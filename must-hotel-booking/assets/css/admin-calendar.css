@@ -1,0 +1,130 @@
+.must-admin-calendar-page .must-calendar-toolbar {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+    margin: 14px 0;
+    font-family: var(--must-font-family);
+}
+
+.must-admin-calendar-page .must-calendar-range-label {
+    font-weight: var(--must-menu-tabs-weight);
+    font-size: var(--must-menu-tabs-size);
+    line-height: var(--must-menu-tabs-line-height);
+}
+
+.must-admin-calendar-page .must-calendar-action-card {
+    background: #fff;
+    border: 1px solid #dcdcde;
+    padding: 16px 20px;
+    margin-bottom: 16px;
+}
+
+.must-admin-calendar-page .must-calendar-manual-reservation-form,
+.must-admin-calendar-page .must-calendar-block-form {
+    display: grid;
+    grid-template-columns: repeat(5, minmax(140px, 1fr));
+    gap: 10px;
+    align-items: end;
+}
+
+.must-admin-calendar-page .must-calendar-manual-reservation-form label,
+.must-admin-calendar-page .must-calendar-block-form label {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.must-admin-calendar-page .must-calendar-manual-reservation-form .must-calendar-form-full-row {
+    grid-column: 1 / -1;
+}
+
+.must-admin-calendar-page .must-calendar-manual-reservation-form textarea {
+    min-height: 74px;
+}
+
+.must-admin-calendar-page .must-calendar-manual-reservation-form .button,
+.must-admin-calendar-page .must-calendar-block-form .button {
+    justify-self: start;
+}
+
+.must-admin-calendar-grid-wrap {
+    overflow-x: auto;
+    background: #fff;
+    border: 1px solid #dcdcde;
+}
+
+.must-admin-calendar-grid {
+    border-collapse: collapse;
+    min-width: 1000px;
+}
+
+.must-admin-calendar-grid th,
+.must-admin-calendar-grid td {
+    white-space: nowrap;
+    text-align: center;
+    padding: 8px 6px;
+}
+
+.must-admin-calendar-grid .must-calendar-room-col {
+    text-align: left;
+    min-width: 180px;
+    background: var(--must-primary);
+}
+
+.must-admin-calendar-grid .must-calendar-date-col {
+    min-width: 90px;
+}
+
+.must-admin-calendar-grid .must-calendar-empty-cell {
+    background: #fff;
+}
+
+.must-admin-calendar-grid .must-calendar-block-cell {
+    padding: 0;
+}
+
+.must-admin-calendar-grid .must-calendar-block-cell a {
+    display: block;
+    text-decoration: none;
+    padding: 8px 6px;
+    color: #fff;
+    font-weight: 600;
+}
+
+.must-admin-calendar-grid .must-calendar-block-cell.status-confirmed a {
+    background: #2f8f46;
+}
+
+.must-admin-calendar-grid .must-calendar-block-cell.status-pending a {
+    background: #d9881e;
+}
+
+.must-admin-calendar-grid .must-calendar-block-cell.status-blocked a {
+    background: #7a7a7a;
+}
+
+.must-admin-calendar-grid .must-calendar-block-cell.status-cancelled a {
+    background: #b32d2e;
+}
+
+.must-admin-calendar-grid .must-calendar-block-cell.status-completed a {
+    background: #2271b1;
+}
+
+.must-admin-calendar-grid .must-calendar-block-cell.status-generic a {
+    background: #50575e;
+}
+
+.must-admin-calendar-page .must-calendar-details-card {
+    background: #fff;
+    border: 1px solid #dcdcde;
+    margin-top: 16px;
+    padding: 16px 20px;
+}
+
+@media (max-width: 1100px) {
+    .must-admin-calendar-page .must-calendar-manual-reservation-form,
+    .must-admin-calendar-page .must-calendar-block-form {
+        grid-template-columns: 1fr;
+    }
+}

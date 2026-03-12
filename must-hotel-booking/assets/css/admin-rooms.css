@@ -1,0 +1,98 @@
+.must-hotel-booking-rooms-admin .must-room-form-card {
+    background: #fff;
+    border: 1px solid #dcdcde;
+    padding: 16px 20px;
+    margin-top: 16px;
+    font-family: var(--must-font-family);
+}
+
+.must-hotel-booking-rooms-admin .must-room-gallery-field {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+
+.must-hotel-booking-rooms-admin .must-room-main-image-field {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+
+.must-hotel-booking-rooms-admin .must-room-main-image-preview {
+    max-width: 320px;
+}
+
+.must-hotel-booking-rooms-admin .must-room-main-image-thumb {
+    width: 100%;
+    height: auto;
+    border: 1px solid #dcdcde;
+    border-radius: 4px;
+    object-fit: cover;
+    display: block;
+}
+
+.must-hotel-booking-rooms-admin .must-room-gallery-preview {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(80px, 1fr));
+    gap: 8px;
+    max-width: 520px;
+}
+
+.must-hotel-booking-rooms-admin .must-room-gallery-thumb {
+    width: 100%;
+    height: auto;
+    border: 1px solid #dcdcde;
+    border-radius: 2px;
+    object-fit: cover;
+}
+
+.must-hotel-booking-rooms-admin .must-room-amenities-selector {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+    gap: 10px;
+    max-width: 820px;
+}
+
+.must-hotel-booking-rooms-admin .must-room-amenity-option {
+    position: relative;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 10px 12px;
+    border: 1px solid #dcdcde;
+    background: #fff;
+    border-radius: 4px;
+    cursor: pointer;
+    user-select: none;
+}
+
+.must-hotel-booking-rooms-admin .must-room-amenity-option:hover {
+    border-color: #b9c4d6;
+}
+
+.must-hotel-booking-rooms-admin .must-room-amenity-option input[type="checkbox"] {
+    margin-left: auto;
+}
+
+.must-hotel-booking-rooms-admin .must-room-amenity-icon-wrap {
+    width: 22px;
+    height: 22px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    border: 1px solid #d9dee8;
+    border-radius: 3px;
+    background: #fff;
+}
+
+.must-hotel-booking-rooms-admin .must-room-amenity-icon {
+    width: 14px;
+    height: 14px;
+    object-fit: contain;
+    display: block;
+}
+
+.must-hotel-booking-rooms-admin .must-room-amenity-label {
+    font-size: 13px;
+    line-height: 1.3;
+}

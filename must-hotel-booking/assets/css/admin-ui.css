@@ -1,0 +1,209 @@
+body.toplevel_page_must-hotel-booking .wrap,
+body[class*="must-hotel-booking_page_"] .wrap {
+    max-width: 1320px;
+}
+
+body.toplevel_page_must-hotel-booking .wrap > h1,
+body[class*="must-hotel-booking_page_"] .wrap > h1 {
+    margin: 12px 0 14px;
+    font-size: 30px;
+    line-height: 1.2;
+    font-weight: 600;
+    color: #1d2327;
+}
+
+body.toplevel_page_must-hotel-booking .wrap > h2,
+body[class*="must-hotel-booking_page_"] .wrap > h2 {
+    margin: 22px 0 12px;
+    font-size: 22px;
+    line-height: 1.3;
+    font-weight: 600;
+    color: #1d2327;
+}
+
+body.toplevel_page_must-hotel-booking .wrap h2,
+body[class*="must-hotel-booking_page_"] .wrap h2 {
+    font-size: 22px;
+    line-height: 1.3;
+    font-weight: 600;
+}
+
+body.toplevel_page_must-hotel-booking .wrap h3,
+body[class*="must-hotel-booking_page_"] .wrap h3 {
+    font-size: 18px;
+    line-height: 1.35;
+    font-weight: 600;
+}
+
+body.toplevel_page_must-hotel-booking .wrap h4,
+body[class*="must-hotel-booking_page_"] .wrap h4 {
+    font-size: 16px;
+    line-height: 1.35;
+    font-weight: 600;
+}
+
+body.toplevel_page_must-hotel-booking .wrap .postbox,
+body[class*="must-hotel-booking_page_"] .wrap .postbox {
+    border: 1px solid #d5d8dd;
+    border-radius: 10px;
+    box-shadow: 0 1px 2px rgba(16, 24, 40, 0.06);
+    background: #fff;
+}
+
+body.toplevel_page_must-hotel-booking .wrap .postbox h2,
+body[class*="must-hotel-booking_page_"] .wrap .postbox h2 {
+    margin-bottom: 10px;
+    font-size: 20px;
+    line-height: 1.35;
+    font-weight: 600;
+}
+
+body.toplevel_page_must-hotel-booking .wrap .widefat,
+body[class*="must-hotel-booking_page_"] .wrap .widefat {
+    border: 1px solid #d5d8dd;
+    border-radius: 10px;
+    overflow: hidden;
+    box-shadow: 0 1px 2px rgba(16, 24, 40, 0.06);
+    background: #fff;
+}
+
+body.toplevel_page_must-hotel-booking .wrap .widefat thead th,
+body[class*="must-hotel-booking_page_"] .wrap .widefat thead th {
+    background: #f6f8fb;
+    font-weight: 600;
+    color: #1d2327;
+}
+
+body.toplevel_page_must-hotel-booking .wrap .widefat td,
+body.toplevel_page_must-hotel-booking .wrap .widefat th,
+body[class*="must-hotel-booking_page_"] .wrap .widefat td,
+body[class*="must-hotel-booking_page_"] .wrap .widefat th {
+    padding: 11px 12px;
+}
+
+body.toplevel_page_must-hotel-booking .wrap .widefat tbody tr:hover td,
+body[class*="must-hotel-booking_page_"] .wrap .widefat tbody tr:hover td {
+    background: #fbfcff;
+}
+
+body.toplevel_page_must-hotel-booking .wrap .notice,
+body[class*="must-hotel-booking_page_"] .wrap .notice {
+    border-radius: 8px;
+    margin: 14px 0;
+}
+
+body.toplevel_page_must-hotel-booking .wrap .form-table th,
+body[class*="must-hotel-booking_page_"] .wrap .form-table th {
+    width: 240px;
+    padding-top: 14px;
+}
+
+body.toplevel_page_must-hotel-booking .wrap .form-table td,
+body[class*="must-hotel-booking_page_"] .wrap .form-table td {
+    padding-top: 10px;
+    padding-bottom: 10px;
+}
+
+body.toplevel_page_must-hotel-booking .wrap .form-table input[type="text"],
+body.toplevel_page_must-hotel-booking .wrap .form-table input[type="email"],
+body.toplevel_page_must-hotel-booking .wrap .form-table input[type="number"],
+body.toplevel_page_must-hotel-booking .wrap .form-table input[type="date"],
+body.toplevel_page_must-hotel-booking .wrap .form-table input[type="time"],
+body.toplevel_page_must-hotel-booking .wrap .form-table select,
+body.toplevel_page_must-hotel-booking .wrap .form-table textarea,
+body[class*="must-hotel-booking_page_"] .wrap .form-table input[type="text"],
+body[class*="must-hotel-booking_page_"] .wrap .form-table input[type="email"],
+body[class*="must-hotel-booking_page_"] .wrap .form-table input[type="number"],
+body[class*="must-hotel-booking_page_"] .wrap .form-table input[type="date"],
+body[class*="must-hotel-booking_page_"] .wrap .form-table input[type="time"],
+body[class*="must-hotel-booking_page_"] .wrap .form-table select,
+body[class*="must-hotel-booking_page_"] .wrap .form-table textarea {
+    border-radius: 6px;
+}
+
+body.toplevel_page_must-hotel-booking .wrap .button,
+body[class*="must-hotel-booking_page_"] .wrap .button {
+    --must-button-bg: transparent;
+    --must-button-border: currentColor;
+    --must-button-color: inherit;
+    background: var(--must-button-bg);
+    border-color: var(--must-button-border);
+    color: var(--must-button-color);
+    border-radius: 6px;
+    transition: none !important;
+    appearance: none;
+    -webkit-appearance: none;
+    box-shadow: none !important;
+    text-shadow: none !important;
+    background-image: none !important;
+    filter: none !important;
+    transform: none !important;
+}
+
+body.toplevel_page_must-hotel-booking .wrap .button.button-primary,
+body[class*="must-hotel-booking_page_"] .wrap .button.button-primary {
+    --must-button-bg: #c1fc7e;
+    --must-button-border: #c1fc7e;
+    --must-button-color: #121212;
+    background: var(--must-button-bg);
+    border-color: var(--must-button-border);
+    color: var(--must-button-color);
+    text-shadow: none;
+    box-shadow: none;
+}
+
+body.toplevel_page_must-hotel-booking .wrap .button:hover,
+body.toplevel_page_must-hotel-booking .wrap .button:focus,
+body.toplevel_page_must-hotel-booking .wrap .button:focus-visible,
+body.toplevel_page_must-hotel-booking .wrap .button:active,
+body[class*="must-hotel-booking_page_"] .wrap .button:hover,
+body[class*="must-hotel-booking_page_"] .wrap .button:focus,
+body[class*="must-hotel-booking_page_"] .wrap .button:focus-visible,
+body[class*="must-hotel-booking_page_"] .wrap .button:active {
+    background: var(--must-button-bg) !important;
+    border-color: var(--must-button-border) !important;
+    color: var(--must-button-color) !important;
+    box-shadow: none !important;
+    text-shadow: none !important;
+    background-image: none !important;
+    filter: none !important;
+    transform: none !important;
+    outline: none !important;
+}
+
+body.toplevel_page_must-hotel-booking .wrap .button.button-primary:hover,
+body.toplevel_page_must-hotel-booking .wrap .button.button-primary:focus,
+body.toplevel_page_must-hotel-booking .wrap .button.button-primary:focus-visible,
+body.toplevel_page_must-hotel-booking .wrap .button.button-primary:active,
+body[class*="must-hotel-booking_page_"] .wrap .button.button-primary:hover,
+body[class*="must-hotel-booking_page_"] .wrap .button.button-primary:focus,
+body[class*="must-hotel-booking_page_"] .wrap .button.button-primary:focus-visible,
+body[class*="must-hotel-booking_page_"] .wrap .button.button-primary:active {
+    background: var(--must-button-bg) !important;
+    border-color: var(--must-button-border) !important;
+    color: var(--must-button-color) !important;
+}
+
+body.toplevel_page_must-hotel-booking .wrap .nav-tab-wrapper,
+body[class*="must-hotel-booking_page_"] .wrap .nav-tab-wrapper {
+    margin-bottom: 14px;
+}
+
+body.toplevel_page_must-hotel-booking .wrap .nav-tab,
+body[class*="must-hotel-booking_page_"] .wrap .nav-tab {
+    border-radius: 8px 8px 0 0;
+    padding: 8px 14px;
+}
+
+body.toplevel_page_must-hotel-booking .wrap .nav-tab-active,
+body[class*="must-hotel-booking_page_"] .wrap .nav-tab-active {
+    border-bottom-color: #c1fc7e;
+    box-shadow: inset 0 -2px 0 #c1fc7e;
+}
+
+@media (max-width: 960px) {
+    body.toplevel_page_must-hotel-booking .wrap .form-table th,
+    body[class*="must-hotel-booking_page_"] .wrap .form-table th {
+        width: auto;
+    }
+}

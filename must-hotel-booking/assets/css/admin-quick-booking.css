@@ -1,0 +1,79 @@
+.must-admin-quick-booking-panel {
+    margin: 18px 0;
+    font-family: var(--must-font-family);
+}
+
+.must-admin-quick-booking-panel .must-admin-quick-booking-panel-inner {
+    padding: 16px 20px;
+}
+
+.must-admin-quick-booking-panel .must-admin-quick-booking-panel-inner > h2 {
+    margin: 0 0 14px;
+    font-size: var(--must-h3-size);
+    line-height: var(--must-h3-line-height);
+    font-weight: var(--must-h3-weight);
+}
+
+.must-admin-quick-booking-panel .must-quick-booking-form {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(180px, 1fr));
+    gap: 12px;
+    align-items: end;
+}
+
+.must-admin-quick-booking-panel .must-quick-booking-form label {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.must-admin-quick-booking-panel .must-quick-booking-form-full-row {
+    grid-column: 1 / -1;
+}
+
+.must-admin-quick-booking-panel .must-quick-booking-form textarea {
+    min-height: 82px;
+}
+
+.must-admin-quick-booking-panel .must-quick-booking-live {
+    border: 1px solid #dcdcde;
+    background: var(--must-light-blue);
+    padding: 10px 12px;
+}
+
+.must-admin-quick-booking-panel .must-quick-booking-live p {
+    margin: 0;
+}
+
+.must-admin-quick-booking-panel .must-quick-booking-live .must-quick-booking-price {
+    margin-top: 6px;
+}
+
+.must-admin-quick-booking-panel .must-quick-booking-status.is-info {
+    color: #1d2327;
+}
+
+.must-admin-quick-booking-panel .must-quick-booking-status.is-success {
+    color: #06752f;
+}
+
+.must-admin-quick-booking-panel .must-quick-booking-status.is-error {
+    color: #b32d2e;
+}
+
+.must-admin-quick-booking-panel .button[disabled] {
+    opacity: 0.7;
+    cursor: not-allowed;
+}
+
+@media (max-width: 1120px) {
+    .must-admin-quick-booking-panel .must-quick-booking-form {
+        grid-template-columns: 1fr 1fr;
+    }
+}
+
+@media (max-width: 782px) {
+    .must-admin-quick-booking-panel .must-quick-booking-form {
+        grid-template-columns: 1fr;
+    }
+}
