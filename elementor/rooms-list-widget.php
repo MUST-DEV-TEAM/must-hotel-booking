@@ -232,6 +232,16 @@ function register_elementor_rooms_list_widget($widgets_manager): void
                     ]
                 );
 
+                $this->add_control(
+                    'booking_search_connection_key',
+                    [
+                        'label' => \__('Booking Search Connection Key', 'must-hotel-booking'),
+                        'type' => \Elementor\Controls_Manager::TEXT,
+                        'placeholder' => \__('e.g. suites-search', 'must-hotel-booking'),
+                        'description' => \__('Match this with a Booking Search widget on the same page to pass this widget category into that search. Leave empty to keep this widget independent.', 'must-hotel-booking'),
+                    ]
+                );
+
                 $this->end_controls_section();
             }
 
@@ -239,6 +249,9 @@ function register_elementor_rooms_list_widget($widgets_manager): void
             {
                 $settings = $this->get_settings_for_display();
                 $selected_category = isset($settings['room_category']) ? \sanitize_key((string) $settings['room_category']) : 'all';
+                $connection_key = isset($settings['booking_search_connection_key'])
+                    ? \sanitize_key((string) $settings['booking_search_connection_key'])
+                    : '';
                 $rooms_limit = isset($settings['rooms_limit']) ? (int) $settings['rooms_limit'] : 20;
                 $rooms_limit = \max(1, \min(200, $rooms_limit));
                 $show_heading = isset($settings['show_category_heading']) && (string) $settings['show_category_heading'] === 'yes';
@@ -261,7 +274,7 @@ function register_elementor_rooms_list_widget($widgets_manager): void
                 $arrow_icon_url = MUST_HOTEL_BOOKING_URL . 'assets/img/ArrowRight.svg';
                 $bed_icon_url = MUST_HOTEL_BOOKING_URL . 'assets/img/bed.svg';
 
-                echo '<div class="must-hotel-booking-widget must-hotel-booking-rooms-list-widget">';
+                echo '<div class="must-hotel-booking-widget must-hotel-booking-rooms-list-widget" data-connection-key="' . \esc_attr($connection_key) . '" data-room-category="' . \esc_attr($selected_category) . '">';
 
                 if ($show_heading && $category_label !== '') {
                     echo '<p class="must-hotel-booking-rooms-list-heading">/ ' . \esc_html(\strtoupper($category_label)) . '</p>';

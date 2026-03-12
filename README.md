@@ -1,4 +1,4 @@
-# MUST Hotel Booking
+﻿# MUST Hotel Booking
 
 MUST Hotel Booking is a WordPress plugin designed to help hotels manage room reservations directly from their website. It provides an integrated booking system that allows customers to check availability, make reservations, and manage bookings easily.
 
@@ -14,8 +14,8 @@ MUST Hotel Booking is a WordPress plugin designed to help hotels manage room res
 ## Installation
 
 1. Download or clone the repository.
-2. Upload the plugin folder to your WordPress `/wp-content/plugins/` directory.
-3. Go to **WordPress Admin → Plugins**.
+2. Place the `must-hotel-booking` folder in your WordPress `/wp-content/plugins/` directory.
+3. Go to **WordPress Admin -> Plugins**.
 4. Activate **MUST Hotel Booking**.
 
 ## Usage

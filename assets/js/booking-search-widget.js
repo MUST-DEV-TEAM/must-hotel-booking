@@ -142,6 +142,81 @@
         };
     }
 
+    function getSearchConnectionKey(form) {
+        if (!form || !form.closest) {
+            return '';
+        }
+
+        var widgetNode = form.closest('.must-hotel-booking-widget-booking-search');
+
+        if (!widgetNode) {
+            return '';
+        }
+
+        return String(widgetNode.getAttribute('data-connection-key') || '').trim();
+    }
+
+    function getLinkedRoomCategory(form) {
+        var connectionKey = getSearchConnectionKey(form);
+
+        if (connectionKey === '') {
+            return '';
+        }
+
+        var scope = form && form.ownerDocument ? form.ownerDocument : document;
+        var roomsWidgets = scope.querySelectorAll('.must-hotel-booking-rooms-list-widget[data-connection-key]');
+        var matchedCategory = '';
+
+        roomsWidgets.forEach(function (widgetNode) {
+            if (matchedCategory !== '') {
+                return;
+            }
+
+            var widgetConnectionKey = String(widgetNode.getAttribute('data-connection-key') || '').trim();
+
+            if (widgetConnectionKey !== connectionKey) {
+                return;
+            }
+
+            matchedCategory = String(widgetNode.getAttribute('data-room-category') || '').trim();
+        });
+
+        if (matchedCategory === '' || matchedCategory === 'all') {
+            return '';
+        }
+
+        return matchedCategory;
+    }
+
+    function syncLinkedAccommodationTypeInput(form) {
+        if (!form) {
+            return;
+        }
+
+        var linkedCategory = getLinkedRoomCategory(form);
+        var hiddenInput = form.querySelector('.must-hotel-booking-linked-accommodation-type');
+
+        if (linkedCategory === '') {
+            if (hiddenInput) {
+                hiddenInput.disabled = true;
+                hiddenInput.value = '';
+            }
+
+            return;
+        }
+
+        if (!hiddenInput) {
+            hiddenInput = document.createElement('input');
+            hiddenInput.type = 'hidden';
+            hiddenInput.name = 'accommodation_type';
+            hiddenInput.className = 'must-hotel-booking-linked-accommodation-type';
+            form.appendChild(hiddenInput);
+        }
+
+        hiddenInput.disabled = false;
+        hiddenInput.value = linkedCategory;
+    }
+
     function initializeBookingSearch(scope) {
         var container = scope || document;
         var forms = container.querySelectorAll('.must-hotel-booking-booking-search');
@@ -157,8 +232,14 @@
             var checkoutInput = form.querySelector('.must-hotel-booking-checkout');
             var guestsInput = form.querySelector('.must-hotel-booking-field-guests input[name="guests"]');
 
+            syncLinkedAccommodationTypeInput(form);
             attachNumericGuestsGuard(guestsInput);
             sanitizeGuestsValue(guestsInput, false);
+
+            form.addEventListener('submit', function () {
+                syncLinkedAccommodationTypeInput(form);
+                sanitizeGuestsValue(guestsInput, false);
+            });
 
             if (typeof window.flatpickr !== 'function' || !checkinInput || !checkoutInput) {
                 return;
@@ -197,10 +278,6 @@
             if (isValidYmd(checkinInput.value)) {
                 checkoutPicker.set('minDate', addDays(checkinInput.value, 1));
             }
-
-            form.addEventListener('submit', function () {
-                sanitizeGuestsValue(guestsInput, false);
-            });
         });
     }
 

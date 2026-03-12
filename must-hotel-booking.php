@@ -1,10 +1,14 @@
 <?php
 /**
  * Plugin Name: MUST Hotel Booking
- * Description: Base architecture for the MUST Hotel Booking plugin.
+ * Description: Hotel booking management for room availability, reservations, and checkout workflows.
  * Version: 0.3.18
  * Author: MUST
+ * Requires at least: 5.0
+ * Requires PHP: 7.4
  * Text Domain: must-hotel-booking
+ * License: GPL-2.0-or-later
+ * License URI: https://www.gnu.org/licenses/gpl-2.0.html
  */
 
 namespace must_hotel_booking;

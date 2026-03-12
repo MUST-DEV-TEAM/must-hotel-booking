@@ -773,6 +773,8 @@
     align-items: stretch;
     min-width: 0;
     overflow: hidden;
+    border-top-left-radius: 24px;
+    border-bottom-left-radius: 24px;
 }
 
 .must-hotel-booking-page-booking .must-booking-room-media {

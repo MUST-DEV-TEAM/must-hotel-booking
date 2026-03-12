@@ -153,12 +153,38 @@ function register_elementor_booking_search_widget($widgets_manager): void
                 ];
             }
 
+            protected function register_controls(): void
+            {
+                $this->start_controls_section(
+                    'section_content',
+                    [
+                        'label' => \__('Content', 'must-hotel-booking'),
+                    ]
+                );
+
+                $this->add_control(
+                    'rooms_list_connection_key',
+                    [
+                        'label' => \__('Rooms List Connection Key', 'must-hotel-booking'),
+                        'type' => \Elementor\Controls_Manager::TEXT,
+                        'placeholder' => \__('e.g. suites-search', 'must-hotel-booking'),
+                        'description' => \__('Match this with a Rooms List widget on the same page to submit that widget category automatically. Leave empty to keep this search independent.', 'must-hotel-booking'),
+                    ]
+                );
+
+                $this->end_controls_section();
+            }
+
             protected function render(): void
             {
+                $settings = $this->get_settings_for_display();
                 $widget_id = \wp_unique_id('must-hotel-booking-search-');
                 $checkin_id = $widget_id . '-checkin';
                 $checkout_id = $widget_id . '-checkout';
                 $guests_id = $widget_id . '-guests';
+                $connection_key = isset($settings['rooms_list_connection_key'])
+                    ? \sanitize_key((string) $settings['rooms_list_connection_key'])
+                    : '';
                 $max_booking_guests = \class_exists(__NAMESPACE__ . '\MustBookingConfig')
                     ? \max(1, MustBookingConfig::get_max_booking_guests())
                     : 5;
@@ -168,7 +194,10 @@ function register_elementor_booking_search_widget($widgets_manager): void
                 $arrow_icon_url = MUST_HOTEL_BOOKING_URL . 'assets/img/ArrowRight.svg';
 
                 ?>
-                <div class="must-hotel-booking-widget must-hotel-booking-widget-booking-search">
+                <div
+                    class="must-hotel-booking-widget must-hotel-booking-widget-booking-search"
+                    data-connection-key="<?php echo \esc_attr($connection_key); ?>"
+                >
                     <form class="must-hotel-booking-booking-search" method="get" action="<?php echo \esc_url($booking_url); ?>">
                         <div class="must-hotel-booking-booking-search-fields">
                             <div class="must-hotel-booking-field must-hotel-booking-field-date must-hotel-booking-field-checkin">
