@@ -203,6 +203,9 @@ function has_room_reservation_overlap(int $room_id, string $checkin, string $che
     global $wpdb;
 
     $table_name = $wpdb->prefix . 'must_reservations';
+    $non_blocking_statuses = \function_exists(__NAMESPACE__ . '\get_inventory_non_blocking_reservation_statuses')
+        ? get_inventory_non_blocking_reservation_statuses()
+        : ['cancelled', 'expired', 'payment_failed'];
 
     $sql = $wpdb->prepare(
         "SELECT 1
@@ -210,10 +213,14 @@ function has_room_reservation_overlap(int $room_id, string $checkin, string $che
         WHERE room_id = %d
             AND checkin < %s
             AND checkout > %s
+            AND status NOT IN (%s, %s, %s)
         LIMIT 1",
         $room_id,
         $checkout,
-        $checkin
+        $checkin,
+        (string) $non_blocking_statuses[0],
+        (string) $non_blocking_statuses[1],
+        (string) $non_blocking_statuses[2]
     );
 
     $overlap_found = $wpdb->get_var($sql);
@@ -246,6 +253,93 @@ function check_room_availability(int $room_id, string $checkin, string $checkout
 }
 
 /**
+ * Load a room row for availability lookups.
+ *
+ * @return array<string, mixed>|null
+ */
+function get_room_data_for_availability(int $room_id): ?array
+{
+    if ($room_id <= 0) {
+        return null;
+    }
+
+    if (\function_exists(__NAMESPACE__ . '\get_room_record')) {
+        $room = get_room_record($room_id);
+
+        if (\is_array($room)) {
+            return $room;
+        }
+    }
+
+    global $wpdb;
+
+    $room = $wpdb->get_row(
+        $wpdb->prepare(
+            'SELECT id, name, slug, category, description, max_guests, base_price, room_size, beds FROM ' . $wpdb->prefix . 'must_rooms WHERE id = %d LIMIT 1',
+            $room_id
+        ),
+        ARRAY_A
+    );
+
+    return \is_array($room) ? $room : null;
+}
+
+/**
+ * Check if a room can be booked for the given range and guest count.
+ */
+function is_room_bookable_for_range(int $room_id, string $checkin, string $checkout, int $guests = 1, string $exclude_session_id = ''): bool
+{
+    $room = get_room_data_for_availability($room_id);
+
+    if (!\is_array($room)) {
+        return false;
+    }
+
+    $guests = \max(1, $guests);
+    $room_max_guests = isset($room['max_guests']) ? (int) $room['max_guests'] : 0;
+
+    if ($room_max_guests > 0 && $guests > $room_max_guests) {
+        return false;
+    }
+
+    if (\function_exists(__NAMESPACE__ . '\cleanup_expired_locks')) {
+        cleanup_expired_locks();
+    }
+
+    if (!check_room_availability($room_id, $checkin, $checkout)) {
+        return false;
+    }
+
+    if (\function_exists(__NAMESPACE__ . '\has_active_room_lock_overlap')) {
+        $session_id = $exclude_session_id !== ''
+            ? $exclude_session_id
+            : (\function_exists(__NAMESPACE__ . '\get_or_create_lock_session_id') ? get_or_create_lock_session_id() : '');
+
+        if (has_active_room_lock_overlap($room_id, $checkin, $checkout, $session_id)) {
+            return false;
+        }
+    }
+
+    return true;
+}
+
+/**
+ * Load one exact room for AJAX availability payloads.
+ *
+ * @return array<string, mixed>|null
+ */
+function get_available_room_for_ajax_by_id(int $room_id, string $checkin, string $checkout, int $guests = 1): ?array
+{
+    $room = get_room_data_for_availability($room_id);
+
+    if (!\is_array($room) || !is_room_bookable_for_range($room_id, $checkin, $checkout, $guests)) {
+        return null;
+    }
+
+    return $room;
+}
+
+/**
  * Get available rooms for a date range and guest count.
  *
  * @return array<int, array<string, mixed>>
@@ -269,6 +363,9 @@ function get_available_rooms_for_ajax(string $checkin, string $checkout, int $gu
     $reservations_table = $wpdb->prefix . 'must_reservations';
     $locks_table = $wpdb->prefix . 'must_locks';
     $now = \function_exists(__NAMESPACE__ . '\get_current_utc_datetime') ? get_current_utc_datetime() : \gmdate('Y-m-d H:i:s');
+    $non_blocking_statuses = \function_exists(__NAMESPACE__ . '\get_inventory_non_blocking_reservation_statuses')
+        ? get_inventory_non_blocking_reservation_statuses()
+        : ['cancelled', 'expired', 'payment_failed'];
 
     $sql = $wpdb->prepare(
         "SELECT
@@ -279,7 +376,6 @@ function get_available_rooms_for_ajax(string $checkin, string $checkout, int $gu
             r.description,
             r.max_guests,
             r.base_price,
-            r.extra_guest_price,
             r.room_size,
             r.beds
         FROM {$rooms_table} r
@@ -291,6 +387,7 @@ function get_available_rooms_for_ajax(string $checkin, string $checkout, int $gu
                 WHERE existing.room_id = r.id
                     AND existing.checkin < %s
                     AND existing.checkout > %s
+                    AND existing.status NOT IN (%s, %s, %s)
             )
             AND NOT EXISTS (
                 SELECT 1
@@ -305,6 +402,9 @@ function get_available_rooms_for_ajax(string $checkin, string $checkout, int $gu
         $guests,
         $checkout,
         $checkin,
+        (string) $non_blocking_statuses[0],
+        (string) $non_blocking_statuses[1],
+        (string) $non_blocking_statuses[2],
         $checkout,
         $checkin,
         $now
@@ -382,6 +482,57 @@ function get_available_room_ids_for_guests(int $guests, string $category = 'stan
 }
 
 /**
+ * Load max guest capacity for the provided room IDs.
+ *
+ * @param array<int, int> $room_ids
+ * @return array<int, int>
+ */
+function get_room_capacity_map_for_room_ids(array $room_ids): array
+{
+    global $wpdb;
+
+    $room_ids = \array_values(
+        \array_filter(
+            \array_map('\absint', $room_ids),
+            static function (int $room_id): bool {
+                return $room_id > 0;
+            }
+        )
+    );
+
+    if (empty($room_ids)) {
+        return [];
+    }
+
+    $rooms_table = $wpdb->prefix . 'must_rooms';
+    $room_ids_sql = \implode(',', $room_ids);
+    $rows = $wpdb->get_results(
+        "SELECT id, max_guests FROM {$rooms_table} WHERE id IN ({$room_ids_sql})",
+        ARRAY_A
+    );
+    $capacity_map = [];
+
+    if (!\is_array($rows)) {
+        return $capacity_map;
+    }
+
+    foreach ($rows as $row) {
+        if (!\is_array($row)) {
+            continue;
+        }
+
+        $room_id = isset($row['id']) ? (int) $row['id'] : 0;
+        $max_guests = isset($row['max_guests']) ? \max(1, (int) $row['max_guests']) : 1;
+
+        if ($room_id > 0) {
+            $capacity_map[$room_id] = $max_guests;
+        }
+    }
+
+    return $capacity_map;
+}
+
+/**
  * Load reservation ranges for selected rooms and date span.
  *
  * @param array<int, int> $room_ids
@@ -411,15 +562,22 @@ function get_reservation_ranges_by_room_ids(array $room_ids, string $range_start
 
     $reservations_table = $wpdb->prefix . 'must_reservations';
     $room_ids_sql = \implode(',', $room_ids);
+    $non_blocking_statuses = \function_exists(__NAMESPACE__ . '\get_inventory_non_blocking_reservation_statuses')
+        ? get_inventory_non_blocking_reservation_statuses()
+        : ['cancelled', 'expired', 'payment_failed'];
     $sql = $wpdb->prepare(
         "SELECT room_id, checkin, checkout
         FROM {$reservations_table}
         WHERE room_id IN ({$room_ids_sql})
             AND checkin < %s
             AND checkout > %s
+            AND status NOT IN (%s, %s, %s)
         ORDER BY room_id ASC, checkin ASC, checkout ASC",
         $range_end_exclusive,
-        $range_start
+        $range_start,
+        (string) $non_blocking_statuses[0],
+        (string) $non_blocking_statuses[1],
+        (string) $non_blocking_statuses[2]
     );
 
     $rows = $wpdb->get_results($sql, ARRAY_A);
@@ -520,6 +678,88 @@ function has_any_room_available_for_range(array $room_ids, array $ranges_by_room
 }
 
 /**
+ * Check whether the free rooms can host the requested party across the selected room count.
+ *
+ * @param array<int, int> $room_ids
+ * @param array<int, array<int, array<string, string>>> $ranges_by_room
+ * @param array<int, int> $capacity_map
+ */
+function can_room_ids_host_party_for_range(
+    array $room_ids,
+    array $ranges_by_room,
+    array $capacity_map,
+    string $checkin,
+    string $checkout,
+    int $guests,
+    int $room_count
+): bool {
+    $guests = \max(1, $guests);
+    $room_count = \max(1, $room_count);
+    $free_room_capacities = [];
+
+    foreach ($room_ids as $room_id) {
+        $room_id = (int) $room_id;
+
+        if ($room_id <= 0) {
+            continue;
+        }
+
+        $room_ranges = isset($ranges_by_room[$room_id]) && \is_array($ranges_by_room[$room_id])
+            ? $ranges_by_room[$room_id]
+            : [];
+
+        if (!is_room_free_for_range($room_ranges, $checkin, $checkout)) {
+            continue;
+        }
+
+        $capacity = isset($capacity_map[$room_id]) ? (int) $capacity_map[$room_id] : 0;
+
+        if ($capacity > 0) {
+            $free_room_capacities[] = $capacity;
+        }
+    }
+
+    if (\count($free_room_capacities) < $room_count) {
+        return false;
+    }
+
+    \rsort($free_room_capacities, SORT_NUMERIC);
+
+    return \array_sum(\array_slice($free_room_capacities, 0, $room_count)) >= $guests;
+}
+
+/**
+ * Check whether raw available room rows can host the requested party.
+ *
+ * @param array<int, array<string, mixed>> $rooms
+ */
+function can_available_room_rows_host_party(array $rooms, int $guests, int $room_count): bool
+{
+    $room_count = \max(1, $room_count);
+    $capacities = [];
+
+    foreach ($rooms as $room) {
+        if (!\is_array($room)) {
+            continue;
+        }
+
+        $capacity = isset($room['max_guests']) ? (int) $room['max_guests'] : 0;
+
+        if ($capacity > 0) {
+            $capacities[] = $capacity;
+        }
+    }
+
+    if (\count($capacities) < $room_count) {
+        return false;
+    }
+
+    \rsort($capacities, SORT_NUMERIC);
+
+    return \array_sum(\array_slice($capacities, 0, $room_count)) >= \max(1, $guests);
+}
+
+/**
  * Build disabled check-in date list where all matching rooms are unavailable.
  *
  * @return array<int, string>
@@ -598,6 +838,131 @@ function get_disabled_checkout_dates_for_guests(string $checkin, int $guests, in
 }
 
 /**
+ * Build disabled check-in dates for a multi-room party.
+ *
+ * @return array<int, string>
+ */
+function get_disabled_checkin_dates_for_party(int $guests, int $room_count, int $window_days = 180, string $category = 'standard-rooms'): array
+{
+    $window_days = normalize_disabled_dates_window_days($window_days);
+    $start_date = \current_time('Y-m-d');
+    $start = new \DateTimeImmutable($start_date);
+    $range_end_exclusive = $start->modify('+' . ($window_days + 1) . ' day')->format('Y-m-d');
+    $room_ids = get_available_room_ids_for_guests(1, $category);
+    $disabled_dates = [];
+
+    if (empty($room_ids)) {
+        for ($index = 0; $index < $window_days; $index++) {
+            $disabled_dates[] = $start->modify('+' . $index . ' day')->format('Y-m-d');
+        }
+
+        return $disabled_dates;
+    }
+
+    $ranges_by_room = get_reservation_ranges_by_room_ids($room_ids, $start_date, $range_end_exclusive);
+    $capacity_map = get_room_capacity_map_for_room_ids($room_ids);
+
+    for ($index = 0; $index < $window_days; $index++) {
+        $checkin = $start->modify('+' . $index . ' day')->format('Y-m-d');
+        $checkout = $start->modify('+' . ($index + 1) . ' day')->format('Y-m-d');
+
+        if (!can_room_ids_host_party_for_range($room_ids, $ranges_by_room, $capacity_map, $checkin, $checkout, $guests, $room_count)) {
+            $disabled_dates[] = $checkin;
+        }
+    }
+
+    return $disabled_dates;
+}
+
+/**
+ * Build disabled checkout dates for a multi-room party.
+ *
+ * @return array<int, string>
+ */
+function get_disabled_checkout_dates_for_party(string $checkin, int $guests, int $room_count, int $window_days = 180, string $category = 'standard-rooms'): array
+{
+    if (!is_valid_booking_date($checkin)) {
+        return [];
+    }
+
+    $window_days = normalize_disabled_dates_window_days($window_days);
+    $checkin_date = new \DateTimeImmutable($checkin);
+    $range_end_exclusive = $checkin_date->modify('+' . ($window_days + 1) . ' day')->format('Y-m-d');
+    $room_ids = get_available_room_ids_for_guests(1, $category);
+    $disabled_dates = [];
+
+    if (empty($room_ids)) {
+        for ($nights = 1; $nights <= $window_days; $nights++) {
+            $disabled_dates[] = $checkin_date->modify('+' . $nights . ' day')->format('Y-m-d');
+        }
+
+        return $disabled_dates;
+    }
+
+    $ranges_by_room = get_reservation_ranges_by_room_ids($room_ids, $checkin, $range_end_exclusive);
+    $capacity_map = get_room_capacity_map_for_room_ids($room_ids);
+
+    for ($nights = 1; $nights <= $window_days; $nights++) {
+        $checkout = $checkin_date->modify('+' . $nights . ' day')->format('Y-m-d');
+
+        if (!can_room_ids_host_party_for_range($room_ids, $ranges_by_room, $capacity_map, $checkin, $checkout, $guests, $room_count)) {
+            $disabled_dates[] = $checkout;
+        }
+    }
+
+    return $disabled_dates;
+}
+
+/**
+ * Build disabled check-in dates for one exact room.
+ *
+ * @return array<int, string>
+ */
+function get_disabled_checkin_dates_for_room(int $room_id, int $guests, int $window_days = 180): array
+{
+    $window_days = normalize_disabled_dates_window_days($window_days);
+    $start = new \DateTimeImmutable(\current_time('Y-m-d'));
+    $disabled_dates = [];
+
+    for ($index = 0; $index < $window_days; $index++) {
+        $checkin = $start->modify('+' . $index . ' day')->format('Y-m-d');
+        $checkout = $start->modify('+' . ($index + 1) . ' day')->format('Y-m-d');
+
+        if (!is_room_bookable_for_range($room_id, $checkin, $checkout, $guests)) {
+            $disabled_dates[] = $checkin;
+        }
+    }
+
+    return $disabled_dates;
+}
+
+/**
+ * Build disabled checkout dates for one exact room.
+ *
+ * @return array<int, string>
+ */
+function get_disabled_checkout_dates_for_room(string $checkin, int $room_id, int $guests, int $window_days = 180): array
+{
+    if (!is_valid_booking_date($checkin)) {
+        return [];
+    }
+
+    $window_days = normalize_disabled_dates_window_days($window_days);
+    $checkin_date = new \DateTimeImmutable($checkin);
+    $disabled_dates = [];
+
+    for ($nights = 1; $nights <= $window_days; $nights++) {
+        $checkout = $checkin_date->modify('+' . $nights . ' day')->format('Y-m-d');
+
+        if (!is_room_bookable_for_range($room_id, $checkin, $checkout, $guests)) {
+            $disabled_dates[] = $checkout;
+        }
+    }
+
+    return $disabled_dates;
+}
+
+/**
  * AJAX endpoint for disabled booking dates.
  */
 function ajax_must_get_disabled_dates(): void
@@ -608,9 +973,13 @@ function ajax_must_get_disabled_dates(): void
     $guests = isset($_REQUEST['guests'])
         ? \max(1, \min($max_booking_guests, \absint(\wp_unslash($_REQUEST['guests']))))
         : 1;
+    $room_count = \function_exists(__NAMESPACE__ . '\normalize_booking_room_count')
+        ? normalize_booking_room_count($_REQUEST['room_count'] ?? 0)
+        : 0;
     $window_days = isset($_REQUEST['window_days']) ? \absint(\wp_unslash($_REQUEST['window_days'])) : 180;
     $window_days = normalize_disabled_dates_window_days($window_days);
     $checkin = isset($_REQUEST['checkin']) ? \sanitize_text_field((string) \wp_unslash($_REQUEST['checkin'])) : '';
+    $room_id = isset($_REQUEST['room_id']) ? \absint(\wp_unslash($_REQUEST['room_id'])) : 0;
     $accommodation_type = isset($_REQUEST['accommodation_type'])
         ? normalize_availability_room_category(\sanitize_text_field((string) \wp_unslash($_REQUEST['accommodation_type'])))
         : 'standard-rooms';
@@ -624,14 +993,34 @@ function ajax_must_get_disabled_dates(): void
         );
     }
 
-    $disabled_checkin_dates = get_disabled_checkin_dates_for_guests($guests, $window_days, $accommodation_type);
-    $disabled_checkout_dates = $checkin !== ''
-        ? get_disabled_checkout_dates_for_guests($checkin, $guests, $window_days, $accommodation_type)
-        : [];
+    if ($room_id > 0) {
+        $disabled_checkin_dates = get_disabled_checkin_dates_for_room($room_id, $guests, $window_days);
+        $disabled_checkout_dates = $checkin !== ''
+            ? get_disabled_checkout_dates_for_room($checkin, $room_id, $guests, $window_days)
+            : [];
+    } else {
+        $resolved_room_count = \function_exists(__NAMESPACE__ . '\resolve_booking_room_count')
+            ? resolve_booking_room_count($guests, $room_count, $accommodation_type)
+            : 1;
+
+        if ($resolved_room_count > 1) {
+            $disabled_checkin_dates = get_disabled_checkin_dates_for_party($guests, $resolved_room_count, $window_days, $accommodation_type);
+            $disabled_checkout_dates = $checkin !== ''
+                ? get_disabled_checkout_dates_for_party($checkin, $guests, $resolved_room_count, $window_days, $accommodation_type)
+                : [];
+        } else {
+            $disabled_checkin_dates = get_disabled_checkin_dates_for_guests($guests, $window_days, $accommodation_type);
+            $disabled_checkout_dates = $checkin !== ''
+                ? get_disabled_checkout_dates_for_guests($checkin, $guests, $window_days, $accommodation_type)
+                : [];
+        }
+    }
 
     \wp_send_json_success(
         [
+            'room_id' => $room_id,
             'guests' => $guests,
+            'room_count' => $room_count,
             'checkin' => $checkin,
             'accommodation_type' => $accommodation_type,
             'window_days' => $window_days,
@@ -654,6 +1043,10 @@ function ajax_must_check_availability(): void
     $guests = isset($_REQUEST['guests'])
         ? \max(1, \min($max_booking_guests, \absint(\wp_unslash($_REQUEST['guests']))))
         : 1;
+    $room_count = \function_exists(__NAMESPACE__ . '\normalize_booking_room_count')
+        ? normalize_booking_room_count($_REQUEST['room_count'] ?? 0)
+        : 0;
+    $room_id = isset($_REQUEST['room_id']) ? \absint(\wp_unslash($_REQUEST['room_id'])) : 0;
     $accommodation_type = isset($_REQUEST['accommodation_type'])
         ? normalize_availability_room_category(\sanitize_text_field((string) \wp_unslash($_REQUEST['accommodation_type'])))
         : 'standard-rooms';
@@ -667,7 +1060,47 @@ function ajax_must_check_availability(): void
         );
     }
 
-    $rooms = get_available_rooms_for_ajax($checkin, $checkout, $guests, $accommodation_type);
+    $rooms = [];
+    $message = '';
+
+    if ($room_id > 0) {
+        $room = get_available_room_for_ajax_by_id($room_id, $checkin, $checkout, $guests);
+
+        if (\is_array($room)) {
+            $rooms[] = $room;
+        } else {
+            $message = \__('The selected room is not available for the chosen dates and party size.', 'must-hotel-booking');
+        }
+    } else {
+        $resolved_room_count = \function_exists(__NAMESPACE__ . '\resolve_booking_room_count')
+            ? resolve_booking_room_count($guests, $room_count, $accommodation_type)
+            : 1;
+
+        $rooms = get_available_rooms_for_ajax(
+            $checkin,
+            $checkout,
+            $resolved_room_count > 1 ? 1 : $guests,
+            $accommodation_type
+        );
+
+        if ($resolved_room_count > 1 && !can_available_room_rows_host_party($rooms, $guests, $resolved_room_count)) {
+            $rooms = [];
+        }
+
+        if (empty($rooms)) {
+            $message = \function_exists(__NAMESPACE__ . '\get_accommodation_empty_results_message')
+                ? get_accommodation_empty_results_message(
+                    [
+                        'guests' => $guests,
+                        'room_count' => $room_count,
+                        'accommodation_type' => $accommodation_type,
+                    ],
+                    $resolved_room_count
+                )
+                : \__('No rooms are available for the selected dates.', 'must-hotel-booking');
+        }
+    }
+
     $payload = [];
 
     foreach ($rooms as $room) {
@@ -716,7 +1149,6 @@ function ajax_must_check_availability(): void
             'description' => isset($room['description']) ? (string) $room['description'] : '',
             'max_guests' => isset($room['max_guests']) ? (int) $room['max_guests'] : 0,
             'base_price' => isset($room['base_price']) ? (float) $room['base_price'] : 0.0,
-            'extra_guest_price' => isset($room['extra_guest_price']) ? (float) $room['extra_guest_price'] : 0.0,
             'room_size' => isset($room['room_size']) ? (string) $room['room_size'] : '',
             'beds' => isset($room['beds']) ? (string) $room['beds'] : '',
             'calculated_price' => $dynamic_total_price,
@@ -742,7 +1174,9 @@ function ajax_must_check_availability(): void
             'checkin' => $checkin,
             'checkout' => $checkout,
             'guests' => $guests,
+            'room_count' => $room_count,
             'accommodation_type' => $accommodation_type,
+            'message' => $message,
             'rooms' => $payload,
         ]
     );

@@ -157,6 +157,7 @@ function get_reservation_email_data(int $reservation_id): ?array
             r.booking_id,
             r.checkin,
             r.checkout,
+            r.status,
             r.total_price,
             rm.name AS room_name,
             g.first_name,
@@ -358,6 +359,12 @@ function handle_reservation_created_email_notifications(int $reservation_id): vo
         return;
     }
 
+    $status = isset($reservation['status']) ? \sanitize_key((string) $reservation['status']) : '';
+
+    if (\function_exists(__NAMESPACE__ . '\is_reservation_confirmed_status') && !is_reservation_confirmed_status($status)) {
+        return;
+    }
+
     send_guest_booking_confirmation_email($reservation);
     send_admin_new_booking_notification_email($reservation);
 }
@@ -383,6 +390,7 @@ function handle_reservation_cancelled_email_notifications(int $reservation_id): 
 function bootstrap_email_engine(): void
 {
     \add_action('must_hotel_booking/reservation_created', __NAMESPACE__ . '\handle_reservation_created_email_notifications', 10, 1);
+    \add_action('must_hotel_booking/reservation_confirmed', __NAMESPACE__ . '\handle_reservation_created_email_notifications', 10, 1);
     \add_action('must_hotel_booking/reservation_cancelled', __NAMESPACE__ . '\handle_reservation_cancelled_email_notifications', 10, 1);
 }
 

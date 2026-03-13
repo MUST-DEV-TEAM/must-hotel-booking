@@ -232,7 +232,7 @@ function get_dashboard_metrics(): array
             "SELECT COUNT(*)
             FROM {$table_name}
             WHERE DATE(created_at) = %s
-                AND status NOT IN ('cancelled', 'blocked')",
+                AND status NOT IN ('cancelled', 'blocked', 'expired', 'payment_failed', 'pending_payment')",
             $date_context['today']
         )
     );
@@ -242,7 +242,7 @@ function get_dashboard_metrics(): array
             "SELECT COUNT(*)
             FROM {$table_name}
             WHERE checkin > %s
-                AND status NOT IN ('cancelled', 'blocked')",
+                AND status NOT IN ('cancelled', 'blocked', 'expired', 'payment_failed', 'pending_payment')",
             $date_context['today']
         )
     );
@@ -252,7 +252,7 @@ function get_dashboard_metrics(): array
             "SELECT COUNT(*)
             FROM {$table_name}
             WHERE checkout > %s
-                AND status NOT IN ('cancelled', 'blocked')",
+                AND status NOT IN ('cancelled', 'blocked', 'expired', 'payment_failed', 'pending_payment')",
             $date_context['today']
         )
     );
@@ -263,7 +263,7 @@ function get_dashboard_metrics(): array
             FROM {$table_name}
             WHERE created_at >= %s
                 AND created_at < %s
-                AND status NOT IN ('cancelled', 'blocked')",
+                AND status NOT IN ('cancelled', 'blocked', 'expired', 'payment_failed', 'pending_payment')",
             $date_context['month_start'],
             $date_context['next_month_start']
         )
@@ -302,7 +302,7 @@ function get_dashboard_next_reservations(int $limit = 10): array
             created_at
         FROM {$table_name}
         WHERE checkin >= %s
-            AND status NOT IN ('cancelled', 'blocked')
+            AND status NOT IN ('cancelled', 'blocked', 'expired', 'payment_failed', 'pending_payment')
         ORDER BY checkin ASC, checkout ASC, id ASC
         LIMIT %d",
         $date_context['today'],

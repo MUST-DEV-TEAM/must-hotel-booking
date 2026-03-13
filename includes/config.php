@@ -29,7 +29,8 @@ class MustBookingConfig
             'timezone' => self::get_wordpress_timezone_fallback(),
             'tax_rate' => 0.0,
             'booking_window' => 365,
-            'max_booking_guests' => 5,
+            'max_booking_guests' => 12,
+            'max_booking_rooms' => 3,
             'checkin_time' => '14:00',
             'checkout_time' => '11:00',
             'payment_methods' => [
@@ -37,6 +38,9 @@ class MustBookingConfig
                 'bank_transfer' => false,
                 'stripe' => false,
             ],
+            'stripe_publishable_key' => '',
+            'stripe_secret_key' => '',
+            'stripe_webhook_secret' => '',
             'design_use_elementor_global_styles' => 1,
             'design_font_family' => 'PP Neue Montreal',
             'design_h1_size' => '54px',
@@ -257,9 +261,19 @@ class MustBookingConfig
      */
     public static function get_max_booking_guests(): int
     {
-        $value = \absint((string) self::get_setting('max_booking_guests', 5));
+        $value = \absint((string) self::get_setting('max_booking_guests', 12));
 
-        return $value > 0 ? $value : 5;
+        return $value > 0 ? $value : 12;
+    }
+
+    /**
+     * Get max booking rooms setting.
+     */
+    public static function get_max_booking_rooms(): int
+    {
+        $value = \absint((string) self::get_setting('max_booking_rooms', 3));
+
+        return $value > 0 ? $value : 3;
     }
 
     /**

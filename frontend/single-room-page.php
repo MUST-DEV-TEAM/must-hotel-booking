@@ -64,7 +64,7 @@ function get_room_record_by_slug(string $room_slug): ?array
 
     $row = $wpdb->get_row(
         $wpdb->prepare(
-            'SELECT id, name, slug, category, description, max_guests, base_price, extra_guest_price, room_size, beds
+            'SELECT id, name, slug, category, description, max_guests, base_price, room_size, beds
             FROM ' . get_rooms_table_name() . '
             WHERE slug = %s
             LIMIT 1',

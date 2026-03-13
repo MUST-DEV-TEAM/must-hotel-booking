@@ -4,6 +4,8 @@
     var cardSelector = '.must-booking-accommodation-room-card';
     var lightboxTriggerSelector = '.must-booking-room-image-trigger';
     var modalTriggerSelector = '.must-booking-room-modal-trigger';
+    var filterToggleSelector = '.must-booking-results-filter[data-filter-target]';
+    var selectionFormSelector = '.must-hotel-booking-select-room-form';
 
     var lightbox = null;
     var lightboxImageNode = null;
@@ -22,6 +24,263 @@
     var roomModalCloseNode = null;
     var roomModalOpen = false;
     var roomModalLastFocused = null;
+    var selectionRequestInFlight = false;
+
+    function getAccommodationConfig() {
+        var config = window.mustBookingAccommodationConfig || {};
+
+        if (!config.labels) {
+            config.labels = {};
+        }
+
+        return config;
+    }
+
+    function renderLiveMessages(messages) {
+        var messagesNode = document.getElementById('must-booking-live-messages');
+
+        if (!messagesNode) {
+            return;
+        }
+
+        messagesNode.innerHTML = '';
+
+        if (!Array.isArray(messages) || !messages.length) {
+            return;
+        }
+
+        messages.forEach(function (message) {
+            if (typeof message !== 'string' || message === '') {
+                return;
+            }
+
+            var paragraph = document.createElement('p');
+            paragraph.textContent = message;
+            messagesNode.appendChild(paragraph);
+        });
+    }
+
+    function getArrowIconClone() {
+        var reference = document.querySelector(
+            '#must-booking-stepper-next img, .must-booking-results-continue img, .must-booking-room-book-button img'
+        );
+
+        if (!(reference instanceof HTMLImageElement)) {
+            return null;
+        }
+
+        var clone = reference.cloneNode(true);
+
+        if (clone instanceof HTMLImageElement) {
+            clone.hidden = false;
+            return clone;
+        }
+
+        return null;
+    }
+
+    function syncResultsContinue(state) {
+        var slot = document.getElementById('must-booking-results-continue-slot');
+
+        if (!slot) {
+            return;
+        }
+
+        slot.innerHTML = '';
+
+        if (!state || !state.can_continue || !state.checkout_url) {
+            return;
+        }
+
+        var link = document.createElement('a');
+        var label = document.createElement('span');
+        var arrow = getArrowIconClone();
+
+        link.className = 'must-booking-results-continue';
+        link.href = String(state.checkout_url);
+        label.textContent = String(state.continue_label || '');
+        link.appendChild(label);
+
+        if (arrow) {
+            link.appendChild(arrow);
+        }
+
+        slot.appendChild(link);
+    }
+
+    function syncSelectionStatus(state) {
+        var note = document.getElementById('must-booking-results-selection-note');
+        var tone = state && typeof state.selection_status_tone === 'string' ? state.selection_status_tone : 'neutral';
+        var message = state && typeof state.selection_status_message === 'string' ? state.selection_status_message : '';
+
+        if (!note) {
+            return;
+        }
+
+        note.classList.remove('is-hidden', 'is-neutral', 'is-success', 'is-warning');
+
+        if (message === '') {
+            note.textContent = '';
+            note.classList.add('is-hidden');
+            return;
+        }
+
+        note.textContent = message;
+        note.classList.add('is-' + tone);
+    }
+
+    function syncStepperNext(state) {
+        var nextLink = document.getElementById('must-booking-stepper-next');
+
+        if (!(nextLink instanceof HTMLAnchorElement)) {
+            return;
+        }
+
+        if (state && state.can_continue && state.checkout_url) {
+            nextLink.href = String(state.checkout_url);
+            nextLink.classList.remove('is-disabled');
+            nextLink.setAttribute('aria-disabled', 'false');
+            nextLink.removeAttribute('tabindex');
+            return;
+        }
+
+        nextLink.href = '#';
+        nextLink.classList.add('is-disabled');
+        nextLink.setAttribute('aria-disabled', 'true');
+        nextLink.setAttribute('tabindex', '-1');
+    }
+
+    function syncRoomSelectionState(state) {
+        var config = getAccommodationConfig();
+        var labels = config.labels || {};
+        var selectedRoomIds = Array.isArray(state && state.selected_room_ids) ? state.selected_room_ids.map(function (value) {
+            return String(value);
+        }) : [];
+        var selectedRoomMap = {};
+
+        selectedRoomIds.forEach(function (roomId) {
+            selectedRoomMap[roomId] = true;
+        });
+
+        document.querySelectorAll(selectionFormSelector).forEach(function (form) {
+            if (!(form instanceof HTMLFormElement)) {
+                return;
+            }
+
+            var roomId = String(form.getAttribute('data-room-id') || '');
+            var isSelected = !!selectedRoomMap[roomId];
+            var actionInput = form.querySelector('input[name="must_accommodation_action"]');
+            var nonceInput = form.querySelector('input[name="must_accommodation_nonce"]');
+            var button = form.querySelector('.must-booking-room-book-button');
+            var label = button ? button.querySelector('span') : null;
+            var icon = button ? button.querySelector('img') : null;
+            var card = form.closest(cardSelector);
+            var buttonLabel = '';
+            var buttonDisabled = false;
+            var showArrow = false;
+
+            if (!(actionInput instanceof HTMLInputElement) || !(nonceInput instanceof HTMLInputElement) || !(button instanceof HTMLButtonElement)) {
+                return;
+            }
+
+            if (isSelected) {
+                actionInput.value = 'remove_selected_room';
+                nonceInput.value = String(form.getAttribute('data-remove-nonce') || '');
+                buttonLabel = String(labels.removeRoom || 'Remove Room');
+                buttonDisabled = false;
+                showArrow = false;
+            } else {
+                actionInput.value = 'select_room';
+                nonceInput.value = String(form.getAttribute('data-select-nonce') || '');
+                buttonLabel = state && state.single_room_mode
+                    ? String(labels.bookNow || 'Book Now')
+                    : (state && state.selection_limit_reached
+                        ? String(labels.selectionFull || 'Selection Full')
+                        : String(labels.addRoom || 'Add Room'));
+                buttonDisabled = !!(state && !state.single_room_mode && state.selection_limit_reached);
+                showArrow = !buttonDisabled;
+            }
+
+            if (label) {
+                label.textContent = buttonLabel;
+            }
+
+            if (icon instanceof HTMLImageElement) {
+                icon.hidden = !showArrow;
+            }
+
+            button.disabled = buttonDisabled;
+            button.classList.toggle('is-selected', isSelected);
+
+            if (card) {
+                card.classList.toggle('is-selected', isSelected);
+            }
+        });
+    }
+
+    function submitSelectionForm(form) {
+        var config = getAccommodationConfig();
+        var formData;
+
+        if (!(form instanceof HTMLFormElement) || !window.fetch || !config.ajaxUrl || !config.ajaxAction) {
+            form.submit();
+            return;
+        }
+
+        if (selectionRequestInFlight) {
+            return;
+        }
+
+        selectionRequestInFlight = true;
+        formData = new FormData(form);
+        formData.append('action', String(config.ajaxAction));
+
+        fetch(String(config.ajaxUrl), {
+            method: 'POST',
+            body: formData,
+            credentials: 'same-origin'
+        })
+            .then(function (response) {
+                return response.json().catch(function () {
+                    return { success: false, data: {} };
+                }).then(function (payload) {
+                    return {
+                        ok: response.ok,
+                        payload: payload
+                    };
+                });
+            })
+            .then(function (result) {
+                var payload = result && result.payload ? result.payload : {};
+                var state = payload && payload.data ? payload.data : {};
+
+                renderLiveMessages(Array.isArray(state.messages) ? state.messages : []);
+
+                if (payload.success && state.redirect_url) {
+                    window.location.href = String(state.redirect_url);
+                    return;
+                }
+
+                if (state && Object.prototype.hasOwnProperty.call(state, 'selected_room_ids')) {
+                    syncRoomSelectionState(state);
+                    syncResultsContinue(state);
+                    syncSelectionStatus(state);
+                    syncStepperNext(state);
+                }
+
+                if (!result.ok || !payload.success) {
+                    if (!Array.isArray(state.messages) || !state.messages.length) {
+                        renderLiveMessages([String(config.labels.requestFailed || 'Unable to update your room selection right now. Please try again.')]);
+                    }
+                }
+            })
+            .catch(function () {
+                renderLiveMessages([String(config.labels.requestFailed || 'Unable to update your room selection right now. Please try again.')]);
+            })
+            .finally(function () {
+                selectionRequestInFlight = false;
+            });
+    }
 
     function parseImages(value) {
         if (!value) {
@@ -321,12 +580,65 @@
 
         var modalTriggerNode = target.closest(modalTriggerSelector);
 
-        if (!modalTriggerNode) {
+        if (modalTriggerNode) {
+            event.preventDefault();
+            openRoomModalFromTrigger(modalTriggerNode);
             return;
         }
 
-        event.preventDefault();
-        openRoomModalFromTrigger(modalTriggerNode);
+        var disabledStepperNext = target.closest('#must-booking-stepper-next.is-disabled');
+
+        if (disabledStepperNext) {
+            event.preventDefault();
+        }
+    }
+
+    function closeAccommodationFilterPanels(exceptId) {
+        document.querySelectorAll(filterToggleSelector).forEach(function (toggle) {
+            var targetId = String(toggle.getAttribute('data-filter-target') || '');
+            var panel = targetId !== '' ? document.getElementById(targetId) : null;
+            var isOpen = targetId !== '' && targetId === exceptId;
+
+            toggle.setAttribute('aria-expanded', isOpen ? 'true' : 'false');
+
+            if (panel) {
+                panel.hidden = !isOpen;
+                panel.classList.toggle('is-open', isOpen);
+            }
+        });
+    }
+
+    function initAccommodationFilters() {
+        var toggles = document.querySelectorAll(filterToggleSelector);
+
+        if (!toggles.length) {
+            return;
+        }
+
+        toggles.forEach(function (toggle) {
+            toggle.addEventListener('click', function (event) {
+                event.preventDefault();
+
+                var targetId = String(toggle.getAttribute('data-filter-target') || '');
+                var panel = targetId !== '' ? document.getElementById(targetId) : null;
+                var shouldOpen = panel ? panel.hidden : false;
+
+                closeAccommodationFilterPanels(shouldOpen ? targetId : '');
+            });
+        });
+    }
+
+    function initSelectionForms() {
+        document.addEventListener('submit', function (event) {
+            var target = event.target;
+
+            if (!(target instanceof HTMLFormElement) || !target.matches(selectionFormSelector)) {
+                return;
+            }
+
+            event.preventDefault();
+            submitSelectionForm(target);
+        });
     }
 
     function onDocumentKeyDown(event) {
@@ -360,4 +672,6 @@
 
     document.addEventListener('click', onDocumentClick);
     document.addEventListener('keydown', onDocumentKeyDown);
+    initAccommodationFilters();
+    initSelectionForms();
 })();

@@ -36,7 +36,7 @@ function get_payment_methods_catalog(): array
         ],
         'stripe' => [
             'label' => \__('Stripe', 'must-hotel-booking'),
-            'description' => \__('Stripe gateway placeholder for future API integration.', 'must-hotel-booking'),
+            'description' => \__('Redirect guests to Stripe Checkout for secure card payment.', 'must-hotel-booking'),
         ],
     ];
 }
@@ -167,6 +167,21 @@ function maybe_handle_payment_methods_save_request(): void
     }
 
     $saved = save_payment_method_states($states);
+    $stripe_publishable_key = isset($_POST['stripe_publishable_key'])
+        ? \sanitize_text_field((string) \wp_unslash($_POST['stripe_publishable_key']))
+        : '';
+    $stripe_secret_key = isset($_POST['stripe_secret_key'])
+        ? \sanitize_text_field((string) \wp_unslash($_POST['stripe_secret_key']))
+        : '';
+    $stripe_webhook_secret = isset($_POST['stripe_webhook_secret'])
+        ? \sanitize_text_field((string) \wp_unslash($_POST['stripe_webhook_secret']))
+        : '';
+
+    if (\class_exists(__NAMESPACE__ . '\MustBookingConfig')) {
+        MustBookingConfig::set_setting('stripe_publishable_key', $stripe_publishable_key);
+        MustBookingConfig::set_setting('stripe_secret_key', $stripe_secret_key);
+        MustBookingConfig::set_setting('stripe_webhook_secret', $stripe_webhook_secret);
+    }
 
     \wp_safe_redirect(
         get_admin_payments_page_url(
@@ -217,6 +232,18 @@ function render_admin_payments_page(): void
 
     $catalog = get_payment_methods_catalog();
     $states = get_payment_method_states();
+    $stripe_publishable_key = \class_exists(__NAMESPACE__ . '\MustBookingConfig')
+        ? (string) MustBookingConfig::get_setting('stripe_publishable_key', '')
+        : '';
+    $stripe_secret_key = \class_exists(__NAMESPACE__ . '\MustBookingConfig')
+        ? (string) MustBookingConfig::get_setting('stripe_secret_key', '')
+        : '';
+    $stripe_webhook_secret = \class_exists(__NAMESPACE__ . '\MustBookingConfig')
+        ? (string) MustBookingConfig::get_setting('stripe_webhook_secret', '')
+        : '';
+    $webhook_url = \function_exists(__NAMESPACE__ . '\get_stripe_webhook_url')
+        ? get_stripe_webhook_url()
+        : \rest_url('must-hotel-booking/v1/stripe/webhook');
 
     echo '<div class="wrap">';
     echo '<h1>' . \esc_html__('Payments', 'must-hotel-booking') . '</h1>';
@@ -254,7 +281,31 @@ function render_admin_payments_page(): void
 
     echo '</tbody></table>';
 
-    \submit_button(\__('Save Payment Methods', 'must-hotel-booking'));
+    echo '<h2 style="margin-top:24px;">' . \esc_html__('Stripe Checkout', 'must-hotel-booking') . '</h2>';
+    echo '<table class="form-table" role="presentation"><tbody>';
+    echo '<tr>';
+    echo '<th scope="row"><label for="must-stripe-publishable-key">' . \esc_html__('Publishable key', 'must-hotel-booking') . '</label></th>';
+    echo '<td><input id="must-stripe-publishable-key" type="text" class="regular-text" name="stripe_publishable_key" value="' . \esc_attr($stripe_publishable_key) . '" autocomplete="off" />';
+    echo '<p class="description">' . \esc_html__('Starts with pk_. Required when Stripe is enabled.', 'must-hotel-booking') . '</p></td>';
+    echo '</tr>';
+    echo '<tr>';
+    echo '<th scope="row"><label for="must-stripe-secret-key">' . \esc_html__('Secret key', 'must-hotel-booking') . '</label></th>';
+    echo '<td><input id="must-stripe-secret-key" type="password" class="regular-text" name="stripe_secret_key" value="' . \esc_attr($stripe_secret_key) . '" autocomplete="new-password" />';
+    echo '<p class="description">' . \esc_html__('Starts with sk_. Used to create and verify Stripe Checkout sessions.', 'must-hotel-booking') . '</p></td>';
+    echo '</tr>';
+    echo '<tr>';
+    echo '<th scope="row"><label for="must-stripe-webhook-secret">' . \esc_html__('Webhook signing secret', 'must-hotel-booking') . '</label></th>';
+    echo '<td><input id="must-stripe-webhook-secret" type="password" class="regular-text" name="stripe_webhook_secret" value="' . \esc_attr($stripe_webhook_secret) . '" autocomplete="new-password" />';
+    echo '<p class="description">' . \esc_html__('Starts with whsec_. Strongly recommended so webhook payloads can be verified.', 'must-hotel-booking') . '</p></td>';
+    echo '</tr>';
+    echo '<tr>';
+    echo '<th scope="row">' . \esc_html__('Webhook URL', 'must-hotel-booking') . '</th>';
+    echo '<td><code>' . \esc_html($webhook_url) . '</code>';
+    echo '<p class="description">' . \esc_html__('Register this URL in your Stripe dashboard for checkout.session.completed and checkout.session.expired events.', 'must-hotel-booking') . '</p></td>';
+    echo '</tr>';
+    echo '</tbody></table>';
+
+    \submit_button(\__('Save Payment Settings', 'must-hotel-booking'));
 
     echo '</form>';
     echo '</div>';

@@ -142,6 +142,20 @@
         };
     }
 
+    function getLinkedRoomListId(form) {
+        if (!form || !form.closest) {
+            return '';
+        }
+
+        var widgetNode = form.closest('.must-hotel-booking-widget-booking-search');
+
+        if (!widgetNode) {
+            return '';
+        }
+
+        return String(widgetNode.getAttribute('data-linked-room-list-id') || '').trim();
+    }
+
     function getSearchConnectionKey(form) {
         if (!form || !form.closest) {
             return '';
@@ -156,14 +170,53 @@
         return String(widgetNode.getAttribute('data-connection-key') || '').trim();
     }
 
+    function getLinkedRoomCategoryByWidgetId(scope, widgetId) {
+        if (!widgetId) {
+            return '';
+        }
+
+        var roomsWidgets = scope.querySelectorAll('.must-hotel-booking-rooms-list-widget[data-room-list-widget-id]');
+        var matchedCategory = '';
+
+        roomsWidgets.forEach(function (widgetNode) {
+            if (matchedCategory !== '') {
+                return;
+            }
+
+            var currentWidgetId = String(widgetNode.getAttribute('data-room-list-widget-id') || '').trim();
+
+            if (currentWidgetId !== widgetId) {
+                return;
+            }
+
+            matchedCategory = String(widgetNode.getAttribute('data-room-category') || '').trim();
+        });
+
+        if (matchedCategory === '' || matchedCategory === 'all') {
+            return '';
+        }
+
+        return matchedCategory;
+    }
+
     function getLinkedRoomCategory(form) {
+        var scope = form && form.ownerDocument ? form.ownerDocument : document;
+        var linkedRoomListId = getLinkedRoomListId(form);
+
+        if (linkedRoomListId !== '') {
+            var linkedCategory = getLinkedRoomCategoryByWidgetId(scope, linkedRoomListId);
+
+            if (linkedCategory !== '') {
+                return linkedCategory;
+            }
+        }
+
         var connectionKey = getSearchConnectionKey(form);
 
         if (connectionKey === '') {
             return '';
         }
 
-        var scope = form && form.ownerDocument ? form.ownerDocument : document;
         var roomsWidgets = scope.querySelectorAll('.must-hotel-booking-rooms-list-widget[data-connection-key]');
         var matchedCategory = '';
 

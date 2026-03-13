@@ -50,9 +50,183 @@ function get_max_booking_guests_limit(): int
     }
 
     $settings = get_plugin_settings();
-    $value = isset($settings['max_booking_guests']) ? \absint((string) $settings['max_booking_guests']) : 5;
+    $value = isset($settings['max_booking_guests']) ? \absint((string) $settings['max_booking_guests']) : 12;
 
-    return $value > 0 ? $value : 5;
+    return $value > 0 ? $value : 12;
+}
+
+/**
+ * Get the max number of rooms supported by the multi-room booking flow.
+ */
+function get_max_booking_rooms_limit(): int
+{
+    if (\class_exists(__NAMESPACE__ . '\MustBookingConfig')) {
+        return \max(1, MustBookingConfig::get_max_booking_rooms());
+    }
+
+    $settings = get_plugin_settings();
+    $value = isset($settings['max_booking_rooms']) ? \absint((string) $settings['max_booking_rooms']) : 3;
+
+    return $value > 0 ? $value : 3;
+}
+
+/**
+ * Normalize requested room count. Zero means auto.
+ *
+ * @param mixed $value
+ */
+function normalize_booking_room_count($value): int
+{
+    $room_count = \absint(\is_scalar($value) ? (string) $value : 0);
+
+    if ($room_count <= 0) {
+        return 0;
+    }
+
+    return \min(get_max_booking_rooms_limit(), $room_count);
+}
+
+/**
+ * Load the maximum capacity available for each room category.
+ *
+ * @return array<string, int>
+ */
+function get_booking_room_category_capacity_map(): array
+{
+    static $capacity_map = null;
+
+    if (\is_array($capacity_map)) {
+        return $capacity_map;
+    }
+
+    $capacity_map = [];
+
+    if (\function_exists(__NAMESPACE__ . '\get_room_categories')) {
+        foreach (get_room_categories() as $category_slug => $category_label) {
+            $normalized_category = \function_exists(__NAMESPACE__ . '\normalize_room_category')
+                ? normalize_room_category((string) $category_slug)
+                : \sanitize_key((string) $category_slug);
+
+            if ($normalized_category !== '') {
+                $capacity_map[$normalized_category] = 4;
+            }
+        }
+    }
+
+    global $wpdb;
+
+    if (isset($wpdb->prefix)) {
+        $rows = $wpdb->get_results(
+            'SELECT category, MAX(max_guests) AS max_guests FROM ' . $wpdb->prefix . 'must_rooms GROUP BY category',
+            ARRAY_A
+        );
+
+        if (\is_array($rows)) {
+            foreach ($rows as $row) {
+                if (!\is_array($row)) {
+                    continue;
+                }
+
+                $category = isset($row['category']) && \function_exists(__NAMESPACE__ . '\normalize_room_category')
+                    ? normalize_room_category((string) $row['category'])
+                    : \sanitize_key((string) ($row['category'] ?? ''));
+                $max_guests = isset($row['max_guests']) ? \max(1, (int) $row['max_guests']) : 1;
+
+                if ($category !== '') {
+                    $capacity_map[$category] = $max_guests;
+                }
+            }
+        }
+    }
+
+    if (empty($capacity_map)) {
+        $capacity_map = [
+            'standard-rooms' => 4,
+            'suites' => 4,
+            'duplex-suite' => 4,
+        ];
+    }
+
+    return $capacity_map;
+}
+
+/**
+ * Get the largest single-room capacity for a booking context.
+ *
+ * @param array<string, mixed>|null $fixed_room
+ */
+function get_booking_context_max_room_capacity(string $accommodation_type = 'standard-rooms', ?array $fixed_room = null): int
+{
+    if (\is_array($fixed_room) && !empty($fixed_room)) {
+        $fixed_room_capacity = isset($fixed_room['max_guests']) ? (int) $fixed_room['max_guests'] : 0;
+
+        return \max(1, $fixed_room_capacity);
+    }
+
+    $capacity_map = get_booking_room_category_capacity_map();
+    $normalized_category = \function_exists(__NAMESPACE__ . '\normalize_room_category')
+        ? normalize_room_category($accommodation_type)
+        : \sanitize_key($accommodation_type);
+
+    if ($normalized_category !== '' && isset($capacity_map[$normalized_category])) {
+        return \max(1, (int) $capacity_map[$normalized_category]);
+    }
+
+    $fallback_capacity = !empty($capacity_map) ? (int) \max($capacity_map) : 4;
+
+    return \max(1, $fallback_capacity);
+}
+
+/**
+ * Resolve the room count that should be used for a booking party.
+ *
+ * @param array<string, mixed>|null $fixed_room
+ */
+function resolve_booking_room_count(int $guests, int $room_count = 0, string $accommodation_type = 'standard-rooms', ?array $fixed_room = null): int
+{
+    if (\is_array($fixed_room) && !empty($fixed_room)) {
+        return 1;
+    }
+
+    $max_rooms = get_max_booking_rooms_limit();
+    $normalized_room_count = normalize_booking_room_count($room_count);
+    $room_capacity = get_booking_context_max_room_capacity($accommodation_type, $fixed_room);
+    $resolved_auto_count = (int) \ceil(\max(1, $guests) / \max(1, $room_capacity));
+    $resolved_auto_count = \max(1, \min($max_rooms, $resolved_auto_count));
+
+    if ($normalized_room_count > 0) {
+        return \min($max_rooms, $normalized_room_count);
+    }
+
+    return $resolved_auto_count;
+}
+
+/**
+ * Get the max guest count available for a booking context and room-count selection.
+ *
+ * @param array<string, mixed>|null $fixed_room
+ */
+function get_booking_context_guest_limit(string $accommodation_type = 'standard-rooms', int $room_count = 0, ?array $fixed_room = null): int
+{
+    $configured_limit = get_max_booking_guests_limit();
+    $room_capacity = get_booking_context_max_room_capacity($accommodation_type, $fixed_room);
+    $allowed_room_count = \is_array($fixed_room) && !empty($fixed_room)
+        ? 1
+        : \max(1, normalize_booking_room_count($room_count) > 0 ? normalize_booking_room_count($room_count) : get_max_booking_rooms_limit());
+
+    return \max(1, \min($configured_limit, $room_capacity * $allowed_room_count));
+}
+
+/**
+ * Format a room-count label for booking summaries and selectors.
+ */
+function format_booking_room_count_label(int $room_count): string
+{
+    return \sprintf(
+        /* translators: %d is room count. */
+        _n('%d Room', '%d Rooms', \max(1, $room_count), 'must-hotel-booking'),
+        \max(1, $room_count)
+    );
 }
 
 /**
@@ -189,11 +363,65 @@ function get_booking_page_url(): string
 }
 
 /**
+ * Resolve a requested fixed room ID from booking entry URLs.
+ *
+ * @param array<string, mixed> $source
+ */
+function get_requested_booking_room_id(array $source): int
+{
+    if (!isset($source['room_id'])) {
+        return 0;
+    }
+
+    return \absint(\wp_unslash($source['room_id']));
+}
+
+/**
+ * Load the requested fixed room row for booking page mode.
+ *
+ * @param array<string, mixed> $source
+ * @return array<string, mixed>|null
+ */
+function get_requested_booking_room_data(array $source): ?array
+{
+    $room_id = get_requested_booking_room_id($source);
+
+    if ($room_id <= 0 || !\function_exists(__NAMESPACE__ . '\get_room_record')) {
+        return null;
+    }
+
+    $room = get_room_record($room_id);
+
+    return \is_array($room) ? $room : null;
+}
+
+/**
+ * Apply fixed-room context rules to a parsed booking request.
+ *
+ * @param array<string, mixed> $context
+ * @param array<string, mixed> $room
+ * @return array<string, mixed>
+ */
+function apply_fixed_room_booking_context(array $context, array $room): array
+{
+    $room_category = isset($room['category']) && \function_exists(__NAMESPACE__ . '\normalize_room_category')
+        ? normalize_room_category((string) $room['category'])
+        : 'standard-rooms';
+    $room_max_guests = isset($room['max_guests']) ? \max(1, (int) $room['max_guests']) : 1;
+
+    $context['accommodation_type'] = $room_category;
+    $context['guests'] = \max(1, \min($room_max_guests, (int) ($context['guests'] ?? 1)));
+    $context['room_count'] = 1;
+
+    return $context;
+}
+
+/**
  * Build booking page URL with a booking context.
  *
  * @param array<string, mixed> $context
  */
-function get_booking_context_url(array $context): string
+function get_booking_context_url(array $context, int $room_id = 0): string
 {
     $normalized_context = normalize_booking_selection_context($context);
     $args = [];
@@ -207,9 +435,47 @@ function get_booking_context_url(array $context): string
     }
 
     $args['guests'] = (int) ($normalized_context['guests'] ?? 1);
+    $args['room_count'] = \function_exists(__NAMESPACE__ . '\normalize_booking_room_count')
+        ? normalize_booking_room_count($normalized_context['room_count'] ?? 0)
+        : 0;
     $args['accommodation_type'] = (string) ($normalized_context['accommodation_type'] ?? 'standard-rooms');
 
+    if ($room_id > 0) {
+        $args['room_id'] = $room_id;
+    }
+
     return \add_query_arg($args, get_booking_page_url());
+}
+
+/**
+ * Build checkout page URL with a booking context.
+ *
+ * @param array<string, mixed> $context
+ */
+function get_checkout_context_url(array $context, int $room_id = 0): string
+{
+    $normalized_context = normalize_booking_selection_context($context);
+    $args = [];
+
+    if ((string) ($normalized_context['checkin'] ?? '') !== '') {
+        $args['checkin'] = (string) $normalized_context['checkin'];
+    }
+
+    if ((string) ($normalized_context['checkout'] ?? '') !== '') {
+        $args['checkout'] = (string) $normalized_context['checkout'];
+    }
+
+    $args['guests'] = (int) ($normalized_context['guests'] ?? 1);
+    $args['room_count'] = \function_exists(__NAMESPACE__ . '\normalize_booking_room_count')
+        ? normalize_booking_room_count($normalized_context['room_count'] ?? 0)
+        : 0;
+    $args['accommodation_type'] = (string) ($normalized_context['accommodation_type'] ?? 'standard-rooms');
+
+    if ($room_id > 0) {
+        $args['room_id'] = $room_id;
+    }
+
+    return \add_query_arg($args, get_checkout_page_url());
 }
 
 /**
@@ -246,13 +512,16 @@ function parse_booking_request_context(array $source, bool $require_dates = fals
 {
     $checkin = isset($source['checkin']) ? \sanitize_text_field((string) \wp_unslash($source['checkin'])) : '';
     $checkout = isset($source['checkout']) ? \sanitize_text_field((string) \wp_unslash($source['checkout'])) : '';
-    $guests_raw = isset($source['guests']) ? \wp_unslash($source['guests']) : 1;
-    $max_booking_guests = get_max_booking_guests_limit();
-    $guests = \max(1, \min($max_booking_guests, \absint($guests_raw)));
     $accommodation_type_raw = isset($source['accommodation_type']) ? \sanitize_text_field((string) \wp_unslash($source['accommodation_type'])) : 'standard-rooms';
     $accommodation_type = \function_exists(__NAMESPACE__ . '\normalize_room_category')
         ? normalize_room_category($accommodation_type_raw)
         : 'standard-rooms';
+    $room_count = \function_exists(__NAMESPACE__ . '\normalize_booking_room_count')
+        ? normalize_booking_room_count($source['room_count'] ?? 0)
+        : 0;
+    $guests_raw = isset($source['guests']) ? \wp_unslash($source['guests']) : 1;
+    $max_booking_guests = get_max_booking_guests_limit();
+    $guests = \max(1, \min($max_booking_guests, \absint($guests_raw)));
     $errors = [];
 
     if ($require_dates && ($checkin === '' || $checkout === '')) {
@@ -277,6 +546,7 @@ function parse_booking_request_context(array $source, bool $require_dates = fals
         'checkin' => $checkin,
         'checkout' => $checkout,
         'guests' => $guests,
+        'room_count' => $room_count,
         'accommodation_type' => $accommodation_type,
         'is_valid' => empty($errors),
         'errors' => $errors,
@@ -339,6 +609,7 @@ function maybe_process_booking_room_selection(): string
             'checkin' => (string) $context['checkin'],
             'checkout' => (string) $context['checkout'],
             'guests' => (int) $context['guests'],
+            'room_count' => (int) ($context['room_count'] ?? 1),
             'accommodation_type' => (string) $context['accommodation_type'],
         ],
         get_checkout_page_url()
@@ -425,7 +696,6 @@ function get_booking_results_room_view_data(array $room): ?array
         'description' => isset($room['description']) ? (string) $room['description'] : '',
         'max_guests' => isset($room['max_guests']) ? (int) $room['max_guests'] : 0,
         'base_price' => isset($room['base_price']) ? (float) $room['base_price'] : 0.0,
-        'extra_guest_price' => isset($room['extra_guest_price']) ? (float) $room['extra_guest_price'] : 0.0,
         'room_size' => isset($room['room_size']) ? (string) $room['room_size'] : '',
         'beds' => isset($room['beds']) ? (string) $room['beds'] : '',
         'currency' => $currency,
@@ -478,17 +748,24 @@ function format_booking_results_date_range(string $checkin, string $checkout): s
 /**
  * Format the visible selection summary for booking step 2.
  */
-function format_booking_results_selection_summary(string $accommodation_type, int $guests): string
+function format_booking_results_selection_summary(string $accommodation_type, int $guests, int $room_count = 0): string
 {
     $category_label = \function_exists(__NAMESPACE__ . '\get_room_category_label')
         ? get_room_category_label($accommodation_type)
         : \__('Standard Rooms', 'must-hotel-booking');
+    $resolved_room_count = \function_exists(__NAMESPACE__ . '\resolve_booking_room_count')
+        ? resolve_booking_room_count($guests, $room_count, $accommodation_type)
+        : \max(1, $room_count > 0 ? $room_count : 1);
+    $room_count_label = \function_exists(__NAMESPACE__ . '\format_booking_room_count_label')
+        ? format_booking_room_count_label($resolved_room_count)
+        : (string) $resolved_room_count;
 
     return \sprintf(
-        /* translators: 1: accommodation type label, 2: guests count. */
-        \__('%1$s / %2$d Guests', 'must-hotel-booking'),
+        /* translators: 1: accommodation type label, 2: guests count, 3: room count label. */
+        \__('%1$s / %2$d Guests / %3$s', 'must-hotel-booking'),
         $category_label,
-        \max(1, $guests)
+        \max(1, $guests),
+        $room_count_label
     );
 }
 
@@ -508,7 +785,19 @@ function get_booking_page_view_data(): array
 
     /** @var array<string, mixed> $raw_get */
     $raw_get = \is_array($_GET) ? $_GET : [];
+    $requested_room_id = get_requested_booking_room_id($raw_get);
+    $fixed_room = get_requested_booking_room_data($raw_get);
+    $fixed_room_mode = \is_array($fixed_room);
     $context = parse_booking_request_context($raw_get, false);
+
+    if ($requested_room_id > 0 && !$fixed_room_mode) {
+        $messages[] = \__('The selected room could not be found.', 'must-hotel-booking');
+    }
+
+    if ($fixed_room_mode) {
+        $context = apply_fixed_room_booking_context($context, $fixed_room);
+    }
+
     $has_search = (string) $context['checkin'] !== '' || (string) $context['checkout'] !== '';
 
     if (!$context['is_valid'] && $has_search) {
@@ -518,19 +807,77 @@ function get_booking_page_view_data(): array
     }
 
     $rooms = [];
+    $fixed_room_view = null;
+    $max_booking_guests = get_max_booking_guests_limit();
+    $max_booking_rooms = get_max_booking_rooms_limit();
+
+    if ($fixed_room_mode) {
+        $room_max_guests = isset($fixed_room['max_guests']) ? \max(1, (int) $fixed_room['max_guests']) : 1;
+        $max_booking_guests = \max(1, \min($max_booking_guests, $room_max_guests));
+        $max_booking_rooms = 1;
+
+        $room_for_view = $fixed_room;
+
+        if (
+            !empty($context['is_valid']) &&
+            (string) ($context['checkin'] ?? '') !== '' &&
+            (string) ($context['checkout'] ?? '') !== '' &&
+            \function_exists(__NAMESPACE__ . '\calculate_booking_price')
+        ) {
+            $pricing = calculate_booking_price(
+                (int) ($fixed_room['id'] ?? 0),
+                (string) $context['checkin'],
+                (string) $context['checkout'],
+                (int) $context['guests']
+            );
+
+            if (\is_array($pricing) && !empty($pricing['success'])) {
+                if (isset($pricing['total_price'])) {
+                    $room_for_view['price_preview_total'] = (float) $pricing['total_price'];
+                    $room_for_view['dynamic_total_price'] = (float) $pricing['total_price'];
+                }
+
+                if (isset($pricing['room_subtotal'])) {
+                    $room_for_view['dynamic_room_subtotal'] = (float) $pricing['room_subtotal'];
+                }
+
+                if (isset($pricing['nights'])) {
+                    $room_for_view['dynamic_nights'] = (int) $pricing['nights'];
+                }
+            }
+        }
+
+        $fixed_room_view = \function_exists(__NAMESPACE__ . '\get_booking_results_room_view_data')
+            ? get_booking_results_room_view_data($room_for_view)
+            : $room_for_view;
+    }
 
     return [
-        'booking_url' => get_booking_page_url(),
-        'accommodation_url' => get_booking_accommodation_page_url(),
-        'checkout_url' => get_checkout_page_url(),
+        'booking_url' => get_booking_context_url($context, $fixed_room_mode ? (int) ($fixed_room['id'] ?? 0) : 0),
+        'accommodation_url' => $fixed_room_mode
+            ? get_checkout_context_url($context, (int) ($fixed_room['id'] ?? 0))
+            : get_booking_accommodation_page_url(),
+        'checkout_url' => get_checkout_context_url($context, $fixed_room_mode ? (int) ($fixed_room['id'] ?? 0) : 0),
         'checkin' => (string) $context['checkin'],
         'checkout' => (string) $context['checkout'],
         'guests' => (int) $context['guests'],
-        'max_booking_guests' => get_max_booking_guests_limit(),
+        'room_count' => $fixed_room_mode ? 1 : (int) ($context['room_count'] ?? 0),
+        'resolved_room_count' => $fixed_room_mode
+            ? 1
+            : resolve_booking_room_count(
+                (int) ($context['guests'] ?? 1),
+                (int) ($context['room_count'] ?? 0),
+                (string) ($context['accommodation_type'] ?? 'standard-rooms')
+            ),
+        'max_booking_guests' => $max_booking_guests,
+        'max_booking_rooms' => $max_booking_rooms,
         'accommodation_type' => (string) $context['accommodation_type'],
         'has_search' => $has_search,
         'is_valid' => (bool) $context['is_valid'],
         'initial_step' => 1,
+        'fixed_room_mode' => $fixed_room_mode,
+        'fixed_room_id' => $fixed_room_mode ? (int) ($fixed_room['id'] ?? 0) : 0,
+        'fixed_room' => \is_array($fixed_room_view) ? $fixed_room_view : null,
         'messages' => $messages,
         'rooms' => $rooms,
     ];
@@ -589,12 +936,33 @@ function enqueue_booking_page_assets(): void
 
     /** @var array<string, mixed> $raw_get */
     $raw_get = \is_array($_GET) ? $_GET : [];
+    $fixed_room = get_requested_booking_room_data($raw_get);
+    $fixed_room_mode = \is_array($fixed_room);
     $context = parse_booking_request_context($raw_get, false);
+
+    if ($fixed_room_mode) {
+        $context = apply_fixed_room_booking_context($context, $fixed_room);
+    }
+
     $initial_checkin = (string) ($context['checkin'] ?? '');
     $initial_checkout = (string) ($context['checkout'] ?? '');
     $initial_guests = (int) ($context['guests'] ?? 1);
+    $initial_room_count = $fixed_room_mode ? 1 : (int) ($context['room_count'] ?? 0);
     $initial_accommodation_type = (string) ($context['accommodation_type'] ?? 'standard-rooms');
     $max_booking_guests = get_max_booking_guests_limit();
+    $max_booking_rooms = $fixed_room_mode ? 1 : get_max_booking_rooms_limit();
+    $category_capacities = get_booking_room_category_capacity_map();
+
+    if ($fixed_room_mode) {
+        $room_max_guests = isset($fixed_room['max_guests']) ? \max(1, (int) $fixed_room['max_guests']) : 1;
+        $max_booking_guests = \max(1, \min($max_booking_guests, $room_max_guests));
+    }
+
+    $fixed_room_id = $fixed_room_mode ? (int) ($fixed_room['id'] ?? 0) : 0;
+    $fixed_room_name = $fixed_room_mode ? (string) ($fixed_room['name'] ?? '') : '';
+    $fixed_room_category_label = $fixed_room_mode && \function_exists(__NAMESPACE__ . '\get_room_category_label')
+        ? get_room_category_label((string) ($fixed_room['category'] ?? 'standard-rooms'))
+        : '';
     $arrow_icon_url = MUST_HOTEL_BOOKING_URL . 'assets/img/ArrowRight.svg';
     $bed_icon_url = MUST_HOTEL_BOOKING_URL . 'assets/img/bed.svg';
 
@@ -634,17 +1002,30 @@ function enqueue_booking_page_assets(): void
         [
             'ajaxUrl' => \admin_url('admin-ajax.php'),
             'homeUrl' => \home_url('/'),
-            'bookingUrl' => get_booking_page_url(),
-            'accommodationUrl' => get_booking_accommodation_page_url(),
+            'bookingUrl' => get_booking_context_url($context, $fixed_room_id),
+            'accommodationUrl' => $fixed_room_mode
+                ? get_checkout_context_url($context, $fixed_room_id)
+                : get_booking_accommodation_page_url(),
+            'checkoutUrl' => get_checkout_context_url($context, $fixed_room_id),
             'availabilityAction' => 'must_check_availability',
             'disabledDatesAction' => 'must_get_disabled_dates',
             'selectRoomNonce' => \wp_create_nonce('must_booking_select_room'),
             'windowDays' => 180,
             'today' => \current_time('Y-m-d'),
-            'defaultAccommodationType' => 'standard-rooms',
+            'defaultAccommodationType' => $initial_accommodation_type,
             'maxGuests' => $max_booking_guests,
+            'maxRooms' => $max_booking_rooms,
+            'categoryCapacities' => $category_capacities,
             'pageMode' => 'calendar',
-            'initialStep' => (!empty($context['is_valid']) && $initial_checkin !== '' && $initial_checkout !== '') ? 2 : 1,
+            'fixedRoomMode' => $fixed_room_mode,
+            'fixedRoomId' => $fixed_room_id,
+            'fixedRoom' => [
+                'id' => $fixed_room_id,
+                'name' => $fixed_room_name,
+                'categoryLabel' => $fixed_room_category_label,
+                'maxGuests' => $fixed_room_mode ? (int) ($fixed_room['max_guests'] ?? 1) : 0,
+            ],
+            'initialStep' => 1,
             'arrowIconUrl' => $arrow_icon_url,
             'bedIconUrl' => $bed_icon_url,
             'currencySymbol' => get_frontend_currency_symbol(\class_exists(__NAMESPACE__ . '\MustBookingConfig') ? (string) MustBookingConfig::get_currency() : 'USD'),
@@ -652,6 +1033,7 @@ function enqueue_booking_page_assets(): void
                 'checkin' => $initial_checkin,
                 'checkout' => $initial_checkout,
                 'guests' => \max(1, \min($max_booking_guests, $initial_guests)),
+                'roomCount' => $initial_room_count,
                 'accommodationType' => $initial_accommodation_type,
             ],
             'strings' => [
@@ -660,13 +1042,18 @@ function enqueue_booking_page_assets(): void
                 'invalidRange' => \__('Please select valid check-in and check-out dates.', 'must-hotel-booking'),
                 'requestFailed' => \__('Unable to load availability. Please try again.', 'must-hotel-booking'),
                 'selectDatesHeading' => \__('Select your dates', 'must-hotel-booking'),
+                'selectDatesHeadingFixedRoom' => \__('Select your dates', 'must-hotel-booking'),
                 'availableAccommodationHeading' => \__('Available Accommodation', 'must-hotel-booking'),
                 'selectDatesSummary' => \__('Select dates', 'must-hotel-booking'),
                 'roomLabel' => \__('Room', 'must-hotel-booking'),
                 'capacityFormat' => \__('%d Guests', 'must-hotel-booking'),
                 'basePriceFormat' => \__('Base Price: %s', 'must-hotel-booking'),
                 'estimatedTotalFormat' => \__('Estimated Total: %s', 'must-hotel-booking'),
-                'selectionSummaryFormat' => \__('%1$s / %2$d Guests', 'must-hotel-booking'),
+                'selectionSummaryFormat' => \__('%1$s / %2$d Guests / %3$s', 'must-hotel-booking'),
+                'roomCountSingular' => \__('%d Room', 'must-hotel-booking'),
+                'roomCountPlural' => \__('%d Rooms', 'must-hotel-booking'),
+                'roomCountAuto' => \__('Auto', 'must-hotel-booking'),
+                'continueToGuestInfo' => \__('Continue to Guest Information', 'must-hotel-booking'),
                 'bookNow' => \__('Book Now', 'must-hotel-booking'),
                 'additionalDetails' => \__('Additional Details', 'must-hotel-booking'),
                 'noImage' => \__('Add room image in admin', 'must-hotel-booking'),

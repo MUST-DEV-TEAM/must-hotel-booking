@@ -30,6 +30,7 @@ function load_plugin_files(): void
 {
     $files = [
         'includes/config.php',
+        'includes/booking-status.php',
         'includes/design-system.php',
         'database/install-tables.php',
         'admin/quick-booking.php',
@@ -58,6 +59,7 @@ function load_plugin_files(): void
         'engine/reservation-engine.php',
         'engine/pricing-engine.php',
         'engine/lock-engine.php',
+        'engine/payment-engine.php',
         'engine/email-engine.php',
         'elementor/booking-search-widget.php',
         'elementor/rooms-list-widget.php',

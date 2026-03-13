@@ -61,6 +61,9 @@ function get_available_rooms(string $checkin, string $checkout, int $guests = 1,
     $locks_table = $wpdb->prefix . 'must_locks';
     $now = \function_exists(__NAMESPACE__ . '\get_current_utc_datetime') ? get_current_utc_datetime() : \gmdate('Y-m-d H:i:s');
     $session_id = \function_exists(__NAMESPACE__ . '\get_or_create_lock_session_id') ? get_or_create_lock_session_id() : '';
+    $non_blocking_statuses = \function_exists(__NAMESPACE__ . '\get_inventory_non_blocking_reservation_statuses')
+        ? get_inventory_non_blocking_reservation_statuses()
+        : ['cancelled', 'expired', 'payment_failed'];
 
     if ($session_id !== '') {
         $sql = $wpdb->prepare(
@@ -74,6 +77,7 @@ function get_available_rooms(string $checkin, string $checkout, int $guests = 1,
                     WHERE res.room_id = r.id
                         AND res.checkin < %s
                         AND res.checkout > %s
+                        AND res.status NOT IN (%s, %s, %s)
                 )
                 AND NOT EXISTS (
                     SELECT 1
@@ -89,6 +93,9 @@ function get_available_rooms(string $checkin, string $checkout, int $guests = 1,
             $guests,
             $checkout,
             $checkin,
+            (string) $non_blocking_statuses[0],
+            (string) $non_blocking_statuses[1],
+            (string) $non_blocking_statuses[2],
             $checkout,
             $checkin,
             $now,
@@ -106,6 +113,7 @@ function get_available_rooms(string $checkin, string $checkout, int $guests = 1,
                     WHERE res.room_id = r.id
                         AND res.checkin < %s
                         AND res.checkout > %s
+                        AND res.status NOT IN (%s, %s, %s)
                 )
                 AND NOT EXISTS (
                     SELECT 1
@@ -120,6 +128,9 @@ function get_available_rooms(string $checkin, string $checkout, int $guests = 1,
             $guests,
             $checkout,
             $checkin,
+            (string) $non_blocking_statuses[0],
+            (string) $non_blocking_statuses[1],
+            (string) $non_blocking_statuses[2],
             $checkout,
             $checkin,
             $now
@@ -211,6 +222,9 @@ function store_reservation_from_lock(
     $locks_table = $wpdb->prefix . 'must_locks';
     $now = \function_exists(__NAMESPACE__ . '\get_current_utc_datetime') ? get_current_utc_datetime() : \gmdate('Y-m-d H:i:s');
     $booking_id = generate_unique_booking_id();
+    $non_blocking_statuses = \function_exists(__NAMESPACE__ . '\get_inventory_non_blocking_reservation_statuses')
+        ? get_inventory_non_blocking_reservation_statuses()
+        : ['cancelled', 'expired', 'payment_failed'];
 
     $sql = $wpdb->prepare(
         "INSERT INTO {$reservations_table}
@@ -231,6 +245,7 @@ function store_reservation_from_lock(
             WHERE r.room_id = %d
                 AND r.checkin < %s
                 AND r.checkout > %s
+                AND r.status NOT IN (%s, %s, %s)
         )
         LIMIT 1",
         $booking_id,
@@ -250,7 +265,10 @@ function store_reservation_from_lock(
         $now,
         $room_id,
         $checkout,
-        $checkin
+        $checkin,
+        (string) $non_blocking_statuses[0],
+        (string) $non_blocking_statuses[1],
+        (string) $non_blocking_statuses[2]
     );
 
     $insert_result = $wpdb->query($sql);
@@ -301,6 +319,9 @@ function create_reservation_without_lock(
     $reservations_table = $wpdb->prefix . 'must_reservations';
     $booking_id = generate_unique_booking_id();
     $created_at = \current_time('mysql');
+    $non_blocking_statuses = \function_exists(__NAMESPACE__ . '\get_inventory_non_blocking_reservation_statuses')
+        ? get_inventory_non_blocking_reservation_statuses()
+        : ['cancelled', 'expired', 'payment_failed'];
 
     $sql = $wpdb->prepare(
         "INSERT INTO {$reservations_table}
@@ -312,6 +333,7 @@ function create_reservation_without_lock(
             WHERE r.room_id = %d
                 AND r.checkin < %s
                 AND r.checkout > %s
+                AND r.status NOT IN (%s, %s, %s)
         )
         LIMIT 1",
         $booking_id,
@@ -328,7 +350,10 @@ function create_reservation_without_lock(
         $created_at,
         $room_id,
         $checkout,
-        $checkin
+        $checkin,
+        (string) $non_blocking_statuses[0],
+        (string) $non_blocking_statuses[1],
+        (string) $non_blocking_statuses[2]
     );
 
     $insert_result = $wpdb->query($sql);

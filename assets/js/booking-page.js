@@ -15,6 +15,7 @@
         checkoutPicker: null,
         currentStep: 1,
         previewCheckout: '',
+        lastAvailabilityMessage: '',
         disabledCheckinDates: [],
         disabledCheckoutDates: []
     };
@@ -112,6 +113,25 @@
         return String(firstValue) + ' / ' + String(secondValue);
     }
 
+    function formatThreeValueTemplate(template, firstValue, secondValue, thirdValue) {
+        var output = String(template || '');
+
+        if (
+            output.indexOf('%1$s') !== -1 ||
+            output.indexOf('%2$d') !== -1 ||
+            output.indexOf('%2$s') !== -1 ||
+            output.indexOf('%3$s') !== -1
+        ) {
+            return output
+                .replace('%1$s', String(firstValue))
+                .replace('%2$d', String(secondValue))
+                .replace('%2$s', String(secondValue))
+                .replace('%3$s', String(thirdValue));
+        }
+
+        return String(firstValue) + ' / ' + String(secondValue) + ' / ' + String(thirdValue);
+    }
+
     function formatPrice(value) {
         var amount = Number(value);
         var symbol = String(config.currencySymbol || '').trim();
@@ -192,8 +212,51 @@
         return String(config.pageMode || 'calendar') === 'calendar';
     }
 
+    function getFixedRoomId() {
+        var parsed = parseInt(String(config.fixedRoomId || '0'), 10);
+
+        if (!Number.isFinite(parsed) || parsed < 1) {
+            return 0;
+        }
+
+        return parsed;
+    }
+
+    function isFixedRoomMode() {
+        return Boolean(config.fixedRoomMode) && getFixedRoomId() > 0;
+    }
+
+    function buildContextUrl(baseUrl, context) {
+        var resolvedBaseUrl = String(baseUrl || window.location.href || '');
+        var url;
+
+        try {
+            url = new URL(resolvedBaseUrl, window.location.href);
+        } catch (error) {
+            url = new URL(window.location.href);
+        }
+
+        url.searchParams.set('checkin', String(context.checkin || ''));
+        url.searchParams.set('checkout', String(context.checkout || ''));
+        url.searchParams.set('guests', String(context.guests || 1));
+        url.searchParams.set('room_count', String(context.roomCount || 0));
+        url.searchParams.set('accommodation_type', String(context.accommodationType || getAccommodationTypeValue()));
+
+        if (Number(context.roomId || 0) > 0) {
+            url.searchParams.set('room_id', String(context.roomId));
+        } else {
+            url.searchParams.delete('room_id');
+        }
+
+        return url.toString();
+    }
+
     function getStepHeadingText(step) {
         var strings = config.strings || {};
+
+        if (isFixedRoomMode()) {
+            return String(strings.selectDatesHeadingFixedRoom || strings.selectDatesHeading || 'Select your dates');
+        }
 
         if (Number(step) > 1) {
             return String(strings.availableAccommodationHeading || 'Available Accommodation');
@@ -244,21 +307,33 @@
     }
 
     function redirectToAccommodation(context) {
-        var baseUrl = String(config.accommodationUrl || config.bookingUrl || window.location.href);
-        var params = new URLSearchParams();
+        window.location.href = buildContextUrl(
+            String(config.accommodationUrl || config.bookingUrl || window.location.href),
+            context
+        );
+    }
 
-        params.append('checkin', String(context.checkin || ''));
-        params.append('checkout', String(context.checkout || ''));
-        params.append('guests', String(context.guests || 1));
-        params.append('accommodation_type', String(context.accommodationType || getAccommodationTypeValue()));
-
-        window.location.href = baseUrl + (baseUrl.indexOf('?') === -1 ? '?' : '&') + params.toString();
+    function redirectToCheckout(context) {
+        window.location.href = buildContextUrl(
+            String(config.checkoutUrl || config.bookingUrl || window.location.href),
+            context
+        );
     }
 
     function getAccommodationTypeLabel(accommodationTypeSelect) {
         var selectEl = accommodationTypeSelect || document.getElementById('must-booking-accommodation-type');
 
         if (!selectEl) {
+            if (isFixedRoomMode() && config.fixedRoom && typeof config.fixedRoom === 'object') {
+                if (String(config.fixedRoom.name || '') !== '') {
+                    return String(config.fixedRoom.name);
+                }
+
+                if (String(config.fixedRoom.categoryLabel || '') !== '') {
+                    return String(config.fixedRoom.categoryLabel);
+                }
+            }
+
             return 'Standard Rooms';
         }
 
@@ -286,11 +361,104 @@
         return String(selectEl.value || fallback);
     }
 
-    function getMaxGuestsLimit() {
+    function getMaxRoomsLimit() {
+        var parsed = parseInt(String(config.maxRooms || '3'), 10);
+
+        if (!Number.isFinite(parsed) || parsed < 1) {
+            return 3;
+        }
+
+        return parsed;
+    }
+
+    function getRoomCapacityForAccommodationType(accommodationType) {
+        if (isFixedRoomMode()) {
+            var fixedCapacity = config.fixedRoom && typeof config.fixedRoom === 'object'
+                ? parseInt(String(config.fixedRoom.maxGuests || config.fixedRoom.max_guests || '1'), 10)
+                : 1;
+
+            return Number.isFinite(fixedCapacity) && fixedCapacity > 0 ? fixedCapacity : 1;
+        }
+
+        var capacities = config.categoryCapacities && typeof config.categoryCapacities === 'object'
+            ? config.categoryCapacities
+            : {};
+        var normalizedType = String(accommodationType || getAccommodationTypeValue()).trim();
+        var parsed = parseInt(String(capacities[normalizedType] || config.maxGuests || '4'), 10);
+
+        if (!Number.isFinite(parsed) || parsed < 1) {
+            return 4;
+        }
+
+        return parsed;
+    }
+
+    function getRoomCountValue(roomCountSelect) {
+        if (isFixedRoomMode()) {
+            return 1;
+        }
+
+        var fallback = parseInt(String((config.initial && config.initial.roomCount) || '0'), 10);
+        var selectEl = roomCountSelect || document.getElementById('must-booking-room-count-select');
+
+        if (!Number.isFinite(fallback) || fallback < 0) {
+            fallback = 0;
+        }
+
+        if (!selectEl) {
+            return fallback;
+        }
+
+        var parsed = parseInt(String(selectEl.value || fallback), 10);
+
+        if (!Number.isFinite(parsed) || parsed < 0) {
+            return 0;
+        }
+
+        return Math.min(getMaxRoomsLimit(), parsed);
+    }
+
+    function resolveRoomCount(context) {
+        var roomCount = parseInt(String(context.roomCount || 0), 10);
+        var roomCapacity = getRoomCapacityForAccommodationType(context.accommodationType);
+        var resolvedAutoCount = Math.ceil(Math.max(1, Number(context.guests || 1)) / Math.max(1, roomCapacity));
+
+        if (!Number.isFinite(resolvedAutoCount) || resolvedAutoCount < 1) {
+            resolvedAutoCount = 1;
+        }
+
+        resolvedAutoCount = Math.min(getMaxRoomsLimit(), resolvedAutoCount);
+
+        if (Number.isFinite(roomCount) && roomCount > 0) {
+            return Math.min(getMaxRoomsLimit(), roomCount);
+        }
+
+        return resolvedAutoCount;
+    }
+
+    function formatRoomCountLabel(roomCount) {
+        var numericRoomCount = parseInt(String(roomCount || '1'), 10);
+
+        if (!Number.isFinite(numericRoomCount) || numericRoomCount < 1) {
+            numericRoomCount = 1;
+        }
+
+        if (numericRoomCount === 1) {
+            return String((config.strings && config.strings.roomCountSingular) || '%d Room').replace('%d', '1');
+        }
+
+        return String((config.strings && config.strings.roomCountPlural) || '%d Rooms').replace('%d', String(numericRoomCount));
+    }
+
+    function getMaxGuestsLimit(accommodationType, roomCount) {
         var parsed = parseInt(String(config.maxGuests || '5'), 10);
 
         if (!Number.isFinite(parsed) || parsed < 1) {
             return 5;
+        }
+
+        if (isFixedRoomMode()) {
+            return Math.max(1, Math.min(parsed, getRoomCapacityForAccommodationType(accommodationType)));
         }
 
         return parsed;
@@ -317,9 +485,10 @@
 
     function getResultsSelectionSummary(context, accommodationTypeSelect) {
         var label = getAccommodationTypeLabel(accommodationTypeSelect);
-        var template = (config.strings && config.strings.selectionSummaryFormat) || '%1$s / %2$d Guests';
+        var template = (config.strings && config.strings.selectionSummaryFormat) || '%1$s / %2$d Guests / %3$s';
+        var roomCountLabel = formatRoomCountLabel(resolveRoomCount(context));
 
-        return formatTwoValueTemplate(template, label, context.guests);
+        return formatThreeValueTemplate(template, label, context.guests, roomCountLabel);
     }
 
     function updateResultsSummary(context, accommodationTypeSelect) {
@@ -335,11 +504,13 @@
         }
     }
 
-    function getContext(checkinInput, checkoutInput, guestsInput, accommodationTypeSelect) {
+    function getContext(checkinInput, checkoutInput, guestsInput, accommodationTypeSelect, roomCountInput) {
         var checkin = String(checkinInput.value || '').trim();
         var checkout = String(checkoutInput.value || '').trim();
+        var accommodationType = getAccommodationTypeValue(accommodationTypeSelect);
+        var roomCount = getRoomCountValue(roomCountInput);
         var guests = parseInt(String(guestsInput.value || '1'), 10);
-        var maxGuests = getMaxGuestsLimit();
+        var maxGuests = getMaxGuestsLimit(accommodationType, roomCount);
 
         if (!Number.isFinite(guests) || guests < 1) {
             guests = 1;
@@ -353,7 +524,9 @@
             checkin: checkin,
             checkout: checkout,
             guests: guests,
-            accommodationType: getAccommodationTypeValue(accommodationTypeSelect)
+            roomCount: roomCount,
+            accommodationType: accommodationType,
+            roomId: isFixedRoomMode() ? getFixedRoomId() : 0
         };
     }
 
@@ -398,7 +571,9 @@
         var checkinFields = document.querySelectorAll('.must-booking-hidden-checkin');
         var checkoutFields = document.querySelectorAll('.must-booking-hidden-checkout');
         var guestsFields = document.querySelectorAll('.must-booking-hidden-guests');
+        var roomCountFields = document.querySelectorAll('.must-booking-room-count');
         var accommodationTypeFields = document.querySelectorAll('.must-booking-hidden-accommodation-type');
+        var roomIdFields = document.querySelectorAll('.must-booking-hidden-room-id');
 
         checkinFields.forEach(function (field) {
             field.value = context.checkin;
@@ -412,9 +587,47 @@
             field.value = String(context.guests);
         });
 
+        roomCountFields.forEach(function (field) {
+            field.value = String(context.roomCount || 0);
+        });
+
         accommodationTypeFields.forEach(function (field) {
             field.value = String(context.accommodationType || '');
         });
+
+        roomIdFields.forEach(function (field) {
+            field.value = String(context.roomId || 0);
+        });
+    }
+
+    function rebuildGuestsSelectOptions(guestsSelect, guestsInput, accommodationTypeSelect, roomCountSelect) {
+        if (!guestsSelect || !guestsInput) {
+            return;
+        }
+
+        var accommodationType = getAccommodationTypeValue(accommodationTypeSelect);
+        var roomCount = getRoomCountValue(roomCountSelect);
+        var maxGuests = getMaxGuestsLimit(accommodationType, roomCount);
+        var currentGuests = parseInt(String(guestsInput.value || guestsSelect.value || '1'), 10);
+        var options = [];
+
+        if (!Number.isFinite(currentGuests) || currentGuests < 1) {
+            currentGuests = 1;
+        }
+
+        if (currentGuests > maxGuests) {
+            currentGuests = maxGuests;
+        }
+
+        for (var guestIndex = 1; guestIndex <= maxGuests; guestIndex++) {
+            options.push({
+                value: String(guestIndex),
+                label: String(guestIndex)
+            });
+        }
+
+        populateSelectOptions(guestsSelect, options, String(currentGuests));
+        guestsInput.value = String(currentGuests);
     }
 
     function renderRooms(roomListEl, noRoomsEl, resultsEl, rooms, context) {
@@ -424,6 +637,7 @@
 
         if (!Array.isArray(rooms) || rooms.length === 0) {
             roomListEl.innerHTML = '';
+            noRoomsEl.textContent = state.lastAvailabilityMessage || ((config.strings && config.strings.noRooms) || 'No rooms are available for the selected dates.');
             noRoomsEl.style.display = '';
             resultsEl.style.display = '';
             return;
@@ -515,6 +729,7 @@
                                 '<input class="must-booking-hidden-checkin" type="hidden" name="checkin" value="' + escapeHtml(context.checkin) + '" />' +
                                 '<input class="must-booking-hidden-checkout" type="hidden" name="checkout" value="' + escapeHtml(context.checkout) + '" />' +
                                 '<input class="must-booking-hidden-guests" type="hidden" name="guests" value="' + escapeHtml(context.guests) + '" />' +
+                                '<input class="must-booking-room-count" type="hidden" name="room_count" value="' + escapeHtml(context.roomCount || 0) + '" />' +
                                 '<input class="must-booking-hidden-accommodation-type" type="hidden" name="accommodation_type" value="' + escapeHtml(context.accommodationType || '') + '" />' +
                                 '<button type="submit" class="must-booking-room-book-button">' +
                                     '<span>' + escapeHtml(strings.bookNow || 'Book Now') + '</span>' +
@@ -529,6 +744,7 @@
         }).join('');
 
         roomListEl.innerHTML = html;
+        state.lastAvailabilityMessage = '';
         noRoomsEl.style.display = 'none';
         resultsEl.style.display = '';
     }
@@ -730,8 +946,13 @@
         var params = new URLSearchParams();
         params.append('action', String(config.disabledDatesAction));
         params.append('guests', String(context.guests));
+        params.append('room_count', String(context.roomCount || 0));
         params.append('accommodation_type', String(context.accommodationType || getAccommodationTypeValue()));
         params.append('window_days', String(config.windowDays || 180));
+
+        if (Number(context.roomId || 0) > 0) {
+            params.append('room_id', String(context.roomId));
+        }
 
         if (isValidDateString(context.checkin)) {
             params.append('checkin', context.checkin);
@@ -769,15 +990,17 @@
 
             applyDisabledDatesToPickers(disabledCheckinDates, disabledCheckoutDates, checkinInput, checkoutInput);
             var guestsInput = document.getElementById('must-booking-guests');
+            var roomCountInput = document.getElementById('must-booking-room-count-select') || document.getElementById('must-booking-room-count');
 
             if (guestsInput) {
-                updateSummary(getContext(checkinInput, checkoutInput, guestsInput));
-                updateResultsSummary(getContext(checkinInput, checkoutInput, guestsInput), document.getElementById('must-booking-accommodation-type'));
+                updateSummary(getContext(checkinInput, checkoutInput, guestsInput, document.getElementById('must-booking-accommodation-type'), roomCountInput));
+                updateResultsSummary(getContext(checkinInput, checkoutInput, guestsInput, document.getElementById('must-booking-accommodation-type'), roomCountInput), document.getElementById('must-booking-accommodation-type'));
             } else {
                 var fallbackContext = {
                     checkin: checkinInput.value || '',
                     checkout: checkoutInput.value || '',
                     guests: 1,
+                    roomCount: 0,
                     accommodationType: getAccommodationTypeValue()
                 };
 
@@ -791,9 +1014,11 @@
         });
     }
 
-    function fetchAvailability(context, roomListEl, noRoomsEl, resultsEl, loadingEl, messagesEl) {
+    function fetchAvailability(context, roomListEl, noRoomsEl, resultsEl, loadingEl, messagesEl, options) {
+        var suppressRender = Boolean(options && options.suppressRender);
+
         if (!config.ajaxUrl || !config.availabilityAction) {
-            return;
+            return Promise.resolve([]);
         }
 
         if (!isValidRange(context)) {
@@ -815,7 +1040,7 @@
                 roomListEl.innerHTML = '';
             }
 
-            return;
+            return Promise.resolve([]);
         }
 
         setMessage(messagesEl, '', '');
@@ -826,11 +1051,16 @@
         params.append('checkin', context.checkin);
         params.append('checkout', context.checkout);
         params.append('guests', String(context.guests));
+        params.append('room_count', String(context.roomCount || 0));
         params.append('accommodation_type', String(context.accommodationType || getAccommodationTypeValue()));
+
+        if (Number(context.roomId || 0) > 0) {
+            params.append('room_id', String(context.roomId));
+        }
 
         var requestToken = ++state.availabilityRequestToken;
 
-        fetch(String(config.ajaxUrl) + '?' + params.toString(), {
+        return fetch(String(config.ajaxUrl) + '?' + params.toString(), {
             method: 'GET',
             credentials: 'same-origin'
         }).then(function (response) {
@@ -849,18 +1079,27 @@
             }
 
             var rooms = Array.isArray(payload.data.rooms) ? payload.data.rooms : [];
-            renderRooms(roomListEl, noRoomsEl, resultsEl, rooms, context);
+            state.lastAvailabilityMessage = typeof payload.data.message === 'string' ? payload.data.message : '';
             syncHiddenSelectionFields(context);
-        }).catch(function () {
-            if (requestToken !== state.availabilityRequestToken) {
-                return;
+            
+            if (!suppressRender) {
+                renderRooms(roomListEl, noRoomsEl, resultsEl, rooms, context);
             }
 
+            return rooms;
+        }).catch(function () {
+            if (requestToken !== state.availabilityRequestToken) {
+                return [];
+            }
+
+            state.lastAvailabilityMessage = '';
             setMessage(
                 messagesEl,
                 (config.strings && config.strings.requestFailed) || 'Unable to load availability.',
                 'error'
             );
+
+            return [];
         }).finally(function () {
             if (requestToken !== state.availabilityRequestToken) {
                 return;
@@ -1134,6 +1373,8 @@
         var checkoutInput = document.getElementById('must-booking-checkout');
         var guestsInput = document.getElementById('must-booking-guests');
         var guestsSelect = document.getElementById('must-booking-guests-select');
+        var roomCountInput = document.getElementById('must-booking-room-count');
+        var roomCountSelect = document.getElementById('must-booking-room-count-select');
         var accommodationTypeSelect = document.getElementById('must-booking-accommodation-type');
         var stepBackButton = document.getElementById('must-booking-step-back');
         var stepNextButton = document.getElementById('must-booking-step-next');
@@ -1161,28 +1402,37 @@
             if (!guestsInput.value) {
                 guestsInput.value = String(config.initial.guests || 1);
             }
+
+            if (roomCountInput && !roomCountInput.value) {
+                roomCountInput.value = String(config.initial.roomCount || 0);
+            }
         }
 
         if (accommodationTypeSelect) {
             accommodationTypeSelect.value = getAccommodationTypeValue(accommodationTypeSelect);
         }
 
+        if (roomCountSelect && roomCountInput) {
+            roomCountSelect.value = String(getRoomCountValue(roomCountSelect));
+            roomCountInput.value = String(getRoomCountValue(roomCountSelect));
+        }
+
         if (guestsSelect) {
-            guestsInput.value = String(getContext(checkinInput, checkoutInput, guestsInput).guests || 1);
-            guestsSelect.value = String(guestsInput.value || '1');
+            rebuildGuestsSelectOptions(guestsSelect, guestsInput, accommodationTypeSelect, roomCountSelect);
+            guestsInput.value = String(getContext(checkinInput, checkoutInput, guestsInput, accommodationTypeSelect, roomCountSelect).guests || 1);
         }
 
         function refreshCalendarState(source) {
-            var context = getContext(checkinInput, checkoutInput, guestsInput);
+            var context = getContext(checkinInput, checkoutInput, guestsInput, accommodationTypeSelect, roomCountSelect);
             syncHiddenSelectionFields(context);
             updateSummary(context);
             updateResultsSummary(context, accommodationTypeSelect);
             updateRangeHighlights(context.checkin, context.checkout, state.previewCheckout);
             setCurrentStep(1, resultsEl);
 
-            if (source === 'checkin' || source === 'guests' || source === 'accommodation_type') {
+            if (source === 'checkin' || source === 'guests' || source === 'accommodation_type' || source === 'room_count') {
                 fetchDisabledDates(context).finally(function () {
-                    var updatedContext = getContext(checkinInput, checkoutInput, guestsInput);
+                    var updatedContext = getContext(checkinInput, checkoutInput, guestsInput, accommodationTypeSelect, roomCountSelect);
                     syncHiddenSelectionFields(updatedContext);
                     updateSummary(updatedContext);
                     updateResultsSummary(updatedContext, accommodationTypeSelect);
@@ -1202,7 +1452,7 @@
         }
 
         function runAvailabilityCheck() {
-            var context = getContext(checkinInput, checkoutInput, guestsInput);
+            var context = getContext(checkinInput, checkoutInput, guestsInput, accommodationTypeSelect, roomCountSelect);
 
             syncHiddenSelectionFields(context);
             updateSummary(context);
@@ -1222,6 +1472,31 @@
             setMessage(messagesEl, '', '');
 
             if (isCalendarPageMode()) {
+                if (isFixedRoomMode()) {
+                    fetchAvailability(
+                        context,
+                        roomListEl,
+                        noRoomsEl,
+                        resultsEl,
+                        loadingEl,
+                        messagesEl,
+                        { suppressRender: true }
+                    ).then(function (rooms) {
+                        if (Array.isArray(rooms) && rooms.length > 0) {
+                            redirectToCheckout(context);
+                            return;
+                        }
+
+                        setMessage(
+                            messagesEl,
+                            state.lastAvailabilityMessage || ((config.strings && config.strings.noRooms) || 'No rooms are available for the selected dates.'),
+                            'error'
+                        );
+                        setCurrentStep(1, resultsEl);
+                    });
+                    return;
+                }
+
                 redirectToAccommodation(context);
                 return;
             }
@@ -1242,7 +1517,7 @@
 
         initializeDatePickers(checkinInput, checkoutInput, scheduleRefresh);
 
-        var initialContext = getContext(checkinInput, checkoutInput, guestsInput, accommodationTypeSelect);
+        var initialContext = getContext(checkinInput, checkoutInput, guestsInput, accommodationTypeSelect, roomCountSelect);
         var initialStep = isCalendarPageMode() ? 1 : parseInt(String(config.initialStep || '1'), 10);
 
         syncHiddenSelectionFields(initialContext);
@@ -1254,7 +1529,7 @@
         if (guestsSelect) {
             guestsSelect.addEventListener('change', function () {
                 var guestsValue = parseInt(String(guestsSelect.value || '1'), 10);
-                var maxGuests = getMaxGuestsLimit();
+                var maxGuests = getMaxGuestsLimit(getAccommodationTypeValue(accommodationTypeSelect), getRoomCountValue(roomCountSelect));
 
                 if (!Number.isFinite(guestsValue) || guestsValue < 1) {
                     guestsValue = 1;
@@ -1279,7 +1554,23 @@
 
         if (accommodationTypeSelect) {
             accommodationTypeSelect.addEventListener('change', function () {
+                if (guestsSelect) {
+                    rebuildGuestsSelectOptions(guestsSelect, guestsInput, accommodationTypeSelect, roomCountSelect);
+                }
+
                 scheduleRefresh('accommodation_type');
+            });
+        }
+
+        if (roomCountSelect && roomCountInput) {
+            roomCountSelect.addEventListener('change', function () {
+                roomCountInput.value = String(getRoomCountValue(roomCountSelect));
+
+                if (guestsSelect) {
+                    rebuildGuestsSelectOptions(guestsSelect, guestsInput, accommodationTypeSelect, roomCountSelect);
+                }
+
+                scheduleRefresh('room_count');
             });
         }
 
@@ -1321,7 +1612,7 @@
                     guestsInput.value = String(guestsSelect.value || guestsInput.value || '1');
                 }
 
-                var context = getContext(checkinInput, checkoutInput, guestsInput);
+                var context = getContext(checkinInput, checkoutInput, guestsInput, accommodationTypeSelect, roomCountSelect);
 
                 if (!isValidRange(context)) {
                     setMessage(
@@ -1348,7 +1639,7 @@
         });
 
         fetchDisabledDates(initialContext).finally(function () {
-            var contextAfterLoad = getContext(checkinInput, checkoutInput, guestsInput, accommodationTypeSelect);
+            var contextAfterLoad = getContext(checkinInput, checkoutInput, guestsInput, accommodationTypeSelect, roomCountSelect);
 
             syncHiddenSelectionFields(contextAfterLoad);
             updateSummary(contextAfterLoad);

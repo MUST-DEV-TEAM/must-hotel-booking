@@ -36,15 +36,23 @@ function split_checkout_phone_value(string $phone): array
         if (\strpos($normalized, $dial_code) === 0) {
             return [
                 'phone_country_code' => normalize_checkout_phone_option_value($dial_code),
-                'phone_number' => \trim(\substr($normalized, \strlen($dial_code))),
+                'phone_number' => sanitize_checkout_phone_number(\substr($normalized, \strlen($dial_code))),
             ];
         }
     }
 
     return [
         'phone_country_code' => $default_phone_option_value,
-        'phone_number' => $normalized,
+        'phone_number' => sanitize_checkout_phone_number($normalized),
     ];
+}
+
+/**
+ * Normalize checkout phone number input to digits only.
+ */
+function sanitize_checkout_phone_number(string $phone_number): string
+{
+    return \preg_replace('/\D+/', '', $phone_number) ?? '';
 }
 
 /**
@@ -55,7 +63,7 @@ function combine_checkout_phone_value(array $guest_form): string
     $phone_country_code = isset($guest_form['phone_country_code'])
         ? normalize_checkout_phone_option_value((string) $guest_form['phone_country_code'])
         : get_checkout_default_phone_option_value();
-    $phone_number = isset($guest_form['phone_number']) ? \trim((string) $guest_form['phone_number']) : '';
+    $phone_number = isset($guest_form['phone_number']) ? sanitize_checkout_phone_number((string) $guest_form['phone_number']) : '';
     $phone_option_details = get_checkout_phone_option_details($phone_country_code);
 
     if ($phone_number === '') {
@@ -170,13 +178,184 @@ function get_checkout_room_data(int $room_id): ?array
 
     $room = $wpdb->get_row(
         $wpdb->prepare(
-            'SELECT id, name, slug, category, description, max_guests, base_price, extra_guest_price, room_size, beds FROM ' . $wpdb->prefix . 'must_rooms WHERE id = %d LIMIT 1',
+            'SELECT id, name, slug, category, description, max_guests, base_price, room_size, beds FROM ' . $wpdb->prefix . 'must_rooms WHERE id = %d LIMIT 1',
             $room_id
         ),
         ARRAY_A
     );
 
     return \is_array($room) ? $room : null;
+}
+
+/**
+ * Resolve per-room guest counts for the selected rooms.
+ *
+ * @param array<int, array<string, mixed>> $rooms
+ * @param array<string, mixed> $guest_form
+ * @return array{counts: array<int, int>, errors: array<int, string>}
+ */
+function get_checkout_room_guest_allocations(array $rooms, int $total_guests, array $guest_form = [], bool $strict = false): array
+{
+    $total_guests = \max(1, $total_guests);
+    $room_count = \count($rooms);
+    $counts = [];
+    $errors = [];
+
+    if ($room_count === 0) {
+        return [
+            'counts' => [],
+            'errors' => $errors,
+        ];
+    }
+
+    if ($room_count > $total_guests) {
+        return [
+            'counts' => [],
+            'errors' => [\__('You cannot assign more rooms than guests. Reduce the room count or increase the party size.', 'must-hotel-booking')],
+        ];
+    }
+
+    $requested_room_guests = isset($guest_form['room_guests']) && \is_array($guest_form['room_guests'])
+        ? $guest_form['room_guests']
+        : [];
+    $has_requested_counts = false;
+
+    foreach ($rooms as $room) {
+        if (!\is_array($room)) {
+            continue;
+        }
+
+        $room_id = isset($room['id']) ? (int) $room['id'] : 0;
+
+        if ($room_id <= 0) {
+            continue;
+        }
+
+        $requested_guest_count = isset($requested_room_guests[$room_id]['guest_count'])
+            ? \absint((string) $requested_room_guests[$room_id]['guest_count'])
+            : 0;
+
+        if ($requested_guest_count > 0) {
+            $counts[$room_id] = $requested_guest_count;
+            $has_requested_counts = true;
+        }
+    }
+
+    if ($has_requested_counts) {
+        $assigned_total = 0;
+
+        foreach ($rooms as $room) {
+            if (!\is_array($room)) {
+                continue;
+            }
+
+            $room_id = isset($room['id']) ? (int) $room['id'] : 0;
+            $room_name = isset($room['name']) ? (string) $room['name'] : \__('Room', 'must-hotel-booking');
+            $room_max_guests = isset($room['max_guests']) ? \max(1, (int) $room['max_guests']) : 1;
+            $assigned_guests = isset($counts[$room_id]) ? (int) $counts[$room_id] : 0;
+
+            if ($assigned_guests <= 0) {
+                $errors[] = \sprintf(
+                    /* translators: %s is room name. */
+                    \__('Please assign guests for %s.', 'must-hotel-booking'),
+                    $room_name
+                );
+                continue;
+            }
+
+            if ($assigned_guests > $room_max_guests) {
+                $errors[] = \sprintf(
+                    /* translators: 1: room name, 2: room capacity. */
+                    \__('%1$s can host a maximum of %2$d guests.', 'must-hotel-booking'),
+                    $room_name,
+                    $room_max_guests
+                );
+                continue;
+            }
+
+            $assigned_total += $assigned_guests;
+        }
+
+        if ($assigned_total !== $total_guests) {
+            $errors[] = \sprintf(
+                /* translators: %d is requested guest count. */
+                \__('Room guest counts must add up to %d guests.', 'must-hotel-booking'),
+                $total_guests
+            );
+        }
+
+        if ($strict || empty($errors)) {
+            return [
+                'counts' => $counts,
+                'errors' => $errors,
+            ];
+        }
+
+        $counts = [];
+    }
+
+    $remaining_guests = $total_guests;
+
+    foreach ($rooms as $room) {
+        if (!\is_array($room)) {
+            continue;
+        }
+
+        $room_id = isset($room['id']) ? (int) $room['id'] : 0;
+
+        if ($room_id <= 0) {
+            continue;
+        }
+
+        $counts[$room_id] = 1;
+        $remaining_guests--;
+    }
+
+    if ($remaining_guests < 0) {
+        return [
+            'counts' => [],
+            'errors' => [\__('You cannot assign more rooms than guests. Reduce the room count or increase the party size.', 'must-hotel-booking')],
+        ];
+    }
+
+    $rooms_by_capacity = $rooms;
+    \usort(
+        $rooms_by_capacity,
+        static function (array $left, array $right): int {
+            return ((int) ($right['max_guests'] ?? 0)) <=> ((int) ($left['max_guests'] ?? 0));
+        }
+    );
+
+    foreach ($rooms_by_capacity as $room) {
+        if ($remaining_guests <= 0) {
+            break;
+        }
+
+        $room_id = isset($room['id']) ? (int) $room['id'] : 0;
+        $room_max_guests = isset($room['max_guests']) ? \max(1, (int) $room['max_guests']) : 1;
+        $already_assigned = isset($counts[$room_id]) ? (int) $counts[$room_id] : 1;
+        $remaining_capacity = \max(0, $room_max_guests - $already_assigned);
+
+        if ($room_id <= 0 || $remaining_capacity <= 0) {
+            continue;
+        }
+
+        $increment = \min($remaining_guests, $remaining_capacity);
+        $counts[$room_id] = $already_assigned + $increment;
+        $remaining_guests -= $increment;
+    }
+
+    if ($remaining_guests > 0) {
+        return [
+            'counts' => [],
+            'errors' => [\__('The selected room combination cannot host the full party size.', 'must-hotel-booking')],
+        ];
+    }
+
+    return [
+        'counts' => $counts,
+        'errors' => $errors,
+    ];
 }
 
 /**
@@ -239,7 +418,7 @@ function get_checkout_guest_form_values(array $source): array
         ? normalize_checkout_phone_option_value(\sanitize_text_field((string) \wp_unslash($source['phone_country_code'])))
         : (string) $phone_parts['phone_country_code'];
     $phone_number = isset($source['phone_number'])
-        ? \sanitize_text_field((string) \wp_unslash($source['phone_number']))
+        ? sanitize_checkout_phone_number(\sanitize_text_field((string) \wp_unslash($source['phone_number'])))
         : (string) $phone_parts['phone_number'];
     $country_code = isset($source['country'])
         ? resolve_checkout_country_code(\sanitize_text_field((string) \wp_unslash($source['country'])))
@@ -302,6 +481,14 @@ function validate_checkout_guest_form_values(array $guest_form): array
         $errors[] = \__('A valid email address is required.', 'must-hotel-booking');
     }
 
+    if ((string) ($guest_form['phone_number'] ?? '') === '') {
+        $errors[] = \__('Phone number is required.', 'must-hotel-booking');
+    }
+
+    if ((string) ($guest_form['country'] ?? '') === '') {
+        $errors[] = \__('Country of residence is required.', 'must-hotel-booking');
+    }
+
     return $errors;
 }
 
@@ -347,10 +534,33 @@ function maybe_bootstrap_checkout_selection_from_request(array $source): array
         return [];
     }
 
+    $room = \function_exists(__NAMESPACE__ . '\get_room_record') ? get_room_record($room_id) : null;
+
+    if (!\is_array($room)) {
+        return [\__('The selected room could not be found.', 'must-hotel-booking')];
+    }
+
     $context = parse_booking_request_context($source, true);
+
+    if (\function_exists(__NAMESPACE__ . '\apply_fixed_room_booking_context')) {
+        $context = apply_fixed_room_booking_context($context, $room);
+    }
 
     if (!$context['is_valid']) {
         return (array) $context['errors'];
+    }
+
+    $selection = get_booking_selection();
+    $selected_room_ids = get_booking_selected_room_ids();
+    $has_same_fixed_room_selection =
+        (string) ($selection['flow_data']['booking_mode'] ?? '') === 'fixed-room' &&
+        (int) ($selection['flow_data']['fixed_room_id'] ?? 0) === $room_id &&
+        \count($selected_room_ids) === 1 &&
+        (int) $selected_room_ids[0] === $room_id &&
+        do_booking_selection_contexts_match($selection['context'] ?? [], $context);
+
+    if (!$has_same_fixed_room_selection) {
+        clear_booking_selection();
     }
 
     if (!ensure_checkout_room_lock($room_id, (string) $context['checkin'], (string) $context['checkout'])) {
@@ -363,6 +573,7 @@ function maybe_bootstrap_checkout_selection_from_request(array $source): array
             'checkin' => (string) $context['checkin'],
             'checkout' => (string) $context['checkout'],
             'guests' => (int) $context['guests'],
+            'room_count' => (int) ($context['room_count'] ?? 1),
             'accommodation_type' => (string) $context['accommodation_type'],
         ]
     );
@@ -371,6 +582,11 @@ function maybe_bootstrap_checkout_selection_from_request(array $source): array
         return [\__('Unable to store the selected room.', 'must-hotel-booking')];
     }
 
+    update_booking_selection_flow_data([
+        'booking_mode' => 'fixed-room',
+        'fixed_room_id' => $room_id,
+    ]);
+
     return [];
 }
 
@@ -378,9 +594,10 @@ function maybe_bootstrap_checkout_selection_from_request(array $source): array
  * Build selected room pricing items for checkout.
  *
  * @param array<string, mixed> $context
- * @return array{items: array<int, array<string, mixed>>, summary: array<string, float|int|string>}
+ * @param array<string, mixed> $guest_form
+ * @return array{items: array<int, array<string, mixed>>, summary: array<string, float|int|string>, errors: array<int, string>, room_guest_counts: array<int, int>}
  */
-function get_checkout_selected_room_items(array $context, string $coupon_code = ''): array
+function get_checkout_selected_room_items(array $context, string $coupon_code = '', array $guest_form = [], bool $strict_room_guests = false): array
 {
     $items = [];
     $summary = [
@@ -392,6 +609,7 @@ function get_checkout_selected_room_items(array $context, string $coupon_code = 
         'nights' => 0,
         'applied_coupon' => '',
     ];
+    $room_rows = [];
 
     foreach (get_booking_selected_room_ids() as $room_id) {
         $room = get_checkout_room_data((int) $room_id);
@@ -400,14 +618,34 @@ function get_checkout_selected_room_items(array $context, string $coupon_code = 
             continue;
         }
 
+        $room_rows[] = $room;
+    }
+
+    $allocation = get_checkout_room_guest_allocations($room_rows, (int) ($context['guests'] ?? 1), $guest_form, $strict_room_guests);
+    $room_guest_counts = isset($allocation['counts']) && \is_array($allocation['counts']) ? $allocation['counts'] : [];
+    $allocation_errors = isset($allocation['errors']) && \is_array($allocation['errors']) ? \array_values(\array_filter(\array_map('strval', $allocation['errors']))) : [];
+
+    if (!empty($allocation_errors)) {
+        return [
+            'items' => [],
+            'summary' => $summary,
+            'errors' => $allocation_errors,
+            'room_guest_counts' => $room_guest_counts,
+        ];
+    }
+
+    foreach ($room_rows as $room) {
+        $room_id = isset($room['id']) ? (int) $room['id'] : 0;
+
         $pricing = [];
+        $room_guests = isset($room_guest_counts[$room_id]) ? (int) $room_guest_counts[$room_id] : \max(1, (int) ($context['guests'] ?? 1));
 
         if (\function_exists(__NAMESPACE__ . '\calculate_booking_price')) {
             $pricing = calculate_booking_price(
                 (int) $room_id,
                 (string) ($context['checkin'] ?? ''),
                 (string) ($context['checkout'] ?? ''),
-                (int) ($context['guests'] ?? 1),
+                $room_guests,
                 $coupon_code
             );
         }
@@ -447,6 +685,7 @@ function get_checkout_selected_room_items(array $context, string $coupon_code = 
 
         $items[] = [
             'room_id' => (int) $room_id,
+            'assigned_guests' => $room_guests,
             'room' => $room_view,
             'pricing' => \is_array($pricing) ? $pricing : [],
         ];
@@ -455,6 +694,8 @@ function get_checkout_selected_room_items(array $context, string $coupon_code = 
     return [
         'items' => $items,
         'summary' => $summary,
+        'errors' => [],
+        'room_guest_counts' => $room_guest_counts,
     ];
 }
 
@@ -531,6 +772,12 @@ function maybe_process_checkout_continue(array $context, array $guest_form, stri
         return $validation_errors;
     }
 
+    $room_items_preview = get_checkout_selected_room_items($context, $coupon_code, $guest_form, true);
+
+    if (!empty($room_items_preview['errors'])) {
+        return (array) $room_items_preview['errors'];
+    }
+
     if (!ensure_checkout_room_locks($selected_room_ids, (string) $context['checkin'], (string) $context['checkout'])) {
         return [\__('One or more selected room locks have expired. Please return to accommodation and confirm them again.', 'must-hotel-booking')];
     }
@@ -549,14 +796,25 @@ function maybe_process_checkout_continue(array $context, array $guest_form, stri
  *
  * @param array<string, mixed>  $context
  * @param array<string, string> $guest_form
- * @return array{errors: array<int, string>, reservation_ids: array<int, int>}
+ * @param array<string, mixed>  $options
+ * @return array{errors: array<int, string>, reservation_ids: array<int, int>, applied_coupon_ids: array<int, int>}
  */
-function create_checkout_reservations(array $context, array $guest_form, string $coupon_code = ''): array
+function create_checkout_reservations(array $context, array $guest_form, string $coupon_code = '', array $options = []): array
 {
+    $reservation_status = isset($options['reservation_status'])
+        ? \sanitize_key((string) $options['reservation_status'])
+        : 'pending';
+    $payment_status = isset($options['payment_status'])
+        ? \sanitize_key((string) $options['payment_status'])
+        : 'pending';
+    $clear_selection = !isset($options['clear_selection']) || (bool) $options['clear_selection'];
+    $increment_coupon_usage = !isset($options['increment_coupon_usage']) || (bool) $options['increment_coupon_usage'];
+
     if (empty($context['is_valid'])) {
         return [
             'errors' => (array) ($context['errors'] ?? []),
             'reservation_ids' => [],
+            'applied_coupon_ids' => [],
         ];
     }
 
@@ -566,6 +824,7 @@ function create_checkout_reservations(array $context, array $guest_form, string 
         return [
             'errors' => [\__('Please select at least one room before continuing.', 'must-hotel-booking')],
             'reservation_ids' => [],
+            'applied_coupon_ids' => [],
         ];
     }
 
@@ -575,8 +834,23 @@ function create_checkout_reservations(array $context, array $guest_form, string 
         return [
             'errors' => $validation_errors,
             'reservation_ids' => [],
+            'applied_coupon_ids' => [],
         ];
     }
+
+    $room_items_preview = get_checkout_selected_room_items($context, $coupon_code, $guest_form, true);
+
+    if (!empty($room_items_preview['errors'])) {
+        return [
+            'errors' => (array) $room_items_preview['errors'],
+            'reservation_ids' => [],
+            'applied_coupon_ids' => [],
+        ];
+    }
+
+    $room_guest_counts = isset($room_items_preview['room_guest_counts']) && \is_array($room_items_preview['room_guest_counts'])
+        ? $room_items_preview['room_guest_counts']
+        : [];
 
     $validated_rooms = [];
 
@@ -587,6 +861,7 @@ function create_checkout_reservations(array $context, array $guest_form, string 
             return [
                 'errors' => [\__('One of your selected room locks has expired. Please return to accommodation and confirm your selection again.', 'must-hotel-booking')],
                 'reservation_ids' => [],
+                'applied_coupon_ids' => [],
             ];
         }
 
@@ -601,6 +876,7 @@ function create_checkout_reservations(array $context, array $guest_form, string 
                 return [
                     'errors' => [\__('One of your selected rooms is no longer available for the selected dates.', 'must-hotel-booking')],
                     'reservation_ids' => [],
+                    'applied_coupon_ids' => [],
                 ];
             }
         }
@@ -610,7 +886,7 @@ function create_checkout_reservations(array $context, array $guest_form, string 
                 (int) $room_id,
                 (string) $context['checkin'],
                 (string) $context['checkout'],
-                (int) $context['guests'],
+                isset($room_guest_counts[$room_id]) ? (int) $room_guest_counts[$room_id] : (int) $context['guests'],
                 $coupon_code
             )
             : [];
@@ -619,11 +895,13 @@ function create_checkout_reservations(array $context, array $guest_form, string 
             return [
                 'errors' => [\__('Unable to calculate final booking total for one of the selected rooms.', 'must-hotel-booking')],
                 'reservation_ids' => [],
+                'applied_coupon_ids' => [],
             ];
         }
 
         $validated_rooms[] = [
             'room_id' => (int) $room_id,
+            'guests' => isset($room_guest_counts[$room_id]) ? (int) $room_guest_counts[$room_id] : (int) $context['guests'],
             'pricing' => $pricing,
         ];
     }
@@ -634,6 +912,7 @@ function create_checkout_reservations(array $context, array $guest_form, string 
         return [
             'errors' => [\__('Unable to save guest details.', 'must-hotel-booking')],
             'reservation_ids' => [],
+            'applied_coupon_ids' => [],
         ];
     }
 
@@ -641,6 +920,7 @@ function create_checkout_reservations(array $context, array $guest_form, string 
         return [
             'errors' => [\__('Reservation engine is not available.', 'must-hotel-booking')],
             'reservation_ids' => [],
+            'applied_coupon_ids' => [],
         ];
     }
 
@@ -648,9 +928,11 @@ function create_checkout_reservations(array $context, array $guest_form, string 
 
     $transaction_started = $wpdb->query('START TRANSACTION') !== false;
     $reservation_ids = [];
+    $applied_coupon_ids = [];
 
     foreach ($validated_rooms as $validated_room) {
         $room_id = isset($validated_room['room_id']) ? (int) $validated_room['room_id'] : 0;
+        $room_guests = isset($validated_room['guests']) ? (int) $validated_room['guests'] : (int) $context['guests'];
         $pricing = isset($validated_room['pricing']) && \is_array($validated_room['pricing']) ? $validated_room['pricing'] : [];
 
         $reservation_id = store_reservation_from_lock(
@@ -658,10 +940,10 @@ function create_checkout_reservations(array $context, array $guest_form, string 
             $guest_id,
             (string) $context['checkin'],
             (string) $context['checkout'],
-            (int) $context['guests'],
+            $room_guests,
             (float) ($pricing['total_price'] ?? 0.0),
-            'pending',
-            'pending'
+            $payment_status,
+            $reservation_status
         );
 
         if ($reservation_id <= 0) {
@@ -672,6 +954,7 @@ function create_checkout_reservations(array $context, array $guest_form, string 
             return [
                 'errors' => [\__('Unable to complete the reservation for one of the selected rooms.', 'must-hotel-booking')],
                 'reservation_ids' => [],
+                'applied_coupon_ids' => [],
             ];
         }
 
@@ -691,10 +974,12 @@ function create_checkout_reservations(array $context, array $guest_form, string 
             );
         }
 
-        if (\function_exists(__NAMESPACE__ . '\increment_coupon_usage_count')) {
-            $applied_coupon_id = isset($pricing['applied_coupon_id']) ? (int) $pricing['applied_coupon_id'] : 0;
+        $applied_coupon_id = isset($pricing['applied_coupon_id']) ? (int) $pricing['applied_coupon_id'] : 0;
 
-            if ($applied_coupon_id > 0) {
+        if ($applied_coupon_id > 0) {
+            $applied_coupon_ids[$applied_coupon_id] = $applied_coupon_id;
+
+            if ($increment_coupon_usage && \function_exists(__NAMESPACE__ . '\increment_coupon_usage_count')) {
                 increment_coupon_usage_count($applied_coupon_id);
             }
         }
@@ -706,11 +991,14 @@ function create_checkout_reservations(array $context, array $guest_form, string 
         $wpdb->query('COMMIT');
     }
 
-    clear_booking_selection(false);
+    if ($clear_selection) {
+        clear_booking_selection(false);
+    }
 
     return [
         'errors' => [],
         'reservation_ids' => $reservation_ids,
+        'applied_coupon_ids' => \array_values($applied_coupon_ids),
     ];
 }
 
@@ -778,6 +1066,12 @@ function get_checkout_page_view_data(): array
     $selection = get_booking_selection();
     $selection_context = normalize_booking_selection_context($selection['context'] ?? []);
     $flow_data = get_booking_selection_flow_data();
+    $fixed_room_mode = \function_exists(__NAMESPACE__ . '\is_fixed_room_booking_flow')
+        ? is_fixed_room_booking_flow()
+        : false;
+    $fixed_room_id = $fixed_room_mode && \function_exists(__NAMESPACE__ . '\get_fixed_room_booking_room_id')
+        ? get_fixed_room_booking_room_id()
+        : 0;
     $context = parse_booking_request_context($selection_context, true);
     $selected_room_ids = get_booking_selected_room_ids();
     $request_action = isset($request_source['must_checkout_action']) ? \sanitize_key((string) \wp_unslash($request_source['must_checkout_action'])) : '';
@@ -835,7 +1129,29 @@ function get_checkout_page_view_data(): array
     ]];
 
     if (!empty($context['is_valid'])) {
-        $room_items = get_checkout_selected_room_items($context, $coupon_code);
+        $room_items = get_checkout_selected_room_items($context, $coupon_code, $guest_form);
+    }
+
+    if (!empty($room_items['errors'])) {
+        foreach ((array) $room_items['errors'] as $room_item_error) {
+            $messages[] = (string) $room_item_error;
+        }
+    }
+
+    if (!empty($room_items['room_guest_counts']) && \is_array($room_items['room_guest_counts'])) {
+        foreach ($room_items['room_guest_counts'] as $room_id => $room_guest_count) {
+            $room_id = (int) $room_id;
+
+            if ($room_id <= 0 || isset($guest_form['room_guests'][$room_id]['guest_count'])) {
+                continue;
+            }
+
+            $guest_form['room_guests'][$room_id] = [
+                'guest_count' => (string) (int) $room_guest_count,
+                'first_name' => '',
+                'last_name' => '',
+            ];
+        }
     }
 
     $summary_view = isset($room_items['summary']) && \is_array($room_items['summary']) ? $room_items['summary'] : [];
@@ -863,13 +1179,18 @@ function get_checkout_page_view_data(): array
         'checkin' => (string) ($context['checkin'] ?? ''),
         'checkout' => (string) ($context['checkout'] ?? ''),
         'guests' => (int) ($context['guests'] ?? 1),
+        'room_count' => (int) ($context['room_count'] ?? 0),
         'coupon_code' => $coupon_code,
         'coupon_input_value' => $coupon_input_value,
         'applied_coupon_code' => $applied_coupon_code,
         'selected_room_count' => \count($selected_room_ids),
-        'booking_url' => get_booking_context_url($selection_context),
-        'accommodation_url' => get_booking_accommodation_context_url($selection_context),
-        'checkout_url' => get_checkout_page_url(),
+        'fixed_room_mode' => $fixed_room_mode,
+        'fixed_room_id' => $fixed_room_id,
+        'booking_url' => get_booking_context_url($selection_context, $fixed_room_id),
+        'accommodation_url' => $fixed_room_mode
+            ? get_booking_context_url($selection_context, $fixed_room_id)
+            : get_booking_accommodation_context_url($selection_context),
+        'checkout_url' => get_checkout_context_url($selection_context, $fixed_room_id),
         'country_options' => get_checkout_country_options(),
         'phone_country_code_options' => get_checkout_phone_code_options(),
     ];
@@ -891,6 +1212,14 @@ function enqueue_checkout_page_assets(): void
         MUST_HOTEL_BOOKING_URL . 'assets/css/booking-page.css',
         ['must-hotel-booking-design-system'],
         MUST_HOTEL_BOOKING_VERSION
+    );
+
+    \wp_enqueue_script(
+        'must-hotel-booking-phone-fields',
+        MUST_HOTEL_BOOKING_URL . 'assets/js/booking-phone-fields.js',
+        [],
+        MUST_HOTEL_BOOKING_VERSION,
+        true
     );
 }
 

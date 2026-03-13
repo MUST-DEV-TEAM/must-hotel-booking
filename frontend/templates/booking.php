@@ -10,12 +10,27 @@ $rooms = isset($view['rooms']) && \is_array($view['rooms']) ? $view['rooms'] : [
 $checkin = isset($view['checkin']) ? (string) $view['checkin'] : '';
 $checkout = isset($view['checkout']) ? (string) $view['checkout'] : '';
 $guests = isset($view['guests']) ? (int) $view['guests'] : 1;
-$max_booking_guests = isset($view['max_booking_guests']) ? (int) $view['max_booking_guests'] : 5;
+$room_count = isset($view['room_count']) ? (int) $view['room_count'] : 0;
+$resolved_room_count = isset($view['resolved_room_count']) ? (int) $view['resolved_room_count'] : 1;
+$max_booking_guests = isset($view['max_booking_guests']) ? (int) $view['max_booking_guests'] : 12;
+$max_booking_rooms = isset($view['max_booking_rooms']) ? (int) $view['max_booking_rooms'] : 3;
 $accommodation_type = isset($view['accommodation_type']) ? (string) $view['accommodation_type'] : 'standard-rooms';
 $has_search = !empty($view['has_search']);
 $is_valid = !empty($view['is_valid']);
 $booking_url = isset($view['booking_url']) ? (string) $view['booking_url'] : \home_url('/booking');
 $accommodation_url = isset($view['accommodation_url']) ? (string) $view['accommodation_url'] : \home_url('/booking-accommodation');
+$checkout_url = isset($view['checkout_url']) ? (string) $view['checkout_url'] : \home_url('/checkout');
+$fixed_room_mode = !empty($view['fixed_room_mode']);
+$fixed_room_id = isset($view['fixed_room_id']) ? (int) $view['fixed_room_id'] : 0;
+$fixed_room = isset($view['fixed_room']) && \is_array($view['fixed_room']) ? $view['fixed_room'] : [];
+$fixed_room_name = isset($fixed_room['name']) ? (string) $fixed_room['name'] : '';
+$fixed_room_category_label = isset($fixed_room['category_label']) ? (string) $fixed_room['category_label'] : '';
+$fixed_room_description = isset($fixed_room['description']) ? (string) $fixed_room['description'] : '';
+$fixed_room_max_guests = isset($fixed_room['max_guests']) ? (int) $fixed_room['max_guests'] : 0;
+$fixed_room_room_size = isset($fixed_room['room_size']) ? (string) $fixed_room['room_size'] : '';
+$fixed_room_beds = isset($fixed_room['beds']) ? (string) $fixed_room['beds'] : '';
+$fixed_room_primary_image_url = isset($fixed_room['primary_image_url']) ? (string) $fixed_room['primary_image_url'] : '';
+$form_action_url = $fixed_room_mode ? \must_hotel_booking\get_checkout_page_url() : $accommodation_url;
 $show_results_section = false;
 $back_arrow_icon_url = \defined('MUST_HOTEL_BOOKING_URL') ? MUST_HOTEL_BOOKING_URL . 'assets/img/ArrowLEFT.svg' : '';
 $arrow_icon_url = \defined('MUST_HOTEL_BOOKING_URL') ? MUST_HOTEL_BOOKING_URL . 'assets/img/ArrowRight.svg' : '';
@@ -26,9 +41,17 @@ $step_heading = \__('Select your dates', 'must-hotel-booking');
 $results_date_range = \function_exists('\must_hotel_booking\format_booking_results_date_range')
     ? \must_hotel_booking\format_booking_results_date_range($checkin, $checkout)
     : \__('Select dates', 'must-hotel-booking');
-$results_selection_summary = \function_exists('\must_hotel_booking\format_booking_results_selection_summary')
-    ? \must_hotel_booking\format_booking_results_selection_summary($accommodation_type, $guests)
-    : \__('Standard Rooms / 1 Guests', 'must-hotel-booking');
+$results_selection_summary = $fixed_room_mode && $fixed_room_name !== ''
+    ? \sprintf(
+        /* translators: 1: room name, 2: guest count, 3: room count label. */
+        \__('%1$s / %2$d Guests / %3$s', 'must-hotel-booking'),
+        $fixed_room_name,
+        \max(1, $guests),
+        \must_hotel_booking\format_booking_room_count_label(1)
+    )
+    : (\function_exists('\must_hotel_booking\format_booking_results_selection_summary')
+    ? \must_hotel_booking\format_booking_results_selection_summary($accommodation_type, $guests, $room_count)
+    : \__('Standard Rooms / 1 Guests / 1 Room', 'must-hotel-booking'));
 
 $arrival_day = '--';
 $arrival_month = '--';
@@ -54,7 +77,7 @@ if ($checkout !== '') {
 }
 ?>
 <?php \get_header(); ?>
-<main class="must-hotel-booking-page must-hotel-booking-page-booking must-booking-process-page">
+<main class="must-hotel-booking-page must-hotel-booking-page-booking must-booking-process-page<?php echo $fixed_room_mode ? ' is-fixed-room-flow' : ''; ?>">
     <div class="must-hotel-booking-container">
         <section class="must-booking-step-header">
             <h1 id="must-booking-step-heading"><?php echo \esc_html($step_heading); ?></h1>
@@ -68,9 +91,9 @@ if ($checkout !== '') {
                         <span><?php echo \esc_html__('Back', 'must-hotel-booking'); ?></span>
                     </button>
                     <span class="must-booking-stepper-step is-active" data-step="1"><?php echo \esc_html__('Calendar', 'must-hotel-booking'); ?></span>
-                    <span class="must-booking-stepper-step" data-step="2"><?php echo \esc_html__('Select Accommodation', 'must-hotel-booking'); ?></span>
+                    <span class="must-booking-stepper-step<?php echo $fixed_room_mode ? ' is-skipped' : ''; ?>" data-step="2"><?php echo \esc_html__('Select Accommodation', 'must-hotel-booking'); ?></span>
                     <span class="must-booking-stepper-step" data-step="3"><?php echo \esc_html__('Guest Information', 'must-hotel-booking'); ?></span>
-                    <span class="must-booking-stepper-step" data-step="4"><?php echo \esc_html__('Confirmation', 'must-hotel-booking'); ?></span>
+                    <span class="must-booking-stepper-step" data-step="4"><?php echo \esc_html__('Review & Payment', 'must-hotel-booking'); ?></span>
                     <button type="button" id="must-booking-step-next" class="must-booking-stepper-nav is-next">
                         <span><?php echo \esc_html__('Next', 'must-hotel-booking'); ?></span>
                         <?php if ($arrow_icon_url !== '') : ?>
@@ -81,10 +104,15 @@ if ($checkout !== '') {
             </div>
         </section>
 
-        <form id="must-booking-search-form" class="must-booking-calendar-step-form" method="get" action="<?php echo \esc_url($accommodation_url); ?>">
+        <form id="must-booking-search-form" class="must-booking-calendar-step-form" method="get" action="<?php echo \esc_url($form_action_url); ?>">
             <input id="must-booking-checkin" class="must-hotel-booking-checkin" type="hidden" name="checkin" value="<?php echo \esc_attr($checkin); ?>" />
             <input id="must-booking-checkout" class="must-hotel-booking-checkout" type="hidden" name="checkout" value="<?php echo \esc_attr($checkout); ?>" />
             <input id="must-booking-guests" class="must-hotel-booking-guests" type="hidden" name="guests" value="<?php echo \esc_attr((string) $guests); ?>" />
+            <input id="must-booking-room-count" class="must-booking-room-count" type="hidden" name="room_count" value="<?php echo \esc_attr((string) ($fixed_room_mode ? 1 : $room_count)); ?>" />
+            <?php if ($fixed_room_mode) : ?>
+                <input id="must-booking-fixed-room-id" class="must-booking-hidden-room-id" type="hidden" name="room_id" value="<?php echo \esc_attr((string) $fixed_room_id); ?>" />
+                <input type="hidden" name="accommodation_type" value="<?php echo \esc_attr($accommodation_type); ?>" />
+            <?php endif; ?>
 
             <div class="must-booking-calendar-step-grid">
                 <section class="must-booking-calendars-panel">
@@ -143,14 +171,62 @@ if ($checkout !== '') {
                         </div>
                     </div>
 
-                    <label class="must-booking-step-select-row" for="must-booking-accommodation-type">
-                        <span><?php echo \esc_html__('Accommodation type', 'must-hotel-booking'); ?></span>
-                        <select id="must-booking-accommodation-type" name="accommodation_type">
-                            <option value="standard-rooms" <?php selected($accommodation_type, 'standard-rooms'); ?>><?php echo \esc_html__('Standard Rooms', 'must-hotel-booking'); ?></option>
-                            <option value="suites" <?php selected($accommodation_type, 'suites'); ?>><?php echo \esc_html__('Suites', 'must-hotel-booking'); ?></option>
-                            <option value="duplex-suite" <?php selected($accommodation_type, 'duplex-suite'); ?>><?php echo \esc_html__('Duplex Suite', 'must-hotel-booking'); ?></option>
-                        </select>
-                    </label>
+                    <?php if ($fixed_room_mode && !empty($fixed_room)) : ?>
+                        <section class="must-booking-fixed-room-summary" aria-label="<?php echo \esc_attr__('Selected room', 'must-hotel-booking'); ?>">
+                            <div class="must-booking-fixed-room-media">
+                                <?php if ($fixed_room_primary_image_url !== '') : ?>
+                                    <img src="<?php echo \esc_url($fixed_room_primary_image_url); ?>" alt="<?php echo \esc_attr($fixed_room_name); ?>" loading="lazy" />
+                                <?php else : ?>
+                                    <div class="must-booking-fixed-room-placeholder"><?php echo \esc_html__('Selected Room', 'must-hotel-booking'); ?></div>
+                                <?php endif; ?>
+                            </div>
+
+                            <div class="must-booking-fixed-room-copy">
+                                <p class="must-booking-fixed-room-kicker"><?php echo \esc_html__('Selected Room', 'must-hotel-booking'); ?></p>
+                                <h2><?php echo \esc_html($fixed_room_name); ?></h2>
+
+                                <?php if ($fixed_room_category_label !== '' || $fixed_room_max_guests > 0 || $fixed_room_room_size !== '' || $fixed_room_beds !== '') : ?>
+                                    <div class="must-booking-fixed-room-meta">
+                                        <?php if ($fixed_room_category_label !== '') : ?>
+                                            <span><?php echo \esc_html($fixed_room_category_label); ?></span>
+                                        <?php endif; ?>
+                                        <?php if ($fixed_room_max_guests > 0) : ?>
+                                            <span>
+                                                <?php
+                                                echo \esc_html(
+                                                    \sprintf(
+                                                        /* translators: %d is guest capacity. */
+                                                        __('Up to %d Guests', 'must-hotel-booking'),
+                                                        $fixed_room_max_guests
+                                                    )
+                                                );
+                                                ?>
+                                            </span>
+                                        <?php endif; ?>
+                                        <?php if ($fixed_room_room_size !== '') : ?>
+                                            <span><?php echo \esc_html($fixed_room_room_size); ?></span>
+                                        <?php endif; ?>
+                                        <?php if ($fixed_room_beds !== '') : ?>
+                                            <span><?php echo \esc_html($fixed_room_beds); ?></span>
+                                        <?php endif; ?>
+                                    </div>
+                                <?php endif; ?>
+
+                                <?php if ($fixed_room_description !== '') : ?>
+                                    <p class="must-booking-fixed-room-description"><?php echo \esc_html($fixed_room_description); ?></p>
+                                <?php endif; ?>
+                            </div>
+                        </section>
+                    <?php else : ?>
+                        <label class="must-booking-step-select-row" for="must-booking-accommodation-type">
+                            <span><?php echo \esc_html__('Accommodation type', 'must-hotel-booking'); ?></span>
+                            <select id="must-booking-accommodation-type" name="accommodation_type">
+                                <option value="standard-rooms" <?php selected($accommodation_type, 'standard-rooms'); ?>><?php echo \esc_html__('Standard Rooms', 'must-hotel-booking'); ?></option>
+                                <option value="suites" <?php selected($accommodation_type, 'suites'); ?>><?php echo \esc_html__('Suites', 'must-hotel-booking'); ?></option>
+                                <option value="duplex-suite" <?php selected($accommodation_type, 'duplex-suite'); ?>><?php echo \esc_html__('Duplex Suite', 'must-hotel-booking'); ?></option>
+                            </select>
+                        </label>
+                    <?php endif; ?>
 
                     <label class="must-booking-step-select-row" for="must-booking-guests-select">
                         <span><?php echo \esc_html__('Guests', 'must-hotel-booking'); ?></span>
@@ -163,8 +239,22 @@ if ($checkout !== '') {
                         </select>
                     </label>
 
+                    <?php if (!$fixed_room_mode) : ?>
+                        <label class="must-booking-step-select-row" for="must-booking-room-count-select">
+                            <span><?php echo \esc_html__('Rooms', 'must-hotel-booking'); ?></span>
+                            <select id="must-booking-room-count-select">
+                                <option value="0" <?php selected($room_count, 0); ?>><?php echo \esc_html__('Auto', 'must-hotel-booking'); ?></option>
+                                <?php for ($room_option = 1; $room_option <= $max_booking_rooms; $room_option++) : ?>
+                                    <option value="<?php echo \esc_attr((string) $room_option); ?>" <?php selected($room_count, $room_option); ?>>
+                                        <?php echo \esc_html(\must_hotel_booking\format_booking_room_count_label($room_option)); ?>
+                                    </option>
+                                <?php endfor; ?>
+                            </select>
+                        </label>
+                    <?php endif; ?>
+
                     <button type="submit" class="must-booking-check-availability">
-                        <span><?php echo \esc_html__('Check Availability', 'must-hotel-booking'); ?></span>
+                        <span><?php echo \esc_html($fixed_room_mode ? __('Continue to Guest Information', 'must-hotel-booking') : __('Check Availability', 'must-hotel-booking')); ?></span>
                         <?php if ($arrow_icon_url !== '') : ?>
                             <img src="<?php echo \esc_url($arrow_icon_url); ?>" alt="" aria-hidden="true" />
                         <?php endif; ?>

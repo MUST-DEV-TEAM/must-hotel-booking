@@ -43,8 +43,11 @@ function get_reservation_status_options(): array
 {
     return [
         'pending' => \__('Pending', 'must-hotel-booking'),
+        'pending_payment' => \__('Pending Payment', 'must-hotel-booking'),
         'confirmed' => \__('Confirmed', 'must-hotel-booking'),
         'cancelled' => \__('Cancelled', 'must-hotel-booking'),
+        'expired' => \__('Expired', 'must-hotel-booking'),
+        'payment_failed' => \__('Payment Failed', 'must-hotel-booking'),
         'completed' => \__('Completed', 'must-hotel-booking'),
         'blocked' => \__('Blocked', 'must-hotel-booking'),
     ];
@@ -61,6 +64,7 @@ function get_reservation_payment_status_options(): array
         'unpaid' => \__('Unpaid', 'must-hotel-booking'),
         'pending' => \__('Pending', 'must-hotel-booking'),
         'paid' => \__('Paid', 'must-hotel-booking'),
+        'failed' => \__('Failed', 'must-hotel-booking'),
         'cancelled' => \__('Cancelled', 'must-hotel-booking'),
         'refunded' => \__('Refunded', 'must-hotel-booking'),
         'blocked' => \__('Blocked', 'must-hotel-booking'),
@@ -152,6 +156,9 @@ function has_other_reservation_overlap(int $reservation_id, int $room_id, string
     global $wpdb;
 
     $reservations_table = $wpdb->prefix . 'must_reservations';
+    $non_blocking_statuses = \function_exists(__NAMESPACE__ . '\get_inventory_non_blocking_reservation_statuses')
+        ? get_inventory_non_blocking_reservation_statuses()
+        : ['cancelled', 'expired', 'payment_failed'];
     $sql = $wpdb->prepare(
         "SELECT 1
         FROM {$reservations_table}
@@ -159,11 +166,15 @@ function has_other_reservation_overlap(int $reservation_id, int $room_id, string
             AND id <> %d
             AND checkin < %s
             AND checkout > %s
+            AND status NOT IN (%s, %s, %s)
         LIMIT 1",
         $room_id,
         $reservation_id,
         $checkout,
-        $checkin
+        $checkin,
+        (string) $non_blocking_statuses[0],
+        (string) $non_blocking_statuses[1],
+        (string) $non_blocking_statuses[2]
     );
 
     return $wpdb->get_var($sql) !== null;

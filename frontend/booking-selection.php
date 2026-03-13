@@ -30,6 +30,7 @@ function get_empty_booking_selection(): array
             'checkin' => '',
             'checkout' => '',
             'guests' => 1,
+            'room_count' => 0,
             'accommodation_type' => 'standard-rooms',
         ],
         'selected_rooms' => [],
@@ -37,6 +38,12 @@ function get_empty_booking_selection(): array
             'guest_form' => [],
             'billing_form' => [],
             'coupon_code' => '',
+            'payment_method' => '',
+            'pending_payment' => \function_exists(__NAMESPACE__ . '\get_empty_pending_payment_flow_data')
+                ? get_empty_pending_payment_flow_data()
+                : [],
+            'booking_mode' => '',
+            'fixed_room_id' => 0,
         ],
     ];
 }
@@ -54,7 +61,21 @@ function normalize_booking_selection_flow_data($flow_data): array
             'guest_form' => [],
             'billing_form' => [],
             'coupon_code' => '',
+            'payment_method' => '',
+            'pending_payment' => \function_exists(__NAMESPACE__ . '\get_empty_pending_payment_flow_data')
+                ? get_empty_pending_payment_flow_data()
+                : [],
+            'booking_mode' => '',
+            'fixed_room_id' => 0,
         ];
+    }
+
+    $booking_mode = isset($flow_data['booking_mode'])
+        ? \sanitize_key((string) $flow_data['booking_mode'])
+        : '';
+
+    if (!\in_array($booking_mode, ['', 'fixed-room'], true)) {
+        $booking_mode = '';
     }
 
     return [
@@ -67,7 +88,41 @@ function normalize_booking_selection_flow_data($flow_data): array
         'coupon_code' => isset($flow_data['coupon_code'])
             ? \sanitize_text_field((string) $flow_data['coupon_code'])
             : '',
+        'payment_method' => isset($flow_data['payment_method'])
+            ? \sanitize_key((string) $flow_data['payment_method'])
+            : '',
+        'pending_payment' => \function_exists(__NAMESPACE__ . '\normalize_pending_payment_flow_data')
+            ? normalize_pending_payment_flow_data($flow_data['pending_payment'] ?? [])
+            : [],
+        'booking_mode' => $booking_mode,
+        'fixed_room_id' => isset($flow_data['fixed_room_id'])
+            ? \absint($flow_data['fixed_room_id'])
+            : 0,
     ];
+}
+
+/**
+ * Check whether the current booking flow is a fixed-room booking.
+ */
+function is_fixed_room_booking_flow(): bool
+{
+    $flow_data = get_booking_selection_flow_data();
+
+    return (string) ($flow_data['booking_mode'] ?? '') === 'fixed-room' && (int) ($flow_data['fixed_room_id'] ?? 0) > 0;
+}
+
+/**
+ * Get the fixed room ID for the current booking flow.
+ */
+function get_fixed_room_booking_room_id(): int
+{
+    $flow_data = get_booking_selection_flow_data();
+
+    if ((string) ($flow_data['booking_mode'] ?? '') !== 'fixed-room') {
+        return 0;
+    }
+
+    return (int) ($flow_data['fixed_room_id'] ?? 0);
 }
 
 /**
@@ -85,6 +140,7 @@ function normalize_booking_selection_context(array $context): array
             'checkin' => isset($parsed['checkin']) ? (string) $parsed['checkin'] : '',
             'checkout' => isset($parsed['checkout']) ? (string) $parsed['checkout'] : '',
             'guests' => isset($parsed['guests']) ? (int) $parsed['guests'] : 1,
+            'room_count' => isset($parsed['room_count']) ? (int) $parsed['room_count'] : 0,
             'accommodation_type' => isset($parsed['accommodation_type']) ? (string) $parsed['accommodation_type'] : 'standard-rooms',
         ];
     }
@@ -93,6 +149,9 @@ function normalize_booking_selection_context(array $context): array
         'checkin' => isset($context['checkin']) ? \sanitize_text_field((string) $context['checkin']) : '',
         'checkout' => isset($context['checkout']) ? \sanitize_text_field((string) $context['checkout']) : '',
         'guests' => isset($context['guests']) ? \max(1, \absint(\wp_unslash($context['guests']))) : 1,
+        'room_count' => \function_exists(__NAMESPACE__ . '\normalize_booking_room_count')
+            ? normalize_booking_room_count($context['room_count'] ?? 0)
+            : 0,
         'accommodation_type' => isset($context['accommodation_type']) ? \sanitize_key((string) $context['accommodation_type']) : 'standard-rooms',
     ];
 }
@@ -195,6 +254,7 @@ function do_booking_selection_contexts_match(array $first, array $second): bool
         (string) $left['checkin'] === (string) $right['checkin'] &&
         (string) $left['checkout'] === (string) $right['checkout'] &&
         (int) $left['guests'] === (int) $right['guests'] &&
+        (int) $left['room_count'] === (int) $right['room_count'] &&
         (string) $left['accommodation_type'] === (string) $right['accommodation_type'];
 }
 

@@ -75,6 +75,7 @@ function get_settings_form_defaults(): array
             'checkout_time' => MustBookingConfig::get_checkout_time(),
             'booking_window' => MustBookingConfig::get_booking_window(),
             'max_booking_guests' => MustBookingConfig::get_max_booking_guests(),
+            'max_booking_rooms' => MustBookingConfig::get_max_booking_rooms(),
         ];
     }
 
@@ -86,7 +87,8 @@ function get_settings_form_defaults(): array
         'checkin_time' => '14:00',
         'checkout_time' => '11:00',
         'booking_window' => 365,
-        'max_booking_guests' => 5,
+        'max_booking_guests' => 12,
+        'max_booking_rooms' => 3,
     ];
 }
 
@@ -161,6 +163,7 @@ function sanitize_settings_form_values(array $source): array
     $checkout_time = isset($source['checkout_time']) ? \sanitize_text_field((string) \wp_unslash($source['checkout_time'])) : '';
     $booking_window = isset($source['booking_window']) ? \absint(\wp_unslash($source['booking_window'])) : 0;
     $max_booking_guests = isset($source['max_booking_guests']) ? \absint(\wp_unslash($source['max_booking_guests'])) : 0;
+    $max_booking_rooms = isset($source['max_booking_rooms']) ? \absint(\wp_unslash($source['max_booking_rooms'])) : 0;
     $errors = [];
 
     $currency = normalize_settings_currency($currency_raw);
@@ -195,6 +198,11 @@ function sanitize_settings_form_values(array $source): array
         $max_booking_guests = (int) $defaults['max_booking_guests'];
     }
 
+    if ($max_booking_rooms <= 0) {
+        $errors[] = \__('Maximum booking rooms must be greater than 0.', 'must-hotel-booking');
+        $max_booking_rooms = (int) $defaults['max_booking_rooms'];
+    }
+
     return [
         'hotel_name' => $hotel_name,
         'hotel_address' => $hotel_address,
@@ -204,6 +212,7 @@ function sanitize_settings_form_values(array $source): array
         'checkout_time' => $checkout_time,
         'booking_window' => $booking_window,
         'max_booking_guests' => $max_booking_guests,
+        'max_booking_rooms' => $max_booking_rooms,
         'errors' => $errors,
     ];
 }
@@ -338,6 +347,7 @@ function maybe_handle_settings_save_request(): array
         $settings['checkout_time'] = (string) $settings_data['checkout_time'];
         $settings['booking_window'] = (int) $settings_data['booking_window'];
         $settings['max_booking_guests'] = (int) $settings_data['max_booking_guests'];
+        $settings['max_booking_rooms'] = (int) $settings_data['max_booking_rooms'];
 
         MustBookingConfig::set_all_settings($settings);
 
@@ -398,6 +408,7 @@ function maybe_handle_settings_save_request_early(): void
     $settings['checkout_time'] = (string) $settings_data['checkout_time'];
     $settings['booking_window'] = (int) $settings_data['booking_window'];
     $settings['max_booking_guests'] = (int) $settings_data['max_booking_guests'];
+    $settings['max_booking_rooms'] = (int) $settings_data['max_booking_rooms'];
 
     MustBookingConfig::set_all_settings($settings);
 
@@ -470,6 +481,10 @@ function render_general_settings_section(array $form): void
     echo '<tr><th scope="row"><label for="must-settings-max-booking-guests">' . \esc_html__('Maximum booking guests', 'must-hotel-booking') . '</label></th>';
     echo '<td><input id="must-settings-max-booking-guests" type="number" min="1" step="1" name="max_booking_guests" value="' . \esc_attr((string) $form['max_booking_guests']) . '" required />';
     echo '<p class="description">' . \esc_html__('Sets the guest limit used by the booking page and search widget.', 'must-hotel-booking') . '</p></td></tr>';
+
+    echo '<tr><th scope="row"><label for="must-settings-max-booking-rooms">' . \esc_html__('Maximum booking rooms', 'must-hotel-booking') . '</label></th>';
+    echo '<td><input id="must-settings-max-booking-rooms" type="number" min="1" step="1" name="max_booking_rooms" value="' . \esc_attr((string) $form['max_booking_rooms']) . '" required />';
+    echo '<p class="description">' . \esc_html__('Sets the room-count limit used by the multi-room booking flow.', 'must-hotel-booking') . '</p></td></tr>';
 
     echo '</tbody></table>';
 

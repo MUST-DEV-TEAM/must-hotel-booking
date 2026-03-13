@@ -13,17 +13,27 @@ $guest_form = isset($view['guest_form']) && \is_array($view['guest_form']) ? $vi
 $checkout_url = isset($view['checkout_url']) ? (string) $view['checkout_url'] : \home_url('/checkout');
 $booking_url = isset($view['booking_url']) ? (string) $view['booking_url'] : \home_url('/booking');
 $accommodation_url = isset($view['accommodation_url']) ? (string) $view['accommodation_url'] : \home_url('/booking-accommodation');
+$fixed_room_mode = !empty($view['fixed_room_mode']);
 $arrow_icon_url = \defined('MUST_HOTEL_BOOKING_URL') ? MUST_HOTEL_BOOKING_URL . 'assets/img/ArrowRight.svg' : '';
 $back_arrow_icon_url = \defined('MUST_HOTEL_BOOKING_URL') ? MUST_HOTEL_BOOKING_URL . 'assets/img/ArrowLEFT.svg' : '';
 $dropdown_icon_url = \defined('MUST_HOTEL_BOOKING_URL') ? MUST_HOTEL_BOOKING_URL . 'assets/img/poludown.svg' : '';
 $check_icon_url = \defined('MUST_HOTEL_BOOKING_URL') ? MUST_HOTEL_BOOKING_URL . 'assets/img/check.svg' : '';
+$back_url = $fixed_room_mode ? $booking_url : $accommodation_url;
 $selected_room_count = isset($view['selected_room_count']) ? (int) $view['selected_room_count'] : 0;
+$show_room_guest_info = $selected_room_count > 1;
 $checkin = isset($view['checkin']) ? (string) $view['checkin'] : '';
 $checkout = isset($view['checkout']) ? (string) $view['checkout'] : '';
 $guests = isset($view['guests']) ? (int) $view['guests'] : 1;
+$room_count = isset($view['room_count']) ? (int) $view['room_count'] : 0;
 $coupon_code = isset($view['coupon_code']) ? (string) $view['coupon_code'] : '';
 $coupon_input_value = isset($view['coupon_input_value']) ? (string) $view['coupon_input_value'] : $coupon_code;
 $applied_coupon_code = isset($view['applied_coupon_code']) ? (string) $view['applied_coupon_code'] : '';
+$coupon_control_classes = 'must-checkout-coupon-control';
+
+if ($coupon_input_value !== '' || $applied_coupon_code !== '') {
+    $coupon_control_classes .= ' is-filled';
+}
+
 $country_options = isset($view['country_options']) && \is_array($view['country_options']) ? $view['country_options'] : [];
 $phone_country_code_options = isset($view['phone_country_code_options']) && \is_array($view['phone_country_code_options']) ? $view['phone_country_code_options'] : [];
 $room_guest_form = isset($guest_form['room_guests']) && \is_array($guest_form['room_guests']) ? $guest_form['room_guests'] : [];
@@ -58,23 +68,27 @@ $format_display_date = static function (string $date): string {
 };
 ?>
 <?php \get_header(); ?>
-<main class="must-hotel-booking-page must-hotel-booking-page-checkout must-booking-process-page">
+<main class="must-hotel-booking-page must-hotel-booking-page-checkout must-booking-process-page<?php echo $fixed_room_mode ? ' is-fixed-room-flow' : ''; ?>">
     <div class="must-hotel-booking-container">
         <section class="must-booking-step-header">
             <h1><?php echo \esc_html__('Guest Information', 'must-hotel-booking'); ?></h1>
 
             <div class="must-booking-stepper-wrap" aria-label="<?php echo \esc_attr__('Booking steps', 'must-hotel-booking'); ?>">
                 <div class="must-booking-stepper">
-                    <a href="<?php echo \esc_url($accommodation_url); ?>" class="must-booking-stepper-nav is-back">
+                    <a href="<?php echo \esc_url($back_url); ?>" class="must-booking-stepper-nav is-back">
                         <?php if ($back_arrow_icon_url !== '') : ?>
                             <img src="<?php echo \esc_url($back_arrow_icon_url); ?>" alt="" aria-hidden="true" />
                         <?php endif; ?>
                         <span><?php echo \esc_html__('Back', 'must-hotel-booking'); ?></span>
                     </a>
                     <a href="<?php echo \esc_url($booking_url); ?>" class="must-booking-stepper-step is-link" data-step="1"><?php echo \esc_html__('Calendar', 'must-hotel-booking'); ?></a>
-                    <a href="<?php echo \esc_url($accommodation_url); ?>" class="must-booking-stepper-step is-link" data-step="2"><?php echo \esc_html__('Select Accommodation', 'must-hotel-booking'); ?></a>
+                    <?php if ($fixed_room_mode) : ?>
+                        <span class="must-booking-stepper-step is-skipped" data-step="2"><?php echo \esc_html__('Select Accommodation', 'must-hotel-booking'); ?></span>
+                    <?php else : ?>
+                        <a href="<?php echo \esc_url($accommodation_url); ?>" class="must-booking-stepper-step is-link" data-step="2"><?php echo \esc_html__('Select Accommodation', 'must-hotel-booking'); ?></a>
+                    <?php endif; ?>
                     <span class="must-booking-stepper-step is-active" data-step="3"><?php echo \esc_html__('Guest Information', 'must-hotel-booking'); ?></span>
-                    <span class="must-booking-stepper-step" data-step="4"><?php echo \esc_html__('Confirmation', 'must-hotel-booking'); ?></span>
+                    <span class="must-booking-stepper-step" data-step="4"><?php echo \esc_html__('Review & Payment', 'must-hotel-booking'); ?></span>
                     <span class="must-booking-stepper-nav is-next" aria-disabled="true">
                         <span><?php echo \esc_html__('Next', 'must-hotel-booking'); ?></span>
                         <?php if ($arrow_icon_url !== '') : ?>
@@ -95,8 +109,8 @@ $format_display_date = static function (string $date): string {
 
         <?php if (!$is_valid_context || empty($selected_rooms)) : ?>
             <p>
-                <a href="<?php echo \esc_url($accommodation_url); ?>">
-                    <?php echo \esc_html__('Back to Select Accommodation', 'must-hotel-booking'); ?>
+                <a href="<?php echo \esc_url($back_url); ?>">
+                    <?php echo \esc_html($fixed_room_mode ? __('Back to Calendar', 'must-hotel-booking') : __('Back to Select Accommodation', 'must-hotel-booking')); ?>
                 </a>
             </p>
         <?php else : ?>
@@ -105,10 +119,11 @@ $format_display_date = static function (string $date): string {
                 <input type="hidden" name="checkin" value="<?php echo \esc_attr($checkin); ?>" />
                 <input type="hidden" name="checkout" value="<?php echo \esc_attr($checkout); ?>" />
                 <input type="hidden" name="guests" value="<?php echo \esc_attr((string) $guests); ?>" />
+                <input type="hidden" name="room_count" value="<?php echo \esc_attr((string) $room_count); ?>" />
                 <input type="hidden" name="applied_coupon_code" value="<?php echo \esc_attr($applied_coupon_code); ?>" />
 
                 <section class="must-checkout-coupon-row">
-                    <div class="must-checkout-coupon-control">
+                    <div class="<?php echo \esc_attr($coupon_control_classes); ?>">
                         <label class="screen-reader-text" for="must-checkout-coupon"><?php echo \esc_html__('Coupon Code', 'must-hotel-booking'); ?></label>
                         <input
                             id="must-checkout-coupon"
@@ -139,6 +154,7 @@ $format_display_date = static function (string $date): string {
                         $room = isset($selected_room_item['room']) && \is_array($selected_room_item['room']) ? $selected_room_item['room'] : [];
                         $pricing = isset($selected_room_item['pricing']) && \is_array($selected_room_item['pricing']) ? $selected_room_item['pricing'] : [];
                         $room_id = isset($selected_room_item['room_id']) ? (int) $selected_room_item['room_id'] : 0;
+                        $assigned_room_guests = isset($selected_room_item['assigned_guests']) ? \max(1, (int) $selected_room_item['assigned_guests']) : \max(1, $guests);
                         $room_name = isset($room['name']) ? (string) $room['name'] : \__('Room', 'must-hotel-booking');
                         $room_currency = isset($room['currency']) ? (string) $room['currency'] : 'USD';
                         $max_guests = isset($room['max_guests']) ? (int) $room['max_guests'] : 0;
@@ -147,7 +163,7 @@ $format_display_date = static function (string $date): string {
                         $room_total = isset($pricing['total_price']) ? (float) $pricing['total_price'] : (isset($room['dynamic_total_price']) ? (float) $room['dynamic_total_price'] : 0.0);
                         $room_nights = isset($pricing['nights']) ? (int) $pricing['nights'] : $nights;
                         $room_guests = isset($room_guest_form[$room_id]) && \is_array($room_guest_form[$room_id]) ? $room_guest_form[$room_id] : [];
-                        $room_guest_count = isset($room_guests['guest_count']) && (string) $room_guests['guest_count'] !== '' ? (string) $room_guests['guest_count'] : (string) $guests;
+                        $room_guest_count = isset($room_guests['guest_count']) && (string) $room_guests['guest_count'] !== '' ? (string) $room_guests['guest_count'] : (string) $assigned_room_guests;
                         $room_guest_first_name = isset($room_guests['first_name']) ? (string) $room_guests['first_name'] : '';
                         $room_guest_last_name = isset($room_guests['last_name']) ? (string) $room_guests['last_name'] : '';
                         $room_fee_total = isset($pricing['fees_total']) ? (float) $pricing['fees_total'] : 0.0;
@@ -214,47 +230,49 @@ $format_display_date = static function (string $date): string {
                                     </p>
                                 </div>
 
-                                <div class="must-checkout-room-guest-info">
-                                    <h3><?php echo \esc_html__('Guest Information', 'must-hotel-booking'); ?></h3>
+                                <?php if ($show_room_guest_info) : ?>
+                                    <div class="must-checkout-room-guest-info">
+                                        <h3><?php echo \esc_html__('Guest Information', 'must-hotel-booking'); ?></h3>
 
-                                    <div class="must-checkout-room-guest-fields">
-                                        <label class="must-checkout-room-guest-shell must-checkout-room-guest-count-shell">
-                                            <span class="screen-reader-text"><?php echo \esc_html__('Guests Number', 'must-hotel-booking'); ?></span>
-                                            <input
-                                                type="number"
-                                                min="1"
-                                                step="1"
-                                                max="<?php echo \esc_attr((string) \max(1, $max_guests > 0 ? $max_guests : $guests)); ?>"
-                                                name="room_guest_count[<?php echo \esc_attr((string) $room_id); ?>]"
-                                                value="<?php echo \esc_attr($room_guest_count); ?>"
-                                                placeholder="<?php echo \esc_attr__('Guests Number', 'must-hotel-booking'); ?>"
-                                            />
-                                            <?php if ($room_people_icon_url !== '') : ?>
-                                                <img src="<?php echo \esc_url($room_people_icon_url); ?>" alt="" aria-hidden="true" />
-                                            <?php endif; ?>
-                                        </label>
+                                        <div class="must-checkout-room-guest-fields">
+                                            <label class="must-checkout-room-guest-shell must-checkout-room-guest-count-shell">
+                                                <span class="screen-reader-text"><?php echo \esc_html__('Guests Number', 'must-hotel-booking'); ?></span>
+                                                <input
+                                                    type="number"
+                                                    min="1"
+                                                    step="1"
+                                                    max="<?php echo \esc_attr((string) \max(1, $max_guests > 0 ? $max_guests : $guests)); ?>"
+                                                    name="room_guest_count[<?php echo \esc_attr((string) $room_id); ?>]"
+                                                    value="<?php echo \esc_attr($room_guest_count); ?>"
+                                                    placeholder="<?php echo \esc_attr__('Guests Number', 'must-hotel-booking'); ?>"
+                                                />
+                                                <?php if ($room_people_icon_url !== '') : ?>
+                                                    <img src="<?php echo \esc_url($room_people_icon_url); ?>" alt="" aria-hidden="true" />
+                                                <?php endif; ?>
+                                            </label>
 
-                                        <label class="must-checkout-room-guest-shell">
-                                            <span class="screen-reader-text"><?php echo \esc_html__('First Name', 'must-hotel-booking'); ?></span>
-                                            <input
-                                                type="text"
-                                                name="room_guest_first_name[<?php echo \esc_attr((string) $room_id); ?>]"
-                                                value="<?php echo \esc_attr($room_guest_first_name); ?>"
-                                                placeholder="<?php echo \esc_attr__('First Name', 'must-hotel-booking'); ?>"
-                                            />
-                                        </label>
+                                            <label class="must-checkout-room-guest-shell">
+                                                <span class="screen-reader-text"><?php echo \esc_html__('First Name', 'must-hotel-booking'); ?></span>
+                                                <input
+                                                    type="text"
+                                                    name="room_guest_first_name[<?php echo \esc_attr((string) $room_id); ?>]"
+                                                    value="<?php echo \esc_attr($room_guest_first_name); ?>"
+                                                    placeholder="<?php echo \esc_attr__('First Name (Optional)', 'must-hotel-booking'); ?>"
+                                                />
+                                            </label>
 
-                                        <label class="must-checkout-room-guest-shell">
-                                            <span class="screen-reader-text"><?php echo \esc_html__('Last Name', 'must-hotel-booking'); ?></span>
-                                            <input
-                                                type="text"
-                                                name="room_guest_last_name[<?php echo \esc_attr((string) $room_id); ?>]"
-                                                value="<?php echo \esc_attr($room_guest_last_name); ?>"
-                                                placeholder="<?php echo \esc_attr__('Last Name', 'must-hotel-booking'); ?>"
-                                            />
-                                        </label>
+                                            <label class="must-checkout-room-guest-shell">
+                                                <span class="screen-reader-text"><?php echo \esc_html__('Last Name', 'must-hotel-booking'); ?></span>
+                                                <input
+                                                    type="text"
+                                                    name="room_guest_last_name[<?php echo \esc_attr((string) $room_id); ?>]"
+                                                    value="<?php echo \esc_attr($room_guest_last_name); ?>"
+                                                    placeholder="<?php echo \esc_attr__('Last Name (Optional)', 'must-hotel-booking'); ?>"
+                                                />
+                                            </label>
+                                        </div>
                                     </div>
-                                </div>
+                                <?php endif; ?>
                             </div>
 
                             <div class="must-checkout-room-pricing-pane">
@@ -272,8 +290,8 @@ $format_display_date = static function (string $date): string {
                                                 echo \esc_html(
                                                     \sprintf(
                                                         /* translators: %d is guests count. */
-                                                        _n('%d Guest', '%d Guests', \max(1, $guests), 'must-hotel-booking'),
-                                                        \max(1, $guests)
+                                                        _n('%d Guest', '%d Guests', $assigned_room_guests, 'must-hotel-booking'),
+                                                        $assigned_room_guests
                                                     )
                                                 );
                                                 ?>
@@ -300,7 +318,7 @@ $format_display_date = static function (string $date): string {
                                         </div>
                                         <div class="must-checkout-price-line">
                                             <span><?php echo \esc_html__('Guests', 'must-hotel-booking'); ?></span>
-                                            <span><?php echo \esc_html((string) \max(1, $guests)); ?></span>
+                                            <span><?php echo \esc_html((string) $assigned_room_guests); ?></span>
                                         </div>
                                         <div class="must-checkout-divider is-dark"></div>
                                         <div class="must-checkout-price-line">
@@ -365,17 +383,17 @@ $format_display_date = static function (string $date): string {
                             <div class="must-checkout-contact-grid">
                                 <label class="must-checkout-field">
                                     <span class="screen-reader-text"><?php echo \esc_html__('First Name', 'must-hotel-booking'); ?></span>
-                                    <input id="must-checkout-first-name" type="text" name="first_name" value="<?php echo \esc_attr((string) ($guest_form['first_name'] ?? '')); ?>" placeholder="<?php echo \esc_attr__('First Name', 'must-hotel-booking'); ?>" required />
+                                    <input id="must-checkout-first-name" type="text" name="first_name" value="<?php echo \esc_attr((string) ($guest_form['first_name'] ?? '')); ?>" placeholder="<?php echo \esc_attr__('First Name*', 'must-hotel-booking'); ?>" required />
                                 </label>
 
                                 <label class="must-checkout-field">
                                     <span class="screen-reader-text"><?php echo \esc_html__('Last Name', 'must-hotel-booking'); ?></span>
-                                    <input id="must-checkout-last-name" type="text" name="last_name" value="<?php echo \esc_attr((string) ($guest_form['last_name'] ?? '')); ?>" placeholder="<?php echo \esc_attr__('Last Name', 'must-hotel-booking'); ?>" required />
+                                    <input id="must-checkout-last-name" type="text" name="last_name" value="<?php echo \esc_attr((string) ($guest_form['last_name'] ?? '')); ?>" placeholder="<?php echo \esc_attr__('Last Name*', 'must-hotel-booking'); ?>" required />
                                 </label>
 
                                 <label class="must-checkout-field">
                                     <span class="screen-reader-text"><?php echo \esc_html__('Email', 'must-hotel-booking'); ?></span>
-                                    <input id="must-checkout-email" type="email" name="email" value="<?php echo \esc_attr((string) ($guest_form['email'] ?? '')); ?>" placeholder="<?php echo \esc_attr__('Email', 'must-hotel-booking'); ?>" required />
+                                    <input id="must-checkout-email" type="email" name="email" value="<?php echo \esc_attr((string) ($guest_form['email'] ?? '')); ?>" placeholder="<?php echo \esc_attr__('Email*', 'must-hotel-booking'); ?>" required />
                                 </label>
 
                                 <label class="must-checkout-field must-checkout-field-phone">
@@ -393,14 +411,14 @@ $format_display_date = static function (string $date): string {
                                             <?php endforeach; ?>
                                         </select>
                                         <span class="must-checkout-phone-divider" aria-hidden="true">|</span>
-                                        <input id="must-checkout-phone" type="text" name="phone_number" value="<?php echo \esc_attr($phone_number); ?>" placeholder="<?php echo \esc_attr__('Phone Number', 'must-hotel-booking'); ?>" />
+                                        <input id="must-checkout-phone" type="text" name="phone_number" value="<?php echo \esc_attr($phone_number); ?>" placeholder="<?php echo \esc_attr__('Phone Number*', 'must-hotel-booking'); ?>" inputmode="numeric" pattern="[0-9]*" autocomplete="tel-national" required />
                                     </span>
                                 </label>
 
                                 <label class="must-checkout-field must-checkout-field-select">
                                     <span class="screen-reader-text"><?php echo \esc_html__('Country of Residence', 'must-hotel-booking'); ?></span>
-                                    <select id="must-checkout-country" name="country">
-                                        <option value=""><?php echo \esc_html__('Country of Residence', 'must-hotel-booking'); ?></option>
+                                    <select id="must-checkout-country" name="country" required>
+                                        <option value=""><?php echo \esc_html__('Country of Residence*', 'must-hotel-booking'); ?></option>
                                         <?php foreach ($country_options as $country_option) : ?>
                                             <?php
                                             $country_option_value = isset($country_option['value']) ? (string) $country_option['value'] : '';
@@ -419,9 +437,6 @@ $format_display_date = static function (string $date): string {
                         </div>
 
                         <div class="must-checkout-payment-section">
-                            <h2><?php echo \esc_html__('Payment Method', 'must-hotel-booking'); ?></h2>
-                            <p class="must-checkout-payment-label"><?php echo \esc_html__('WooCommerce Payments', 'must-hotel-booking'); ?></p>
-
                             <label class="must-checkout-consent">
                                 <input type="checkbox" name="marketing_opt_in" value="1"<?php checked(!empty($guest_form['marketing_opt_in'])); ?> />
                                 <span><?php echo \esc_html__('I consent to receive updates about Empire Beach Residence', 'must-hotel-booking'); ?></span>
@@ -429,7 +444,7 @@ $format_display_date = static function (string $date): string {
 
                             <label class="must-checkout-field must-checkout-field-full must-checkout-field-textarea">
                                 <span class="screen-reader-text"><?php echo \esc_html__('Special Requests', 'must-hotel-booking'); ?></span>
-                                <textarea name="special_requests" rows="4" placeholder="<?php echo \esc_attr__('Special Requests', 'must-hotel-booking'); ?>"><?php echo \esc_textarea((string) ($guest_form['special_requests'] ?? '')); ?></textarea>
+                                <textarea name="special_requests" rows="4" placeholder="<?php echo \esc_attr__('Special Requests (Optional)', 'must-hotel-booking'); ?>"><?php echo \esc_textarea((string) ($guest_form['special_requests'] ?? '')); ?></textarea>
                             </label>
                         </div>
                     </div>

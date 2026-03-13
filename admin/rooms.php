@@ -299,7 +299,6 @@ function sanitize_room_form_values(array $source): array
     $description = isset($source['description']) ? \sanitize_textarea_field((string) \wp_unslash($source['description'])) : '';
     $max_guests = isset($source['max_guests']) ? \max(1, \absint(\wp_unslash($source['max_guests']))) : 1;
     $base_price = isset($source['base_price']) ? (float) \wp_unslash($source['base_price']) : 0.0;
-    $extra_guest_price = isset($source['extra_guest_price']) ? (float) \wp_unslash($source['extra_guest_price']) : 0.0;
     $room_size = isset($source['room_size']) ? \sanitize_text_field((string) \wp_unslash($source['room_size'])) : '';
     $beds = isset($source['beds']) ? \sanitize_text_field((string) \wp_unslash($source['beds'])) : '';
     $room_rules = isset($source['room_rules']) ? \sanitize_textarea_field((string) \wp_unslash($source['room_rules'])) : '';
@@ -318,10 +317,6 @@ function sanitize_room_form_values(array $source): array
         $base_price = 0.0;
     }
 
-    if ($extra_guest_price < 0) {
-        $extra_guest_price = 0.0;
-    }
-
     $slug = generate_unique_room_slug($slug_input !== '' ? $slug_input : $name, $room_id);
 
     return [
@@ -332,7 +327,7 @@ function sanitize_room_form_values(array $source): array
         'description' => $description,
         'max_guests' => $max_guests,
         'base_price' => \round($base_price, 2),
-        'extra_guest_price' => \round($extra_guest_price, 2),
+        'extra_guest_price' => 0.0,
         'room_size' => $room_size,
         'beds' => $beds,
         'room_rules' => $room_rules,
@@ -370,7 +365,7 @@ function save_room_meta_data(
 
     $wpdb->query(
         $wpdb->prepare(
-            "DELETE FROM {$meta_table} WHERE room_id = %d AND meta_key IN ('main_image_id', 'room_rules', 'amenities_intro', 'amenity', 'gallery_image_id', 'extra_guest_price')",
+            "DELETE FROM {$meta_table} WHERE room_id = %d AND meta_key IN ('main_image_id', 'room_rules', 'amenities_intro', 'amenity', 'gallery_image_id')",
             $room_id
         )
     );
@@ -439,22 +434,6 @@ function save_room_meta_data(
         );
     }
 
-    $room_row = $wpdb->get_row(
-        $wpdb->prepare('SELECT extra_guest_price FROM ' . get_rooms_table_name() . ' WHERE id = %d LIMIT 1', $room_id),
-        ARRAY_A
-    );
-
-    if (\is_array($room_row) && isset($room_row['extra_guest_price'])) {
-        $wpdb->insert(
-            $meta_table,
-            [
-                'room_id' => $room_id,
-                'meta_key' => 'extra_guest_price',
-                'meta_value' => (string) \round((float) $room_row['extra_guest_price'], 2),
-            ],
-            ['%d', '%s', '%s']
-        );
-    }
 }
 
 /**
@@ -475,7 +454,7 @@ function create_room_record(array $room_data): int
             'description' => (string) $room_data['description'],
             'max_guests' => (int) $room_data['max_guests'],
             'base_price' => (float) $room_data['base_price'],
-            'extra_guest_price' => (float) $room_data['extra_guest_price'],
+            'extra_guest_price' => 0.0,
             'room_size' => (string) $room_data['room_size'],
             'beds' => (string) $room_data['beds'],
             'created_at' => \current_time('mysql'),
@@ -508,7 +487,7 @@ function update_room_record(int $room_id, array $room_data): bool
             'description' => (string) $room_data['description'],
             'max_guests' => (int) $room_data['max_guests'],
             'base_price' => (float) $room_data['base_price'],
-            'extra_guest_price' => (float) $room_data['extra_guest_price'],
+            'extra_guest_price' => 0.0,
             'room_size' => (string) $room_data['room_size'],
             'beds' => (string) $room_data['beds'],
         ],
@@ -970,7 +949,6 @@ function get_room_form_defaults(): array
         'description' => '',
         'max_guests' => 1,
         'base_price' => 0.00,
-        'extra_guest_price' => 0.00,
         'room_size' => '',
         'beds' => '',
         'room_rules' => '',
@@ -1036,7 +1014,6 @@ function get_room_form_data(?array $submitted_form = null): array
         'description' => (string) ($room['description'] ?? ''),
         'max_guests' => (int) ($room['max_guests'] ?? 1),
         'base_price' => (float) ($room['base_price'] ?? 0),
-        'extra_guest_price' => (float) ($room['extra_guest_price'] ?? 0),
         'room_size' => (string) ($room['room_size'] ?? ''),
         'beds' => (string) ($room['beds'] ?? ''),
         'room_rules' => $room_rules,
@@ -1216,9 +1193,6 @@ function render_admin_rooms_page(): void
 
     echo '<tr><th scope="row"><label for="must-room-base-price">' . \esc_html__('Base Price', 'must-hotel-booking') . '</label></th>';
     echo '<td><input id="must-room-base-price" type="number" min="0" step="0.01" name="base_price" value="' . \esc_attr((string) $form['base_price']) . '" required /></td></tr>';
-
-    echo '<tr><th scope="row"><label for="must-room-extra-guest-price">' . \esc_html__('Extra Guest Price', 'must-hotel-booking') . '</label></th>';
-    echo '<td><input id="must-room-extra-guest-price" type="number" min="0" step="0.01" name="extra_guest_price" value="' . \esc_attr((string) $form['extra_guest_price']) . '" /></td></tr>';
 
     echo '<tr><th scope="row"><label for="must-room-size">' . \esc_html__('Room Size', 'must-hotel-booking') . '</label></th>';
     echo '<td><input id="must-room-size" type="text" name="room_size" class="regular-text" value="' . \esc_attr((string) $form['room_size']) . '" /></td></tr>';

@@ -110,14 +110,13 @@ function get_room_pricing_context(int $room_id): ?array
             "SELECT meta_key, meta_value
             FROM {$room_meta_table}
             WHERE room_id = %d
-                AND meta_key IN ('base_capacity', 'extra_guest_price')",
+                AND meta_key IN ('base_capacity')",
             $room_id
         ),
         ARRAY_A
     );
 
     $base_capacity = isset($room['max_guests']) ? (int) $room['max_guests'] : 1;
-    $extra_guest_price = isset($room['extra_guest_price']) ? (float) $room['extra_guest_price'] : 0.0;
 
     if (\is_array($meta_rows)) {
         foreach ($meta_rows as $meta_row) {
@@ -135,10 +134,6 @@ function get_room_pricing_context(int $room_id): ?array
                     $base_capacity = $parsed_capacity;
                 }
             }
-
-            if ($key === 'extra_guest_price' && $extra_guest_price <= 0) {
-                $extra_guest_price = (float) $value;
-            }
         }
     }
 
@@ -150,7 +145,7 @@ function get_room_pricing_context(int $room_id): ?array
         'room_id' => (int) $room['id'],
         'room_base_price' => (float) $room['base_price'],
         'base_capacity' => $base_capacity,
-        'extra_guest_price' => $extra_guest_price,
+        'extra_guest_price' => 0.0,
     ];
 }
 
@@ -872,22 +867,16 @@ function calculate_booking_price(int $room_id, string $checkin, string $checkout
 
     $room_base_price = isset($room_context['room_base_price']) ? (float) $room_context['room_base_price'] : 0.0;
     $base_capacity = isset($room_context['base_capacity']) ? (int) $room_context['base_capacity'] : 1;
-    $extra_guest_price = isset($room_context['extra_guest_price']) ? (float) $room_context['extra_guest_price'] : 0.0;
-
     if ($base_capacity <= 0) {
         $base_capacity = 1;
-    }
-
-    if ($extra_guest_price < 0) {
-        $extra_guest_price = 0.0;
     }
 
     $seasonal_rules = get_applicable_seasonal_pricing_rules($room_id, $checkin, $checkout, $nights);
     $base_pricing = calculate_base_amount_with_seasonal_rules($room_base_price, $checkin, $nights, $seasonal_rules);
     $base_amount = isset($base_pricing['base_amount']) ? (float) $base_pricing['base_amount'] : 0.0;
-    $extra_guest_count = \max(0, $guests - $base_capacity);
-    $extra_guest_amount = round_price($extra_guest_count * $extra_guest_price);
-    $room_subtotal = round_price($base_amount + $extra_guest_amount);
+    $extra_guest_count = 0;
+    $extra_guest_amount = 0.0;
+    $room_subtotal = round_price($base_amount);
 
     $settings = get_pricing_engine_settings();
     $coupon_rules = get_pricing_rule_group($settings, ['coupons', 'coupon_rules']);
@@ -933,7 +922,7 @@ function calculate_booking_price(int $room_id, string $checkin, string $checkout
         'guests' => $guests,
         'room_base_price' => round_price($room_base_price),
         'base_capacity' => $base_capacity,
-        'extra_guest_price' => round_price($extra_guest_price),
+        'extra_guest_price' => 0.0,
         'extra_guest_count' => $extra_guest_count,
         'base_amount' => $base_amount,
         'nightly_rates' => isset($base_pricing['nightly_rates']) && \is_array($base_pricing['nightly_rates']) ? $base_pricing['nightly_rates'] : [],
