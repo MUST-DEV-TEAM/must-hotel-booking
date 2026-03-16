@@ -172,13 +172,178 @@ function get_checkout_payment_cta_label(string $payment_method): string
 }
 
 /**
+ * Get supported site environments for Stripe configuration.
+ *
+ * @return array<string, array<string, string>>
+ */
+function get_stripe_environment_catalog(): array
+{
+    return [
+        'local' => [
+            'label' => \__('Localhost', 'must-hotel-booking'),
+            'description' => \__('Use for local development sites such as localhost or LocalWP domains.', 'must-hotel-booking'),
+            'example' => 'http://localhost',
+        ],
+        'staging' => [
+            'label' => \__('Staging / IP website', 'must-hotel-booking'),
+            'description' => \__('Use for temporary HTTP or IP-based sites such as http://18.185.56.94/.', 'must-hotel-booking'),
+            'example' => 'http://18.185.56.94/',
+        ],
+        'production' => [
+            'label' => \__('Live website', 'must-hotel-booking'),
+            'description' => \__('Use for the real HTTPS website such as https://empirebeachresort.al.', 'must-hotel-booking'),
+            'example' => 'https://empirebeachresort.al',
+        ],
+    ];
+}
+
+/**
+ * Detect the most likely site environment from a URL.
+ */
+function detect_stripe_environment_from_url(string $url): string
+{
+    $parts = \wp_parse_url($url);
+    $host = isset($parts['host']) ? \strtolower((string) $parts['host']) : '';
+    $scheme = isset($parts['scheme']) ? \strtolower((string) $parts['scheme']) : '';
+
+    if ($host === '') {
+        return 'production';
+    }
+
+    if (
+        $host === 'localhost' ||
+        $host === '127.0.0.1' ||
+        $host === '::1' ||
+        \substr($host, -10) === '.localhost' ||
+        \substr($host, -6) === '.local' ||
+        \substr($host, -5) === '.test'
+    ) {
+        return 'local';
+    }
+
+    if (\filter_var($host, \FILTER_VALIDATE_IP) !== false) {
+        return 'staging';
+    }
+
+    if ($scheme !== 'https') {
+        return 'staging';
+    }
+
+    return 'production';
+}
+
+/**
+ * Detect the most likely current site environment.
+ */
+function detect_stripe_environment_from_site_url(): string
+{
+    return detect_stripe_environment_from_url((string) \home_url('/'));
+}
+
+/**
+ * Normalize a site environment key.
+ */
+function normalize_stripe_environment(string $environment): string
+{
+    $environment = \sanitize_key($environment);
+    $catalog = get_stripe_environment_catalog();
+
+    if (isset($catalog[$environment])) {
+        return $environment;
+    }
+
+    return detect_stripe_environment_from_site_url();
+}
+
+/**
+ * Get the active site environment selected in General settings.
+ */
+function get_active_site_environment(): string
+{
+    $saved_environment = \class_exists(__NAMESPACE__ . '\MustBookingConfig')
+        ? (string) MustBookingConfig::get_setting('site_environment', '')
+        : '';
+
+    if (\trim($saved_environment) === '') {
+        return detect_stripe_environment_from_site_url();
+    }
+
+    return normalize_stripe_environment($saved_environment);
+}
+
+/**
+ * Get a display label for a site environment key.
+ */
+function get_site_environment_label(string $environment = ''): string
+{
+    $environment = $environment !== '' ? normalize_stripe_environment($environment) : get_active_site_environment();
+    $catalog = get_stripe_environment_catalog();
+
+    return isset($catalog[$environment]['label']) ? (string) $catalog[$environment]['label'] : $environment;
+}
+
+/**
+ * Get setting keys used by a Stripe environment profile.
+ *
+ * @return array<string, string>
+ */
+function get_stripe_environment_setting_keys(string $environment): array
+{
+    $environment = normalize_stripe_environment($environment);
+
+    return [
+        'publishable_key' => 'stripe_' . $environment . '_publishable_key',
+        'secret_key' => 'stripe_' . $environment . '_secret_key',
+        'webhook_secret' => 'stripe_' . $environment . '_webhook_secret',
+    ];
+}
+
+/**
+ * Get Stripe credentials for an environment profile.
+ *
+ * @return array<string, string>
+ */
+function get_stripe_environment_credentials(string $environment = ''): array
+{
+    $environment = $environment !== '' ? normalize_stripe_environment($environment) : get_active_site_environment();
+    $keys = get_stripe_environment_setting_keys($environment);
+    $credentials = [
+        'publishable_key' => '',
+        'secret_key' => '',
+        'webhook_secret' => '',
+    ];
+
+    if (\class_exists(__NAMESPACE__ . '\MustBookingConfig')) {
+        foreach ($keys as $field => $setting_key) {
+            $credentials[$field] = \trim((string) MustBookingConfig::get_setting($setting_key, ''));
+        }
+
+        if ($environment === 'production') {
+            if ($credentials['publishable_key'] === '') {
+                $credentials['publishable_key'] = \trim((string) MustBookingConfig::get_setting('stripe_publishable_key', ''));
+            }
+
+            if ($credentials['secret_key'] === '') {
+                $credentials['secret_key'] = \trim((string) MustBookingConfig::get_setting('stripe_secret_key', ''));
+            }
+
+            if ($credentials['webhook_secret'] === '') {
+                $credentials['webhook_secret'] = \trim((string) MustBookingConfig::get_setting('stripe_webhook_secret', ''));
+            }
+        }
+    }
+
+    return $credentials;
+}
+
+/**
  * Get Stripe publishable key.
  */
 function get_stripe_publishable_key(): string
 {
-    return \class_exists(__NAMESPACE__ . '\MustBookingConfig')
-        ? \trim((string) MustBookingConfig::get_setting('stripe_publishable_key', ''))
-        : '';
+    $credentials = get_stripe_environment_credentials();
+
+    return (string) ($credentials['publishable_key'] ?? '');
 }
 
 /**
@@ -186,9 +351,9 @@ function get_stripe_publishable_key(): string
  */
 function get_stripe_secret_key(): string
 {
-    return \class_exists(__NAMESPACE__ . '\MustBookingConfig')
-        ? \trim((string) MustBookingConfig::get_setting('stripe_secret_key', ''))
-        : '';
+    $credentials = get_stripe_environment_credentials();
+
+    return (string) ($credentials['secret_key'] ?? '');
 }
 
 /**
@@ -196,9 +361,9 @@ function get_stripe_secret_key(): string
  */
 function get_stripe_webhook_secret(): string
 {
-    return \class_exists(__NAMESPACE__ . '\MustBookingConfig')
-        ? \trim((string) MustBookingConfig::get_setting('stripe_webhook_secret', ''))
-        : '';
+    $credentials = get_stripe_environment_credentials();
+
+    return (string) ($credentials['webhook_secret'] ?? '');
 }
 
 /**

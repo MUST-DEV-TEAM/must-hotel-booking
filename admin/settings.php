@@ -125,6 +125,9 @@ function normalize_settings_currency(string $currency): string
 function get_general_settings_form_defaults(): array
 {
     $hotel_name = \function_exists('get_bloginfo') ? (string) \get_bloginfo('name') : 'Hotel';
+    $site_environment = \function_exists(__NAMESPACE__ . '\get_active_site_environment')
+        ? get_active_site_environment()
+        : 'production';
 
     if (\class_exists(__NAMESPACE__ . '\MustBookingConfig')) {
         return [
@@ -132,6 +135,7 @@ function get_general_settings_form_defaults(): array
             'hotel_address' => MustBookingConfig::get_hotel_address(),
             'currency' => MustBookingConfig::get_currency(),
             'timezone' => MustBookingConfig::get_timezone(),
+            'site_environment' => $site_environment,
         ];
     }
 
@@ -140,6 +144,7 @@ function get_general_settings_form_defaults(): array
         'hotel_address' => '',
         'currency' => 'USD',
         'timezone' => 'UTC',
+        'site_environment' => $site_environment,
     ];
 }
 
@@ -173,9 +178,13 @@ function sanitize_general_settings_form_values(array $source): array
     $hotel_address = isset($source['hotel_address']) ? \sanitize_textarea_field((string) \wp_unslash($source['hotel_address'])) : '';
     $currency_raw = isset($source['currency']) ? \sanitize_text_field((string) \wp_unslash($source['currency'])) : '';
     $timezone = isset($source['timezone']) ? \sanitize_text_field((string) \wp_unslash($source['timezone'])) : '';
+    $site_environment = isset($source['site_environment']) ? \sanitize_key((string) \wp_unslash($source['site_environment'])) : '';
     $errors = [];
 
     $currency = normalize_settings_currency($currency_raw);
+    $site_environment = \function_exists(__NAMESPACE__ . '\normalize_stripe_environment')
+        ? normalize_stripe_environment($site_environment)
+        : (string) ($defaults['site_environment'] ?? 'production');
 
     if ($hotel_name === '') {
         $errors[] = \__('Hotel name is required.', 'must-hotel-booking');
@@ -192,6 +201,7 @@ function sanitize_general_settings_form_values(array $source): array
         'hotel_address' => $hotel_address,
         'currency' => $currency,
         'timezone' => $timezone,
+        'site_environment' => $site_environment,
         'errors' => $errors,
     ];
 }
@@ -777,6 +787,15 @@ function render_settings_admin_notice(string $notice = ''): void
 function render_general_settings_section(array $form): void
 {
     $timezone = isset($form['timezone']) ? (string) $form['timezone'] : 'UTC';
+    $site_environment = isset($form['site_environment']) ? (string) $form['site_environment'] : 'production';
+    $environment_catalog = \function_exists(__NAMESPACE__ . '\get_stripe_environment_catalog')
+        ? get_stripe_environment_catalog()
+        : [
+            'local' => ['label' => \__('Localhost', 'must-hotel-booking'), 'description' => '', 'example' => 'http://localhost'],
+            'staging' => ['label' => \__('Staging / IP website', 'must-hotel-booking'), 'description' => '', 'example' => 'http://18.185.56.94/'],
+            'production' => ['label' => \__('Live website', 'must-hotel-booking'), 'description' => '', 'example' => 'https://empirebeachresort.al'],
+        ];
+    $current_site_url = (string) \home_url('/');
 
     echo '<div class="postbox" style="max-width:960px; padding:16px;">';
     echo '<h2 style="margin-top:0;">' . \esc_html__('Hotel Configuration', 'must-hotel-booking') . '</h2>';
@@ -808,6 +827,51 @@ function render_general_settings_section(array $form): void
     }
 
     echo '</td></tr>';
+    echo '<tr><th scope="row"><label for="must-settings-site-environment">' . \esc_html__('Site environment', 'must-hotel-booking') . '</label></th>';
+    echo '<td><select id="must-settings-site-environment" name="site_environment">';
+
+    foreach ($environment_catalog as $environment_key => $environment_meta) {
+        $environment_label = isset($environment_meta['label']) ? (string) $environment_meta['label'] : $environment_key;
+        echo '<option value="' . \esc_attr($environment_key) . '"' . \selected($site_environment, $environment_key, false) . '>' . \esc_html($environment_label) . '</option>';
+    }
+
+    echo '</select>';
+    echo '<p class="description">' . \esc_html__('This decides which Stripe credentials are active on this site.', 'must-hotel-booking') . '</p>';
+
+    foreach ($environment_catalog as $environment_meta) {
+        if (!\is_array($environment_meta)) {
+            continue;
+        }
+
+        $environment_label = isset($environment_meta['label']) ? (string) $environment_meta['label'] : '';
+        $environment_description = isset($environment_meta['description']) ? (string) $environment_meta['description'] : '';
+        $environment_example = isset($environment_meta['example']) ? (string) $environment_meta['example'] : '';
+        $description_parts = [];
+
+        if ($environment_description !== '') {
+            $description_parts[] = $environment_description;
+        }
+
+        if ($environment_example !== '') {
+            $description_parts[] = \sprintf(
+                /* translators: %s is an example site URL. */
+                \__('Example: %s', 'must-hotel-booking'),
+                $environment_example
+            );
+        }
+
+        if (empty($description_parts)) {
+            continue;
+        }
+
+        echo '<p class="description"><strong>' . \esc_html($environment_label) . ':</strong> ' . \esc_html(\implode(' ', $description_parts)) . '</p>';
+    }
+
+    echo '<p class="description">' . \esc_html(\sprintf(
+        /* translators: %s is the current site URL. */
+        __('Current site URL: %s', 'must-hotel-booking'),
+        $current_site_url
+    )) . '</p></td></tr>';
     echo '</tbody></table>';
     \submit_button(\__('Save General Settings', 'must-hotel-booking'));
     echo '</form>';
@@ -1153,6 +1217,9 @@ function get_settings_diagnostics_data(): array
         'stripe_enabled' => $stripe_enabled,
         'stripe_configured' => $stripe_configured,
         'stripe_webhook_secret_set' => $stripe_webhook_secret_set,
+        'stripe_environment' => \function_exists(__NAMESPACE__ . '\get_site_environment_label')
+            ? get_site_environment_label()
+            : '',
         'stripe_webhook_url' => \function_exists(__NAMESPACE__ . '\get_stripe_webhook_url')
             ? get_stripe_webhook_url()
             : '',
@@ -1173,6 +1240,10 @@ function get_settings_diagnostics_data(): array
         'database_version' => (string) \get_option('must_hotel_booking_db_version', ''),
         'wordpress_version' => (string) \get_bloginfo('version'),
         'php_version' => \PHP_VERSION,
+        'site_url' => (string) \home_url('/'),
+        'site_environment' => \function_exists(__NAMESPACE__ . '\get_site_environment_label')
+            ? get_site_environment_label()
+            : '',
         'room_count' => $room_count,
         'email_template_count' => \function_exists(__NAMESPACE__ . '\get_email_templates')
             ? \count((array) get_email_templates())
@@ -1254,6 +1325,8 @@ function render_diagnostics_settings_section(): void
     echo '<tr><th>' . \esc_html__('Database version', 'must-hotel-booking') . '</th><td>' . \esc_html((string) ($environment['database_version'] ?? '')) . '</td></tr>';
     echo '<tr><th>' . \esc_html__('WordPress version', 'must-hotel-booking') . '</th><td>' . \esc_html((string) ($environment['wordpress_version'] ?? '')) . '</td></tr>';
     echo '<tr><th>' . \esc_html__('PHP version', 'must-hotel-booking') . '</th><td>' . \esc_html((string) ($environment['php_version'] ?? '')) . '</td></tr>';
+    echo '<tr><th>' . \esc_html__('Site URL', 'must-hotel-booking') . '</th><td><code>' . \esc_html((string) ($environment['site_url'] ?? '')) . '</code></td></tr>';
+    echo '<tr><th>' . \esc_html__('Active site environment', 'must-hotel-booking') . '</th><td>' . \esc_html((string) ($environment['site_environment'] ?? '')) . '</td></tr>';
     echo '<tr><th>' . \esc_html__('Configured rooms', 'must-hotel-booking') . '</th><td>' . \esc_html((string) ($environment['room_count'] ?? 0)) . '</td></tr>';
     echo '<tr><th>' . \esc_html__('Email templates', 'must-hotel-booking') . '</th><td>' . \esc_html((string) ($environment['email_template_count'] ?? 0)) . '</td></tr>';
     echo '</tbody></table>';
@@ -1314,6 +1387,7 @@ function render_diagnostics_settings_section(): void
     echo '<tr><th>' . \esc_html__('Next lock cleanup run', 'must-hotel-booking') . '</th><td>' . \esc_html((string) ($cron['next_run'] ?? '')) . '</td></tr>';
     echo '<tr><th>' . \esc_html__('Cron hook', 'must-hotel-booking') . '</th><td><code>' . \esc_html((string) ($cron['hook'] ?? '')) . '</code></td></tr>';
     echo '<tr><th>' . \esc_html__('Enabled payment methods', 'must-hotel-booking') . '</th><td>' . \esc_html(!empty($payments['enabled_methods']) ? \implode(', ', (array) $payments['enabled_methods']) : __('None enabled', 'must-hotel-booking')) . '</td></tr>';
+    echo '<tr><th>' . \esc_html__('Active Stripe profile', 'must-hotel-booking') . '</th><td>' . \esc_html((string) ($payments['stripe_environment'] ?? '')) . '</td></tr>';
     echo '<tr><th>' . \esc_html__('Stripe configuration', 'must-hotel-booking') . '</th><td>' . render_settings_status_badge(!empty($payments['stripe_configured']) ? 'healthy' : (!empty($payments['stripe_enabled']) ? 'warning' : 'warning')) . ' ';
     echo \esc_html(
         !empty($payments['stripe_enabled'])

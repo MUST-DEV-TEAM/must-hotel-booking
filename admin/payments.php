@@ -167,20 +167,54 @@ function maybe_handle_payment_methods_save_request(): void
     }
 
     $saved = save_payment_method_states($states);
-    $stripe_publishable_key = isset($_POST['stripe_publishable_key'])
-        ? \sanitize_text_field((string) \wp_unslash($_POST['stripe_publishable_key']))
-        : '';
-    $stripe_secret_key = isset($_POST['stripe_secret_key'])
-        ? \sanitize_text_field((string) \wp_unslash($_POST['stripe_secret_key']))
-        : '';
-    $stripe_webhook_secret = isset($_POST['stripe_webhook_secret'])
-        ? \sanitize_text_field((string) \wp_unslash($_POST['stripe_webhook_secret']))
-        : '';
+    $environment_catalog = \function_exists(__NAMESPACE__ . '\get_stripe_environment_catalog')
+        ? get_stripe_environment_catalog()
+        : [
+            'local' => [],
+            'staging' => [],
+            'production' => [],
+        ];
 
     if (\class_exists(__NAMESPACE__ . '\MustBookingConfig')) {
-        MustBookingConfig::set_setting('stripe_publishable_key', $stripe_publishable_key);
-        MustBookingConfig::set_setting('stripe_secret_key', $stripe_secret_key);
-        MustBookingConfig::set_setting('stripe_webhook_secret', $stripe_webhook_secret);
+        foreach (\array_keys($environment_catalog) as $environment_key) {
+            $setting_keys = \function_exists(__NAMESPACE__ . '\get_stripe_environment_setting_keys')
+                ? get_stripe_environment_setting_keys((string) $environment_key)
+                : [
+                    'publishable_key' => 'stripe_' . $environment_key . '_publishable_key',
+                    'secret_key' => 'stripe_' . $environment_key . '_secret_key',
+                    'webhook_secret' => 'stripe_' . $environment_key . '_webhook_secret',
+                ];
+
+            foreach ($setting_keys as $field_key => $setting_key) {
+                $posted_field_key = 'stripe_' . $environment_key . '_' . $field_key;
+                $value = isset($_POST[$posted_field_key])
+                    ? \sanitize_text_field((string) \wp_unslash($_POST[$posted_field_key]))
+                    : '';
+
+                MustBookingConfig::set_setting($setting_key, $value);
+            }
+        }
+
+        $production_keys = \function_exists(__NAMESPACE__ . '\get_stripe_environment_setting_keys')
+            ? get_stripe_environment_setting_keys('production')
+            : [
+                'publishable_key' => 'stripe_production_publishable_key',
+                'secret_key' => 'stripe_production_secret_key',
+                'webhook_secret' => 'stripe_production_webhook_secret',
+            ];
+
+        MustBookingConfig::set_setting(
+            'stripe_publishable_key',
+            (string) MustBookingConfig::get_setting($production_keys['publishable_key'], '')
+        );
+        MustBookingConfig::set_setting(
+            'stripe_secret_key',
+            (string) MustBookingConfig::get_setting($production_keys['secret_key'], '')
+        );
+        MustBookingConfig::set_setting(
+            'stripe_webhook_secret',
+            (string) MustBookingConfig::get_setting($production_keys['webhook_secret'], '')
+        );
     }
 
     \wp_safe_redirect(
@@ -232,15 +266,16 @@ function render_admin_payments_page(): void
 
     $catalog = get_payment_methods_catalog();
     $states = get_payment_method_states();
-    $stripe_publishable_key = \class_exists(__NAMESPACE__ . '\MustBookingConfig')
-        ? (string) MustBookingConfig::get_setting('stripe_publishable_key', '')
-        : '';
-    $stripe_secret_key = \class_exists(__NAMESPACE__ . '\MustBookingConfig')
-        ? (string) MustBookingConfig::get_setting('stripe_secret_key', '')
-        : '';
-    $stripe_webhook_secret = \class_exists(__NAMESPACE__ . '\MustBookingConfig')
-        ? (string) MustBookingConfig::get_setting('stripe_webhook_secret', '')
-        : '';
+    $environment_catalog = \function_exists(__NAMESPACE__ . '\get_stripe_environment_catalog')
+        ? get_stripe_environment_catalog()
+        : [
+            'local' => ['label' => \__('Localhost', 'must-hotel-booking'), 'description' => ''],
+            'staging' => ['label' => \__('Staging / IP website', 'must-hotel-booking'), 'description' => ''],
+            'production' => ['label' => \__('Live website', 'must-hotel-booking'), 'description' => ''],
+        ];
+    $active_environment = \function_exists(__NAMESPACE__ . '\get_active_site_environment')
+        ? get_active_site_environment()
+        : 'production';
     $webhook_url = \function_exists(__NAMESPACE__ . '\get_stripe_webhook_url')
         ? get_stripe_webhook_url()
         : \rest_url('must-hotel-booking/v1/stripe/webhook');
@@ -282,26 +317,57 @@ function render_admin_payments_page(): void
     echo '</tbody></table>';
 
     echo '<h2 style="margin-top:24px;">' . \esc_html__('Stripe Checkout', 'must-hotel-booking') . '</h2>';
-    echo '<table class="form-table" role="presentation"><tbody>';
-    echo '<tr>';
-    echo '<th scope="row"><label for="must-stripe-publishable-key">' . \esc_html__('Publishable key', 'must-hotel-booking') . '</label></th>';
-    echo '<td><input id="must-stripe-publishable-key" type="text" class="regular-text" name="stripe_publishable_key" value="' . \esc_attr($stripe_publishable_key) . '" autocomplete="off" />';
-    echo '<p class="description">' . \esc_html__('Starts with pk_. Required when Stripe is enabled.', 'must-hotel-booking') . '</p></td>';
-    echo '</tr>';
-    echo '<tr>';
-    echo '<th scope="row"><label for="must-stripe-secret-key">' . \esc_html__('Secret key', 'must-hotel-booking') . '</label></th>';
-    echo '<td><input id="must-stripe-secret-key" type="password" class="regular-text" name="stripe_secret_key" value="' . \esc_attr($stripe_secret_key) . '" autocomplete="new-password" />';
-    echo '<p class="description">' . \esc_html__('Starts with sk_. Used to create and verify Stripe Checkout sessions.', 'must-hotel-booking') . '</p></td>';
-    echo '</tr>';
-    echo '<tr>';
-    echo '<th scope="row"><label for="must-stripe-webhook-secret">' . \esc_html__('Webhook signing secret', 'must-hotel-booking') . '</label></th>';
-    echo '<td><input id="must-stripe-webhook-secret" type="password" class="regular-text" name="stripe_webhook_secret" value="' . \esc_attr($stripe_webhook_secret) . '" autocomplete="new-password" />';
-    echo '<p class="description">' . \esc_html__('Starts with whsec_. Strongly recommended so webhook payloads can be verified.', 'must-hotel-booking') . '</p></td>';
-    echo '</tr>';
+    echo '<p>' . \esc_html__('Store a separate Stripe profile for each site environment. The active profile is selected from General Settings.', 'must-hotel-booking') . '</p>';
+    echo '<p><strong>' . \esc_html__('Currently active profile:', 'must-hotel-booking') . '</strong> ' . \esc_html(\function_exists(__NAMESPACE__ . '\get_site_environment_label') ? get_site_environment_label($active_environment) : $active_environment) . '</p>';
+
+    foreach ($environment_catalog as $environment_key => $environment_meta) {
+        if (!\is_string($environment_key)) {
+            continue;
+        }
+
+        $environment_label = isset($environment_meta['label']) ? (string) $environment_meta['label'] : $environment_key;
+        $environment_description = isset($environment_meta['description']) ? (string) $environment_meta['description'] : '';
+        $is_active_environment = $environment_key === $active_environment;
+        $credentials = \function_exists(__NAMESPACE__ . '\get_stripe_environment_credentials')
+            ? get_stripe_environment_credentials($environment_key)
+            : [
+                'publishable_key' => '',
+                'secret_key' => '',
+                'webhook_secret' => '',
+            ];
+
+        echo '<div style="margin-top:20px; padding:16px; border:1px solid #dcdcde; border-radius:8px; background:' . ($is_active_environment ? '#f6ffed' : '#fff') . ';">';
+        echo '<h3 style="margin-top:0;">' . \esc_html($environment_label) . ($is_active_environment ? ' <span style="font-size:12px; color:#2271b1;">' . \esc_html__('Active', 'must-hotel-booking') . '</span>' : '') . '</h3>';
+
+        if ($environment_description !== '') {
+            echo '<p class="description">' . \esc_html($environment_description) . '</p>';
+        }
+
+        echo '<table class="form-table" role="presentation"><tbody>';
+        echo '<tr>';
+        echo '<th scope="row"><label for="must-stripe-' . \esc_attr($environment_key) . '-publishable-key">' . \esc_html__('Publishable key', 'must-hotel-booking') . '</label></th>';
+        echo '<td><input id="must-stripe-' . \esc_attr($environment_key) . '-publishable-key" type="text" class="regular-text" name="stripe_' . \esc_attr($environment_key) . '_publishable_key" value="' . \esc_attr((string) ($credentials['publishable_key'] ?? '')) . '" autocomplete="off" />';
+        echo '<p class="description">' . \esc_html__('Starts with pk_. Required when Stripe is enabled for this environment.', 'must-hotel-booking') . '</p></td>';
+        echo '</tr>';
+        echo '<tr>';
+        echo '<th scope="row"><label for="must-stripe-' . \esc_attr($environment_key) . '-secret-key">' . \esc_html__('Secret key', 'must-hotel-booking') . '</label></th>';
+        echo '<td><input id="must-stripe-' . \esc_attr($environment_key) . '-secret-key" type="password" class="regular-text" name="stripe_' . \esc_attr($environment_key) . '_secret_key" value="' . \esc_attr((string) ($credentials['secret_key'] ?? '')) . '" autocomplete="new-password" />';
+        echo '<p class="description">' . \esc_html__('Starts with sk_. Used to create and verify Stripe Checkout sessions.', 'must-hotel-booking') . '</p></td>';
+        echo '</tr>';
+        echo '<tr>';
+        echo '<th scope="row"><label for="must-stripe-' . \esc_attr($environment_key) . '-webhook-secret">' . \esc_html__('Webhook signing secret', 'must-hotel-booking') . '</label></th>';
+        echo '<td><input id="must-stripe-' . \esc_attr($environment_key) . '-webhook-secret" type="password" class="regular-text" name="stripe_' . \esc_attr($environment_key) . '_webhook_secret" value="' . \esc_attr((string) ($credentials['webhook_secret'] ?? '')) . '" autocomplete="new-password" />';
+        echo '<p class="description">' . \esc_html__('Starts with whsec_. Strongly recommended so webhook payloads can be verified.', 'must-hotel-booking') . '</p></td>';
+        echo '</tr>';
+        echo '</tbody></table>';
+        echo '</div>';
+    }
+
+    echo '<table class="form-table" role="presentation" style="margin-top:16px;"><tbody>';
     echo '<tr>';
     echo '<th scope="row">' . \esc_html__('Webhook URL', 'must-hotel-booking') . '</th>';
     echo '<td><code>' . \esc_html($webhook_url) . '</code>';
-    echo '<p class="description">' . \esc_html__('Register this URL in your Stripe dashboard for checkout.session.completed and checkout.session.expired events.', 'must-hotel-booking') . '</p></td>';
+    echo '<p class="description">' . \esc_html__('Register this URL in the Stripe dashboard for the environment currently running on this site.', 'must-hotel-booking') . '</p></td>';
     echo '</tr>';
     echo '</tbody></table>';
 
