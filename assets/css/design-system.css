@@ -52,11 +52,46 @@
 
     --must-primary: #F5F2E5;
     --must-secondary: #C1FC7E;
-    --must-black: #F4F1EE;
+    --must-black: #141414;
+    --must-text: #141414;
+    --must-surface: #FFFFFF;
+    --must-surface-alt: #E7E8FF;
+    --must-surface-muted: rgba(255, 255, 255, 0.72);
+    --must-border: rgba(20, 20, 20, 0.18);
+    --must-focus: #C1FC7E;
+    --must-on-primary: #141414;
+    --must-on-surface: #141414;
+    --must-on-text: #FFFFFF;
     --must-accent-blue: #FFFFFF;
     --must-light-blue: #E7E8FF;
-    --must-secondary-blue: #FFFFFF;
+    --must-secondary-blue: #D9DEE5;
     --must-gold: #DA1E28;
+
+    --must-space-2xs: 4px;
+    --must-space-xs: 8px;
+    --must-space-sm: 12px;
+    --must-space-md: 16px;
+    --must-space-lg: 24px;
+    --must-space-xl: 32px;
+    --must-space-2xl: 48px;
+    --must-space-3xl: 64px;
+
+    --must-button-bg: transparent;
+    --must-button-text: var(--must-text);
+    --must-button-border: var(--must-text);
+    --must-button-radius: 4px;
+    --must-button-padding-inline: var(--must-space-lg);
+    --must-button-padding-block: var(--must-space-sm);
+    --must-button-focus: var(--must-focus);
+
+    --must-form-bg: var(--must-surface);
+    --must-form-color: var(--must-text);
+    --must-form-border: var(--must-border);
+    --must-form-radius: 4px;
+    --must-form-padding-inline: var(--must-space-md);
+    --must-form-padding-block: var(--must-space-sm);
+    --must-form-placeholder: rgba(20, 20, 20, 0.58);
+    --must-form-focus: var(--must-focus);
 }
 
 .must-hotel-booking-page,
@@ -66,7 +101,7 @@
 .must-hotel-booking-rooms-admin,
 .must-hotel-booking-settings-page {
     font-family: var(--must-font-family);
-    color: var(--must-black);
+    color: var(--must-text);
 }
 
 .must-hotel-booking-page h1,
@@ -164,10 +199,11 @@
     font-family: var(--must-font-family);
     font-size: var(--must-body-m-size);
     line-height: var(--must-body-m-line-height);
-    color: #121212;
-    background: #fff;
-    border: 1px solid #ccd0d4;
-    border-radius: 4px;
+    color: var(--must-form-color);
+    background: var(--must-form-bg);
+    border: 1px solid var(--must-form-border);
+    border-radius: var(--must-form-radius);
+    padding: var(--must-form-padding-block) var(--must-form-padding-inline);
 }
 
 .must-hotel-booking-page button,
@@ -182,9 +218,7 @@
 .must-admin-quick-booking-panel .button.button-primary,
 .must-hotel-booking-rooms-admin .button.button-primary,
 .must-hotel-booking-settings-page .button.button-primary {
-    --must-button-bg: transparent;
-    --must-button-border: currentColor;
-    --must-button-color: #121212;
+    --must-button-color: var(--must-button-text);
     font-family: var(--must-font-family);
     font-size: var(--must-button-m-size);
     line-height: var(--must-button-m-line-height);
@@ -192,7 +226,8 @@
     color: var(--must-button-color);
     background: var(--must-button-bg);
     border: 1px solid var(--must-button-border);
-    border-radius: 4px;
+    border-radius: var(--must-button-radius);
+    padding: var(--must-button-padding-block) var(--must-button-padding-inline);
     transition: none;
     appearance: none;
     -webkit-appearance: none;
@@ -261,6 +296,51 @@
     outline: none;
 }
 
+.must-hotel-booking-page input::placeholder,
+.must-hotel-booking-page textarea::placeholder,
+.must-hotel-booking-widget input::placeholder,
+.must-hotel-booking-widget textarea::placeholder,
+.must-admin-calendar-page input::placeholder,
+.must-admin-calendar-page textarea::placeholder,
+.must-admin-quick-booking-panel input::placeholder,
+.must-admin-quick-booking-panel textarea::placeholder,
+.must-hotel-booking-rooms-admin input::placeholder,
+.must-hotel-booking-rooms-admin textarea::placeholder,
+.must-hotel-booking-settings-page input::placeholder,
+.must-hotel-booking-settings-page textarea::placeholder {
+    color: var(--must-form-placeholder);
+}
+
+.must-hotel-booking-page button:focus-visible,
+.must-hotel-booking-page .button:focus-visible,
+.must-hotel-booking-page input:focus-visible,
+.must-hotel-booking-page select:focus-visible,
+.must-hotel-booking-page textarea:focus-visible,
+.must-hotel-booking-widget button:focus-visible,
+.must-hotel-booking-widget .button:focus-visible,
+.must-hotel-booking-widget input:focus-visible,
+.must-hotel-booking-widget select:focus-visible,
+.must-hotel-booking-widget textarea:focus-visible,
+.must-admin-calendar-page .button.button-primary:focus-visible,
+.must-admin-calendar-page input:focus-visible,
+.must-admin-calendar-page select:focus-visible,
+.must-admin-calendar-page textarea:focus-visible,
+.must-admin-quick-booking-panel .button.button-primary:focus-visible,
+.must-admin-quick-booking-panel input:focus-visible,
+.must-admin-quick-booking-panel select:focus-visible,
+.must-admin-quick-booking-panel textarea:focus-visible,
+.must-hotel-booking-rooms-admin .button.button-primary:focus-visible,
+.must-hotel-booking-rooms-admin input:focus-visible,
+.must-hotel-booking-rooms-admin select:focus-visible,
+.must-hotel-booking-rooms-admin textarea:focus-visible,
+.must-hotel-booking-settings-page .button.button-primary:focus-visible,
+.must-hotel-booking-settings-page input:focus-visible,
+.must-hotel-booking-settings-page select:focus-visible,
+.must-hotel-booking-settings-page textarea:focus-visible {
+    outline: 2px solid var(--must-form-focus);
+    outline-offset: 2px;
+}
+
 .must-hotel-booking-page a,
 .must-hotel-booking-widget a,
 .must-admin-calendar-page a,
@@ -278,8 +358,8 @@
 .must-hotel-booking-page .must-hotel-booking-room-card,
 .must-hotel-booking-page-checkout .must-hotel-booking-checkout-summary,
 .must-hotel-booking-page-checkout .must-hotel-booking-checkout-form-wrap {
-    background: #fff;
-    border: 1px solid #dcdcde;
+    background: var(--must-surface);
+    border: 1px solid var(--must-border);
     border-radius: 6px;
 }
 

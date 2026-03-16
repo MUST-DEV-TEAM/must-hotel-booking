@@ -156,6 +156,9 @@
         var selectedRoomIds = Array.isArray(state && state.selected_room_ids) ? state.selected_room_ids.map(function (value) {
             return String(value);
         }) : [];
+        var selectedRatePlans = state && state.selected_room_rate_plans && typeof state.selected_room_rate_plans === 'object'
+            ? state.selected_room_rate_plans
+            : {};
         var selectedRoomMap = {};
 
         selectedRoomIds.forEach(function (roomId) {
@@ -168,13 +171,20 @@
             }
 
             var roomId = String(form.getAttribute('data-room-id') || '');
-            var isSelected = !!selectedRoomMap[roomId];
+            var ratePlanId = String(form.getAttribute('data-rate-plan-id') || '0');
+            var selectedRatePlanId = Object.prototype.hasOwnProperty.call(selectedRatePlans, roomId)
+                ? String(selectedRatePlans[roomId])
+                : '';
+            var roomIsSelected = !!selectedRoomMap[roomId];
+            var isSelected = roomIsSelected && selectedRatePlanId === ratePlanId;
+            var isSwitchingRate = roomIsSelected && !isSelected;
             var actionInput = form.querySelector('input[name="must_accommodation_action"]');
             var nonceInput = form.querySelector('input[name="must_accommodation_nonce"]');
             var button = form.querySelector('.must-booking-room-book-button');
             var label = button ? button.querySelector('span') : null;
             var icon = button ? button.querySelector('img') : null;
             var card = form.closest(cardSelector);
+            var ratePlanRow = form.closest('.must-booking-room-rate-plan');
             var buttonLabel = '';
             var buttonDisabled = false;
             var showArrow = false;
@@ -186,18 +196,20 @@
             if (isSelected) {
                 actionInput.value = 'remove_selected_room';
                 nonceInput.value = String(form.getAttribute('data-remove-nonce') || '');
-                buttonLabel = String(labels.removeRoom || 'Remove Room');
+                buttonLabel = String(labels.removeSelection || labels.removeRoom || 'Remove Selection');
                 buttonDisabled = false;
                 showArrow = false;
             } else {
                 actionInput.value = 'select_room';
                 nonceInput.value = String(form.getAttribute('data-select-nonce') || '');
-                buttonLabel = state && state.single_room_mode
-                    ? String(labels.bookNow || 'Book Now')
-                    : (state && state.selection_limit_reached
-                        ? String(labels.selectionFull || 'Selection Full')
-                        : String(labels.addRoom || 'Add Room'));
-                buttonDisabled = !!(state && !state.single_room_mode && state.selection_limit_reached);
+                buttonLabel = isSwitchingRate
+                    ? String(labels.chooseRate || 'Choose This Rate')
+                    : (state && state.single_room_mode
+                        ? String(labels.bookNow || 'Book Now')
+                        : (state && state.selection_limit_reached
+                            ? String(labels.selectionFull || 'Selection Full')
+                            : String(labels.addRoom || 'Add Room')));
+                buttonDisabled = !!(state && !state.single_room_mode && state.selection_limit_reached && !roomIsSelected);
                 showArrow = !buttonDisabled;
             }
 
@@ -213,7 +225,11 @@
             button.classList.toggle('is-selected', isSelected);
 
             if (card) {
-                card.classList.toggle('is-selected', isSelected);
+                card.classList.toggle('is-selected', roomIsSelected);
+            }
+
+            if (ratePlanRow) {
+                ratePlanRow.classList.toggle('is-selected', isSelected);
             }
         });
     }

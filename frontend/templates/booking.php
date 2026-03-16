@@ -324,6 +324,7 @@ if ($checkout !== '') {
                         $total_preview = isset($room['dynamic_total_price']) && $room['dynamic_total_price'] !== null
                             ? (float) $room['dynamic_total_price']
                             : (isset($room['price_preview_total']) && $room['price_preview_total'] !== null ? (float) $room['price_preview_total'] : null);
+                        $rate_plans = isset($room['rate_plans']) && \is_array($room['rate_plans']) ? $room['rate_plans'] : [];
                         ?>
                         <article class="must-hotel-booking-room-card">
                             <div class="must-booking-room-media">
@@ -398,21 +399,66 @@ if ($checkout !== '') {
                                 </div>
 
                                 <div class="must-booking-room-actions">
-                                    <form class="must-hotel-booking-select-room-form" method="post" action="<?php echo \esc_url($booking_url); ?>">
-                                        <?php \wp_nonce_field('must_booking_select_room', 'must_booking_nonce'); ?>
-                                        <input type="hidden" name="must_booking_action" value="select_room" />
-                                        <input type="hidden" name="room_id" value="<?php echo \esc_attr((string) $room_id); ?>" />
-                                        <input class="must-booking-hidden-checkin" type="hidden" name="checkin" value="<?php echo \esc_attr($checkin); ?>" />
-                                        <input class="must-booking-hidden-checkout" type="hidden" name="checkout" value="<?php echo \esc_attr($checkout); ?>" />
-                                        <input class="must-booking-hidden-guests" type="hidden" name="guests" value="<?php echo \esc_attr((string) $guests); ?>" />
-                                        <input class="must-booking-hidden-accommodation-type" type="hidden" name="accommodation_type" value="<?php echo \esc_attr($accommodation_type); ?>" />
-                                        <button type="submit" class="must-booking-room-book-button">
-                                            <span><?php echo \esc_html__('Book Now', 'must-hotel-booking'); ?></span>
-                                            <?php if ($arrow_icon_url !== '') : ?>
-                                                <img src="<?php echo \esc_url($arrow_icon_url); ?>" alt="" aria-hidden="true" />
-                                            <?php endif; ?>
-                                        </button>
-                                    </form>
+                                    <?php if (!empty($rate_plans)) : ?>
+                                        <div class="must-booking-room-rate-plans">
+                                            <?php foreach ($rate_plans as $rate_plan) : ?>
+                                                <?php
+                                                if (!\is_array($rate_plan)) {
+                                                    continue;
+                                                }
+
+                                                $rate_plan_id = isset($rate_plan['id']) ? (int) $rate_plan['id'] : 0;
+                                                $rate_plan_name = isset($rate_plan['name']) ? (string) $rate_plan['name'] : \__('Rate', 'must-hotel-booking');
+                                                $rate_plan_description = isset($rate_plan['description']) ? (string) $rate_plan['description'] : '';
+                                                $rate_plan_nightly_price = isset($rate_plan['nightly_price']) ? (float) $rate_plan['nightly_price'] : 0.0;
+                                                $rate_plan_total_price = isset($rate_plan['total_price']) ? (float) $rate_plan['total_price'] : 0.0;
+                                                ?>
+                                                <div class="must-booking-room-rate-plan">
+                                                    <div class="must-booking-room-rate-plan-copy">
+                                                        <strong><?php echo \esc_html($rate_plan_name); ?></strong>
+                                                        <span><?php echo \esc_html(\must_hotel_booking\format_frontend_money($rate_plan_nightly_price, (string) ($room['currency'] ?? 'USD'))); ?></span>
+                                                    </div>
+
+                                                    <?php if ($rate_plan_description !== '' || $rate_plan_total_price > 0.0) : ?>
+                                                        <div class="must-booking-room-rate-plan-meta">
+                                                            <?php if ($rate_plan_description !== '') : ?>
+                                                                <p><?php echo \esc_html($rate_plan_description); ?></p>
+                                                            <?php endif; ?>
+                                                            <?php if ($rate_plan_total_price > 0.0) : ?>
+                                                                <p>
+                                                                    <?php
+                                                                    echo \esc_html(
+                                                                        \sprintf(
+                                                                            __('Stay Total: %s', 'must-hotel-booking'),
+                                                                            \must_hotel_booking\format_frontend_money($rate_plan_total_price, (string) ($room['currency'] ?? 'USD'))
+                                                                        )
+                                                                    );
+                                                                    ?>
+                                                                </p>
+                                                            <?php endif; ?>
+                                                        </div>
+                                                    <?php endif; ?>
+
+                                                    <form class="must-hotel-booking-select-room-form" method="post" action="<?php echo \esc_url($booking_url); ?>">
+                                                        <?php \wp_nonce_field('must_booking_select_room', 'must_booking_nonce'); ?>
+                                                        <input type="hidden" name="must_booking_action" value="select_room" />
+                                                        <input type="hidden" name="room_id" value="<?php echo \esc_attr((string) $room_id); ?>" />
+                                                        <input type="hidden" name="rate_plan_id" value="<?php echo \esc_attr((string) $rate_plan_id); ?>" />
+                                                        <input class="must-booking-hidden-checkin" type="hidden" name="checkin" value="<?php echo \esc_attr($checkin); ?>" />
+                                                        <input class="must-booking-hidden-checkout" type="hidden" name="checkout" value="<?php echo \esc_attr($checkout); ?>" />
+                                                        <input class="must-booking-hidden-guests" type="hidden" name="guests" value="<?php echo \esc_attr((string) $guests); ?>" />
+                                                        <input class="must-booking-hidden-accommodation-type" type="hidden" name="accommodation_type" value="<?php echo \esc_attr($accommodation_type); ?>" />
+                                                        <button type="submit" class="must-booking-room-book-button">
+                                                            <span><?php echo \esc_html__('Book Now', 'must-hotel-booking'); ?></span>
+                                                            <?php if ($arrow_icon_url !== '') : ?>
+                                                                <img src="<?php echo \esc_url($arrow_icon_url); ?>" alt="" aria-hidden="true" />
+                                                            <?php endif; ?>
+                                                        </button>
+                                                    </form>
+                                                </div>
+                                            <?php endforeach; ?>
+                                        </div>
+                                    <?php endif; ?>
 
                                     <a class="must-booking-room-details" href="<?php echo \esc_url($details_url); ?>">
                                         <span><?php echo \esc_html__('Additional Details', 'must-hotel-booking'); ?></span>

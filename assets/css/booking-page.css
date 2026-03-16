@@ -1207,6 +1207,61 @@
     margin: 0;
 }
 
+.must-hotel-booking-page-booking .must-booking-room-rate-plans {
+    display: grid;
+    gap: 12px;
+    width: 100%;
+}
+
+.must-hotel-booking-page-booking .must-booking-room-rate-plan {
+    display: grid;
+    gap: 10px;
+    padding: 14px 16px;
+    border: 1px solid rgba(20, 20, 20, 0.14);
+    border-radius: 18px;
+    background: rgba(255, 255, 255, 0.82);
+}
+
+.must-hotel-booking-page-booking .must-booking-room-rate-plan.is-selected {
+    border-color: #141414;
+    box-shadow: 0 0 0 1px #141414;
+}
+
+.must-hotel-booking-page-booking .must-booking-room-rate-plan-copy {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 16px;
+}
+
+.must-hotel-booking-page-booking .must-booking-room-rate-plan-copy strong {
+    font-family: 'PP Neue Montreal', sans-serif;
+    font-weight: 500;
+    font-size: 18px;
+    line-height: 1.2;
+}
+
+.must-hotel-booking-page-booking .must-booking-room-rate-plan-copy span {
+    font-family: 'PP Neue Montreal', sans-serif;
+    font-weight: 500;
+    font-size: 17px;
+    line-height: 1.2;
+    white-space: nowrap;
+}
+
+.must-hotel-booking-page-booking .must-booking-room-rate-plan-meta {
+    display: grid;
+    gap: 4px;
+}
+
+.must-hotel-booking-page-booking .must-booking-room-rate-plan-meta p {
+    margin: 0;
+    color: rgba(20, 20, 20, 0.7);
+    font-family: 'PP Neue Montreal', sans-serif;
+    font-size: 14px;
+    line-height: 1.45;
+}
+
 .must-hotel-booking-page-booking .must-booking-room-book-button {
     --must-button-bg: transparent;
     --must-button-border: transparent;

@@ -156,8 +156,11 @@ $format_display_date = static function (string $date): string {
                         $room_id = isset($selected_room_item['room_id']) ? (int) $selected_room_item['room_id'] : 0;
                         $assigned_room_guests = isset($selected_room_item['assigned_guests']) ? \max(1, (int) $selected_room_item['assigned_guests']) : \max(1, $guests);
                         $room_name = isset($room['name']) ? (string) $room['name'] : \__('Room', 'must-hotel-booking');
+                        $rate_plan_name = isset($selected_room_item['rate_plan']['name']) ? (string) $selected_room_item['rate_plan']['name'] : '';
                         $room_currency = isset($room['currency']) ? (string) $room['currency'] : 'USD';
-                        $max_guests = isset($room['max_guests']) ? (int) $room['max_guests'] : 0;
+                        $max_guests = isset($room['effective_max_guests'])
+                            ? (int) $room['effective_max_guests']
+                            : (isset($room['max_guests']) ? (int) $room['max_guests'] : 0);
                         $room_people_icon_url = isset($room['people_icon_url']) ? (string) $room['people_icon_url'] : '';
                         $room_primary_image_url = isset($room['primary_image_url']) ? (string) $room['primary_image_url'] : '';
                         $room_total = isset($pricing['total_price']) ? (float) $pricing['total_price'] : (isset($room['dynamic_total_price']) ? (float) $room['dynamic_total_price'] : 0.0);
@@ -192,6 +195,11 @@ $format_display_date = static function (string $date): string {
                                 </div>
 
                                 <div class="must-checkout-divider"></div>
+
+                                <?php if ($rate_plan_name !== '') : ?>
+                                    <p><?php echo \esc_html(\sprintf(__('Rate Plan: %s', 'must-hotel-booking'), $rate_plan_name)); ?></p>
+                                    <div class="must-checkout-divider"></div>
+                                <?php endif; ?>
 
                                 <div class="must-checkout-stay-meta">
                                     <p>
@@ -277,7 +285,12 @@ $format_display_date = static function (string $date): string {
 
                             <div class="must-checkout-room-pricing-pane">
                                 <div class="must-checkout-room-title-row">
-                                    <h3><?php echo \esc_html($room_name); ?></h3>
+                                    <div>
+                                        <h3><?php echo \esc_html($room_name); ?></h3>
+                                        <?php if ($rate_plan_name !== '') : ?>
+                                            <p><?php echo \esc_html($rate_plan_name); ?></p>
+                                        <?php endif; ?>
+                                    </div>
                                     <strong><?php echo \esc_html($format_money($room_total, $room_currency)); ?></strong>
                                 </div>
 

@@ -664,6 +664,7 @@
             var detailsUrl = String(room.details_url || '');
             var primaryImageUrl = String(room.primary_image_url || '');
             var galleryImages = Array.isArray(room.gallery_images) ? room.gallery_images.slice(0, 3) : [];
+            var ratePlans = Array.isArray(room.rate_plans) ? room.rate_plans : [];
             var metaParts = [];
 
             if (maxGuests > 0) {
@@ -710,6 +711,49 @@
                     '</a>'
                 )
                 : '';
+            var ratePlansHtml = ratePlans.map(function (ratePlan) {
+                var ratePlanId = Number(ratePlan.id || 0);
+                var ratePlanName = String(ratePlan.name || 'Rate');
+                var ratePlanDescription = String(ratePlan.description || '');
+                var nightlyPrice = Number(ratePlan.nightly_price || 0);
+                var totalPrice = Number(ratePlan.total_price || 0);
+                var metaHtml = '';
+
+                if (ratePlanDescription !== '' || (Number.isFinite(totalPrice) && totalPrice > 0)) {
+                    metaHtml =
+                        '<div class="must-booking-room-rate-plan-meta">' +
+                            (ratePlanDescription !== '' ? '<p>' + escapeHtml(ratePlanDescription) + '</p>' : '') +
+                            ((Number.isFinite(totalPrice) && totalPrice > 0)
+                                ? '<p>' + escapeHtml(formatTemplate(strings.stayTotalFormat || 'Stay Total: %s', formatPrice(totalPrice))) + '</p>'
+                                : '') +
+                        '</div>';
+                }
+
+                return (
+                    '<div class="must-booking-room-rate-plan">' +
+                        '<div class="must-booking-room-rate-plan-copy">' +
+                            '<strong>' + escapeHtml(ratePlanName) + '</strong>' +
+                            '<span>' + escapeHtml(formatPrice(nightlyPrice)) + '</span>' +
+                        '</div>' +
+                        metaHtml +
+                        '<form class="must-hotel-booking-select-room-form" method="post" action="' + escapeHtml(bookingUrl) + '">' +
+                            '<input type="hidden" name="must_booking_nonce" value="' + escapeHtml(nonce) + '" />' +
+                            '<input type="hidden" name="must_booking_action" value="select_room" />' +
+                            '<input type="hidden" name="room_id" value="' + escapeHtml(roomId) + '" />' +
+                            '<input type="hidden" name="rate_plan_id" value="' + escapeHtml(ratePlanId) + '" />' +
+                            '<input class="must-booking-hidden-checkin" type="hidden" name="checkin" value="' + escapeHtml(context.checkin) + '" />' +
+                            '<input class="must-booking-hidden-checkout" type="hidden" name="checkout" value="' + escapeHtml(context.checkout) + '" />' +
+                            '<input class="must-booking-hidden-guests" type="hidden" name="guests" value="' + escapeHtml(context.guests) + '" />' +
+                            '<input class="must-booking-room-count" type="hidden" name="room_count" value="' + escapeHtml(context.roomCount || 0) + '" />' +
+                            '<input class="must-booking-hidden-accommodation-type" type="hidden" name="accommodation_type" value="' + escapeHtml(context.accommodationType || '') + '" />' +
+                            '<button type="submit" class="must-booking-room-book-button">' +
+                                '<span>' + escapeHtml(strings.bookNow || 'Book Now') + '</span>' +
+                                arrowIconHtml +
+                            '</button>' +
+                        '</form>' +
+                    '</div>'
+                );
+            }).join('');
 
             return (
                 '<article class="must-hotel-booking-room-card">' +
@@ -722,20 +766,7 @@
                         '</div>' +
                         '<div class="must-booking-room-thumbs">' + thumbsHtml + '</div>' +
                         '<div class="must-booking-room-actions">' +
-                            '<form class="must-hotel-booking-select-room-form" method="post" action="' + escapeHtml(bookingUrl) + '">' +
-                                '<input type="hidden" name="must_booking_nonce" value="' + escapeHtml(nonce) + '" />' +
-                                '<input type="hidden" name="must_booking_action" value="select_room" />' +
-                                '<input type="hidden" name="room_id" value="' + escapeHtml(roomId) + '" />' +
-                                '<input class="must-booking-hidden-checkin" type="hidden" name="checkin" value="' + escapeHtml(context.checkin) + '" />' +
-                                '<input class="must-booking-hidden-checkout" type="hidden" name="checkout" value="' + escapeHtml(context.checkout) + '" />' +
-                                '<input class="must-booking-hidden-guests" type="hidden" name="guests" value="' + escapeHtml(context.guests) + '" />' +
-                                '<input class="must-booking-room-count" type="hidden" name="room_count" value="' + escapeHtml(context.roomCount || 0) + '" />' +
-                                '<input class="must-booking-hidden-accommodation-type" type="hidden" name="accommodation_type" value="' + escapeHtml(context.accommodationType || '') + '" />' +
-                                '<button type="submit" class="must-booking-room-book-button">' +
-                                    '<span>' + escapeHtml(strings.bookNow || 'Book Now') + '</span>' +
-                                    arrowIconHtml +
-                                '</button>' +
-                            '</form>' +
+                            (ratePlansHtml !== '' ? ('<div class="must-booking-room-rate-plans">' + ratePlansHtml + '</div>') : '') +
                             detailsLinkHtml +
                         '</div>' +
                     '</div>' +

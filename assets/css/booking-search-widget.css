@@ -38,15 +38,15 @@
     flex-wrap: wrap;
     justify-content: space-between;
     align-items: center;
-    gap: clamp(18px, 4vw, 60px);
+    gap: var(--must-widget-gap, clamp(18px, 4vw, 60px));
     width: 100% !important;
-    padding: clamp(20px, 3vw, 36px) clamp(16px, 3vw, 40px);
-    background: #141414;
+    padding: var(--must-widget-padding-block, clamp(20px, 3vw, 36px)) var(--must-widget-padding-inline, clamp(16px, 3vw, 40px));
+    background: var(--must-widget-surface, var(--must-text));
     box-sizing: border-box;
     min-width: 0;
     max-width: 100%;
     margin: 0;
-    font-family: 'PP Neue Montreal', var(--must-font-family), sans-serif;
+    font-family: var(--must-widget-font-family, var(--must-font-family));
 }
 
 .must-hotel-booking-widget-booking-search .must-hotel-booking-booking-search-fields {
@@ -75,7 +75,7 @@
     min-width: 0;
     height: 50px;
     padding: 10px 20px;
-    border: 1px solid #f5f3ec;
+    border: 1px solid var(--must-widget-border, var(--must-widget-on-surface, var(--must-on-text)));
     box-sizing: border-box;
 }
 
@@ -98,12 +98,12 @@
     border: 0;
     outline: none;
     background: transparent;
-    color: #f5f3ec;
+    color: var(--must-widget-on-surface, var(--must-on-text));
     font-family: inherit;
     font-style: normal;
     font-weight: 500;
-    font-size: clamp(15px, 1.45vw, 20px);
-    line-height: 150%;
+    font-size: var(--must-body-l-size);
+    line-height: var(--must-body-l-line-height);
     letter-spacing: -0.011em;
     padding: 0;
     margin: 0;
@@ -111,7 +111,7 @@
 }
 
 .must-hotel-booking-widget-booking-search .must-hotel-booking-field input::placeholder {
-    color: #f5f3ec;
+    color: var(--must-widget-on-surface, var(--must-on-text));
     opacity: 1;
 }
 
@@ -147,9 +147,9 @@
     justify-content: center;
     gap: 10px;
     border: 0;
-    border-bottom: 1.5px solid #f5f3ec;
-    background: transparent;
-    color: #f5f3ec;
+    border-bottom: 1.5px solid var(--must-widget-button-border, var(--must-widget-on-surface, var(--must-on-text)));
+    background: var(--must-widget-button-bg, transparent);
+    color: var(--must-widget-button-text, var(--must-widget-on-surface, var(--must-on-text)));
     padding: 0 0 2px;
     margin: 0;
     cursor: pointer;
@@ -159,22 +159,22 @@
 
 .must-hotel-booking-widget-booking-search .must-hotel-booking-submit button:hover {
     opacity: 0.82;
-    border-bottom-color: #f5f3ec;
+    border-bottom-color: var(--must-widget-button-border, var(--must-widget-on-surface, var(--must-on-text)));
 }
 
 .must-hotel-booking-widget-booking-search .must-hotel-booking-submit button:focus-visible,
 .must-hotel-booking-widget-booking-search .must-hotel-booking-field input:focus-visible {
-    outline: 2px solid #f5f3ec;
+    outline: 2px solid var(--must-widget-focus, var(--must-focus));
     outline-offset: 4px;
 }
 
 .must-hotel-booking-widget-booking-search .must-hotel-booking-submit-text {
     font-style: normal;
-    font-weight: 400;
-    font-size: clamp(20px, 2.2vw, 28px);
-    line-height: 100%;
+    font-weight: var(--must-button-l-weight);
+    font-size: var(--must-button-l-size);
+    line-height: var(--must-button-l-line-height);
     letter-spacing: -0.011em;
-    color: #f5f3ec;
+    color: inherit;
 }
 
 .must-hotel-booking-widget-booking-search .must-hotel-booking-submit-icon {
@@ -191,7 +191,7 @@
 
 @media (max-width: 1366px) {
     .must-hotel-booking-widget-booking-search .must-hotel-booking-booking-search {
-        gap: 16px;
+        gap: var(--must-widget-gap, 16px);
     }
 
     .must-hotel-booking-widget-booking-search .must-hotel-booking-field {
@@ -219,8 +219,8 @@
         display: grid !important;
         grid-template-columns: 1fr;
         align-items: stretch;
-        gap: 16px;
-        padding: 26px 24px;
+        gap: var(--must-widget-gap, 16px);
+        padding: var(--must-widget-padding-block, 26px) var(--must-widget-padding-inline, 24px);
     }
 
     .must-hotel-booking-widget-booking-search .must-hotel-booking-booking-search-fields {
@@ -252,7 +252,7 @@
 
 @media (max-width: 767px) {
     .must-hotel-booking-widget-booking-search .must-hotel-booking-booking-search {
-        padding: 18px 14px;
+        padding: var(--must-widget-padding-block, 18px) var(--must-widget-padding-inline, 14px);
     }
 
     .must-hotel-booking-widget-booking-search .must-hotel-booking-booking-search-fields {

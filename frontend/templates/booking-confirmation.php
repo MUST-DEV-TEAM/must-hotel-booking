@@ -116,6 +116,9 @@ $render_payment_method_icon = static function (string $payment_method_key): stri
                 <?php foreach ($reservations as $reservation) : ?>
                     <div class="must-confirmation-success-card">
                         <p><strong><?php echo \esc_html((string) ($reservation['room_name'] ?? __('Room', 'must-hotel-booking'))); ?></strong></p>
+                        <?php if (!empty($reservation['rate_plan_name'])) : ?>
+                            <p><?php echo \esc_html(\sprintf(__('Rate Plan: %s', 'must-hotel-booking'), (string) $reservation['rate_plan_name'])); ?></p>
+                        <?php endif; ?>
                         <?php if (!empty($reservation['booking_id'])) : ?>
                             <p><?php echo \esc_html(\sprintf(__('Booking ID: %s', 'must-hotel-booking'), (string) $reservation['booking_id'])); ?></p>
                         <?php endif; ?>
@@ -273,11 +276,17 @@ $render_payment_method_icon = static function (string $payment_method_key): stri
                                     $room = isset($selected_room_item['room']) && \is_array($selected_room_item['room']) ? $selected_room_item['room'] : [];
                                     $pricing = isset($selected_room_item['pricing']) && \is_array($selected_room_item['pricing']) ? $selected_room_item['pricing'] : [];
                                     $room_name = isset($room['name']) ? (string) $room['name'] : \__('Room', 'must-hotel-booking');
+                                    $rate_plan_name = isset($selected_room_item['rate_plan']['name']) ? (string) $selected_room_item['rate_plan']['name'] : '';
                                     $room_currency = isset($room['currency']) ? (string) $room['currency'] : $summary_currency;
                                     $room_total = isset($pricing['total_price']) ? (float) $pricing['total_price'] : (isset($room['dynamic_total_price']) ? (float) $room['dynamic_total_price'] : 0.0);
                                     ?>
                                     <div class="must-confirmation-order-row">
-                                        <span><?php echo \esc_html($room_name); ?></span>
+                                        <span>
+                                            <?php echo \esc_html($room_name); ?>
+                                            <?php if ($rate_plan_name !== '') : ?>
+                                                <small><?php echo \esc_html(' - ' . $rate_plan_name); ?></small>
+                                            <?php endif; ?>
+                                        </span>
                                         <span><?php echo \esc_html($format_money($room_total, $room_currency)); ?></span>
                                     </div>
                                 <?php endforeach; ?>
