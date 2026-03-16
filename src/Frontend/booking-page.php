@@ -606,6 +606,7 @@ function get_booking_results_room_view_data(array $room): ?array
         'effective_max_guests' => isset($room['effective_max_guests'])
             ? (int) $room['effective_max_guests']
             : (isset($room['max_guests']) ? (int) $room['max_guests'] : 0),
+        'available_count' => isset($room['available_count']) ? \max(0, (int) $room['available_count']) : 0,
         'base_price' => isset($room['base_price']) ? (float) $room['base_price'] : 0.0,
         'selected_rate_plan_id' => isset($room['selected_rate_plan_id']) ? (int) $room['selected_rate_plan_id'] : 0,
         'selected_rate_plan_name' => isset($room['selected_rate_plan_name']) ? (string) $room['selected_rate_plan_name'] : '',
@@ -737,8 +738,7 @@ function get_booking_page_view_data(): array
         if (
             !empty($context['is_valid']) &&
             (string) ($context['checkin'] ?? '') !== '' &&
-            (string) ($context['checkout'] ?? '') !== '' &&
-            \function_exists(__NAMESPACE__ . '\calculate_booking_price')
+            (string) ($context['checkout'] ?? '') !== ''
         ) {
             $pricing = PricingEngine::calculateTotal(
                 (int) ($fixed_room['id'] ?? 0),
@@ -900,7 +900,7 @@ function enqueue_booking_page_assets(): void
     \wp_enqueue_style(
         'must-hotel-booking-booking-page',
         MUST_HOTEL_BOOKING_URL . 'assets/css/booking-page.css',
-        ['must-hotel-booking-design-system'],
+        [],
         MUST_HOTEL_BOOKING_VERSION
     );
 

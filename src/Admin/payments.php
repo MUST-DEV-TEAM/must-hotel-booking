@@ -3,6 +3,7 @@
 namespace MustHotelBooking\Admin;
 
 use MustHotelBooking\Core\MustBookingConfig;
+use MustHotelBooking\Engine\PaymentEngine;
 
 /**
  * Build Payments admin page URL.
@@ -169,23 +170,11 @@ function maybe_handle_payment_methods_save_request(): void
     }
 
     $saved = save_payment_method_states($states);
-    $environment_catalog = \function_exists(__NAMESPACE__ . '\get_stripe_environment_catalog')
-        ? get_stripe_environment_catalog()
-        : [
-            'local' => [],
-            'staging' => [],
-            'production' => [],
-        ];
+    $environment_catalog = PaymentEngine::getStripeEnvironmentCatalog();
 
     if (\class_exists(MustBookingConfig::class)) {
         foreach (\array_keys($environment_catalog) as $environment_key) {
-            $setting_keys = \function_exists(__NAMESPACE__ . '\get_stripe_environment_setting_keys')
-                ? get_stripe_environment_setting_keys((string) $environment_key)
-                : [
-                    'publishable_key' => 'stripe_' . $environment_key . '_publishable_key',
-                    'secret_key' => 'stripe_' . $environment_key . '_secret_key',
-                    'webhook_secret' => 'stripe_' . $environment_key . '_webhook_secret',
-                ];
+            $setting_keys = PaymentEngine::getStripeEnvironmentSettingKeys((string) $environment_key);
 
             foreach ($setting_keys as $field_key => $setting_key) {
                 $posted_field_key = 'stripe_' . $environment_key . '_' . $field_key;
@@ -197,13 +186,7 @@ function maybe_handle_payment_methods_save_request(): void
             }
         }
 
-        $production_keys = \function_exists(__NAMESPACE__ . '\get_stripe_environment_setting_keys')
-            ? get_stripe_environment_setting_keys('production')
-            : [
-                'publishable_key' => 'stripe_production_publishable_key',
-                'secret_key' => 'stripe_production_secret_key',
-                'webhook_secret' => 'stripe_production_webhook_secret',
-            ];
+        $production_keys = PaymentEngine::getStripeEnvironmentSettingKeys('production');
 
         MustBookingConfig::set_setting(
             'stripe_publishable_key',
@@ -268,19 +251,9 @@ function render_admin_payments_page(): void
 
     $catalog = get_payment_methods_catalog();
     $states = get_payment_method_states();
-    $environment_catalog = \function_exists(__NAMESPACE__ . '\get_stripe_environment_catalog')
-        ? get_stripe_environment_catalog()
-        : [
-            'local' => ['label' => \__('Localhost', 'must-hotel-booking'), 'description' => ''],
-            'staging' => ['label' => \__('Staging / IP website', 'must-hotel-booking'), 'description' => ''],
-            'production' => ['label' => \__('Live website', 'must-hotel-booking'), 'description' => ''],
-        ];
-    $active_environment = \function_exists(__NAMESPACE__ . '\get_active_site_environment')
-        ? get_active_site_environment()
-        : 'production';
-    $webhook_url = \function_exists(__NAMESPACE__ . '\get_stripe_webhook_url')
-        ? get_stripe_webhook_url()
-        : \rest_url('must-hotel-booking/v1/stripe/webhook');
+    $environment_catalog = PaymentEngine::getStripeEnvironmentCatalog();
+    $active_environment = PaymentEngine::getActiveSiteEnvironment();
+    $webhook_url = PaymentEngine::getStripeWebhookUrl();
 
     echo '<div class="wrap">';
     echo '<h1>' . \esc_html__('Payments', 'must-hotel-booking') . '</h1>';
@@ -320,7 +293,7 @@ function render_admin_payments_page(): void
 
     echo '<h2 style="margin-top:24px;">' . \esc_html__('Stripe Checkout', 'must-hotel-booking') . '</h2>';
     echo '<p>' . \esc_html__('Store a separate Stripe profile for each site environment. The active profile is selected from General Settings.', 'must-hotel-booking') . '</p>';
-    echo '<p><strong>' . \esc_html__('Currently active profile:', 'must-hotel-booking') . '</strong> ' . \esc_html(\function_exists(__NAMESPACE__ . '\get_site_environment_label') ? get_site_environment_label($active_environment) : $active_environment) . '</p>';
+    echo '<p><strong>' . \esc_html__('Currently active profile:', 'must-hotel-booking') . '</strong> ' . \esc_html(PaymentEngine::getSiteEnvironmentLabel($active_environment)) . '</p>';
 
     foreach ($environment_catalog as $environment_key => $environment_meta) {
         if (!\is_string($environment_key)) {
@@ -330,13 +303,7 @@ function render_admin_payments_page(): void
         $environment_label = isset($environment_meta['label']) ? (string) $environment_meta['label'] : $environment_key;
         $environment_description = isset($environment_meta['description']) ? (string) $environment_meta['description'] : '';
         $is_active_environment = $environment_key === $active_environment;
-        $credentials = \function_exists(__NAMESPACE__ . '\get_stripe_environment_credentials')
-            ? get_stripe_environment_credentials($environment_key)
-            : [
-                'publishable_key' => '',
-                'secret_key' => '',
-                'webhook_secret' => '',
-            ];
+        $credentials = PaymentEngine::getStripeEnvironmentCredentials($environment_key);
 
         echo '<div style="margin-top:20px; padding:16px; border:1px solid #dcdcde; border-radius:8px; background:' . ($is_active_environment ? '#f6ffed' : '#fff') . ';">';
         echo '<h3 style="margin-top:0;">' . \esc_html($environment_label) . ($is_active_environment ? ' <span style="font-size:12px; color:#2271b1;">' . \esc_html__('Active', 'must-hotel-booking') . '</span>' : '') . '</h3>';

@@ -32,15 +32,15 @@ final class BookingValidationEngine
             $errors[] = \__('Please provide check-in and check-out dates.', 'must-hotel-booking');
         }
 
-        if ($checkin !== '' && !is_valid_booking_date($checkin)) {
+        if ($checkin !== '' && !AvailabilityEngine::isValidBookingDate($checkin)) {
             $errors[] = \__('Check-in date is invalid.', 'must-hotel-booking');
         }
 
-        if ($checkout !== '' && !is_valid_booking_date($checkout)) {
+        if ($checkout !== '' && !AvailabilityEngine::isValidBookingDate($checkout)) {
             $errors[] = \__('Check-out date is invalid.', 'must-hotel-booking');
         }
 
-        if ($checkin !== '' && $checkout !== '' && is_valid_booking_date($checkin) && is_valid_booking_date($checkout) && $checkin >= $checkout) {
+        if ($checkin !== '' && $checkout !== '' && AvailabilityEngine::isValidBookingDate($checkin) && AvailabilityEngine::isValidBookingDate($checkout) && $checkin >= $checkout) {
             $errors[] = \__('Check-out date must be after check-in date.', 'must-hotel-booking');
         }
 

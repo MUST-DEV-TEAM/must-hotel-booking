@@ -3,13 +3,13 @@
     gap: 8px;
     align-items: center;
     margin: 14px 0;
-    font-family: var(--must-font-family);
+    font-family: inherit;
 }
 
 .must-admin-calendar-page .must-calendar-range-label {
-    font-weight: var(--must-menu-tabs-weight);
-    font-size: var(--must-menu-tabs-size);
-    line-height: var(--must-menu-tabs-line-height);
+    font-weight: 600;
+    font-size: 14px;
+    line-height: 1.4;
 }
 
 .must-admin-calendar-page .must-calendar-action-card {
@@ -68,7 +68,7 @@
 .must-admin-calendar-grid .must-calendar-room-col {
     text-align: left;
     min-width: 180px;
-    background: var(--must-primary);
+    background: #f6f8fb;
 }
 
 .must-admin-calendar-grid .must-calendar-date-col {

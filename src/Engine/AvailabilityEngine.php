@@ -4,9 +4,201 @@ namespace MustHotelBooking\Engine;
 
 final class AvailabilityEngine
 {
+    public static function isValidBookingDate(string $date): bool
+    {
+        $parsed = \DateTime::createFromFormat('Y-m-d', $date);
+
+        return $parsed instanceof \DateTime && $parsed->format('Y-m-d') === $date;
+    }
+
+    public static function getAvailabilityNightsCount(string $checkin, string $checkout): int
+    {
+        if (!self::isValidBookingDate($checkin) || !self::isValidBookingDate($checkout) || $checkin >= $checkout) {
+            return 0;
+        }
+
+        try {
+            $start = new \DateTimeImmutable($checkin);
+            $end = new \DateTimeImmutable($checkout);
+        } catch (\Exception $exception) {
+            return 0;
+        }
+
+        return (int) $start->diff($end)->days;
+    }
+
+    public static function checkBookingRestrictions(int $roomId, string $checkin, string $checkout): bool
+    {
+        if ($roomId <= 0 || !self::isValidBookingDate($checkin) || !self::isValidBookingDate($checkout) || $checkin >= $checkout) {
+            return false;
+        }
+
+        $nights = self::getAvailabilityNightsCount($checkin, $checkout);
+
+        if ($nights <= 0) {
+            return false;
+        }
+
+        $rules = get_availability_repository()->getAvailabilityRules($roomId);
+
+        if (empty($rules)) {
+            return true;
+        }
+
+        $minimumStay = 0;
+        $maximumStay = 0;
+
+        foreach ($rules as $rule) {
+            if (!\is_array($rule)) {
+                continue;
+            }
+
+            $ruleType = isset($rule['rule_type']) ? \sanitize_key((string) $rule['rule_type']) : '';
+            $startDate = isset($rule['availability_date']) ? (string) $rule['availability_date'] : '';
+            $endDate = isset($rule['end_date']) ? (string) $rule['end_date'] : '';
+
+            if ($endDate === '') {
+                $endDate = $startDate;
+            }
+
+            if (($startDate !== '' && !self::isValidBookingDate($startDate)) || ($endDate !== '' && !self::isValidBookingDate($endDate))) {
+                continue;
+            }
+
+            if ($startDate !== '' && $endDate !== '' && $startDate > $endDate) {
+                continue;
+            }
+
+            if ($ruleType === 'minimum_stay') {
+                $value = \max(0, (int) ($rule['rule_value'] ?? 0));
+
+                if ($value > $minimumStay) {
+                    $minimumStay = $value;
+                }
+
+                continue;
+            }
+
+            if ($ruleType === 'maximum_stay') {
+                $value = \max(0, (int) ($rule['rule_value'] ?? 0));
+
+                if ($value > 0 && ($maximumStay === 0 || $value < $maximumStay)) {
+                    $maximumStay = $value;
+                }
+
+                continue;
+            }
+
+            if ($startDate === '' || $endDate === '') {
+                continue;
+            }
+
+            if ($ruleType === 'closed_arrival' && $checkin >= $startDate && $checkin <= $endDate) {
+                return false;
+            }
+
+            if ($ruleType === 'closed_departure' && $checkout >= $startDate && $checkout <= $endDate) {
+                return false;
+            }
+
+            if ($ruleType === 'maintenance_block' && $startDate < $checkout && $endDate >= $checkin) {
+                return false;
+            }
+        }
+
+        if ($minimumStay > 0 && $nights < $minimumStay) {
+            return false;
+        }
+
+        if ($maximumStay > 0 && $nights > $maximumStay) {
+            return false;
+        }
+
+        return true;
+    }
+
     public static function checkAvailability(int $roomId, string $checkin, string $checkout, string $excludeSessionId = ''): bool
     {
-        return check_room_availability($roomId, $checkin, $checkout, $excludeSessionId);
+        if ($roomId <= 0 || !self::isValidBookingDate($checkin) || !self::isValidBookingDate($checkout) || $checkin >= $checkout) {
+            return false;
+        }
+
+        if (!self::checkBookingRestrictions($roomId, $checkin, $checkout)) {
+            return false;
+        }
+
+        $excludeSessionId = $excludeSessionId !== '' ? LockEngine::normalizeSessionId($excludeSessionId) : '';
+
+        if (InventoryEngine::hasInventoryForRoomType($roomId)) {
+            return !empty(InventoryEngine::getAvailableRooms($roomId, $checkin, $checkout, $excludeSessionId));
+        }
+
+        $nonBlockingStatuses = \function_exists(__NAMESPACE__ . '\get_inventory_non_blocking_reservation_statuses')
+            ? get_inventory_non_blocking_reservation_statuses()
+            : ['cancelled', 'expired', 'payment_failed'];
+
+        return get_availability_repository()->checkRoomAvailability(
+            $roomId,
+            $checkin,
+            $checkout,
+            $nonBlockingStatuses,
+            LockEngine::getCurrentUtcDatetime(),
+            $excludeSessionId
+        );
+    }
+
+    /**
+     * @return array<int, array<string, mixed>>
+     */
+    public static function getAvailableRooms(string $checkin, string $checkout, int $guests = 1, string $category = 'standard-rooms'): array
+    {
+        if (!self::isValidBookingDate($checkin) || !self::isValidBookingDate($checkout) || $checkin >= $checkout) {
+            return [];
+        }
+
+        $guests = \max(1, $guests);
+        $category = \function_exists(__NAMESPACE__ . '\normalize_room_category')
+            ? normalize_room_category($category)
+            : 'standard-rooms';
+
+        LockEngine::cleanupExpiredLocks();
+
+        $sessionId = LockEngine::getOrCreateSessionId();
+        $filtered = [];
+        $roomTypes = get_room_repository()->getRoomsByType($category, $guests);
+
+        foreach ($roomTypes as $roomType) {
+            if (!\is_array($roomType)) {
+                continue;
+            }
+
+            $roomId = isset($roomType['id']) ? (int) $roomType['id'] : 0;
+
+            if ($roomId <= 0 || !self::checkBookingRestrictions($roomId, $checkin, $checkout)) {
+                continue;
+            }
+
+            if (InventoryEngine::hasInventoryForRoomType($roomId)) {
+                $availableCount = InventoryEngine::countAvailableRooms($roomId, $checkin, $checkout, $sessionId);
+
+                if ($availableCount <= 0) {
+                    continue;
+                }
+
+                $roomType['available_count'] = $availableCount;
+                $filtered[] = $roomType;
+                continue;
+            }
+
+            if (!self::checkAvailability($roomId, $checkin, $checkout, $sessionId)) {
+                continue;
+            }
+
+            $roomType['available_count'] = 1;
+            $filtered[] = $roomType;
+        }
+
+        return $filtered;
     }
 
     /**
@@ -255,6 +447,7 @@ final class AvailabilityEngine
             && \count($selectedRoomIds) === $resolvedRoomCount
             && $remainingGuests === 0;
         $selectionLimitReached = \count($selectedRoomIds) >= $resolvedRoomCount;
+        $singleRoomMode = $resolvedRoomCount <= 1;
         $selectionStatus = self::getAccommodationSelectionStatusData(
             \count($selectedRoomIds),
             $resolvedRoomCount,
@@ -270,12 +463,12 @@ final class AvailabilityEngine
             'selected_room_count' => \count($selectedRoomIds),
             'resolved_room_count' => $resolvedRoomCount,
             'selection_limit_reached' => $selectionLimitReached,
-            'single_room_mode' => $resolvedRoomCount <= 1,
+            'single_room_mode' => $singleRoomMode,
             'can_continue' => $canContinue,
             'continue_label' => self::getAccommodationContinueLabel($canContinue, \count($selectedRoomIds), $resolvedRoomCount),
             'checkout_url' => $canContinue ? \MustHotelBooking\Frontend\get_checkout_context_url($context) : '',
-            'selection_status_message' => (string) ($selectionStatus['message'] ?? ''),
-            'selection_status_tone' => (string) ($selectionStatus['tone'] ?? 'neutral'),
+            'selection_status_message' => $singleRoomMode ? '' : (string) ($selectionStatus['message'] ?? ''),
+            'selection_status_tone' => $singleRoomMode ? 'neutral' : (string) ($selectionStatus['tone'] ?? 'neutral'),
         ];
     }
 }

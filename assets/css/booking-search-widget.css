@@ -38,15 +38,15 @@
     flex-wrap: wrap;
     justify-content: space-between;
     align-items: center;
-    gap: var(--must-widget-gap, clamp(18px, 4vw, 60px));
+    gap: clamp(18px, 4vw, 60px);
     width: 100% !important;
-    padding: var(--must-widget-padding-block, clamp(20px, 3vw, 36px)) var(--must-widget-padding-inline, clamp(16px, 3vw, 40px));
-    background: var(--must-widget-surface, var(--must-text));
+    padding: 75px 60px;
+    background: #141414;
     box-sizing: border-box;
     min-width: 0;
     max-width: 100%;
     margin: 0;
-    font-family: var(--must-widget-font-family, var(--must-font-family));
+    font-family: inherit;
 }
 
 .must-hotel-booking-widget-booking-search .must-hotel-booking-booking-search-fields {
@@ -54,12 +54,7 @@
     flex-direction: row;
     align-items: center;
     justify-content: flex-start;
-    gap: 14px;
-    flex-wrap: wrap;
-    flex: 1 1 auto;
-    min-width: 0;
-    max-width: 100%;
-    width: 100%;
+    gap: 15px;
 }
 
 .must-hotel-booking-widget-booking-search .must-hotel-booking-field {
@@ -75,7 +70,7 @@
     min-width: 0;
     height: 50px;
     padding: 10px 20px;
-    border: 1px solid var(--must-widget-border, var(--must-widget-on-surface, var(--must-on-text)));
+    border: 1px solid #F5F3EC;
     box-sizing: border-box;
 }
 
@@ -98,12 +93,12 @@
     border: 0;
     outline: none;
     background: transparent;
-    color: var(--must-widget-on-surface, var(--must-on-text));
+    color: #F5F3EC;
     font-family: inherit;
     font-style: normal;
     font-weight: 500;
-    font-size: var(--must-body-l-size);
-    line-height: var(--must-body-l-line-height);
+    font-size: 20px;
+    line-height: 1.2;
     letter-spacing: -0.011em;
     padding: 0;
     margin: 0;
@@ -111,7 +106,7 @@
 }
 
 .must-hotel-booking-widget-booking-search .must-hotel-booking-field input::placeholder {
-    color: var(--must-widget-on-surface, var(--must-on-text));
+    color: #F5F3EC;
     opacity: 1;
 }
 
@@ -147,32 +142,33 @@
     justify-content: center;
     gap: 10px;
     border: 0;
-    border-bottom: 1.5px solid var(--must-widget-button-border, var(--must-widget-on-surface, var(--must-on-text)));
-    background: var(--must-widget-button-bg, transparent);
-    color: var(--must-widget-button-text, var(--must-widget-on-surface, var(--must-on-text)));
+    border-bottom: 1.5px solid #F5F3EC;
+    background: transparent;
+    color: #F5F3EC;
     padding: 0 0 2px;
     margin: 0;
     cursor: pointer;
     font-family: inherit;
     transition: opacity 0.2s ease;
+    border-radius: 0px;
 }
 
 .must-hotel-booking-widget-booking-search .must-hotel-booking-submit button:hover {
     opacity: 0.82;
-    border-bottom-color: var(--must-widget-button-border, var(--must-widget-on-surface, var(--must-on-text)));
+    border-bottom-color: none;
 }
 
 .must-hotel-booking-widget-booking-search .must-hotel-booking-submit button:focus-visible,
 .must-hotel-booking-widget-booking-search .must-hotel-booking-field input:focus-visible {
-    outline: 2px solid var(--must-widget-focus, var(--must-focus));
-    outline-offset: 4px;
+    outline: none;
+    outline-offset: none;
 }
 
 .must-hotel-booking-widget-booking-search .must-hotel-booking-submit-text {
     font-style: normal;
-    font-weight: var(--must-button-l-weight);
-    font-size: var(--must-button-l-size);
-    line-height: var(--must-button-l-line-height);
+    font-weight: 500;
+    font-size: 28px;
+    line-height: 1.2;
     letter-spacing: -0.011em;
     color: inherit;
 }
@@ -184,14 +180,14 @@
 }
 
 .must-hotel-booking-widget-booking-search .flatpickr-calendar {
-    font-family: var(--must-font-family), sans-serif;
+    font-family: inherit;
     z-index: 99999;
     max-width: min(320px, calc(100vw - 16px));
 }
 
 @media (max-width: 1366px) {
     .must-hotel-booking-widget-booking-search .must-hotel-booking-booking-search {
-        gap: var(--must-widget-gap, 16px);
+        gap: 16px;
     }
 
     .must-hotel-booking-widget-booking-search .must-hotel-booking-field {
@@ -219,8 +215,8 @@
         display: grid !important;
         grid-template-columns: 1fr;
         align-items: stretch;
-        gap: var(--must-widget-gap, 16px);
-        padding: var(--must-widget-padding-block, 26px) var(--must-widget-padding-inline, 24px);
+        gap: 16px;
+        padding: 26px 24px;
     }
 
     .must-hotel-booking-widget-booking-search .must-hotel-booking-booking-search-fields {
@@ -252,7 +248,7 @@
 
 @media (max-width: 767px) {
     .must-hotel-booking-widget-booking-search .must-hotel-booking-booking-search {
-        padding: var(--must-widget-padding-block, 18px) var(--must-widget-padding-inline, 14px);
+        padding: 18px 14px;
     }
 
     .must-hotel-booking-widget-booking-search .must-hotel-booking-booking-search-fields {

@@ -8,19 +8,14 @@ final class Plugin
     {
         \MustHotelBooking\Database\install_tables();
         \MustHotelBooking\Frontend\install_frontend_pages();
-
-        if (\function_exists('\MustHotelBooking\Engine\schedule_lock_cleanup_cron')) {
-            \MustHotelBooking\Engine\schedule_lock_cleanup_cron();
-        }
+        \MustHotelBooking\Engine\LockEngine::scheduleCleanupCron();
 
         \flush_rewrite_rules();
     }
 
     public static function deactivate(): void
     {
-        if (\function_exists('\MustHotelBooking\Engine\unschedule_lock_cleanup_cron')) {
-            \MustHotelBooking\Engine\unschedule_lock_cleanup_cron();
-        }
+        \MustHotelBooking\Engine\LockEngine::unscheduleCleanupCron();
 
         \flush_rewrite_rules();
     }
@@ -41,6 +36,10 @@ final class Plugin
         if (\function_exists('\MustHotelBooking\Frontend\maybe_sync_frontend_pages')) {
             \MustHotelBooking\Frontend\maybe_sync_frontend_pages();
         }
+
+        \MustHotelBooking\Engine\LockEngine::registerHooks();
+        \MustHotelBooking\Engine\PaymentEngine::registerHooks();
+        \MustHotelBooking\Engine\AvailabilityAjaxController::registerHooks();
 
         \do_action('must_hotel_booking/init');
     }

@@ -22,6 +22,29 @@ final class RatePlanRepository extends AbstractRepository
         return \is_string($result) && $result !== '';
     }
 
+    private function mhbColumnExists(string $suffix, string $column): bool
+    {
+        if ($column === '' || !$this->mhbTableExists($suffix)) {
+            return false;
+        }
+
+        $result = $this->wpdb->get_var(
+            $this->wpdb->prepare(
+                'SHOW COLUMNS FROM ' . $this->mhbTable($suffix) . ' LIKE %s',
+                $column
+            )
+        );
+
+        return \is_string($result) && $result !== '';
+    }
+
+    private function seasonalModifierTypeColumn(): string
+    {
+        return $this->mhbColumnExists('seasonal_prices', 'modifier_type')
+            ? 'modifier_type'
+            : 'price_modifier_type';
+    }
+
     /**
      * @return array<int, array<string, mixed>>
      */
@@ -407,12 +430,13 @@ final class RatePlanRepository extends AbstractRepository
                     rtrp.base_price,
                     rtrp.max_occupancy,
                     rtrp.created_at,
-                    rm.name AS room_name,
+                    COALESCE(rt.name, rm.name) AS room_name,
                     rm.category AS room_category
                 FROM ' . $this->mhbTable('room_type_rate_plans') . ' rtrp
+                LEFT JOIN ' . $this->mhbTable('room_types') . ' rt ON rt.id = rtrp.room_type_id
                 LEFT JOIN ' . $this->table('rooms') . ' rm ON rm.id = rtrp.room_type_id
                 WHERE rtrp.rate_plan_id = %d
-                ORDER BY rm.name ASC, rtrp.id ASC',
+                ORDER BY COALESCE(rt.name, rm.name) ASC, rtrp.id ASC',
                 $ratePlanId
             ),
             ARRAY_A
@@ -489,9 +513,10 @@ final class RatePlanRepository extends AbstractRepository
             return null;
         }
 
+        $modifierTypeColumn = $this->seasonalModifierTypeColumn();
         $row = $this->wpdb->get_row(
             $this->wpdb->prepare(
-                'SELECT id, season_id, rate_plan_id, price_modifier_type, modifier_value
+                'SELECT id, season_id, rate_plan_id, ' . $modifierTypeColumn . ' AS modifier_type, ' . $modifierTypeColumn . ' AS price_modifier_type, modifier_value
                 FROM ' . $this->mhbTable('seasonal_prices') . '
                 WHERE season_id = %d
                     AND rate_plan_id = %d
@@ -514,9 +539,10 @@ final class RatePlanRepository extends AbstractRepository
             return [];
         }
 
+        $modifierTypeColumn = $this->seasonalModifierTypeColumn();
         $rows = $this->wpdb->get_results(
             $this->wpdb->prepare(
-                'SELECT id, season_id, rate_plan_id, price_modifier_type, modifier_value
+                'SELECT id, season_id, rate_plan_id, ' . $modifierTypeColumn . ' AS modifier_type, ' . $modifierTypeColumn . ' AS price_modifier_type, modifier_value
                 FROM ' . $this->mhbTable('seasonal_prices') . '
                 WHERE rate_plan_id = %d
                 ORDER BY id ASC',
@@ -549,5 +575,95 @@ final class RatePlanRepository extends AbstractRepository
         );
 
         return $price !== null ? (float) $price : null;
+    }
+
+    /**
+     * @return array<int, array<string, mixed>>
+     */
+    public function getRatePlanPriceRows(int $ratePlanId): array
+    {
+        if ($ratePlanId <= 0 || !$this->mhbTableExists('rate_plan_prices')) {
+            return [];
+        }
+
+        $rows = $this->wpdb->get_results(
+            $this->wpdb->prepare(
+                'SELECT id, rate_plan_id, `date`, price
+                FROM ' . $this->mhbTable('rate_plan_prices') . '
+                WHERE rate_plan_id = %d
+                ORDER BY `date` ASC, id ASC',
+                $ratePlanId
+            ),
+            ARRAY_A
+        );
+
+        return \is_array($rows) ? $rows : [];
+    }
+
+    public function saveRatePlanPrice(int $ratePlanId, string $date, float $price): int
+    {
+        if (
+            $ratePlanId <= 0 ||
+            $date === '' ||
+            !$this->mhbTableExists('rate_plan_prices')
+        ) {
+            return 0;
+        }
+
+        $price = \round(\max(0.0, $price), 2);
+        $existingId = (int) $this->wpdb->get_var(
+            $this->wpdb->prepare(
+                'SELECT id
+                FROM ' . $this->mhbTable('rate_plan_prices') . '
+                WHERE rate_plan_id = %d
+                    AND `date` = %s
+                LIMIT 1',
+                $ratePlanId,
+                $date
+            )
+        );
+
+        if ($existingId > 0) {
+            $updated = $this->wpdb->update(
+                $this->mhbTable('rate_plan_prices'),
+                ['price' => $price],
+                ['id' => $existingId],
+                ['%f'],
+                ['%d']
+            );
+
+            return $updated === false ? 0 : $existingId;
+        }
+
+        $inserted = $this->wpdb->insert(
+            $this->mhbTable('rate_plan_prices'),
+            [
+                'rate_plan_id' => $ratePlanId,
+                'date' => $date,
+                'price' => $price,
+            ],
+            ['%d', '%s', '%f']
+        );
+
+        if ($inserted === false) {
+            return 0;
+        }
+
+        return (int) $this->wpdb->insert_id;
+    }
+
+    public function deleteRatePlanPrice(int $priceId): bool
+    {
+        if ($priceId <= 0 || !$this->mhbTableExists('rate_plan_prices')) {
+            return false;
+        }
+
+        $deleted = $this->wpdb->delete(
+            $this->mhbTable('rate_plan_prices'),
+            ['id' => $priceId],
+            ['%d']
+        );
+
+        return $deleted !== false;
     }
 }

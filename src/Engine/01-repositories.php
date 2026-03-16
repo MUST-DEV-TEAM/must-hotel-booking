@@ -5,6 +5,7 @@ namespace MustHotelBooking\Engine;
 use MustHotelBooking\Database\AvailabilityRepository;
 use MustHotelBooking\Database\CancellationPolicyRepository;
 use MustHotelBooking\Database\GuestRepository;
+use MustHotelBooking\Database\InventoryRepository;
 use MustHotelBooking\Database\PaymentRepository;
 use MustHotelBooking\Database\RatePlanRepository;
 use MustHotelBooking\Database\ReservationRepository;
@@ -27,6 +28,17 @@ function get_guest_repository(): GuestRepository
 
     if (!$repository instanceof GuestRepository) {
         $repository = new GuestRepository();
+    }
+
+    return $repository;
+}
+
+function get_inventory_repository(): InventoryRepository
+{
+    static $repository = null;
+
+    if (!$repository instanceof InventoryRepository) {
+        $repository = new InventoryRepository();
     }
 
     return $repository;

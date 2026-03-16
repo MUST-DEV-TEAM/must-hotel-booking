@@ -3,6 +3,9 @@
 namespace MustHotelBooking\Admin;
 
 use MustHotelBooking\Core\MustBookingConfig;
+use MustHotelBooking\Engine\AvailabilityEngine;
+use MustHotelBooking\Engine\PricingEngine;
+use MustHotelBooking\Engine\ReservationEngine;
 
 /**
  * Build Dashboard admin page URL.
@@ -139,15 +142,7 @@ function get_admin_quick_booking_room_row(int $room_id): ?array
  */
 function is_admin_quick_booking_room_available(int $room_id, string $checkin, string $checkout): bool
 {
-    if (\function_exists(__NAMESPACE__ . '\check_room_availability')) {
-        return check_room_availability($room_id, $checkin, $checkout);
-    }
-
-    if (\function_exists(__NAMESPACE__ . '\has_calendar_reservation_overlap')) {
-        return !has_calendar_reservation_overlap(0, $room_id, $checkin, $checkout);
-    }
-
-    return false;
+    return AvailabilityEngine::checkAvailability($room_id, $checkin, $checkout);
 }
 
 /**
@@ -155,12 +150,10 @@ function is_admin_quick_booking_room_available(int $room_id, string $checkin, st
  */
 function get_admin_quick_booking_total_price(int $room_id, string $checkin, string $checkout, int $guests): float
 {
-    if (\function_exists(__NAMESPACE__ . '\calculate_booking_price')) {
-        $pricing = calculate_booking_price($room_id, $checkin, $checkout, $guests);
+    $pricing = PricingEngine::calculateTotal($room_id, $checkin, $checkout, $guests);
 
-        if (\is_array($pricing) && !empty($pricing['success']) && isset($pricing['total_price'])) {
-            return (float) $pricing['total_price'];
-        }
+    if (\is_array($pricing) && !empty($pricing['success']) && isset($pricing['total_price'])) {
+        return (float) $pricing['total_price'];
     }
 
     if (\function_exists(__NAMESPACE__ . '\calculate_calendar_reservation_total_price')) {
@@ -230,11 +223,7 @@ function create_admin_quick_booking_reservation(array $form): int
 
     $total_price = get_admin_quick_booking_total_price($room_id, $checkin, $checkout, $guests);
 
-    if (!\function_exists(__NAMESPACE__ . '\create_reservation_without_lock')) {
-        return 0;
-    }
-
-    return create_reservation_without_lock(
+    return ReservationEngine::createReservationWithoutLock(
         $room_id,
         $guest_id,
         $checkin,
@@ -274,8 +263,8 @@ function sanitize_admin_quick_booking_form_values(array $source): array
 
     if (
         !\function_exists(__NAMESPACE__ . '\is_valid_booking_date') ||
-        !is_valid_booking_date($checkin) ||
-        !is_valid_booking_date($checkout)
+        !AvailabilityEngine::isValidBookingDate($checkin) ||
+        !AvailabilityEngine::isValidBookingDate($checkout)
     ) {
         $errors[] = \__('Please provide valid check-in and check-out dates.', 'must-hotel-booking');
     } elseif ($checkin >= $checkout) {
@@ -553,8 +542,8 @@ function ajax_must_admin_quick_booking_preview(): void
 
     if (
         !\function_exists(__NAMESPACE__ . '\is_valid_booking_date') ||
-        !is_valid_booking_date($checkin) ||
-        !is_valid_booking_date($checkout) ||
+        !AvailabilityEngine::isValidBookingDate($checkin) ||
+        !AvailabilityEngine::isValidBookingDate($checkout) ||
         $checkin >= $checkout
     ) {
         \wp_send_json_success(
@@ -630,7 +619,7 @@ function enqueue_admin_quick_booking_assets(): void
     \wp_enqueue_style(
         'must-hotel-booking-admin-quick-booking',
         MUST_HOTEL_BOOKING_URL . 'assets/css/admin-quick-booking.css',
-        ['must-hotel-booking-design-system'],
+        [],
         MUST_HOTEL_BOOKING_VERSION
     );
 

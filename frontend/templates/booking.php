@@ -317,6 +317,7 @@ if ($checkout !== '') {
                         $room_name = isset($room['name']) ? (string) $room['name'] : '';
                         $room_description = isset($room['description']) ? (string) $room['description'] : '';
                         $max_guests = isset($room['max_guests']) ? (int) $room['max_guests'] : 0;
+                        $available_count = isset($room['available_count']) ? (int) $room['available_count'] : 0;
                         $room_size = isset($room['room_size']) ? (string) $room['room_size'] : '';
                         $primary_image_url = isset($room['primary_image_url']) ? (string) $room['primary_image_url'] : '';
                         $gallery_images = isset($room['gallery_images']) && \is_array($room['gallery_images']) ? $room['gallery_images'] : [];
@@ -338,6 +339,19 @@ if ($checkout !== '') {
                             <div class="must-booking-room-content">
                                 <div class="must-booking-room-header">
                                     <h3><?php echo \esc_html($room_name !== '' ? $room_name : __('Room', 'must-hotel-booking')); ?></h3>
+
+                                    <?php if ($available_count > 0) : ?>
+                                        <p class="must-booking-room-availability">
+                                            <?php
+                                            echo \esc_html(
+                                                \sprintf(
+                                                    \_n('%d available', '%d available', $available_count, 'must-hotel-booking'),
+                                                    $available_count
+                                                )
+                                            );
+                                            ?>
+                                        </p>
+                                    <?php endif; ?>
 
                                     <?php if ($room_description !== '') : ?>
                                         <p class="must-booking-room-description"><?php echo \esc_html($room_description); ?></p>

@@ -4,16 +4,6 @@ if (!\defined('ABSPATH')) {
     exit;
 }
 
-$include_files = [
-    MUST_HOTEL_BOOKING_PATH . 'includes/design-system.php',
-];
-
-foreach ($include_files as $include_file) {
-    if (\is_file($include_file)) {
-        require_once $include_file;
-    }
-}
-
 $class_aliases = [
     \MustHotelBooking\Core\MustBookingConfig::class => [
         'MustHotelBooking\\Admin\\MustBookingConfig',

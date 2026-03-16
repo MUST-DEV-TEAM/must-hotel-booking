@@ -79,13 +79,6 @@ if (!\function_exists(__NAMESPACE__ . '\get_checkout_page_view_data')) {
     }
 }
 
-if (!\function_exists(__NAMESPACE__ . '\get_checkout_payment_cta_label')) {
-    function get_checkout_payment_cta_label(...$args)
-    {
-        return \MustHotelBooking\Engine\get_checkout_payment_cta_label(...$args);
-    }
-}
-
 if (!\function_exists(__NAMESPACE__ . '\get_confirmation_page_view_data')) {
     function get_confirmation_page_view_data(...$args)
     {

@@ -1333,11 +1333,17 @@
     cursor: pointer;
 }
 
-.must-hotel-booking-page-booking .must-booking-results-filter:hover,
-.must-hotel-booking-page-booking .must-booking-results-filter:focus-visible,
 .must-hotel-booking-page-booking .must-booking-room-details:hover,
 .must-hotel-booking-page-booking .must-booking-room-details:focus-visible {
     opacity: 0.85;
+    outline: none;
+}
+
+.must-hotel-booking-page-booking .must-booking-results-filter:hover,
+.must-hotel-booking-page-booking .must-booking-results-filter:focus-visible,
+.must-hotel-booking-page-booking .must-booking-results-filter:active {
+    opacity: 1;
+    background: transparent !important;
     outline: none;
 }
 
@@ -2025,7 +2031,7 @@ body .must-booking-room-modal .must-booking-room-modal-close:active {
 
 .must-hotel-booking-page-checkout .must-checkout-room-title-row strong,
 .must-hotel-booking-page-checkout .must-checkout-total-band-row strong {
-    font-family: 'Instrument Sans', sans-serif;
+    font-family: 'PP Neue Montreal', sans-serif;
     font-weight: 700;
     font-size: 24px;
     line-height: 100%;
@@ -2234,7 +2240,7 @@ body .must-booking-room-modal .must-booking-room-modal-close:active {
 }
 
 .must-hotel-booking-page-checkout .must-checkout-payment-label {
-    font-family: 'Instrument Sans', sans-serif;
+    font-family: 'PP Neue Montreal', sans-serif;
     font-weight: 700;
     font-size: 14px;
     color: #c2bfaf;
@@ -2611,7 +2617,7 @@ body .must-booking-room-modal .must-booking-room-modal-close:active {
 }
 
 .must-hotel-booking-page-booking-confirmation .must-confirmation-order-row.is-total span {
-    font-family: 'Instrument Sans', sans-serif;
+    font-family: 'PP Neue Montreal', sans-serif;
     font-weight: 700;
 }
 
@@ -2798,7 +2804,7 @@ body .must-booking-room-modal .must-booking-room-modal-close:active {
 }
 
 .must-hotel-booking-page-booking-confirmation .must-confirmation-success-head strong {
-    font-family: 'Instrument Sans', sans-serif;
+    font-family: 'PP Neue Montreal', sans-serif;
     font-weight: 700;
     font-size: 24px;
     line-height: 100%;

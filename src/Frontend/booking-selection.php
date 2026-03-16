@@ -2,6 +2,9 @@
 
 namespace MustHotelBooking\Frontend;
 
+use MustHotelBooking\Engine\InventoryEngine;
+use MustHotelBooking\Engine\LockEngine;
+use MustHotelBooking\Engine\PaymentEngine;
 use MustHotelBooking\Engine\PricingEngine;
 
 /**
@@ -9,9 +12,7 @@ use MustHotelBooking\Engine\PricingEngine;
  */
 function get_booking_selection_transient_key(): string
 {
-    $session_id = \function_exists(__NAMESPACE__ . '\get_or_create_lock_session_id')
-        ? get_or_create_lock_session_id()
-        : '';
+    $session_id = LockEngine::getOrCreateSessionId();
 
     if ($session_id === '') {
         $session_id = 'guest';
@@ -41,9 +42,7 @@ function get_empty_booking_selection(): array
             'billing_form' => [],
             'coupon_code' => '',
             'payment_method' => '',
-            'pending_payment' => \function_exists(__NAMESPACE__ . '\get_empty_pending_payment_flow_data')
-                ? get_empty_pending_payment_flow_data()
-                : [],
+            'pending_payment' => PaymentEngine::getEmptyPendingPaymentFlowData(),
             'booking_mode' => '',
             'fixed_room_id' => 0,
         ],
@@ -64,9 +63,7 @@ function normalize_booking_selection_flow_data($flow_data): array
             'billing_form' => [],
             'coupon_code' => '',
             'payment_method' => '',
-            'pending_payment' => \function_exists(__NAMESPACE__ . '\get_empty_pending_payment_flow_data')
-                ? get_empty_pending_payment_flow_data()
-                : [],
+            'pending_payment' => PaymentEngine::getEmptyPendingPaymentFlowData(),
             'booking_mode' => '',
             'fixed_room_id' => 0,
         ];
@@ -93,9 +90,7 @@ function normalize_booking_selection_flow_data($flow_data): array
         'payment_method' => isset($flow_data['payment_method'])
             ? \sanitize_key((string) $flow_data['payment_method'])
             : '',
-        'pending_payment' => \function_exists(__NAMESPACE__ . '\normalize_pending_payment_flow_data')
-            ? normalize_pending_payment_flow_data($flow_data['pending_payment'] ?? [])
-            : [],
+        'pending_payment' => PaymentEngine::normalizePendingPaymentFlowData($flow_data['pending_payment'] ?? []),
         'booking_mode' => $booking_mode,
         'fixed_room_id' => isset($flow_data['fixed_room_id'])
             ? \absint($flow_data['fixed_room_id'])
@@ -308,10 +303,6 @@ function do_booking_selection_contexts_match(array $first, array $second): bool
  */
 function release_booking_selection_locks(array $selection): void
 {
-    if (!\function_exists(__NAMESPACE__ . '\release_room_lock')) {
-        return;
-    }
-
     $context = normalize_booking_selection_context(
         isset($selection['context']) && \is_array($selection['context'])
             ? $selection['context']
@@ -331,7 +322,12 @@ function release_booking_selection_locks(array $selection): void
             continue;
         }
 
-        release_room_lock($room_id, $checkin, $checkout);
+        if (InventoryEngine::hasInventoryForRoomType($room_id)) {
+            InventoryEngine::releaseLocksForRoomType($room_id, $checkin, $checkout);
+            continue;
+        }
+
+        LockEngine::releaseExactLock($room_id, $checkin, $checkout);
     }
 }
 
@@ -501,12 +497,15 @@ function remove_room_from_booking_selection(int $room_id): bool
     save_booking_selection($selection);
 
     if (
-        \function_exists(__NAMESPACE__ . '\release_room_lock') &&
         isset($context['checkin'], $context['checkout']) &&
         (string) $context['checkin'] !== '' &&
         (string) $context['checkout'] !== ''
     ) {
-        release_room_lock($room_id, (string) $context['checkin'], (string) $context['checkout']);
+        if (InventoryEngine::hasInventoryForRoomType($room_id)) {
+            InventoryEngine::releaseLocksForRoomType($room_id, (string) $context['checkin'], (string) $context['checkout']);
+        } else {
+            LockEngine::releaseExactLock($room_id, (string) $context['checkin'], (string) $context['checkout']);
+        }
     }
 
     return true;

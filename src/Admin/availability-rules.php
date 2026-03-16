@@ -2,6 +2,8 @@
 
 namespace MustHotelBooking\Admin;
 
+use MustHotelBooking\Engine\AvailabilityEngine;
+
 /**
  * Build Availability Rules admin page URL.
  *
@@ -122,8 +124,8 @@ function is_valid_availability_rule_date(string $date): bool
 {
     $candidate = \trim($date);
 
-    if (\function_exists(__NAMESPACE__ . '\is_valid_booking_date')) {
-        return is_valid_booking_date($candidate);
+    if (AvailabilityEngine::isValidBookingDate($candidate)) {
+        return true;
     }
 
     $parsed = \DateTimeImmutable::createFromFormat('Y-m-d', $candidate);

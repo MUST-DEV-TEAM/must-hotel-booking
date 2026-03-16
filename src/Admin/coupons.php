@@ -2,18 +2,15 @@
 
 namespace MustHotelBooking\Admin;
 
+use MustHotelBooking\Engine\AvailabilityEngine;
+use MustHotelBooking\Engine\PricingEngine;
+
 /**
  * Get coupons table name.
  */
 function get_admin_coupons_table_name(): string
 {
-    global $wpdb;
-
-    if (\function_exists(__NAMESPACE__ . '\get_coupons_table_name')) {
-        return get_coupons_table_name();
-    }
-
-    return $wpdb->prefix . 'must_coupons';
+    return PricingEngine::getCouponsTableName();
 }
 
 /**
@@ -52,8 +49,8 @@ function is_valid_coupon_date(string $date): bool
 {
     $candidate = \trim($date);
 
-    if (\function_exists(__NAMESPACE__ . '\is_valid_booking_date')) {
-        return is_valid_booking_date($candidate);
+    if (AvailabilityEngine::isValidBookingDate($candidate)) {
+        return true;
     }
 
     $parsed = \DateTimeImmutable::createFromFormat('Y-m-d', $candidate);

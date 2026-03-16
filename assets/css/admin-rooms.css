@@ -3,7 +3,7 @@
     border: 1px solid #dcdcde;
     padding: 16px 20px;
     margin-top: 16px;
-    font-family: var(--must-font-family);
+    font-family: inherit;
 }
 
 .must-hotel-booking-rooms-admin .must-room-gallery-field {

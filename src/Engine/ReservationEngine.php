@@ -275,17 +275,21 @@ final class ReservationEngine
 
     public static function ensureRoomLock(int $roomId, string $checkin, string $checkout): bool
     {
-        if ($roomId <= 0 || !\function_exists(__NAMESPACE__ . '\get_or_create_lock_session_id') || !\function_exists(__NAMESPACE__ . '\has_active_exact_room_lock')) {
+        if ($roomId <= 0) {
             return false;
         }
 
-        $sessionId = get_or_create_lock_session_id();
+        $sessionId = LockEngine::getOrCreateSessionId();
 
         if ($sessionId === '') {
             return false;
         }
 
-        if (has_active_exact_room_lock($roomId, $checkin, $checkout, $sessionId)) {
+        if (InventoryEngine::hasInventoryForRoomType($roomId)) {
+            return \is_array(InventoryEngine::lockRoomType($roomId, $checkin, $checkout, $sessionId));
+        }
+
+        if (LockEngine::hasExactLock($roomId, $checkin, $checkout, $sessionId)) {
             return true;
         }
 
@@ -456,12 +460,21 @@ final class ReservationEngine
             ];
         }
 
-        $lockCreated = LockEngine::createLock(
-            $roomId,
-            (string) $context['checkin'],
-            (string) $context['checkout'],
-            \function_exists(__NAMESPACE__ . '\get_or_create_lock_session_id') ? get_or_create_lock_session_id() : ''
-        );
+        $lockCreated = InventoryEngine::hasInventoryForRoomType($roomId)
+            ? \is_array(
+                InventoryEngine::lockRoomType(
+                    $roomId,
+                    (string) $context['checkin'],
+                    (string) $context['checkout'],
+                    LockEngine::getOrCreateSessionId()
+                )
+            )
+            : LockEngine::createLock(
+                $roomId,
+                (string) $context['checkin'],
+                (string) $context['checkout'],
+                LockEngine::getOrCreateSessionId()
+            );
 
         if (!$lockCreated) {
             return [
@@ -605,11 +618,22 @@ final class ReservationEngine
 
         $lockCreated = \in_array($roomId, $selectedRoomIds, true)
             ? true
-            : LockEngine::createLock(
-                $roomId,
-                (string) $context['checkin'],
-                (string) $context['checkout'],
-                \function_exists(__NAMESPACE__ . '\get_or_create_lock_session_id') ? get_or_create_lock_session_id() : ''
+            : (
+                InventoryEngine::hasInventoryForRoomType($roomId)
+                    ? \is_array(
+                        InventoryEngine::lockRoomType(
+                            $roomId,
+                            (string) $context['checkin'],
+                            (string) $context['checkout'],
+                            LockEngine::getOrCreateSessionId()
+                        )
+                    )
+                    : LockEngine::createLock(
+                        $roomId,
+                        (string) $context['checkin'],
+                        (string) $context['checkout'],
+                        LockEngine::getOrCreateSessionId()
+                    )
             );
 
         if (!$lockCreated) {
@@ -793,7 +817,7 @@ final class ReservationEngine
             ? $roomItemsPreview['room_guest_counts']
             : [];
         $validatedRooms = [];
-        $sessionId = \function_exists(__NAMESPACE__ . '\get_or_create_lock_session_id') ? get_or_create_lock_session_id() : '';
+        $sessionId = LockEngine::getOrCreateSessionId();
 
         foreach ($selectedRoomIds as $roomId) {
             if (!self::ensureRoomLock((int) $roomId, (string) $context['checkin'], (string) $context['checkout'])) {
@@ -883,6 +907,17 @@ final class ReservationEngine
             }
 
             $reservationNote = self::buildReservationNote($roomId, $guestForm);
+            $cancellationPolicy = $ratePlanId > 0 ? CancellationEngine::getCancellationPolicy($ratePlanId) : null;
+
+            if (\is_array($cancellationPolicy) && (string) ($cancellationPolicy['name'] ?? '') !== '') {
+                $reservationNote = \trim($reservationNote);
+                $reservationNote .= ($reservationNote !== '' ? "\n\n" : '')
+                    . \sprintf(
+                        /* translators: %s is cancellation policy name. */
+                        \__('Cancellation Policy: %s', 'must-hotel-booking'),
+                        (string) $cancellationPolicy['name']
+                    );
+            }
 
             if ($reservationNote !== '') {
                 $reservationRepository->updateReservationNotes($reservationId, $reservationNote);
@@ -894,7 +929,7 @@ final class ReservationEngine
                 $appliedCouponIds[$appliedCouponId] = $appliedCouponId;
 
                 if ($incrementCouponUsage) {
-                    increment_coupon_usage_count($appliedCouponId);
+                    PricingEngine::incrementCouponUsageCount($appliedCouponId);
                 }
             }
 
@@ -927,18 +962,148 @@ final class ReservationEngine
         string $reservationStatus = 'pending',
         int $ratePlanId = 0
     ): int {
-        return store_reservation_from_lock(
-            $roomId,
-            $guestId,
-            $checkin,
-            $checkout,
-            $guests,
-            $totalPrice,
-            $paymentStatus,
-            $reservationStatus,
-            '',
-            $ratePlanId
+        if (
+            $roomId <= 0 ||
+            $guestId <= 0 ||
+            $guests <= 0 ||
+            !AvailabilityEngine::isValidBookingDate($checkin) ||
+            !AvailabilityEngine::isValidBookingDate($checkout) ||
+            $checkin >= $checkout
+        ) {
+            return 0;
+        }
+
+        LockEngine::cleanupExpiredLocks();
+
+        $sessionId = LockEngine::getOrCreateSessionId();
+        $inventoryRoomId = 0;
+
+        if (InventoryEngine::hasInventoryForRoomType($roomId)) {
+            $lockedInventoryRoom = InventoryEngine::getLockedRoomForType($roomId, $checkin, $checkout, $sessionId);
+
+            if (!\is_array($lockedInventoryRoom)) {
+                return 0;
+            }
+
+            $inventoryRoomId = isset($lockedInventoryRoom['id']) ? (int) $lockedInventoryRoom['id'] : 0;
+
+            if ($inventoryRoomId <= 0) {
+                return 0;
+            }
+        } elseif (!LockEngine::hasExactLock($roomId, $checkin, $checkout, $sessionId)) {
+            return 0;
+        }
+
+        $now = LockEngine::getCurrentUtcDatetime();
+        $reservationId = get_reservation_repository()->createReservationFromLock(
+            [
+                'booking_id' => self::generateUniqueBookingId(),
+                'room_id' => $roomId,
+                'room_type_id' => $roomId,
+                'assigned_room_id' => $inventoryRoomId,
+                'rate_plan_id' => \max(0, $ratePlanId),
+                'guest_id' => $guestId,
+                'checkin' => $checkin,
+                'checkout' => $checkout,
+                'guests' => $guests,
+                'status' => $reservationStatus,
+                'total_price' => $totalPrice,
+                'payment_status' => $paymentStatus,
+                'created_at' => $now,
+            ],
+            $sessionId,
+            $now,
+            self::getNonBlockingReservationStatuses()
         );
+
+        if ($reservationId <= 0) {
+            return 0;
+        }
+
+        if ($inventoryRoomId > 0) {
+            InventoryEngine::reserveRoom($inventoryRoomId, $reservationId);
+            LockEngine::releaseExactLock($inventoryRoomId, $checkin, $checkout, $sessionId);
+        } else {
+            LockEngine::releaseExactLock($roomId, $checkin, $checkout, $sessionId);
+        }
+
+        \do_action('must_hotel_booking/reservation_created', $reservationId);
+
+        return $reservationId;
+    }
+
+    public static function createReservationWithoutLock(
+        int $roomId,
+        int $guestId,
+        string $checkin,
+        string $checkout,
+        int $guests,
+        float $totalPrice,
+        string $paymentStatus = 'unpaid',
+        string $reservationStatus = 'pending',
+        string $bookingSource = 'website',
+        string $notes = '',
+        int $ratePlanId = 0
+    ): int {
+        if (
+            $roomId <= 0 ||
+            $guestId <= 0 ||
+            $guests <= 0 ||
+            !AvailabilityEngine::isValidBookingDate($checkin) ||
+            !AvailabilityEngine::isValidBookingDate($checkout) ||
+            $checkin >= $checkout
+        ) {
+            return 0;
+        }
+
+        $inventoryRoomId = 0;
+
+        if (InventoryEngine::hasInventoryForRoomType($roomId)) {
+            $availableInventoryRooms = InventoryEngine::getAvailableRooms($roomId, $checkin, $checkout);
+
+            if (empty($availableInventoryRooms)) {
+                return 0;
+            }
+
+            $inventoryRoomId = isset($availableInventoryRooms[0]['id']) ? (int) $availableInventoryRooms[0]['id'] : 0;
+
+            if ($inventoryRoomId <= 0) {
+                return 0;
+            }
+        }
+
+        $reservationId = get_reservation_repository()->createReservation(
+            [
+                'booking_id' => self::generateUniqueBookingId(),
+                'room_id' => $roomId,
+                'room_type_id' => $roomId,
+                'assigned_room_id' => $inventoryRoomId,
+                'rate_plan_id' => \max(0, $ratePlanId),
+                'guest_id' => $guestId,
+                'checkin' => $checkin,
+                'checkout' => $checkout,
+                'guests' => $guests,
+                'status' => $reservationStatus,
+                'booking_source' => $bookingSource,
+                'notes' => $notes,
+                'total_price' => $totalPrice,
+                'payment_status' => $paymentStatus,
+                'created_at' => \current_time('mysql'),
+            ],
+            self::getNonBlockingReservationStatuses()
+        );
+
+        if ($reservationId <= 0) {
+            return 0;
+        }
+
+        if ($inventoryRoomId > 0) {
+            InventoryEngine::reserveRoom($inventoryRoomId, $reservationId);
+        }
+
+        \do_action('must_hotel_booking/reservation_created', $reservationId);
+
+        return $reservationId;
     }
 
     /**
@@ -1012,5 +1177,35 @@ final class ReservationEngine
         }
 
         return \array_values($ids);
+    }
+
+    /**
+     * @return array<int, string>
+     */
+    private static function getNonBlockingReservationStatuses(): array
+    {
+        return \function_exists(__NAMESPACE__ . '\get_inventory_non_blocking_reservation_statuses')
+            ? get_inventory_non_blocking_reservation_statuses()
+            : ['cancelled', 'expired', 'payment_failed'];
+    }
+
+    private static function generateUniqueBookingId(): string
+    {
+        $repository = get_reservation_repository();
+        $maxAttempts = 8;
+        $attempt = 0;
+
+        while ($attempt < $maxAttempts) {
+            $suffix = \strtoupper(\substr(\str_replace('-', '', \wp_generate_uuid4()), 0, 8));
+            $bookingId = 'MHB-' . \gmdate('Ymd') . '-' . $suffix;
+
+            if (!$repository->bookingIdExists($bookingId)) {
+                return $bookingId;
+            }
+
+            $attempt++;
+        }
+
+        return 'MHB-' . \gmdate('YmdHis') . '-' . \wp_rand(1000, 9999);
     }
 }

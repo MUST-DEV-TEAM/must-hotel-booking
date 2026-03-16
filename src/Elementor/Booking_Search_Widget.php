@@ -3,7 +3,6 @@
 namespace MustHotelBooking\Elementor;
 
 use MustHotelBooking\Core\MustBookingConfig;
-use MustHotelBooking\Core\DesignSystem;
 
 class Booking_Search_Widget extends \Elementor\Widget_Base
 {
@@ -72,57 +71,6 @@ class Booking_Search_Widget extends \Elementor\Widget_Base
 
         $this->end_controls_section();
 
-        $this->start_controls_section(
-            'section_design_system',
-            [
-                'label' => \__('Design System', 'must-hotel-booking'),
-                'tab' => \Elementor\Controls_Manager::TAB_STYLE,
-            ]
-        );
-
-        $this->add_control(
-            'design_font_family_override',
-            [
-                'label' => \__('Font Family Override', 'must-hotel-booking'),
-                'type' => \Elementor\Controls_Manager::TEXT,
-                'placeholder' => \class_exists(DesignSystem::class) ? DesignSystem::getFontFamily() : 'Instrument Sans, sans-serif',
-                'description' => \__('Leave empty to inherit the plugin design system font.', 'must-hotel-booking'),
-            ]
-        );
-
-        $this->add_control(
-            'design_surface_color_override',
-            [
-                'label' => \__('Surface Color Override', 'must-hotel-booking'),
-                'type' => \Elementor\Controls_Manager::COLOR,
-            ]
-        );
-
-        $this->add_control(
-            'design_text_color_override',
-            [
-                'label' => \__('Text Color Override', 'must-hotel-booking'),
-                'type' => \Elementor\Controls_Manager::COLOR,
-            ]
-        );
-
-        $this->add_control(
-            'design_border_color_override',
-            [
-                'label' => \__('Border Color Override', 'must-hotel-booking'),
-                'type' => \Elementor\Controls_Manager::COLOR,
-            ]
-        );
-
-        $this->add_control(
-            'design_primary_color_override',
-            [
-                'label' => \__('Accent Color Override', 'must-hotel-booking'),
-                'type' => \Elementor\Controls_Manager::COLOR,
-            ]
-        );
-
-        $this->end_controls_section();
     }
 
     protected function render(): void
@@ -145,12 +93,10 @@ class Booking_Search_Widget extends \Elementor\Widget_Base
         $calendar_icon_url = MUST_HOTEL_BOOKING_URL . 'assets/img/Calendar2Date.svg';
         $people_icon_url = MUST_HOTEL_BOOKING_URL . 'assets/img/PeopleFill.svg';
         $arrow_icon_url = MUST_HOTEL_BOOKING_URL . 'assets/img/ArrowRight.svg';
-        $design_system_style = $this->get_design_system_style_attribute($settings);
 
         ?>
         <div
             class="must-hotel-booking-widget must-hotel-booking-widget-booking-search"
-            <?php echo $design_system_style; ?>
             data-linked-room-list-id="<?php echo \esc_attr($linked_rooms_list_widget_id); ?>"
             data-connection-key="<?php echo \esc_attr($legacy_connection_key); ?>"
         >
@@ -234,23 +180,4 @@ class Booking_Search_Widget extends \Elementor\Widget_Base
         <?php
     }
 
-    /**
-     * @param array<string, mixed> $settings
-     */
-    private function get_design_system_style_attribute(array $settings): string
-    {
-        if (!\class_exists(DesignSystem::class)) {
-            return '';
-        }
-
-        $inline_style = DesignSystem::buildWidgetInlineStyle([
-            'font_family' => isset($settings['design_font_family_override']) ? (string) $settings['design_font_family_override'] : '',
-            'surface' => isset($settings['design_surface_color_override']) ? (string) $settings['design_surface_color_override'] : '',
-            'text' => isset($settings['design_text_color_override']) ? (string) $settings['design_text_color_override'] : '',
-            'border' => isset($settings['design_border_color_override']) ? (string) $settings['design_border_color_override'] : '',
-            'primary' => isset($settings['design_primary_color_override']) ? (string) $settings['design_primary_color_override'] : '',
-        ]);
-
-        return $inline_style !== '' ? 'style="' . \esc_attr($inline_style) . '"' : '';
-    }
 }

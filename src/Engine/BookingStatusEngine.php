@@ -2,6 +2,8 @@
 
 namespace MustHotelBooking\Engine;
 
+use MustHotelBooking\Core\MustBookingConfig;
+
 final class BookingStatusEngine
 {
     /**
@@ -9,7 +11,31 @@ final class BookingStatusEngine
      */
     public static function updateReservationStatuses(array $reservationIds, string $status, string $paymentStatus): void
     {
-        update_reservations_payment_state($reservationIds, $status, $paymentStatus);
+        $reservationRows = self::getPaymentReservationRows($reservationIds);
+        $reservationRepository = get_reservation_repository();
+
+        foreach ($reservationRows as $reservationRow) {
+            $reservationId = isset($reservationRow['id']) ? (int) $reservationRow['id'] : 0;
+            $previousStatus = isset($reservationRow['status']) ? (string) $reservationRow['status'] : '';
+
+            if ($reservationId <= 0) {
+                continue;
+            }
+
+            $reservationRepository->updateReservationStatus($reservationId, $status, $paymentStatus);
+
+            if ($previousStatus !== 'cancelled' && $status === 'cancelled') {
+                \do_action('must_hotel_booking/reservation_cancelled', $reservationId);
+            }
+
+            if (
+                \function_exists(__NAMESPACE__ . '\is_reservation_confirmed_status') &&
+                !is_reservation_confirmed_status($previousStatus) &&
+                is_reservation_confirmed_status($status)
+            ) {
+                \do_action('must_hotel_booking/reservation_confirmed', $reservationId);
+            }
+        }
     }
 
     /**
@@ -18,7 +44,7 @@ final class BookingStatusEngine
      */
     public static function syncStripeReturnSession(string $sessionId, array $reservationIds): array
     {
-        return maybe_sync_stripe_return_session($sessionId, $reservationIds);
+        return PaymentEngine::syncReturnSession('stripe', $sessionId, $reservationIds);
     }
 
     /**
@@ -26,7 +52,22 @@ final class BookingStatusEngine
      */
     public static function areReusablePendingPaymentReservations(array $reservationIds): bool
     {
-        return are_reusable_pending_payment_reservations($reservationIds);
+        $rows = self::getPaymentReservationRows($reservationIds);
+
+        if (\count($rows) !== \count($reservationIds)) {
+            return false;
+        }
+
+        foreach ($rows as $row) {
+            $status = isset($row['status']) ? (string) $row['status'] : '';
+            $paymentStatus = isset($row['payment_status']) ? (string) $row['payment_status'] : '';
+
+            if ($status !== 'pending_payment' || $paymentStatus !== 'pending') {
+                return false;
+            }
+        }
+
+        return true;
     }
 
     /**
@@ -34,7 +75,43 @@ final class BookingStatusEngine
      */
     public static function createPaymentRows(array $reservationIds, string $method, string $status, string $transactionId = ''): void
     {
-        create_or_update_payment_rows($reservationIds, $method, $status, $transactionId);
+        $reservationRows = self::getPaymentReservationRows($reservationIds);
+        $currency = \class_exists(MustBookingConfig::class) ? MustBookingConfig::get_currency() : 'USD';
+        $paymentRepository = get_payment_repository();
+
+        foreach ($reservationRows as $reservationRow) {
+            $reservationId = isset($reservationRow['id']) ? (int) $reservationRow['id'] : 0;
+
+            if ($reservationId <= 0) {
+                continue;
+            }
+
+            $existingPaymentId = $paymentRepository->getLatestPaymentIdForReservationMethod($reservationId, $method);
+            $paymentData = [
+                'amount' => isset($reservationRow['total_price']) ? (float) $reservationRow['total_price'] : 0.0,
+                'currency' => $currency,
+                'method' => $method,
+                'status' => $status,
+                'transaction_id' => $transactionId,
+            ];
+
+            if ($status === 'paid') {
+                $paymentData['paid_at'] = \current_time('mysql');
+            }
+
+            if ($existingPaymentId > 0) {
+                if ($transactionId === '') {
+                    unset($paymentData['transaction_id']);
+                }
+
+                $paymentRepository->updatePayment($existingPaymentId, $paymentData);
+                continue;
+            }
+
+            $paymentData['reservation_id'] = $reservationId;
+            $paymentData['created_at'] = \current_time('mysql');
+            $paymentRepository->createPayment($paymentData);
+        }
     }
 
     /**
@@ -42,7 +119,12 @@ final class BookingStatusEngine
      */
     public static function failPendingStripeReservations(array $reservationIds, string $reservationStatus = 'payment_failed'): void
     {
-        fail_pending_stripe_reservations($reservationIds, $reservationStatus);
+        if (!\in_array($reservationStatus, ['payment_failed', 'expired', 'cancelled'], true)) {
+            $reservationStatus = 'payment_failed';
+        }
+
+        self::updateReservationStatuses($reservationIds, $reservationStatus, 'cancelled');
+        self::createPaymentRows($reservationIds, 'stripe', 'failed');
     }
 
     /**
@@ -119,5 +201,14 @@ final class BookingStatusEngine
             'heading' => \__('Booking Confirmed', 'must-hotel-booking'),
             'message' => \__('Your stay has been confirmed.', 'must-hotel-booking'),
         ];
+    }
+
+    /**
+     * @param array<int, int> $reservationIds
+     * @return array<int, array<string, mixed>>
+     */
+    private static function getPaymentReservationRows(array $reservationIds): array
+    {
+        return get_reservation_repository()->getReservationsByIds($reservationIds);
     }
 }

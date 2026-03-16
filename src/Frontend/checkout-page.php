@@ -475,7 +475,7 @@ function enqueue_checkout_page_assets(): void
     \wp_enqueue_style(
         'must-hotel-booking-booking-page',
         MUST_HOTEL_BOOKING_URL . 'assets/css/booking-page.css',
-        ['must-hotel-booking-design-system'],
+        [],
         MUST_HOTEL_BOOKING_VERSION
     );
 

@@ -2,6 +2,10 @@
 
 namespace MustHotelBooking\Admin;
 
+use MustHotelBooking\Engine\AvailabilityEngine;
+use MustHotelBooking\Engine\PricingEngine;
+use MustHotelBooking\Engine\ReservationEngine;
+
 /**
  * Build Calendar admin page URL.
  *
@@ -25,7 +29,7 @@ function sanitize_calendar_date(string $date, string $fallback): string
 {
     $candidate = \trim($date);
 
-    if (\function_exists(__NAMESPACE__ . '\is_valid_booking_date') && is_valid_booking_date($candidate)) {
+    if (AvailabilityEngine::isValidBookingDate($candidate)) {
         return $candidate;
     }
 
@@ -190,8 +194,8 @@ function build_room_calendar_blocks(array $room_reservations, string $range_star
 
         if (
             !\function_exists(__NAMESPACE__ . '\is_valid_booking_date') ||
-            !is_valid_booking_date($checkin) ||
-            !is_valid_booking_date($checkout) ||
+            !AvailabilityEngine::isValidBookingDate($checkin) ||
+            !AvailabilityEngine::isValidBookingDate($checkout) ||
             $checkin >= $checkout
         ) {
             continue;
@@ -485,12 +489,10 @@ function save_calendar_guest_record(int $guest_id, string $guest_name, string $e
  */
 function calculate_calendar_reservation_total_price(int $room_id, string $checkin, string $checkout, int $guests): float
 {
-    if (\function_exists(__NAMESPACE__ . '\calculate_booking_price')) {
-        $pricing = calculate_booking_price($room_id, $checkin, $checkout, $guests);
+    $pricing = PricingEngine::calculateTotal($room_id, $checkin, $checkout, $guests);
 
-        if (\is_array($pricing) && !empty($pricing['success']) && isset($pricing['total_price'])) {
-            return (float) $pricing['total_price'];
-        }
+    if (\is_array($pricing) && !empty($pricing['success']) && isset($pricing['total_price'])) {
+        return (float) $pricing['total_price'];
     }
 
     return 0.0;
@@ -629,8 +631,8 @@ function maybe_handle_calendar_reservation_update_submission(): array
 
     if (
         !\function_exists(__NAMESPACE__ . '\is_valid_booking_date') ||
-        !is_valid_booking_date($checkin) ||
-        !is_valid_booking_date($checkout)
+        !AvailabilityEngine::isValidBookingDate($checkin) ||
+        !AvailabilityEngine::isValidBookingDate($checkout)
     ) {
         $errors[] = \__('Please provide valid check-in and check-out dates.', 'must-hotel-booking');
     } elseif ($checkin >= $checkout) {
@@ -784,8 +786,8 @@ function maybe_handle_calendar_manual_reservation_submission(): array
 
     if (
         !\function_exists(__NAMESPACE__ . '\is_valid_booking_date') ||
-        !is_valid_booking_date($checkin) ||
-        !is_valid_booking_date($checkout)
+        !AvailabilityEngine::isValidBookingDate($checkin) ||
+        !AvailabilityEngine::isValidBookingDate($checkout)
     ) {
         $errors[] = \__('Please provide valid check-in and check-out dates.', 'must-hotel-booking');
     } elseif ($checkin >= $checkout) {
@@ -813,13 +815,7 @@ function maybe_handle_calendar_manual_reservation_submission(): array
     }
 
     if (empty($errors)) {
-        $is_available = true;
-
-        if (\function_exists(__NAMESPACE__ . '\check_room_availability')) {
-            $is_available = check_room_availability($room_id, $checkin, $checkout);
-        } else {
-            $is_available = !has_calendar_reservation_overlap(0, $room_id, $checkin, $checkout);
-        }
+        $is_available = AvailabilityEngine::checkAvailability($room_id, $checkin, $checkout);
 
         if (!$is_available) {
             $errors[] = \__('This room is already reserved or blocked for the selected range.', 'must-hotel-booking');
@@ -857,14 +853,7 @@ function maybe_handle_calendar_manual_reservation_submission(): array
 
     $total_price = calculate_calendar_reservation_total_price($room_id, $checkin, $checkout, $guests_count);
 
-    if (!\function_exists(__NAMESPACE__ . '\create_reservation_without_lock')) {
-        return [
-            'errors' => [\__('Unable to create reservation. Please check database schema.', 'must-hotel-booking')],
-            'form' => $form_data,
-        ];
-    }
-
-    $new_reservation_id = create_reservation_without_lock(
+    $new_reservation_id = ReservationEngine::createReservationWithoutLock(
         $room_id,
         $guest_id,
         $checkin,
@@ -935,18 +924,16 @@ function maybe_handle_calendar_block_submission(): array
 
     if (
         !\function_exists(__NAMESPACE__ . '\is_valid_booking_date') ||
-        !is_valid_booking_date($checkin) ||
-        !is_valid_booking_date($checkout)
+        !AvailabilityEngine::isValidBookingDate($checkin) ||
+        !AvailabilityEngine::isValidBookingDate($checkout)
     ) {
         $errors[] = \__('Please provide valid dates.', 'must-hotel-booking');
     } elseif ($checkin >= $checkout) {
         $errors[] = \__('Checkout must be after check-in.', 'must-hotel-booking');
     }
 
-    if (empty($errors) && \function_exists(__NAMESPACE__ . '\check_room_availability')) {
-        if (!check_room_availability($room_id, $checkin, $checkout)) {
-            $errors[] = \__('This room is already reserved or blocked for the selected range.', 'must-hotel-booking');
-        }
+    if (empty($errors) && !AvailabilityEngine::checkAvailability($room_id, $checkin, $checkout)) {
+        $errors[] = \__('This room is already reserved or blocked for the selected range.', 'must-hotel-booking');
     }
 
     if (!empty($errors)) {
@@ -1596,7 +1583,7 @@ function enqueue_admin_calendar_assets(): void
     \wp_enqueue_style(
         'must-hotel-booking-admin-calendar',
         MUST_HOTEL_BOOKING_URL . 'assets/css/admin-calendar.css',
-        ['must-hotel-booking-design-system'],
+        [],
         MUST_HOTEL_BOOKING_VERSION
     );
 }

@@ -304,6 +304,118 @@ function seed_default_cancellation_policies(): void
 }
 
 /**
+ * Seed the room-type/inventory model from legacy room records.
+ */
+function seed_inventory_model_from_legacy_rooms(): void
+{
+    global $wpdb;
+
+    $room_types_table = $wpdb->prefix . 'mhb_room_types';
+    $inventory_rooms_table = $wpdb->prefix . 'mhb_rooms';
+    $legacy_rooms_table = $wpdb->prefix . 'must_rooms';
+    $room_types_exists = $wpdb->get_var(
+        $wpdb->prepare(
+            'SHOW TABLES LIKE %s',
+            $room_types_table
+        )
+    );
+    $inventory_rooms_exists = $wpdb->get_var(
+        $wpdb->prepare(
+            'SHOW TABLES LIKE %s',
+            $inventory_rooms_table
+        )
+    );
+
+    if (
+        !\is_string($room_types_exists) ||
+        $room_types_exists === '' ||
+        !\is_string($inventory_rooms_exists) ||
+        $inventory_rooms_exists === ''
+    ) {
+        return;
+    }
+
+    $legacy_rooms = $wpdb->get_results(
+        'SELECT id, name, description, max_guests, base_price
+        FROM ' . $legacy_rooms_table . '
+        ORDER BY id ASC',
+        ARRAY_A
+    );
+
+    if (!\is_array($legacy_rooms)) {
+        return;
+    }
+
+    foreach ($legacy_rooms as $legacy_room) {
+        if (!\is_array($legacy_room)) {
+            continue;
+        }
+
+        $room_type_id = isset($legacy_room['id']) ? (int) $legacy_room['id'] : 0;
+
+        if ($room_type_id <= 0) {
+            continue;
+        }
+
+        $room_type_data = [
+            'name' => isset($legacy_room['name']) ? \sanitize_text_field((string) $legacy_room['name']) : '',
+            'description' => isset($legacy_room['description']) ? \sanitize_textarea_field((string) $legacy_room['description']) : '',
+            'capacity' => isset($legacy_room['max_guests']) ? \max(1, (int) $legacy_room['max_guests']) : 1,
+            'base_price' => isset($legacy_room['base_price']) ? \round((float) $legacy_room['base_price'], 2) : 0.0,
+        ];
+        $room_type_exists = (int) $wpdb->get_var(
+            $wpdb->prepare(
+                'SELECT id
+                FROM ' . $room_types_table . '
+                WHERE id = %d
+                LIMIT 1',
+                $room_type_id
+            )
+        );
+
+        if ($room_type_exists > 0) {
+            $wpdb->update(
+                $room_types_table,
+                $room_type_data,
+                ['id' => $room_type_id],
+                ['%s', '%s', '%d', '%f'],
+                ['%d']
+            );
+        } else {
+            $wpdb->insert(
+                $room_types_table,
+                ['id' => $room_type_id] + $room_type_data,
+                ['%d', '%s', '%s', '%d', '%f']
+            );
+        }
+
+        $inventory_room_count = (int) $wpdb->get_var(
+            $wpdb->prepare(
+                'SELECT COUNT(*)
+                FROM ' . $inventory_rooms_table . '
+                WHERE room_type_id = %d',
+                $room_type_id
+            )
+        );
+
+        if ($inventory_room_count > 0) {
+            continue;
+        }
+
+        $wpdb->insert(
+            $inventory_rooms_table,
+            [
+                'room_type_id' => $room_type_id,
+                'room_number' => 'RT-' . $room_type_id . '-1',
+                'floor' => 0,
+                'status' => 'available',
+            ],
+            ['%d', '%s', '%d', '%s']
+        );
+    }
+}
+
+/**
  * Create or update plugin database tables.
  */
 function install_tables(): void
@@ -345,6 +457,28 @@ function install_tables(): void
         KEY meta_key (meta_key)
     ) {$charset_collate};";
 
+    $tables[] = "CREATE TABLE {$prefix}mhb_room_types (
+        id BIGINT(20) UNSIGNED NOT NULL AUTO_INCREMENT,
+        name VARCHAR(191) NOT NULL DEFAULT '',
+        description LONGTEXT NULL,
+        capacity SMALLINT(5) UNSIGNED NOT NULL DEFAULT 1,
+        base_price DECIMAL(12,2) NOT NULL DEFAULT 0.00,
+        PRIMARY KEY  (id),
+        KEY capacity (capacity)
+    ) {$charset_collate};";
+
+    $tables[] = "CREATE TABLE {$prefix}mhb_rooms (
+        id BIGINT(20) UNSIGNED NOT NULL AUTO_INCREMENT,
+        room_type_id BIGINT(20) UNSIGNED NOT NULL,
+        room_number VARCHAR(100) NOT NULL DEFAULT '',
+        floor INT(11) NOT NULL DEFAULT 0,
+        status VARCHAR(30) NOT NULL DEFAULT 'available',
+        PRIMARY KEY  (id),
+        KEY room_type_id (room_type_id),
+        KEY status (status),
+        UNIQUE KEY room_number (room_number)
+    ) {$charset_collate};";
+
     $tables[] = "CREATE TABLE {$prefix}must_guests (
         id BIGINT(20) UNSIGNED NOT NULL AUTO_INCREMENT,
         first_name VARCHAR(100) NOT NULL DEFAULT '',
@@ -360,6 +494,8 @@ function install_tables(): void
         id BIGINT(20) UNSIGNED NOT NULL AUTO_INCREMENT,
         booking_id VARCHAR(50) NULL DEFAULT NULL,
         room_id BIGINT(20) UNSIGNED NOT NULL,
+        room_type_id BIGINT(20) UNSIGNED NOT NULL DEFAULT 0,
+        assigned_room_id BIGINT(20) UNSIGNED NOT NULL DEFAULT 0,
         rate_plan_id BIGINT(20) UNSIGNED NOT NULL DEFAULT 0,
         guest_id BIGINT(20) UNSIGNED NOT NULL,
         checkin DATE NOT NULL,
@@ -373,6 +509,8 @@ function install_tables(): void
         created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
         PRIMARY KEY  (id),
         KEY room_id (room_id),
+        KEY room_type_id (room_type_id),
+        KEY assigned_room_id (assigned_room_id),
         KEY rate_plan_id (rate_plan_id),
         KEY room_stay (room_id, checkin, checkout),
         UNIQUE KEY booking_id (booking_id),
@@ -535,7 +673,7 @@ function install_tables(): void
         id BIGINT(20) UNSIGNED NOT NULL AUTO_INCREMENT,
         season_id BIGINT(20) UNSIGNED NOT NULL,
         rate_plan_id BIGINT(20) UNSIGNED NOT NULL,
-        price_modifier_type VARCHAR(20) NOT NULL DEFAULT 'fixed',
+        modifier_type VARCHAR(20) NOT NULL DEFAULT 'fixed',
         modifier_value DECIMAL(12,2) NOT NULL DEFAULT 0.00,
         PRIMARY KEY  (id),
         UNIQUE KEY season_rate_plan (season_id, rate_plan_id),
@@ -549,6 +687,7 @@ function install_tables(): void
 
     seed_default_cancellation_policies();
     seed_default_room_catalog();
+    seed_inventory_model_from_legacy_rooms();
 
     \update_option('must_hotel_booking_db_version', MUST_HOTEL_BOOKING_VERSION);
 }

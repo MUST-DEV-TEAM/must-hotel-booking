@@ -3,6 +3,8 @@
 namespace MustHotelBooking\Engine\Payment;
 
 use MustHotelBooking\Core\MustBookingConfig;
+use MustHotelBooking\Engine\BookingStatusEngine;
+use MustHotelBooking\Engine\PaymentEngine;
 
 final class StripePayment implements PaymentInterface
 {
@@ -27,7 +29,7 @@ final class StripePayment implements PaymentInterface
             return $validation + ['method' => $this->method];
         }
 
-        $result = \MustHotelBooking\Engine\create_stripe_checkout_session(
+        $result = PaymentEngine::createStripeCheckoutSession(
             $reservationIds,
             $this->extractGuestForm($context),
             $amount,
@@ -40,7 +42,7 @@ final class StripePayment implements PaymentInterface
         }
 
         $transactionId = isset($result['session_id']) ? (string) $result['session_id'] : '';
-        \MustHotelBooking\Engine\create_or_update_payment_rows($reservationIds, $this->method, 'pending', $transactionId);
+        BookingStatusEngine::createPaymentRows($reservationIds, $this->method, 'pending', $transactionId);
 
         return [
             'success' => true,
@@ -75,13 +77,13 @@ final class StripePayment implements PaymentInterface
         $payload = [
             'payment_intent' => $transactionId,
         ];
-        $amountMinor = \MustHotelBooking\Engine\convert_amount_to_stripe_minor_units($amount, $currency);
+        $amountMinor = PaymentEngine::convertAmountToStripeMinorUnits($amount, $currency);
 
         if ($amountMinor > 0) {
             $payload['amount'] = $amountMinor;
         }
 
-        $response = \MustHotelBooking\Engine\perform_stripe_api_request('POST', 'refunds', $payload);
+        $response = PaymentEngine::performStripeApiRequest('POST', 'refunds', $payload);
 
         if (empty($response['success'])) {
             return [
@@ -102,7 +104,7 @@ final class StripePayment implements PaymentInterface
 
     public function validatePayment(array $paymentData = []): array
     {
-        if (!\MustHotelBooking\Engine\is_stripe_checkout_configured()) {
+        if (!PaymentEngine::isStripeCheckoutConfigured()) {
             return [
                 'success' => false,
                 'method' => $this->method,

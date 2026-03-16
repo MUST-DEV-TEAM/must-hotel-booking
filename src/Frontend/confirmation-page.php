@@ -109,9 +109,7 @@ function get_pending_confirmation_page_view_data(): array
         ? get_fixed_room_booking_room_id()
         : 0;
     $flow_data = get_booking_selection_flow_data();
-    $pending_payment = \function_exists(__NAMESPACE__ . '\normalize_pending_payment_flow_data')
-        ? normalize_pending_payment_flow_data($flow_data['pending_payment'] ?? [])
-        : [];
+    $pending_payment = PaymentEngine::normalizePendingPaymentFlowData($flow_data['pending_payment'] ?? []);
     $context = BookingValidationEngine::parseRequestContext($selection_context, true);
     $selected_room_ids = get_booking_selected_room_ids();
     $stored_guest_form_source = isset($flow_data['guest_form']) && \is_array($flow_data['guest_form']) ? $flow_data['guest_form'] : [];
@@ -122,20 +120,9 @@ function get_pending_confirmation_page_view_data(): array
         $request_method === 'POST' && \is_array($_POST) ? $_POST : $billing_seed,
         $billing_seed
     );
-    $payment_method = \function_exists(__NAMESPACE__ . '\get_selected_checkout_payment_method')
-        ? get_selected_checkout_payment_method($request_source, $flow_data)
-        : 'pay_at_hotel';
-    $payment_methods = \function_exists(__NAMESPACE__ . '\get_checkout_payment_methods')
-        ? get_checkout_payment_methods()
-        : [
-            'pay_at_hotel' => [
-                'label' => \__('Pay at hotel', 'must-hotel-booking'),
-                'description' => \__('Guest pays during check-in or check-out at the property.', 'must-hotel-booking'),
-            ],
-        ];
-    $confirmation_cta_label = \function_exists(__NAMESPACE__ . '\get_checkout_payment_cta_label')
-        ? get_checkout_payment_cta_label($payment_method)
-        : \__('Confirm reservation', 'must-hotel-booking');
+    $payment_method = PaymentEngine::getSelectedCheckoutPaymentMethod($request_source, $flow_data);
+    $payment_methods = PaymentEngine::getCheckoutPaymentMethods();
+    $confirmation_cta_label = PaymentEngine::getCheckoutPaymentCtaLabel($payment_method);
     $request_action = isset($request_source['must_confirmation_action']) ? \sanitize_key((string) \wp_unslash($request_source['must_confirmation_action'])) : '';
     $submitted_coupon_code = isset($request_source['coupon_code']) ? \sanitize_text_field((string) \wp_unslash($request_source['coupon_code'])) : '';
     $persisted_coupon_code = isset($request_source['applied_coupon_code']) ? \sanitize_text_field((string) \wp_unslash($request_source['applied_coupon_code'])) : '';
@@ -273,8 +260,8 @@ function get_pending_confirmation_page_view_data(): array
                         }
                     }
 
-                    if (empty($stripe_coupon_ids) && $effective_coupon_code !== '' && \function_exists(__NAMESPACE__ . '\get_coupon_rule_from_table')) {
-                        $coupon_rule = get_coupon_rule_from_table($effective_coupon_code);
+                    if (empty($stripe_coupon_ids) && $effective_coupon_code !== '') {
+                        $coupon_rule = PaymentEngine::getCouponRuleByCode($effective_coupon_code);
 
                         if (\is_array($coupon_rule) && !empty($coupon_rule['id'])) {
                             $stripe_coupon_ids[] = (int) $coupon_rule['id'];
@@ -317,8 +304,7 @@ function get_pending_confirmation_page_view_data(): array
 
                             if (
                                 $stripe_checkout_url !== ''
-                                && \function_exists(__NAMESPACE__ . '\is_stripe_checkout_url')
-                                && is_stripe_checkout_url($stripe_checkout_url)
+                                && PaymentEngine::isStripeCheckoutUrl($stripe_checkout_url)
                             ) {
                                 \wp_redirect($stripe_checkout_url);
                                 exit;
@@ -329,7 +315,7 @@ function get_pending_confirmation_page_view_data(): array
                             }
 
                             update_booking_selection_flow_data([
-                                'pending_payment' => get_empty_pending_payment_flow_data(),
+                                'pending_payment' => PaymentEngine::getEmptyPendingPaymentFlowData(),
                             ]);
 
                             $messages[] = \__('Stripe returned an invalid checkout URL. Please try again.', 'must-hotel-booking');
@@ -370,7 +356,7 @@ function get_pending_confirmation_page_view_data(): array
                                 : \__('Unable to process the selected payment method right now.', 'must-hotel-booking');
                         } else {
                             update_booking_selection_flow_data([
-                                'pending_payment' => get_empty_pending_payment_flow_data(),
+                                'pending_payment' => PaymentEngine::getEmptyPendingPaymentFlowData(),
                             ]);
 
                             $redirect_url = \add_query_arg(
@@ -559,7 +545,7 @@ function enqueue_confirmation_page_assets(): void
     \wp_enqueue_style(
         'must-hotel-booking-booking-page',
         MUST_HOTEL_BOOKING_URL . 'assets/css/booking-page.css',
-        ['must-hotel-booking-design-system'],
+        [],
         MUST_HOTEL_BOOKING_VERSION
     );
 

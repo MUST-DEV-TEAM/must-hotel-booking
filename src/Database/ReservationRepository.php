@@ -54,6 +54,8 @@ final class ReservationRepository extends AbstractRepository
     public function createReservation(array $reservationData, array $nonBlockingStatuses = []): int
     {
         $roomId = isset($reservationData['room_id']) ? (int) $reservationData['room_id'] : 0;
+        $roomTypeId = isset($reservationData['room_type_id']) ? (int) $reservationData['room_type_id'] : $roomId;
+        $assignedRoomId = isset($reservationData['assigned_room_id']) ? (int) $reservationData['assigned_room_id'] : 0;
         $ratePlanId = isset($reservationData['rate_plan_id']) ? (int) $reservationData['rate_plan_id'] : 0;
         $guestId = isset($reservationData['guest_id']) ? (int) $reservationData['guest_id'] : 0;
         $guests = isset($reservationData['guests']) ? (int) $reservationData['guests'] : 0;
@@ -67,15 +69,17 @@ final class ReservationRepository extends AbstractRepository
         $paymentStatus = isset($reservationData['payment_status']) ? (string) $reservationData['payment_status'] : 'unpaid';
         $createdAt = isset($reservationData['created_at']) ? (string) $reservationData['created_at'] : \current_time('mysql');
         $statuses = $this->normalizeNonBlockingStatuses($nonBlockingStatuses);
+        $availabilityColumn = $assignedRoomId > 0 ? 'assigned_room_id' : 'room_id';
+        $availabilityTargetId = $assignedRoomId > 0 ? $assignedRoomId : $roomId;
 
         $sql = $this->wpdb->prepare(
             'INSERT INTO ' . $this->table('reservations') . '
-                (booking_id, room_id, rate_plan_id, guest_id, checkin, checkout, guests, status, booking_source, notes, total_price, payment_status, created_at)
-            SELECT %s, %d, %d, %d, %s, %s, %d, %s, %s, %s, %f, %s, %s
+                (booking_id, room_id, room_type_id, assigned_room_id, rate_plan_id, guest_id, checkin, checkout, guests, status, booking_source, notes, total_price, payment_status, created_at)
+            SELECT %s, %d, %d, %d, %d, %d, %s, %s, %d, %s, %s, %s, %f, %s, %s
             WHERE NOT EXISTS (
                 SELECT 1
                 FROM ' . $this->table('reservations') . ' r
-                WHERE r.room_id = %d
+                WHERE r.' . $availabilityColumn . ' = %d
                     AND r.checkin < %s
                     AND r.checkout > %s
                     AND r.status NOT IN (%s, %s, %s)
@@ -83,6 +87,8 @@ final class ReservationRepository extends AbstractRepository
             LIMIT 1',
             $bookingId,
             $roomId,
+            $roomTypeId,
+            $assignedRoomId,
             $ratePlanId,
             $guestId,
             $checkin,
@@ -94,7 +100,7 @@ final class ReservationRepository extends AbstractRepository
             $totalPrice,
             $paymentStatus,
             $createdAt,
-            $roomId,
+            $availabilityTargetId,
             $checkout,
             $checkin,
             $statuses[0],
@@ -118,6 +124,8 @@ final class ReservationRepository extends AbstractRepository
     public function createReservationFromLock(array $reservationData, string $sessionId, string $now, array $nonBlockingStatuses = []): int
     {
         $roomId = isset($reservationData['room_id']) ? (int) $reservationData['room_id'] : 0;
+        $roomTypeId = isset($reservationData['room_type_id']) ? (int) $reservationData['room_type_id'] : $roomId;
+        $assignedRoomId = isset($reservationData['assigned_room_id']) ? (int) $reservationData['assigned_room_id'] : 0;
         $ratePlanId = isset($reservationData['rate_plan_id']) ? (int) $reservationData['rate_plan_id'] : 0;
         $guestId = isset($reservationData['guest_id']) ? (int) $reservationData['guest_id'] : 0;
         $guests = isset($reservationData['guests']) ? (int) $reservationData['guests'] : 0;
@@ -130,11 +138,14 @@ final class ReservationRepository extends AbstractRepository
         $createdAt = isset($reservationData['created_at']) ? (string) $reservationData['created_at'] : $now;
         $statuses = $this->normalizeNonBlockingStatuses($nonBlockingStatuses);
         $locksTable = $this->lockTableName();
+        $lockRoomId = $assignedRoomId > 0 ? $assignedRoomId : $roomId;
+        $availabilityColumn = $assignedRoomId > 0 ? 'assigned_room_id' : 'room_id';
+        $availabilityTargetId = $assignedRoomId > 0 ? $assignedRoomId : $roomId;
 
         $sql = $this->wpdb->prepare(
             'INSERT INTO ' . $this->table('reservations') . '
-                (booking_id, room_id, rate_plan_id, guest_id, checkin, checkout, guests, status, total_price, payment_status, created_at)
-            SELECT %s, %d, %d, %d, %s, %s, %d, %s, %f, %s, %s
+                (booking_id, room_id, room_type_id, assigned_room_id, rate_plan_id, guest_id, checkin, checkout, guests, status, total_price, payment_status, created_at)
+            SELECT %s, %d, %d, %d, %d, %d, %s, %s, %d, %s, %f, %s, %s
             WHERE EXISTS (
                 SELECT 1
                 FROM ' . $locksTable . ' l
@@ -147,7 +158,7 @@ final class ReservationRepository extends AbstractRepository
             AND NOT EXISTS (
                 SELECT 1
                 FROM ' . $this->table('reservations') . ' r
-                WHERE r.room_id = %d
+                WHERE r.' . $availabilityColumn . ' = %d
                     AND r.checkin < %s
                     AND r.checkout > %s
                     AND r.status NOT IN (%s, %s, %s)
@@ -155,6 +166,8 @@ final class ReservationRepository extends AbstractRepository
             LIMIT 1',
             $bookingId,
             $roomId,
+            $roomTypeId,
+            $assignedRoomId,
             $ratePlanId,
             $guestId,
             $checkin,
@@ -164,12 +177,12 @@ final class ReservationRepository extends AbstractRepository
             $totalPrice,
             $paymentStatus,
             $createdAt,
-            $roomId,
+            $lockRoomId,
             $checkin,
             $checkout,
             $sessionId,
             $now,
-            $roomId,
+            $availabilityTargetId,
             $checkout,
             $checkin,
             $statuses[0],
@@ -222,7 +235,7 @@ final class ReservationRepository extends AbstractRepository
         }
 
         $sql = $this->wpdb->prepare(
-            'SELECT id, booking_id, room_id, rate_plan_id, guest_id, checkin, checkout, guests, status, total_price, payment_status, created_at
+            'SELECT id, booking_id, room_id, room_type_id, assigned_room_id, rate_plan_id, guest_id, checkin, checkout, guests, status, total_price, payment_status, created_at
             FROM ' . $this->table('reservations') . '
             WHERE id IN (' . $this->buildIntegerPlaceholders($reservationIds) . ')
             ORDER BY id ASC',
@@ -277,6 +290,26 @@ final class ReservationRepository extends AbstractRepository
         return \is_int($updated);
     }
 
+    public function assignInventoryRoomToReservation(int $reservationId, int $roomTypeId, int $assignedRoomId): bool
+    {
+        if ($reservationId <= 0 || $assignedRoomId <= 0) {
+            return false;
+        }
+
+        $updated = $this->wpdb->update(
+            $this->table('reservations'),
+            [
+                'room_type_id' => \max(0, $roomTypeId),
+                'assigned_room_id' => $assignedRoomId,
+            ],
+            ['id' => $reservationId],
+            ['%d', '%d'],
+            ['%d']
+        );
+
+        return \is_int($updated);
+    }
+
     /**
      * @return array<string, mixed>|null
      */
@@ -294,6 +327,7 @@ final class ReservationRepository extends AbstractRepository
                 r.checkout,
                 r.status,
                 r.total_price,
+                r.assigned_room_id,
                 r.rate_plan_id,
                 rm.name AS room_name,
                 rp.name AS rate_plan_name,
@@ -379,6 +413,8 @@ final class ReservationRepository extends AbstractRepository
                 r.id,
                 r.booking_id,
                 r.room_id,
+                r.room_type_id,
+                r.assigned_room_id,
                 r.rate_plan_id,
                 r.guest_id,
                 r.checkin,
@@ -389,6 +425,7 @@ final class ReservationRepository extends AbstractRepository
                 r.payment_status,
                 r.created_at,
                 rm.name AS room_name,
+                inv.room_number AS assigned_room_number,
                 rp.name AS rate_plan_name,
                 g.first_name,
                 g.last_name,
@@ -397,6 +434,7 @@ final class ReservationRepository extends AbstractRepository
                 g.country
             FROM ' . $this->table('reservations') . ' r
             LEFT JOIN ' . $this->table('rooms') . ' rm ON rm.id = r.room_id
+            LEFT JOIN ' . $this->wpdb->prefix . 'mhb_rooms' . ' inv ON inv.id = r.assigned_room_id
             LEFT JOIN ' . $this->wpdb->prefix . 'mhb_rate_plans' . ' rp ON rp.id = r.rate_plan_id
             LEFT JOIN ' . $this->table('guests') . ' g ON g.id = r.guest_id
             WHERE ' . $whereSql . '

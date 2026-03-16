@@ -81,7 +81,7 @@ final class RatePlanEngine
 
     public static function getRatePlanPrice(int $ratePlanId, string $date): float
     {
-        if ($ratePlanId <= 0 || !is_valid_booking_date($date)) {
+        if ($ratePlanId <= 0 || !AvailabilityEngine::isValidBookingDate($date)) {
             return 0.0;
         }
 
@@ -92,7 +92,7 @@ final class RatePlanEngine
 
     public static function calculateRatePlanPrice(int $ratePlanId, string $checkin, string $checkout): float
     {
-        if (!is_valid_booking_date($checkin) || !is_valid_booking_date($checkout) || $checkin >= $checkout) {
+        if (!AvailabilityEngine::isValidBookingDate($checkin) || !AvailabilityEngine::isValidBookingDate($checkout) || $checkin >= $checkout) {
             return 0.0;
         }
 

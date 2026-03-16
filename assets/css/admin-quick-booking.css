@@ -1,6 +1,6 @@
 .must-admin-quick-booking-panel {
     margin: 18px 0;
-    font-family: var(--must-font-family);
+    font-family: inherit;
 }
 
 .must-admin-quick-booking-panel .must-admin-quick-booking-panel-inner {
@@ -9,9 +9,9 @@
 
 .must-admin-quick-booking-panel .must-admin-quick-booking-panel-inner > h2 {
     margin: 0 0 14px;
-    font-size: var(--must-h3-size);
-    line-height: var(--must-h3-line-height);
-    font-weight: var(--must-h3-weight);
+    font-size: 20px;
+    line-height: 1.3;
+    font-weight: 600;
 }
 
 .must-admin-quick-booking-panel .must-quick-booking-form {
@@ -37,7 +37,7 @@
 
 .must-admin-quick-booking-panel .must-quick-booking-live {
     border: 1px solid #dcdcde;
-    background: var(--must-light-blue);
+    background: #f6f8fb;
     padding: 10px 12px;
 }
 

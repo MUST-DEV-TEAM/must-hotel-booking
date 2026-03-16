@@ -2,6 +2,8 @@
 
 namespace MustHotelBooking\Admin;
 
+use MustHotelBooking\Engine\AvailabilityEngine;
+
 /**
  * Build reservations admin page URL.
  *
@@ -326,8 +328,8 @@ function maybe_handle_edit_reservation_submission(): array
 
     if (
         !\function_exists(__NAMESPACE__ . '\is_valid_booking_date') ||
-        !is_valid_booking_date($checkin) ||
-        !is_valid_booking_date($checkout)
+        !AvailabilityEngine::isValidBookingDate($checkin) ||
+        !AvailabilityEngine::isValidBookingDate($checkout)
     ) {
         $errors[] = \__('Please provide valid check-in and check-out dates.', 'must-hotel-booking');
     } elseif ($checkin >= $checkout) {

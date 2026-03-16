@@ -10,7 +10,7 @@ function register_elementor_rooms_list_widget_styles(): void
     \wp_register_style(
         'must-hotel-booking-rooms-list-widget',
         MUST_HOTEL_BOOKING_URL . 'assets/css/rooms-list-widget.css',
-        ['must-hotel-booking-design-system'],
+        [],
         MUST_HOTEL_BOOKING_VERSION
     );
 }
@@ -26,6 +26,17 @@ function register_elementor_rooms_list_widget_scripts(): void
         [],
         MUST_HOTEL_BOOKING_VERSION,
         true
+    );
+
+    \wp_localize_script(
+        'must-hotel-booking-rooms-list-widget',
+        'mustBookingRoomsListWidgetConfig',
+        [
+            'icons' => [
+                'lightboxPrev' => MUST_HOTEL_BOOKING_URL . 'assets/img/lightboxleft.svg',
+                'lightboxNext' => MUST_HOTEL_BOOKING_URL . 'assets/img/lightboxright.svg',
+            ],
+        ]
     );
 }
 

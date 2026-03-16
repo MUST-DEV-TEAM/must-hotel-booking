@@ -2,6 +2,8 @@
 
 namespace MustHotelBooking\Admin;
 
+use MustHotelBooking\Database\CancellationPolicyRepository;
+use MustHotelBooking\Database\InventoryRepository;
 use MustHotelBooking\Database\RatePlanRepository;
 
 /**
@@ -24,6 +26,17 @@ function get_rate_plan_repository_instance(): RatePlanRepository
 
     if (!$repository instanceof RatePlanRepository) {
         $repository = new RatePlanRepository();
+    }
+
+    return $repository;
+}
+
+function get_cancellation_policy_repository_instance(): CancellationPolicyRepository
+{
+    static $repository = null;
+
+    if (!$repository instanceof CancellationPolicyRepository) {
+        $repository = new CancellationPolicyRepository();
     }
 
     return $repository;
@@ -104,6 +117,18 @@ function get_rate_plan_form_data(?array $submitted_form = null): array
  */
 function get_rate_plan_assignable_rooms(): array
 {
+    static $repository = null;
+
+    if (!$repository instanceof InventoryRepository) {
+        $repository = new InventoryRepository();
+    }
+
+    $roomTypes = $repository->getRoomTypes();
+
+    if (!empty($roomTypes)) {
+        return $roomTypes;
+    }
+
     if (\function_exists(__NAMESPACE__ . '\get_rooms_list_rows')) {
         return (array) get_rooms_list_rows();
     }
@@ -130,6 +155,29 @@ function sanitize_rate_plan_assignment_values(array $source): array
 
     if ((int) $values['room_type_id'] <= 0) {
         $values['errors'][] = \__('Please select a room type.', 'must-hotel-booking');
+    }
+
+    return $values;
+}
+
+/**
+ * @return array<string, mixed>
+ */
+function sanitize_rate_plan_price_values(array $source): array
+{
+    $values = [
+        'rate_plan_id' => isset($source['rate_plan_id']) ? \absint(\wp_unslash($source['rate_plan_id'])) : 0,
+        'date' => isset($source['date']) ? \sanitize_text_field((string) \wp_unslash($source['date'])) : '',
+        'price' => isset($source['price']) ? \round(\max(0.0, (float) \wp_unslash($source['price'])), 2) : 0.0,
+        'errors' => [],
+    ];
+
+    if ((int) $values['rate_plan_id'] <= 0) {
+        $values['errors'][] = \__('Select a rate plan before saving custom prices.', 'must-hotel-booking');
+    }
+
+    if (!\preg_match('/^\d{4}-\d{2}-\d{2}$/', (string) $values['date'])) {
+        $values['errors'][] = \__('Please provide a valid date in YYYY-MM-DD format.', 'must-hotel-booking');
     }
 
     return $values;
@@ -177,6 +225,34 @@ function maybe_handle_rate_plan_assignment_delete_request(): void
     \wp_safe_redirect(
         get_admin_rate_plans_page_url([
             'notice' => $deleted ? 'assignment_deleted' : 'assignment_delete_failed',
+            'action' => 'edit',
+            'rate_plan_id' => $rate_plan_id,
+        ])
+    );
+    exit;
+}
+
+function maybe_handle_rate_plan_price_delete_request(): void
+{
+    $action = isset($_GET['action']) ? \sanitize_key((string) \wp_unslash($_GET['action'])) : '';
+
+    if ($action !== 'delete_rate_plan_price') {
+        return;
+    }
+
+    $price_id = isset($_GET['price_id']) ? \absint(\wp_unslash($_GET['price_id'])) : 0;
+    $rate_plan_id = isset($_GET['rate_plan_id']) ? \absint(\wp_unslash($_GET['rate_plan_id'])) : 0;
+    $nonce = isset($_GET['_wpnonce']) ? (string) \wp_unslash($_GET['_wpnonce']) : '';
+
+    if ($price_id <= 0 || $rate_plan_id <= 0 || !\wp_verify_nonce($nonce, 'must_rate_plan_price_delete_' . $price_id)) {
+        \wp_safe_redirect(get_admin_rate_plans_page_url(['notice' => 'invalid_nonce']));
+        exit;
+    }
+
+    $deleted = get_rate_plan_repository_instance()->deleteRatePlanPrice($price_id);
+    \wp_safe_redirect(
+        get_admin_rate_plans_page_url([
+            'notice' => $deleted ? 'price_deleted' : 'price_delete_failed',
             'action' => 'edit',
             'rate_plan_id' => $rate_plan_id,
         ])
@@ -325,6 +401,57 @@ function maybe_handle_rate_plan_assignment_save_request(): array
     exit;
 }
 
+/**
+ * @return array<int, string>
+ */
+function maybe_handle_rate_plan_price_save_request(): array
+{
+    $request_method = isset($_SERVER['REQUEST_METHOD']) ? \strtoupper((string) $_SERVER['REQUEST_METHOD']) : 'GET';
+
+    if ($request_method !== 'POST') {
+        return [];
+    }
+
+    $action = isset($_POST['must_rate_plan_action']) ? \sanitize_key((string) \wp_unslash($_POST['must_rate_plan_action'])) : '';
+
+    if ($action !== 'save_rate_plan_price') {
+        return [];
+    }
+
+    $nonce = isset($_POST['must_rate_plan_price_nonce']) ? (string) \wp_unslash($_POST['must_rate_plan_price_nonce']) : '';
+
+    if (!\wp_verify_nonce($nonce, 'must_rate_plan_price_save')) {
+        return [\__('Security check failed. Please try again.', 'must-hotel-booking')];
+    }
+
+    /** @var array<string, mixed> $raw_post */
+    $raw_post = \is_array($_POST) ? $_POST : [];
+    $form = sanitize_rate_plan_price_values($raw_post);
+
+    if (!empty($form['errors'])) {
+        return (array) $form['errors'];
+    }
+
+    $saved_id = get_rate_plan_repository_instance()->saveRatePlanPrice(
+        (int) $form['rate_plan_id'],
+        (string) $form['date'],
+        (float) $form['price']
+    );
+
+    if ($saved_id <= 0) {
+        return [\__('Unable to save the custom rate plan price.', 'must-hotel-booking')];
+    }
+
+    \wp_safe_redirect(
+        get_admin_rate_plans_page_url([
+            'notice' => 'price_saved',
+            'action' => 'edit',
+            'rate_plan_id' => (int) $form['rate_plan_id'],
+        ])
+    );
+    exit;
+}
+
 function render_rate_plan_admin_notice_from_query(): void
 {
     $notice = isset($_GET['notice']) ? \sanitize_key((string) \wp_unslash($_GET['notice'])) : '';
@@ -339,8 +466,11 @@ function render_rate_plan_admin_notice_from_query(): void
         'rate_plan_deleted' => ['success', \__('Rate plan deleted successfully.', 'must-hotel-booking')],
         'assignment_saved' => ['success', \__('Room type assignment saved successfully.', 'must-hotel-booking')],
         'assignment_deleted' => ['success', \__('Room type assignment removed successfully.', 'must-hotel-booking')],
+        'price_saved' => ['success', \__('Custom rate plan price saved successfully.', 'must-hotel-booking')],
+        'price_deleted' => ['success', \__('Custom rate plan price removed successfully.', 'must-hotel-booking')],
         'rate_plan_delete_failed' => ['error', \__('Unable to delete the rate plan.', 'must-hotel-booking')],
         'assignment_delete_failed' => ['error', \__('Unable to delete the room type assignment.', 'must-hotel-booking')],
+        'price_delete_failed' => ['error', \__('Unable to delete the custom rate plan price.', 'must-hotel-booking')],
         'invalid_nonce' => ['error', \__('Security check failed. Please try again.', 'must-hotel-booking')],
     ];
 
@@ -361,18 +491,22 @@ function render_admin_rate_plans_page(): void
 
     maybe_handle_rate_plan_delete_request();
     maybe_handle_rate_plan_assignment_delete_request();
+    maybe_handle_rate_plan_price_delete_request();
 
     $save_state = maybe_handle_rate_plan_save_request();
     $assignment_errors = maybe_handle_rate_plan_assignment_save_request();
+    $price_errors = maybe_handle_rate_plan_price_save_request();
     $form_errors = isset($save_state['errors']) && \is_array($save_state['errors']) ? $save_state['errors'] : [];
     $submitted_form = isset($save_state['form']) && \is_array($save_state['form']) ? $save_state['form'] : null;
-    $errors = \array_values(\array_unique(\array_filter(\array_merge($form_errors, $assignment_errors))));
+    $errors = \array_values(\array_unique(\array_filter(\array_merge($form_errors, $assignment_errors, $price_errors))));
     $form = get_rate_plan_form_data($submitted_form);
     $rate_plan_id = (int) ($form['rate_plan_id'] ?? 0);
     $is_edit_mode = $rate_plan_id > 0;
     $repository = get_rate_plan_repository_instance();
+    $cancellation_policies = get_cancellation_policy_repository_instance()->getPolicies();
     $rate_plans = $repository->getRatePlans(true);
     $assignments = $is_edit_mode ? $repository->getAssignmentsByRatePlanId($rate_plan_id) : [];
+    $rate_plan_prices = $is_edit_mode ? $repository->getRatePlanPriceRows($rate_plan_id) : [];
     $rooms = get_rate_plan_assignable_rooms();
 
     echo '<div class="wrap">';
@@ -401,8 +535,26 @@ function render_admin_rate_plans_page(): void
     echo '<td><input id="must-rate-plan-name" type="text" class="regular-text" name="name" value="' . \esc_attr((string) $form['name']) . '" required /></td></tr>';
     echo '<tr><th scope="row"><label for="must-rate-plan-description">' . \esc_html__('Description', 'must-hotel-booking') . '</label></th>';
     echo '<td><textarea id="must-rate-plan-description" class="large-text" name="description" rows="4">' . \esc_textarea((string) $form['description']) . '</textarea></td></tr>';
-    echo '<tr><th scope="row"><label for="must-rate-plan-cancellation-policy">' . \esc_html__('Cancellation Policy ID', 'must-hotel-booking') . '</label></th>';
-    echo '<td><input id="must-rate-plan-cancellation-policy" type="number" min="0" step="1" name="cancellation_policy_id" value="' . \esc_attr((string) $form['cancellation_policy_id']) . '" /></td></tr>';
+    echo '<tr><th scope="row"><label for="must-rate-plan-cancellation-policy">' . \esc_html__('Cancellation Policy', 'must-hotel-booking') . '</label></th>';
+    echo '<td><select id="must-rate-plan-cancellation-policy" name="cancellation_policy_id">';
+    echo '<option value="0">' . \esc_html__('No policy assigned', 'must-hotel-booking') . '</option>';
+
+    foreach ($cancellation_policies as $policy) {
+        if (!\is_array($policy)) {
+            continue;
+        }
+
+        $policy_id = isset($policy['id']) ? (int) $policy['id'] : 0;
+
+        if ($policy_id <= 0) {
+            continue;
+        }
+
+        $policy_name = isset($policy['name']) ? (string) $policy['name'] : ('#' . $policy_id);
+        echo '<option value="' . \esc_attr((string) $policy_id) . '"' . \selected((int) $form['cancellation_policy_id'], $policy_id, false) . '>' . \esc_html($policy_name) . '</option>';
+    }
+
+    echo '</select></td></tr>';
     echo '<tr><th scope="row">' . \esc_html__('Status', 'must-hotel-booking') . '</th>';
     echo '<td><label><input type="checkbox" name="is_active" value="1"' . \checked(!empty($form['is_active']), true, false) . ' /> ' . \esc_html__('Active', 'must-hotel-booking') . '</label></td></tr>';
     echo '</tbody></table>';
@@ -439,11 +591,17 @@ function render_admin_rate_plans_page(): void
             }
 
             $room_name = isset($room['name']) ? (string) $room['name'] : '';
-            $room_category = isset($room['category']) ? (string) $room['category'] : '';
+            $room_capacity = isset($room['capacity']) ? (int) $room['capacity'] : 0;
             $room_label = $room_name !== '' ? $room_name : ('#' . $room_id);
 
-            if ($room_category !== '') {
-                $room_label .= ' (' . $room_category . ')';
+            if ($room_capacity > 0) {
+                $room_label .= ' (' . \sprintf(
+                    /* translators: %d is room type capacity. */
+                    \__('Capacity %d', 'must-hotel-booking'),
+                    $room_capacity
+                ) . ')';
+            } elseif (isset($room['category']) && (string) $room['category'] !== '') {
+                $room_label .= ' (' . (string) $room['category'] . ')';
             }
 
             echo '<option value="' . \esc_attr((string) $room_id) . '">' . \esc_html($room_label) . '</option>';
@@ -456,6 +614,22 @@ function render_admin_rate_plans_page(): void
         echo '<td><input id="must-rate-plan-max-occupancy" type="number" min="1" step="1" name="max_occupancy" value="2" required /></td></tr>';
         echo '</tbody></table>';
         \submit_button(__('Assign Rate Plan', 'must-hotel-booking'));
+        echo '</form>';
+        echo '</div>';
+
+        echo '<div class="postbox" style="padding:16px;margin-bottom:20px;">';
+        echo '<h2 style="margin-top:0;">' . \esc_html__('Custom Prices By Date', 'must-hotel-booking') . '</h2>';
+        echo '<form method="post" action="' . \esc_url(get_admin_rate_plans_page_url()) . '">';
+        \wp_nonce_field('must_rate_plan_price_save', 'must_rate_plan_price_nonce');
+        echo '<input type="hidden" name="must_rate_plan_action" value="save_rate_plan_price" />';
+        echo '<input type="hidden" name="rate_plan_id" value="' . \esc_attr((string) $rate_plan_id) . '" />';
+        echo '<table class="form-table" role="presentation"><tbody>';
+        echo '<tr><th scope="row"><label for="must-rate-plan-price-date">' . \esc_html__('Date', 'must-hotel-booking') . '</label></th>';
+        echo '<td><input id="must-rate-plan-price-date" type="date" name="date" required /></td></tr>';
+        echo '<tr><th scope="row"><label for="must-rate-plan-price-value">' . \esc_html__('Custom Price', 'must-hotel-booking') . '</label></th>';
+        echo '<td><input id="must-rate-plan-price-value" type="number" min="0" step="0.01" name="price" value="0.00" required /></td></tr>';
+        echo '</tbody></table>';
+        \submit_button(__('Save Custom Price', 'must-hotel-booking'));
         echo '</form>';
         echo '</div>';
     }
@@ -532,6 +706,42 @@ function render_admin_rate_plans_page(): void
                 echo '<td>' . \esc_html(\number_format_i18n((float) ($assignment['base_price'] ?? 0.0), 2)) . '</td>';
                 echo '<td>' . \esc_html((string) ((int) ($assignment['max_occupancy'] ?? 1))) . '</td>';
                 echo '<td><a class="button button-small button-link-delete" href="' . \esc_url($delete_url) . '" onclick="return confirm(\'' . \esc_js(__('Remove this assignment?', 'must-hotel-booking')) . '\');">' . \esc_html__('Remove', 'must-hotel-booking') . '</a></td>';
+                echo '</tr>';
+            }
+        }
+
+        echo '</tbody></table>';
+
+        echo '<h2 style="margin-top:24px;">' . \esc_html__('Custom Price Calendar', 'must-hotel-booking') . '</h2>';
+        echo '<table class="widefat striped">';
+        echo '<thead><tr>';
+        echo '<th>' . \esc_html__('Date', 'must-hotel-booking') . '</th>';
+        echo '<th>' . \esc_html__('Price', 'must-hotel-booking') . '</th>';
+        echo '<th>' . \esc_html__('Actions', 'must-hotel-booking') . '</th>';
+        echo '</tr></thead><tbody>';
+
+        if (empty($rate_plan_prices)) {
+            echo '<tr><td colspan="3">' . \esc_html__('No custom date prices saved yet.', 'must-hotel-booking') . '</td></tr>';
+        } else {
+            foreach ($rate_plan_prices as $price_row) {
+                if (!\is_array($price_row)) {
+                    continue;
+                }
+
+                $price_id = isset($price_row['id']) ? (int) $price_row['id'] : 0;
+                $delete_url = \wp_nonce_url(
+                    get_admin_rate_plans_page_url([
+                        'action' => 'delete_rate_plan_price',
+                        'price_id' => $price_id,
+                        'rate_plan_id' => $rate_plan_id,
+                    ]),
+                    'must_rate_plan_price_delete_' . $price_id
+                );
+
+                echo '<tr>';
+                echo '<td>' . \esc_html((string) ($price_row['date'] ?? '')) . '</td>';
+                echo '<td>' . \esc_html(\number_format_i18n((float) ($price_row['price'] ?? 0.0), 2)) . '</td>';
+                echo '<td><a class="button button-small button-link-delete" href="' . \esc_url($delete_url) . '" onclick="return confirm(\'' . \esc_js(__('Remove this custom price?', 'must-hotel-booking')) . '\');">' . \esc_html__('Remove', 'must-hotel-booking') . '</a></td>';
                 echo '</tr>';
             }
         }

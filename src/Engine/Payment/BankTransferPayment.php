@@ -2,6 +2,8 @@
 
 namespace MustHotelBooking\Engine\Payment;
 
+use MustHotelBooking\Engine\BookingStatusEngine;
+
 final class BankTransferPayment implements PaymentInterface
 {
     private string $method;
@@ -23,7 +25,7 @@ final class BankTransferPayment implements PaymentInterface
             return $validation + ['method' => $this->method];
         }
 
-        \MustHotelBooking\Engine\create_or_update_payment_rows($reservationIds, $this->method, 'pending');
+        BookingStatusEngine::createPaymentRows($reservationIds, $this->method, 'pending');
 
         return [
             'success' => true,

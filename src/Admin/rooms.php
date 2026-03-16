@@ -1327,7 +1327,7 @@ function enqueue_admin_rooms_assets(): void
     \wp_enqueue_style(
         'must-hotel-booking-admin-rooms',
         MUST_HOTEL_BOOKING_URL . 'assets/css/admin-rooms.css',
-        ['must-hotel-booking-design-system'],
+        [],
         MUST_HOTEL_BOOKING_VERSION
     );
 

@@ -116,6 +116,9 @@ $render_payment_method_icon = static function (string $payment_method_key): stri
                 <?php foreach ($reservations as $reservation) : ?>
                     <div class="must-confirmation-success-card">
                         <p><strong><?php echo \esc_html((string) ($reservation['room_name'] ?? __('Room', 'must-hotel-booking'))); ?></strong></p>
+                        <?php if (!empty($reservation['assigned_room_number'])) : ?>
+                            <p><?php echo \esc_html(\sprintf(__('Assigned Room: %s', 'must-hotel-booking'), (string) $reservation['assigned_room_number'])); ?></p>
+                        <?php endif; ?>
                         <?php if (!empty($reservation['rate_plan_name'])) : ?>
                             <p><?php echo \esc_html(\sprintf(__('Rate Plan: %s', 'must-hotel-booking'), (string) $reservation['rate_plan_name'])); ?></p>
                         <?php endif; ?>
@@ -324,9 +327,7 @@ $render_payment_method_icon = static function (string $payment_method_key): stri
                                         <?php foreach ($payment_methods as $payment_method_key => $payment_method_meta) : ?>
                                             <?php
                                             $payment_method_label = isset($payment_method_meta['label']) ? (string) $payment_method_meta['label'] : $payment_method_key;
-                                            $payment_method_cta = \function_exists('\must_hotel_booking\get_checkout_payment_cta_label')
-                                                ? \must_hotel_booking\get_checkout_payment_cta_label($payment_method_key)
-                                                : \__('Confirm reservation', 'must-hotel-booking');
+                                            $payment_method_cta = \MustHotelBooking\Engine\PaymentEngine::getCheckoutPaymentCtaLabel($payment_method_key);
                                             ?>
                                             <label class="must-confirmation-payment-option must-confirmation-payment-option--<?php echo \esc_attr($payment_method_key); ?>" title="<?php echo \esc_attr($payment_method_label); ?>">
                                                 <input type="radio" name="payment_method" value="<?php echo \esc_attr($payment_method_key); ?>" data-cta-label="<?php echo \esc_attr($payment_method_cta); ?>"<?php checked($payment_method_key, $payment_method); ?> />

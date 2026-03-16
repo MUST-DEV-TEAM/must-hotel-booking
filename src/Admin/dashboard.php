@@ -481,7 +481,7 @@ function enqueue_admin_ui_assets(): void
     \wp_enqueue_style(
         'must-hotel-booking-admin-ui',
         MUST_HOTEL_BOOKING_URL . 'assets/css/admin-ui.css',
-        ['must-hotel-booking-design-system'],
+        [],
         MUST_HOTEL_BOOKING_VERSION
     );
 }

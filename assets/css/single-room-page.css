@@ -286,7 +286,7 @@
     gap: 15px;
     width: 100%;
     min-height: 30px;
-    font-family: 'Apercu Mono', 'PP Neue Montreal', var(--must-font-family), sans-serif;
+    font-family: 'Apercu Mono', 'PP Neue Montreal', sans-serif;
     font-style: normal;
     font-weight: 400;
     font-size: 20px;
@@ -425,7 +425,7 @@
     text-decoration: none;
     border-bottom: 1.5px solid #141414;
     padding-bottom: 2px;
-    font-family: 'PP Neue Montreal', var(--must-font-family), sans-serif;
+    font-family: 'PP Neue Montreal', sans-serif;
     font-style: normal;
     font-weight: 400;
     font-size: 28px;
@@ -453,7 +453,7 @@
     background: transparent;
     color: #141414;
     text-decoration: none;
-    font-family: 'PP Neue Montreal', var(--must-font-family), sans-serif;
+    font-family: 'PP Neue Montreal', sans-serif;
     font-style: normal;
     font-weight: 500;
     font-size: 20px;
@@ -506,7 +506,7 @@
     gap: 2px;
     width: 100%;
     min-height: 30px;
-    font-family: 'Apercu Mono', 'PP Neue Montreal', var(--must-font-family), sans-serif;
+    font-family: 'Apercu Mono', 'PP Neue Montreal', sans-serif;
     font-style: normal;
     font-weight: 400;
     font-size: 20px;
@@ -525,7 +525,7 @@
 
 .must-hotel-booking-single-room .must-hotel-booking-included-accommodations-title {
     margin: 0;
-    font-family: 'PP Neue Montreal', var(--must-font-family), sans-serif;
+    font-family: 'PP Neue Montreal', sans-serif;
     font-style: normal;
     font-weight: 500;
     font-size: clamp(42px, 3.1vw, 60px);
@@ -569,7 +569,7 @@
 
 .must-hotel-booking-single-room .must-hotel-booking-included-accommodations-card h3 {
     margin: 0;
-    font-family: 'PP Neue Montreal', var(--must-font-family), sans-serif;
+    font-family: 'PP Neue Montreal', sans-serif;
     font-style: normal;
     font-weight: 400;
     font-size: 32px;

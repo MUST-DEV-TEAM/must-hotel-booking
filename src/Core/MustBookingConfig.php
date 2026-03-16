@@ -51,29 +51,6 @@ class MustBookingConfig
             'stripe_production_publishable_key' => '',
             'stripe_production_secret_key' => '',
             'stripe_production_webhook_secret' => '',
-            'design_use_elementor_global_styles' => 1,
-            'design_font_family' => 'Instrument Sans, sans-serif',
-            'design_h1_size' => '54px',
-            'design_h2_size' => '54px',
-            'design_h3_size' => '32px',
-            'design_h4_size' => '24px',
-            'design_h5_size' => '20px',
-            'design_h6_size' => '18px',
-            'design_body_l_size' => '18px',
-            'design_body_m_size' => '16px',
-            'design_body_s_size' => '14px',
-            'design_body_xs_size' => '12px',
-            'design_body_xxs_size' => '10px',
-            'design_button_l_size' => '20px',
-            'design_button_m_size' => '16px',
-            'design_button_s_size' => '14px',
-            'design_primary_color' => '#F5F2E5',
-            'design_secondary_color' => '#C1FC7E',
-            'design_primary_black_color' => '#141414',
-            'design_accent_blue_color' => '#FFFFFF',
-            'design_light_blue_color' => '#E7E8FF',
-            'design_secondary_blue_color' => '#D9DEE5',
-            'design_accent_gold_color' => '#DA1E28',
         ];
     }
 
@@ -130,77 +107,6 @@ class MustBookingConfig
         $settings = self::get_all_settings();
         $settings[$key] = $value;
         self::set_all_settings($settings);
-    }
-
-    /**
-     * Get all persisted design settings merged with defaults.
-     *
-     * @return array<string, mixed>
-     */
-    public static function get_design_settings(): array
-    {
-        $settings = self::get_all_settings();
-        $defaults = self::get_default_settings();
-        $design_keys = [
-            'design_use_elementor_global_styles',
-            'design_font_family',
-            'design_h1_size',
-            'design_h2_size',
-            'design_h3_size',
-            'design_h4_size',
-            'design_h5_size',
-            'design_h6_size',
-            'design_body_l_size',
-            'design_body_m_size',
-            'design_body_s_size',
-            'design_body_xs_size',
-            'design_body_xxs_size',
-            'design_button_l_size',
-            'design_button_m_size',
-            'design_button_s_size',
-            'design_primary_color',
-            'design_secondary_color',
-            'design_primary_black_color',
-            'design_accent_blue_color',
-            'design_light_blue_color',
-            'design_secondary_blue_color',
-            'design_accent_gold_color',
-        ];
-
-        $result = [];
-
-        foreach ($design_keys as $key) {
-            $result[$key] = $settings[$key] ?? ($defaults[$key] ?? null);
-        }
-
-        return $result;
-    }
-
-    /**
-     * Get one design setting value.
-     *
-     * @param mixed $default
-     * @return mixed
-     */
-    public static function get_design_setting(string $key, $default = null)
-    {
-        $settings = self::get_design_settings();
-
-        if (\array_key_exists($key, $settings)) {
-            return $settings[$key];
-        }
-
-        return $default;
-    }
-
-    /**
-     * Get "Use Elementor Global Styles" flag.
-     */
-    public static function use_elementor_global_styles(): bool
-    {
-        $value = self::get_design_setting('design_use_elementor_global_styles', 1);
-
-        return (string) $value === '1' || $value === 1 || $value === true;
     }
 
     /**

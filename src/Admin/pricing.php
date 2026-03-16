@@ -2,18 +2,15 @@
 
 namespace MustHotelBooking\Admin;
 
+use MustHotelBooking\Engine\AvailabilityEngine;
+use MustHotelBooking\Engine\PricingEngine;
+
 /**
  * Resolve pricing table name for admin operations.
  */
 function get_admin_pricing_table_name(): string
 {
-    global $wpdb;
-
-    if (\function_exists(__NAMESPACE__ . '\get_pricing_table_name')) {
-        return get_pricing_table_name();
-    }
-
-    return $wpdb->prefix . 'must_pricing';
+    return PricingEngine::getPricingTableName();
 }
 
 /**
@@ -39,8 +36,8 @@ function is_valid_pricing_rule_date(string $date): bool
 {
     $candidate = \trim($date);
 
-    if (\function_exists(__NAMESPACE__ . '\is_valid_booking_date')) {
-        return is_valid_booking_date($candidate);
+    if (AvailabilityEngine::isValidBookingDate($candidate)) {
+        return true;
     }
 
     $parsed = \DateTimeImmutable::createFromFormat('Y-m-d', $candidate);

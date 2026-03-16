@@ -17,6 +17,32 @@
     var currentTitle = '';
     var lastFocusedNode = null;
 
+    function getWidgetConfig() {
+        var config = window.mustBookingRoomsListWidgetConfig || {};
+
+        if (!config.icons) {
+            config.icons = {};
+        }
+
+        return config;
+    }
+
+    function escapeHtmlAttribute(value) {
+        return String(value)
+            .replace(/&/g, '&amp;')
+            .replace(/"/g, '&quot;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;');
+    }
+
+    function getLightboxArrowMarkup(url, fallbackCharacter) {
+        if (typeof url !== 'string' || url === '') {
+            return fallbackCharacter;
+        }
+
+        return '<img class="must-hotel-booking-lightbox-nav-icon" src="' + escapeHtmlAttribute(url) + '" alt="" aria-hidden="true" />';
+    }
+
     function clamp(value, min, max) {
         return Math.min(Math.max(value, min), max);
     }
@@ -151,6 +177,10 @@
             return;
         }
 
+        var config = getWidgetConfig();
+        var prevIconMarkup = getLightboxArrowMarkup(config.icons.lightboxPrev, '&#10094;');
+        var nextIconMarkup = getLightboxArrowMarkup(config.icons.lightboxNext, '&#10095;');
+
         lightbox = document.createElement('div');
         lightbox.className = 'must-hotel-booking-lightbox';
         lightbox.hidden = true;
@@ -161,12 +191,12 @@
             '<div class="must-hotel-booking-lightbox-backdrop" data-lightbox-close="1"></div>' +
             '<div class="must-hotel-booking-lightbox-dialog" role="document">' +
             '<button type="button" class="must-hotel-booking-lightbox-close" aria-label="Close image preview">&times;</button>' +
-            '<button type="button" class="must-hotel-booking-lightbox-nav must-hotel-booking-lightbox-prev" aria-label="Previous image">&#10094;</button>' +
+            '<button type="button" class="must-hotel-booking-lightbox-nav must-hotel-booking-lightbox-prev" aria-label="Previous image">' + prevIconMarkup + '</button>' +
             '<figure class="must-hotel-booking-lightbox-figure">' +
             '<img class="must-hotel-booking-lightbox-image" src="" alt="" />' +
             '<figcaption class="must-hotel-booking-lightbox-caption"></figcaption>' +
             '</figure>' +
-            '<button type="button" class="must-hotel-booking-lightbox-nav must-hotel-booking-lightbox-next" aria-label="Next image">&#10095;</button>' +
+            '<button type="button" class="must-hotel-booking-lightbox-nav must-hotel-booking-lightbox-next" aria-label="Next image">' + nextIconMarkup + '</button>' +
             '</div>';
 
         document.body.appendChild(lightbox);

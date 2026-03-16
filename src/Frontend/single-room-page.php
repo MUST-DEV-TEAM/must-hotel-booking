@@ -298,7 +298,7 @@ function enqueue_single_room_page_assets(): void
     \wp_enqueue_style(
         'must-hotel-booking-single-room-page',
         MUST_HOTEL_BOOKING_URL . 'assets/css/single-room-page.css',
-        ['must-hotel-booking-design-system'],
+        [],
         MUST_HOTEL_BOOKING_VERSION
     );
 

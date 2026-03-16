@@ -2,18 +2,14 @@
 
 namespace MustHotelBooking\Admin;
 
+use MustHotelBooking\Engine\PricingEngine;
+
 /**
  * Get taxes table name.
  */
 function get_admin_taxes_table_name(): string
 {
-    global $wpdb;
-
-    if (\function_exists(__NAMESPACE__ . '\get_taxes_table_name')) {
-        return get_taxes_table_name();
-    }
-
-    return $wpdb->prefix . 'must_taxes';
+    return PricingEngine::getTaxesTableName();
 }
 
 /**

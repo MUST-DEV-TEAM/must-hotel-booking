@@ -19,7 +19,7 @@ function register_elementor_booking_search_widget_styles(): void
     \wp_register_style(
         'must-hotel-booking-booking-search-widget',
         MUST_HOTEL_BOOKING_URL . 'assets/css/booking-search-widget.css',
-        ['must-hotel-booking-design-system'],
+        [],
         MUST_HOTEL_BOOKING_VERSION
     );
 }

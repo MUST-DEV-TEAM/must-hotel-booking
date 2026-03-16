@@ -3,6 +3,8 @@
 namespace MustHotelBooking\Admin;
 
 use MustHotelBooking\Core\MustBookingConfig;
+use MustHotelBooking\Engine\LockEngine;
+use MustHotelBooking\Engine\PaymentEngine;
 
 /**
  * Build Settings admin page URL.
@@ -31,7 +33,6 @@ function get_settings_tabs(): array
         'general' => \__('General', 'must-hotel-booking'),
         'booking' => \__('Booking', 'must-hotel-booking'),
         'pages' => \__('Pages', 'must-hotel-booking'),
-        'design' => \__('Design', 'must-hotel-booking'),
         'diagnostics' => \__('Diagnostics', 'must-hotel-booking'),
     ];
 }
@@ -127,9 +128,7 @@ function normalize_settings_currency(string $currency): string
 function get_general_settings_form_defaults(): array
 {
     $hotel_name = \function_exists('get_bloginfo') ? (string) \get_bloginfo('name') : 'Hotel';
-    $site_environment = \function_exists(__NAMESPACE__ . '\get_active_site_environment')
-        ? get_active_site_environment()
-        : 'production';
+    $site_environment = PaymentEngine::getActiveSiteEnvironment();
 
     if (\class_exists(MustBookingConfig::class)) {
         return [
@@ -184,9 +183,7 @@ function sanitize_general_settings_form_values(array $source): array
     $errors = [];
 
     $currency = normalize_settings_currency($currency_raw);
-    $site_environment = \function_exists(__NAMESPACE__ . '\normalize_stripe_environment')
-        ? normalize_stripe_environment($site_environment)
-        : (string) ($defaults['site_environment'] ?? 'production');
+    $site_environment = PaymentEngine::normalizeStripeEnvironment($site_environment);
 
     if ($hotel_name === '') {
         $errors[] = \__('Hotel name is required.', 'must-hotel-booking');
@@ -416,65 +413,6 @@ function get_settings_page_options(): array
 }
 
 /**
- * Get default Design tab form values.
- *
- * @return array<string, mixed>
- */
-function get_design_settings_form_defaults(): array
-{
-    if (\function_exists(__NAMESPACE__ . '\get_design_system_plugin_settings')) {
-        return get_design_system_plugin_settings();
-    }
-
-    if (\function_exists(__NAMESPACE__ . '\get_design_system_plugin_defaults')) {
-        return get_design_system_plugin_defaults();
-    }
-
-    return [
-        'design_use_elementor_global_styles' => 1,
-        'design_font_family' => 'Instrument Sans, sans-serif',
-        'design_h1_size' => '54px',
-        'design_h2_size' => '54px',
-        'design_h3_size' => '32px',
-        'design_h4_size' => '24px',
-        'design_h5_size' => '20px',
-        'design_h6_size' => '18px',
-        'design_body_l_size' => '18px',
-        'design_body_m_size' => '16px',
-        'design_body_s_size' => '14px',
-        'design_body_xs_size' => '12px',
-        'design_body_xxs_size' => '10px',
-        'design_button_l_size' => '20px',
-        'design_button_m_size' => '16px',
-        'design_button_s_size' => '14px',
-        'design_primary_color' => '#F5F2E5',
-        'design_secondary_color' => '#C1FC7E',
-        'design_primary_black_color' => '#141414',
-        'design_accent_blue_color' => '#FFFFFF',
-        'design_light_blue_color' => '#E7E8FF',
-        'design_secondary_blue_color' => '#D9DEE5',
-        'design_accent_gold_color' => '#DA1E28',
-    ];
-}
-
-/**
- * Build form data for the Design tab.
- *
- * @param array<string, mixed>|null $submitted_form
- * @return array<string, mixed>
- */
-function get_design_settings_form_data(?array $submitted_form = null): array
-{
-    $defaults = get_design_settings_form_defaults();
-
-    if (\is_array($submitted_form)) {
-        return \array_merge($defaults, $submitted_form);
-    }
-
-    return $defaults;
-}
-
-/**
  * Save values to plugin settings.
  *
  * @param array<string, mixed> $values
@@ -508,7 +446,6 @@ function get_settings_action_tab(string $action): string
         'save_booking_settings' => 'booking',
         'save_page_settings' => 'pages',
         'sync_frontend_pages' => 'pages',
-        'save_design_settings' => 'design',
         'run_diagnostics' => 'diagnostics',
     ];
 
@@ -530,7 +467,6 @@ function process_settings_post_action(string $action, array $raw_post, bool $per
         'general_form' => null,
         'booking_form' => null,
         'pages_form' => null,
-        'design_form' => null,
     ];
 
     if (!\class_exists(MustBookingConfig::class) && $action !== 'run_diagnostics' && $action !== 'sync_frontend_pages') {
@@ -630,36 +566,6 @@ function process_settings_post_action(string $action, array $raw_post, bool $per
         return $state;
     }
 
-    if ($action === 'save_design_settings') {
-        $nonce = isset($raw_post['must_settings_nonce']) ? (string) \wp_unslash($raw_post['must_settings_nonce']) : '';
-
-        if (!\wp_verify_nonce($nonce, 'must_settings_save_design')) {
-            $state['errors'] = [\__('Security check failed. Please try again.', 'must-hotel-booking')];
-            return $state;
-        }
-
-        if (!\function_exists(__NAMESPACE__ . '\sanitize_design_settings_form_values')) {
-            $state['errors'] = [\__('Design settings helpers are unavailable.', 'must-hotel-booking')];
-            return $state;
-        }
-
-        $design_form = sanitize_design_settings_form_values($raw_post);
-        $state['design_form'] = $design_form;
-
-        if (!empty($design_form['errors'])) {
-            $state['errors'] = (array) $design_form['errors'];
-            return $state;
-        }
-
-        if ($persist) {
-            save_settings_values($design_form);
-        }
-
-        $state['notice'] = 'design_settings_saved';
-
-        return $state;
-    }
-
     if ($action === 'run_diagnostics') {
         $nonce = isset($raw_post['must_settings_nonce']) ? (string) \wp_unslash($raw_post['must_settings_nonce']) : '';
 
@@ -690,7 +596,6 @@ function maybe_handle_settings_save_request(): array
         'general_form' => null,
         'booking_form' => null,
         'pages_form' => null,
-        'design_form' => null,
     ];
 
     $request_method = isset($_SERVER['REQUEST_METHOD']) ? \strtoupper((string) $_SERVER['REQUEST_METHOD']) : 'GET';
@@ -770,7 +675,6 @@ function render_settings_admin_notice(string $notice = ''): void
         'booking_settings_saved' => \__('Booking settings saved successfully.', 'must-hotel-booking'),
         'page_settings_saved' => \__('Managed page assignments saved successfully.', 'must-hotel-booking'),
         'pages_synced' => \__('Managed frontend pages were synced successfully.', 'must-hotel-booking'),
-        'design_settings_saved' => \__('Design settings saved successfully.', 'must-hotel-booking'),
         'diagnostics_refreshed' => \__('System checks refreshed.', 'must-hotel-booking'),
     ];
 
@@ -790,13 +694,7 @@ function render_general_settings_section(array $form): void
 {
     $timezone = isset($form['timezone']) ? (string) $form['timezone'] : 'UTC';
     $site_environment = isset($form['site_environment']) ? (string) $form['site_environment'] : 'production';
-    $environment_catalog = \function_exists(__NAMESPACE__ . '\get_stripe_environment_catalog')
-        ? get_stripe_environment_catalog()
-        : [
-            'local' => ['label' => \__('Localhost', 'must-hotel-booking'), 'description' => '', 'example' => 'http://localhost'],
-            'staging' => ['label' => \__('Staging / IP website', 'must-hotel-booking'), 'description' => '', 'example' => 'http://18.185.56.94/'],
-            'production' => ['label' => \__('Live website', 'must-hotel-booking'), 'description' => '', 'example' => 'https://empirebeachresort.al'],
-        ];
+    $environment_catalog = PaymentEngine::getStripeEnvironmentCatalog();
     $current_site_url = (string) \home_url('/');
 
     echo '<div class="postbox" style="max-width:960px; padding:16px;">';
@@ -991,94 +889,6 @@ function render_pages_settings_section(array $form): void
 }
 
 /**
- * Render Design settings section.
- *
- * @param array<string, mixed> $form
- */
-function render_design_settings_section(array $form): void
-{
-    $elementor_status = \function_exists(__NAMESPACE__ . '\get_design_system_elementor_status')
-        ? get_design_system_elementor_status()
-        : ['active' => false, 'has_global_colors' => false, 'has_global_typography' => false];
-
-    echo '<div class="postbox" style="max-width:1100px; padding:16px;">';
-    echo '<h2 style="margin-top:0;">' . \esc_html__('Design System', 'must-hotel-booking') . '</h2>';
-    echo '<p>' . \esc_html__('These design tokens control the plugin UI when you are not inheriting Elementor global styles.', 'must-hotel-booking') . '</p>';
-    echo '<form method="post" action="' . \esc_url(get_admin_settings_page_url(['tab' => 'design'])) . '">';
-    \wp_nonce_field('must_settings_save_design', 'must_settings_nonce');
-    echo '<input type="hidden" name="must_settings_action" value="save_design_settings" />';
-    echo '<table class="form-table" role="presentation"><tbody>';
-
-    echo '<tr><th scope="row">' . \esc_html__('Use Elementor Global Styles', 'must-hotel-booking') . '</th><td>';
-    echo '<label for="must-settings-use-elementor-global-styles">';
-    echo '<input id="must-settings-use-elementor-global-styles" type="checkbox" name="design_use_elementor_global_styles" value="1"' . (!empty($form['design_use_elementor_global_styles']) ? ' checked' : '') . ' /> ';
-    echo \esc_html__('Inherit Elementor Global Colors and Typography when available.', 'must-hotel-booking');
-    echo '</label>';
-
-    if (!empty($elementor_status['active'])) {
-        $status_line = \sprintf(
-            /* translators: 1: colors state, 2: typography state. */
-            \__('Elementor detected. Global colors: %1$s. Global typography: %2$s.', 'must-hotel-booking'),
-            !empty($elementor_status['has_global_colors']) ? \__('found', 'must-hotel-booking') : \__('not found', 'must-hotel-booking'),
-            !empty($elementor_status['has_global_typography']) ? \__('found', 'must-hotel-booking') : \__('not found', 'must-hotel-booking')
-        );
-        echo '<p class="description">' . \esc_html($status_line) . '</p>';
-    } else {
-        echo '<p class="description">' . \esc_html__('Elementor is not active. Plugin design settings and defaults will be used.', 'must-hotel-booking') . '</p>';
-    }
-
-    echo '</td></tr>';
-
-    echo '<tr><th scope="row"><label for="must-settings-design-font-family">' . \esc_html__('Font family', 'must-hotel-booking') . '</label></th>';
-    echo '<td><input id="must-settings-design-font-family" type="text" class="regular-text" name="design_font_family" value="' . \esc_attr((string) $form['design_font_family']) . '" />';
-    echo '<p class="description">' . \esc_html__('Example: Instrument Sans, sans-serif', 'must-hotel-booking') . '</p></td></tr>';
-
-    $size_fields = [
-        'design_h1_size' => \__('Heading 1 size', 'must-hotel-booking'),
-        'design_h2_size' => \__('Heading 2 size', 'must-hotel-booking'),
-        'design_h3_size' => \__('Heading 3 size', 'must-hotel-booking'),
-        'design_h4_size' => \__('Heading 4 size', 'must-hotel-booking'),
-        'design_h5_size' => \__('Heading 5 size', 'must-hotel-booking'),
-        'design_h6_size' => \__('Heading 6 size', 'must-hotel-booking'),
-        'design_body_l_size' => \__('Body Large size', 'must-hotel-booking'),
-        'design_body_m_size' => \__('Body Medium size', 'must-hotel-booking'),
-        'design_body_s_size' => \__('Body Small size', 'must-hotel-booking'),
-        'design_body_xs_size' => \__('Body XS size', 'must-hotel-booking'),
-        'design_body_xxs_size' => \__('Body XXS size', 'must-hotel-booking'),
-        'design_button_l_size' => \__('Button Large size', 'must-hotel-booking'),
-        'design_button_m_size' => \__('Button Medium size', 'must-hotel-booking'),
-        'design_button_s_size' => \__('Button Small size', 'must-hotel-booking'),
-    ];
-
-    foreach ($size_fields as $key => $label) {
-        echo '<tr><th scope="row"><label for="must-settings-' . \esc_attr($key) . '">' . \esc_html($label) . '</label></th>';
-        echo '<td><input id="must-settings-' . \esc_attr($key) . '" type="text" class="small-text" name="' . \esc_attr($key) . '" value="' . \esc_attr((string) $form[$key]) . '" />';
-        echo '<p class="description">' . \esc_html__('Use CSS size values, e.g. 16px, 1rem, 110%.', 'must-hotel-booking') . '</p></td></tr>';
-    }
-
-    $color_fields = [
-        'design_primary_color' => \__('Primary color', 'must-hotel-booking'),
-        'design_secondary_color' => \__('Secondary color', 'must-hotel-booking'),
-        'design_primary_black_color' => \__('Primary black', 'must-hotel-booking'),
-        'design_accent_blue_color' => \__('Accent blue', 'must-hotel-booking'),
-        'design_light_blue_color' => \__('Light blue', 'must-hotel-booking'),
-        'design_secondary_blue_color' => \__('Secondary blue', 'must-hotel-booking'),
-        'design_accent_gold_color' => \__('Accent gold', 'must-hotel-booking'),
-    ];
-
-    foreach ($color_fields as $key => $label) {
-        echo '<tr><th scope="row"><label for="must-settings-' . \esc_attr($key) . '">' . \esc_html($label) . '</label></th>';
-        echo '<td><input id="must-settings-' . \esc_attr($key) . '" type="text" class="regular-text" name="' . \esc_attr($key) . '" value="' . \esc_attr((string) $form[$key]) . '" />';
-        echo '<p class="description">' . \esc_html__('Hex color value, e.g. #F5F2E5.', 'must-hotel-booking') . '</p></td></tr>';
-    }
-
-    echo '</tbody></table>';
-    \submit_button(\__('Save Design Settings', 'must-hotel-booking'));
-    echo '</form>';
-    echo '</div>';
-}
-
-/**
  * Check whether a database table exists.
  */
 function does_settings_diagnostic_table_exist(string $table_name): bool
@@ -1110,6 +920,8 @@ function get_settings_diagnostics_data(): array
 
     $table_checks = [
         'Rooms' => $wpdb->prefix . 'must_rooms',
+        'Room Types' => $wpdb->prefix . 'mhb_room_types',
+        'Inventory Rooms' => $wpdb->prefix . 'mhb_rooms',
         'Room Meta' => $wpdb->prefix . 'must_room_meta',
         'Guests' => $wpdb->prefix . 'must_guests',
         'Reservations' => $wpdb->prefix . 'must_reservations',
@@ -1120,6 +932,11 @@ function get_settings_diagnostics_data(): array
         'Taxes' => $wpdb->prefix . 'must_taxes',
         'Coupons' => $wpdb->prefix . 'must_coupons',
         'Cancellation Policies' => $wpdb->prefix . 'mhb_cancellation_policies',
+        'Rate Plans' => $wpdb->prefix . 'mhb_rate_plans',
+        'Room Type Rate Plans' => $wpdb->prefix . 'mhb_room_type_rate_plans',
+        'Rate Plan Prices' => $wpdb->prefix . 'mhb_rate_plan_prices',
+        'Seasons' => $wpdb->prefix . 'mhb_seasons',
+        'Seasonal Prices' => $wpdb->prefix . 'mhb_seasonal_prices',
     ];
     $tables = [];
     $critical_issues = 0;
@@ -1172,7 +989,7 @@ function get_settings_diagnostics_data(): array
         ];
     }
 
-    $cron_hook = \function_exists(__NAMESPACE__ . '\get_lock_cleanup_cron_hook') ? get_lock_cleanup_cron_hook() : '';
+    $cron_hook = LockEngine::getCleanupCronHook();
     $next_cron = $cron_hook !== '' ? \wp_next_scheduled($cron_hook) : false;
     $cron_scheduled = $next_cron !== false;
 
@@ -1202,10 +1019,8 @@ function get_settings_diagnostics_data(): array
     }
 
     $stripe_enabled = \in_array('stripe', $enabled_methods, true);
-    $stripe_configured = \function_exists(__NAMESPACE__ . '\is_stripe_checkout_configured') ? is_stripe_checkout_configured() : false;
-    $stripe_webhook_secret_set = \function_exists(__NAMESPACE__ . '\get_stripe_webhook_secret')
-        ? get_stripe_webhook_secret() !== ''
-        : false;
+    $stripe_configured = PaymentEngine::isStripeCheckoutConfigured();
+    $stripe_webhook_secret_set = PaymentEngine::getStripeWebhookSecret() !== '';
 
     if ($stripe_enabled && !$stripe_configured) {
         $warnings++;
@@ -1220,12 +1035,8 @@ function get_settings_diagnostics_data(): array
         'stripe_enabled' => $stripe_enabled,
         'stripe_configured' => $stripe_configured,
         'stripe_webhook_secret_set' => $stripe_webhook_secret_set,
-        'stripe_environment' => \function_exists(__NAMESPACE__ . '\get_site_environment_label')
-            ? get_site_environment_label()
-            : '',
-        'stripe_webhook_url' => \function_exists(__NAMESPACE__ . '\get_stripe_webhook_url')
-            ? get_stripe_webhook_url()
-            : '',
+        'stripe_environment' => PaymentEngine::getSiteEnvironmentLabel(),
+        'stripe_webhook_url' => PaymentEngine::getStripeWebhookUrl(),
     ];
 
     $room_count = 0;
@@ -1244,9 +1055,7 @@ function get_settings_diagnostics_data(): array
         'wordpress_version' => (string) \get_bloginfo('version'),
         'php_version' => \PHP_VERSION,
         'site_url' => (string) \home_url('/'),
-        'site_environment' => \function_exists(__NAMESPACE__ . '\get_site_environment_label')
-            ? get_site_environment_label()
-            : '',
+        'site_environment' => PaymentEngine::getSiteEnvironmentLabel(),
         'room_count' => $room_count,
         'email_template_count' => \function_exists(__NAMESPACE__ . '\get_email_templates')
             ? \count((array) get_email_templates())
@@ -1431,9 +1240,6 @@ function render_admin_settings_page(): void
     $pages_form = get_pages_settings_form_data(
         isset($save_state['pages_form']) && \is_array($save_state['pages_form']) ? $save_state['pages_form'] : null
     );
-    $design_form = get_design_settings_form_data(
-        isset($save_state['design_form']) && \is_array($save_state['design_form']) ? $save_state['design_form'] : null
-    );
 
     echo '<div class="wrap must-hotel-booking-settings-page">';
     echo '<h1>' . \esc_html__('Settings', 'must-hotel-booking') . '</h1>';
@@ -1457,8 +1263,6 @@ function render_admin_settings_page(): void
         render_booking_settings_section($booking_form);
     } elseif ($active_tab === 'pages') {
         render_pages_settings_section($pages_form);
-    } elseif ($active_tab === 'design') {
-        render_design_settings_section($design_form);
     } elseif ($active_tab === 'diagnostics') {
         render_diagnostics_settings_section();
     }

@@ -266,8 +266,8 @@ function get_accommodation_page_view_data(): array
     $rooms = [];
     $no_rooms_message = \__('No rooms are available for the selected dates.', 'must-hotel-booking');
 
-    if ($has_context && !empty($context['is_valid']) && \function_exists(__NAMESPACE__ . '\get_available_rooms')) {
-        $room_results = get_available_rooms(
+    if ($has_context && !empty($context['is_valid'])) {
+        $room_results = AvailabilityEngine::getAvailableRooms(
             (string) $context['checkin'],
             (string) $context['checkout'],
             $single_room_mode ? (int) $context['guests'] : 1,
@@ -286,7 +286,7 @@ function get_accommodation_page_view_data(): array
                     continue;
                 }
 
-                if ($single_room_mode && \function_exists(__NAMESPACE__ . '\calculate_booking_price')) {
+                if ($single_room_mode) {
                     $pricing = PricingEngine::calculateTotal(
                         $room_id,
                         (string) $context['checkin'],
@@ -390,14 +390,14 @@ function enqueue_booking_accommodation_page_assets(): void
     \wp_enqueue_style(
         'must-hotel-booking-booking-page',
         MUST_HOTEL_BOOKING_URL . 'assets/css/booking-page.css',
-        ['must-hotel-booking-design-system'],
+        [],
         MUST_HOTEL_BOOKING_VERSION
     );
 
     \wp_enqueue_style(
         'must-hotel-booking-rooms-list-widget-lightbox',
         MUST_HOTEL_BOOKING_URL . 'assets/css/rooms-list-widget.css',
-        ['must-hotel-booking-design-system'],
+        [],
         MUST_HOTEL_BOOKING_VERSION
     );
 
@@ -415,8 +415,12 @@ function enqueue_booking_accommodation_page_assets(): void
         [
             'ajaxUrl' => \admin_url('admin-ajax.php'),
             'ajaxAction' => 'must_booking_accommodation_room_action',
+            'icons' => [
+                'lightboxPrev' => MUST_HOTEL_BOOKING_URL . 'assets/img/lightboxleft.svg',
+                'lightboxNext' => MUST_HOTEL_BOOKING_URL . 'assets/img/lightboxright.svg',
+            ],
             'labels' => [
-                'addRoom' => \__('Add Room', 'must-hotel-booking'),
+                'addRoom' => \__('Book Now', 'must-hotel-booking'),
                 'removeRoom' => \__('Remove Room', 'must-hotel-booking'),
                 'removeSelection' => \__('Remove Selection', 'must-hotel-booking'),
                 'chooseRate' => \__('Choose This Rate', 'must-hotel-booking'),
