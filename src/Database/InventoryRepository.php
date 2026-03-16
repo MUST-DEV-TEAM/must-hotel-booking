@@ -37,6 +37,21 @@ final class InventoryRepository extends AbstractRepository
         return $this->mhbTable('inventory_locks');
     }
 
+    public function roomTypesTableExists(): bool
+    {
+        return $this->mhbTableExists('room_types');
+    }
+
+    public function inventoryRoomsTableExists(): bool
+    {
+        return $this->mhbTableExists('rooms');
+    }
+
+    public function inventoryLocksTableExists(): bool
+    {
+        return $this->mhbTableExists('inventory_locks');
+    }
+
     /**
      * @return array<string, mixed>|null
      */

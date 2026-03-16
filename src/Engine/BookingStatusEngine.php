@@ -3,6 +3,7 @@
 namespace MustHotelBooking\Engine;
 
 use MustHotelBooking\Core\MustBookingConfig;
+use MustHotelBooking\Core\ReservationStatus;
 
 final class BookingStatusEngine
 {
@@ -29,9 +30,8 @@ final class BookingStatusEngine
             }
 
             if (
-                \function_exists(__NAMESPACE__ . '\is_reservation_confirmed_status') &&
-                !is_reservation_confirmed_status($previousStatus) &&
-                is_reservation_confirmed_status($status)
+                !ReservationStatus::isConfirmed($previousStatus) &&
+                ReservationStatus::isConfirmed($status)
             ) {
                 \do_action('must_hotel_booking/reservation_confirmed', $reservationId);
             }

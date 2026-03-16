@@ -2,6 +2,10 @@
 
 namespace MustHotelBooking\Engine;
 
+use MustHotelBooking\Core\BookingRules;
+use MustHotelBooking\Core\ManagedPages;
+use MustHotelBooking\Core\ReservationStatus;
+
 final class ReservationEngine
 {
     /**
@@ -597,13 +601,11 @@ final class ReservationEngine
             ];
         }
 
-        $targetRoomCount = \function_exists('\MustHotelBooking\Frontend\resolve_booking_room_count')
-            ? \MustHotelBooking\Frontend\resolve_booking_room_count(
-                (int) ($context['guests'] ?? 1),
-                (int) ($context['room_count'] ?? 0),
-                (string) ($context['accommodation_type'] ?? 'standard-rooms')
-            )
-            : 1;
+        $targetRoomCount = BookingRules::resolveRoomCount(
+            (int) ($context['guests'] ?? 1),
+            (int) ($context['room_count'] ?? 0),
+            (string) ($context['accommodation_type'] ?? 'standard-rooms')
+        );
         $selectedRoomIds = \MustHotelBooking\Frontend\get_booking_selected_room_ids();
 
         if (!\in_array($roomId, $selectedRoomIds, true) && \count($selectedRoomIds) >= $targetRoomCount) {
@@ -754,7 +756,7 @@ final class ReservationEngine
         return [
             'success' => true,
             'errors' => [],
-            'redirect_url' => \MustHotelBooking\Frontend\get_booking_confirmation_page_url(),
+            'redirect_url' => ManagedPages::getBookingConfirmationPageUrl(),
         ];
     }
 
@@ -1128,7 +1130,7 @@ final class ReservationEngine
             'errors' => [],
             'redirect_url' => \add_query_arg(
                 ['reservation_ids' => \implode(',', \array_map('intval', (array) ($result['reservation_ids'] ?? [])))],
-                \MustHotelBooking\Frontend\get_booking_confirmation_page_url()
+                ManagedPages::getBookingConfirmationPageUrl()
             ),
         ];
     }
@@ -1184,9 +1186,7 @@ final class ReservationEngine
      */
     private static function getNonBlockingReservationStatuses(): array
     {
-        return \function_exists(__NAMESPACE__ . '\get_inventory_non_blocking_reservation_statuses')
-            ? get_inventory_non_blocking_reservation_statuses()
-            : ['cancelled', 'expired', 'payment_failed'];
+        return ReservationStatus::getInventoryNonBlockingStatuses();
     }
 
     private static function generateUniqueBookingId(): string

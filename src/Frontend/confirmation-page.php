@@ -2,7 +2,9 @@
 
 namespace MustHotelBooking\Frontend;
 
+use MustHotelBooking\Core\ManagedPages;
 use MustHotelBooking\Core\MustBookingConfig;
+use MustHotelBooking\Core\ReservationStatus;
 use MustHotelBooking\Engine\BookingStatusEngine;
 use MustHotelBooking\Engine\BookingValidationEngine;
 use MustHotelBooking\Engine\PaymentEngine;
@@ -476,7 +478,7 @@ function get_confirmation_page_view_data(): array
             foreach ($reservations as $reservation) {
                 $status = isset($reservation['status']) ? \sanitize_key((string) ($reservation['status'] ?? '')) : '';
 
-                if (\function_exists(__NAMESPACE__ . '\is_reservation_confirmed_status') && is_reservation_confirmed_status($status)) {
+                if (ReservationStatus::isConfirmed($status)) {
                     clear_booking_selection(false);
                     break;
                 }
@@ -536,10 +538,8 @@ function get_confirmation_page_view_data(): array
  */
 function enqueue_confirmation_page_assets(): void
 {
-    if (!\is_page() || !\is_page((int) (get_plugin_settings()['page_booking_confirmation_id'] ?? 0))) {
-        if (!\is_page('booking-confirmation')) {
-            return;
-        }
+    if (!ManagedPages::isCurrentPage('page_booking_confirmation_id', 'booking-confirmation')) {
+        return;
     }
 
     \wp_enqueue_style(

@@ -21,34 +21,6 @@ function get_admin_availability_rules_page_url(array $args = []): string
 }
 
 /**
- * Get availability rules table name.
- */
-function get_admin_availability_rules_table_name(): string
-{
-    global $wpdb;
-
-    return $wpdb->prefix . 'must_availability';
-}
-
-/**
- * Check if availability rules table exists.
- */
-function does_admin_availability_rules_table_exist(): bool
-{
-    global $wpdb;
-
-    $table_name = get_admin_availability_rules_table_name();
-    $table_exists = $wpdb->get_var(
-        $wpdb->prepare(
-            'SHOW TABLES LIKE %s',
-            $table_name
-        )
-    );
-
-    return \is_string($table_exists) && $table_exists !== '';
-}
-
-/**
  * Get date-based restriction type options.
  *
  * @return array<string, string>
@@ -67,25 +39,7 @@ function get_availability_date_restriction_type_options(): array
  */
 function get_latest_numeric_availability_rule_value(string $rule_type): int
 {
-    global $wpdb;
-
-    if (!does_admin_availability_rules_table_exist()) {
-        return 0;
-    }
-
-    $table_name = get_admin_availability_rules_table_name();
-    $value = $wpdb->get_var(
-        $wpdb->prepare(
-            "SELECT rule_value
-            FROM {$table_name}
-            WHERE rule_type = %s
-            ORDER BY updated_at DESC, id DESC
-            LIMIT 1",
-            $rule_type
-        )
-    );
-
-    return \max(0, (int) $value);
+    return \MustHotelBooking\Engine\get_availability_repository()->getLatestRuleValue($rule_type);
 }
 
 /**
@@ -95,26 +49,9 @@ function get_latest_numeric_availability_rule_value(string $rule_type): int
  */
 function get_availability_date_restriction_rows(): array
 {
-    global $wpdb;
-
-    if (!does_admin_availability_rules_table_exist()) {
-        return [];
-    }
-
-    $table_name = get_admin_availability_rules_table_name();
-    $types = \array_keys(get_availability_date_restriction_type_options());
-    $placeholders = \implode(', ', \array_fill(0, \count($types), '%s'));
-    $sql = $wpdb->prepare(
-        "SELECT id, rule_type, availability_date, end_date, reason, updated_at
-        FROM {$table_name}
-        WHERE rule_type IN ({$placeholders})
-        ORDER BY availability_date DESC, end_date DESC, id DESC",
-        ...$types
+    return \MustHotelBooking\Engine\get_availability_repository()->getDateRestrictionRows(
+        \array_keys(get_availability_date_restriction_type_options())
     );
-
-    $rows = $wpdb->get_results($sql, ARRAY_A);
-
-    return \is_array($rows) ? $rows : [];
 }
 
 /**
@@ -170,56 +107,17 @@ function maybe_handle_availability_stay_rules_save_request(): array
         return $errors;
     }
 
-    global $wpdb;
+    $availabilityRepository = \MustHotelBooking\Engine\get_availability_repository();
 
-    if (!does_admin_availability_rules_table_exist()) {
+    if (!$availabilityRepository->availabilityTableExists()) {
         return [\__('Availability table not found. Please reactivate the plugin.', 'must-hotel-booking')];
     }
-
-    $table_name = get_admin_availability_rules_table_name();
-    $wpdb->query(
-        $wpdb->prepare(
-            "DELETE FROM {$table_name} WHERE rule_type IN (%s, %s)",
-            'minimum_stay',
-            'maximum_stay'
-        )
-    );
 
     $today = \current_time('Y-m-d');
     $now = \current_time('mysql');
 
-    if ($minimum_stay > 0) {
-        $wpdb->insert(
-            $table_name,
-            [
-                'room_id' => 0,
-                'availability_date' => $today,
-                'end_date' => $today,
-                'is_available' => 1,
-                'reason' => 'Minimum stay',
-                'rule_type' => 'minimum_stay',
-                'rule_value' => (string) $minimum_stay,
-                'updated_at' => $now,
-            ],
-            ['%d', '%s', '%s', '%d', '%s', '%s', '%s', '%s']
-        );
-    }
-
-    if ($maximum_stay > 0) {
-        $wpdb->insert(
-            $table_name,
-            [
-                'room_id' => 0,
-                'availability_date' => $today,
-                'end_date' => $today,
-                'is_available' => 1,
-                'reason' => 'Maximum stay',
-                'rule_type' => 'maximum_stay',
-                'rule_value' => (string) $maximum_stay,
-                'updated_at' => $now,
-            ],
-            ['%d', '%s', '%s', '%d', '%s', '%s', '%s', '%s']
-        );
+    if (!$availabilityRepository->saveGlobalStayRules($minimum_stay, $maximum_stay, $today, $now)) {
+        return [\__('Unable to save stay rules. Please check your database schema.', 'must-hotel-booking')];
     }
 
     \wp_safe_redirect(get_admin_availability_rules_page_url(['notice' => 'stay_rules_saved']));
@@ -271,29 +169,21 @@ function maybe_handle_availability_date_rule_save_request(): array
         return $errors;
     }
 
-    global $wpdb;
+    $availabilityRepository = \MustHotelBooking\Engine\get_availability_repository();
 
-    if (!does_admin_availability_rules_table_exist()) {
+    if (!$availabilityRepository->availabilityTableExists()) {
         return [\__('Availability table not found. Please reactivate the plugin.', 'must-hotel-booking')];
     }
 
-    $table_name = get_admin_availability_rules_table_name();
-    $inserted = $wpdb->insert(
-        $table_name,
-        [
-            'room_id' => 0,
-            'availability_date' => $start_date,
-            'end_date' => $end_date,
-            'is_available' => 0,
-            'reason' => (string) $type_options[$rule_type],
-            'rule_type' => $rule_type,
-            'rule_value' => '',
-            'updated_at' => \current_time('mysql'),
-        ],
-        ['%d', '%s', '%s', '%d', '%s', '%s', '%s', '%s']
+    $inserted = $availabilityRepository->createDateRestriction(
+        $rule_type,
+        $start_date,
+        $end_date,
+        (string) $type_options[$rule_type],
+        \current_time('mysql')
     );
 
-    if ($inserted === false) {
+    if ($inserted <= 0) {
         return [\__('Unable to save availability rule. Please check your database schema.', 'must-hotel-booking')];
     }
 
@@ -320,17 +210,16 @@ function maybe_handle_availability_rule_delete_request(): void
         exit;
     }
 
-    global $wpdb;
+    $availabilityRepository = \MustHotelBooking\Engine\get_availability_repository();
 
-    if (!does_admin_availability_rules_table_exist()) {
+    if (!$availabilityRepository->availabilityTableExists()) {
         \wp_safe_redirect(get_admin_availability_rules_page_url(['notice' => 'table_missing']));
         exit;
     }
 
-    $table_name = get_admin_availability_rules_table_name();
-    $deleted = $wpdb->delete($table_name, ['id' => $rule_id], ['%d']);
+    $deleted = $availabilityRepository->deleteAvailabilityRule($rule_id);
 
-    \wp_safe_redirect(get_admin_availability_rules_page_url(['notice' => $deleted !== false ? 'rule_deleted' : 'rule_delete_failed']));
+    \wp_safe_redirect(get_admin_availability_rules_page_url(['notice' => $deleted ? 'rule_deleted' : 'rule_delete_failed']));
     exit;
 }
 
@@ -382,7 +271,7 @@ function render_admin_availability_rules_page(): void
     $maximum_stay = get_latest_numeric_availability_rule_value('maximum_stay');
     $date_rules = get_availability_date_restriction_rows();
     $type_options = get_availability_date_restriction_type_options();
-    $table_exists = does_admin_availability_rules_table_exist();
+    $table_exists = \MustHotelBooking\Engine\get_availability_repository()->availabilityTableExists();
 
     $form_rule_type = isset($_POST['rule_type']) ? \sanitize_key((string) \wp_unslash($_POST['rule_type'])) : 'closed_arrival';
     $form_start = isset($_POST['start_date']) ? \sanitize_text_field((string) \wp_unslash($_POST['start_date'])) : \current_time('Y-m-d');

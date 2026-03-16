@@ -2,8 +2,12 @@
 
 namespace MustHotelBooking\Frontend;
 
+use MustHotelBooking\Core\BookingRules;
+use MustHotelBooking\Core\ManagedPages;
 use MustHotelBooking\Core\MustBookingConfig;
-use MustHotelBooking\Database\RoomRepository;
+use MustHotelBooking\Core\RoomCatalog;
+use MustHotelBooking\Core\RoomData;
+use MustHotelBooking\Core\RoomViewBuilder;
 use MustHotelBooking\Engine\BookingValidationEngine;
 use MustHotelBooking\Engine\PricingEngine;
 use MustHotelBooking\Engine\ReservationEngine;
@@ -51,14 +55,7 @@ function update_plugin_settings(array $settings): void
  */
 function get_max_booking_guests_limit(): int
 {
-    if (\class_exists(MustBookingConfig::class)) {
-        return \max(1, MustBookingConfig::get_max_booking_guests());
-    }
-
-    $settings = get_plugin_settings();
-    $value = isset($settings['max_booking_guests']) ? \absint((string) $settings['max_booking_guests']) : 12;
-
-    return $value > 0 ? $value : 12;
+    return BookingRules::getMaxBookingGuestsLimit();
 }
 
 /**
@@ -66,14 +63,7 @@ function get_max_booking_guests_limit(): int
  */
 function get_max_booking_rooms_limit(): int
 {
-    if (\class_exists(MustBookingConfig::class)) {
-        return \max(1, MustBookingConfig::get_max_booking_rooms());
-    }
-
-    $settings = get_plugin_settings();
-    $value = isset($settings['max_booking_rooms']) ? \absint((string) $settings['max_booking_rooms']) : 3;
-
-    return $value > 0 ? $value : 3;
+    return BookingRules::getMaxBookingRoomsLimit();
 }
 
 /**
@@ -83,13 +73,7 @@ function get_max_booking_rooms_limit(): int
  */
 function normalize_booking_room_count($value): int
 {
-    $room_count = \absint(\is_scalar($value) ? (string) $value : 0);
-
-    if ($room_count <= 0) {
-        return 0;
-    }
-
-    return \min(get_max_booking_rooms_limit(), $room_count);
+    return BookingRules::normalizeRoomCount($value);
 }
 
 /**
@@ -99,47 +83,7 @@ function normalize_booking_room_count($value): int
  */
 function get_booking_room_category_capacity_map(): array
 {
-    static $capacity_map = null;
-
-    if (\is_array($capacity_map)) {
-        return $capacity_map;
-    }
-
-    $capacity_map = [];
-
-    if (\function_exists(__NAMESPACE__ . '\get_room_categories')) {
-        foreach (get_room_categories() as $category_slug => $category_label) {
-            $normalized_category = \function_exists(__NAMESPACE__ . '\normalize_room_category')
-                ? normalize_room_category((string) $category_slug)
-                : \sanitize_key((string) $category_slug);
-
-            if ($normalized_category !== '') {
-                $capacity_map[$normalized_category] = 4;
-            }
-        }
-    }
-
-    $rows = (new RoomRepository())->getRoomCategoryCapacityMap();
-
-    foreach ($rows as $category => $max_guests) {
-        $normalized_category = \function_exists(__NAMESPACE__ . '\normalize_room_category')
-            ? normalize_room_category((string) $category)
-            : \sanitize_key((string) $category);
-
-        if ($normalized_category !== '') {
-            $capacity_map[$normalized_category] = \max(1, (int) $max_guests);
-        }
-    }
-
-    if (empty($capacity_map)) {
-        $capacity_map = [
-            'standard-rooms' => 4,
-            'suites' => 4,
-            'duplex-suite' => 4,
-        ];
-    }
-
-    return $capacity_map;
+    return BookingRules::getRoomCategoryCapacityMap();
 }
 
 /**
@@ -149,24 +93,7 @@ function get_booking_room_category_capacity_map(): array
  */
 function get_booking_context_max_room_capacity(string $accommodation_type = 'standard-rooms', ?array $fixed_room = null): int
 {
-    if (\is_array($fixed_room) && !empty($fixed_room)) {
-        $fixed_room_capacity = isset($fixed_room['max_guests']) ? (int) $fixed_room['max_guests'] : 0;
-
-        return \max(1, $fixed_room_capacity);
-    }
-
-    $capacity_map = get_booking_room_category_capacity_map();
-    $normalized_category = \function_exists(__NAMESPACE__ . '\normalize_room_category')
-        ? normalize_room_category($accommodation_type)
-        : \sanitize_key($accommodation_type);
-
-    if ($normalized_category !== '' && isset($capacity_map[$normalized_category])) {
-        return \max(1, (int) $capacity_map[$normalized_category]);
-    }
-
-    $fallback_capacity = !empty($capacity_map) ? (int) \max($capacity_map) : 4;
-
-    return \max(1, $fallback_capacity);
+    return BookingRules::getContextMaxRoomCapacity($accommodation_type, $fixed_room);
 }
 
 /**
@@ -176,21 +103,7 @@ function get_booking_context_max_room_capacity(string $accommodation_type = 'sta
  */
 function resolve_booking_room_count(int $guests, int $room_count = 0, string $accommodation_type = 'standard-rooms', ?array $fixed_room = null): int
 {
-    if (\is_array($fixed_room) && !empty($fixed_room)) {
-        return 1;
-    }
-
-    $max_rooms = get_max_booking_rooms_limit();
-    $normalized_room_count = normalize_booking_room_count($room_count);
-    $room_capacity = get_booking_context_max_room_capacity($accommodation_type, $fixed_room);
-    $resolved_auto_count = (int) \ceil(\max(1, $guests) / \max(1, $room_capacity));
-    $resolved_auto_count = \max(1, \min($max_rooms, $resolved_auto_count));
-
-    if ($normalized_room_count > 0) {
-        return \min($max_rooms, $normalized_room_count);
-    }
-
-    return $resolved_auto_count;
+    return BookingRules::resolveRoomCount($guests, $room_count, $accommodation_type, $fixed_room);
 }
 
 /**
@@ -200,13 +113,7 @@ function resolve_booking_room_count(int $guests, int $room_count = 0, string $ac
  */
 function get_booking_context_guest_limit(string $accommodation_type = 'standard-rooms', int $room_count = 0, ?array $fixed_room = null): int
 {
-    $configured_limit = get_max_booking_guests_limit();
-    $room_capacity = get_booking_context_max_room_capacity($accommodation_type, $fixed_room);
-    $allowed_room_count = \is_array($fixed_room) && !empty($fixed_room)
-        ? 1
-        : \max(1, normalize_booking_room_count($room_count) > 0 ? normalize_booking_room_count($room_count) : get_max_booking_rooms_limit());
-
-    return \max(1, \min($configured_limit, $room_capacity * $allowed_room_count));
+    return BookingRules::getContextGuestLimit($accommodation_type, $room_count, $fixed_room);
 }
 
 /**
@@ -214,11 +121,7 @@ function get_booking_context_guest_limit(string $accommodation_type = 'standard-
  */
 function format_booking_room_count_label(int $room_count): string
 {
-    return \sprintf(
-        /* translators: %d is room count. */
-        _n('%d Room', '%d Rooms', \max(1, $room_count), 'must-hotel-booking'),
-        \max(1, $room_count)
-    );
+    return BookingRules::formatRoomCountLabel($room_count);
 }
 
 /**
@@ -228,33 +131,7 @@ function format_booking_room_count_label(int $room_count): string
  */
 function get_frontend_pages_config(): array
 {
-    return [
-        'page_rooms_id' => [
-            'title' => 'Rooms',
-            'slug' => 'rooms',
-            'template' => 'frontend/templates/rooms.php',
-        ],
-        'page_booking_id' => [
-            'title' => 'Booking',
-            'slug' => 'booking',
-            'template' => 'frontend/templates/booking.php',
-        ],
-        'page_booking_accommodation_id' => [
-            'title' => 'Select Accommodation',
-            'slug' => 'booking-accommodation',
-            'template' => 'frontend/templates/booking-accommodation.php',
-        ],
-        'page_checkout_id' => [
-            'title' => 'Checkout',
-            'slug' => 'checkout',
-            'template' => 'frontend/templates/checkout.php',
-        ],
-        'page_booking_confirmation_id' => [
-            'title' => 'Booking Confirmation',
-            'slug' => 'booking-confirmation',
-            'template' => 'frontend/templates/booking-confirmation.php',
-        ],
-    ];
+    return ManagedPages::getConfig();
 }
 
 /**
@@ -262,39 +139,7 @@ function get_frontend_pages_config(): array
  */
 function install_frontend_pages(): void
 {
-    $settings = get_plugin_settings();
-
-    foreach (get_frontend_pages_config() as $setting_key => $page_config) {
-        $existing_page = \get_page_by_path($page_config['slug'], OBJECT, 'page');
-        $page_id = 0;
-
-        if ($existing_page instanceof \WP_Post) {
-            $page_id = (int) $existing_page->ID;
-        } else {
-            $created_page_id = \wp_insert_post(
-                [
-                    'post_title' => $page_config['title'],
-                    'post_name' => $page_config['slug'],
-                    'post_type' => 'page',
-                    'post_status' => 'publish',
-                    'post_content' => '',
-                    'comment_status' => 'closed',
-                    'ping_status' => 'closed',
-                ],
-                true
-            );
-
-            if (!\is_wp_error($created_page_id)) {
-                $page_id = (int) $created_page_id;
-            }
-        }
-
-        if ($page_id > 0) {
-            $settings[$setting_key] = $page_id;
-        }
-    }
-
-    update_plugin_settings($settings);
+    ManagedPages::install();
 }
 
 /**
@@ -332,18 +177,7 @@ function maybe_load_frontend_template(string $template): string
  */
 function get_frontend_page_url(string $setting_key, string $fallback_path): string
 {
-    $settings = get_plugin_settings();
-    $page_id = isset($settings[$setting_key]) ? (int) $settings[$setting_key] : 0;
-
-    if ($page_id > 0) {
-        $permalink = \get_permalink($page_id);
-
-        if (\is_string($permalink) && $permalink !== '') {
-            return $permalink;
-        }
-    }
-
-    return \home_url($fallback_path);
+    return ManagedPages::getPageUrl($setting_key, $fallback_path);
 }
 
 /**
@@ -351,7 +185,7 @@ function get_frontend_page_url(string $setting_key, string $fallback_path): stri
  */
 function get_booking_page_url(): string
 {
-    return get_frontend_page_url('page_booking_id', '/booking');
+    return ManagedPages::getBookingPageUrl();
 }
 
 /**
@@ -376,15 +210,7 @@ function get_requested_booking_room_id(array $source): int
  */
 function get_requested_booking_room_data(array $source): ?array
 {
-    $room_id = get_requested_booking_room_id($source);
-
-    if ($room_id <= 0 || !\function_exists(__NAMESPACE__ . '\get_room_record')) {
-        return null;
-    }
-
-    $room = get_room_record($room_id);
-
-    return \is_array($room) ? $room : null;
+    return RoomData::getRoom(get_requested_booking_room_id($source));
 }
 
 /**
@@ -418,9 +244,7 @@ function get_booking_context_url(array $context, int $room_id = 0): string
     }
 
     $args['guests'] = (int) ($normalized_context['guests'] ?? 1);
-    $args['room_count'] = \function_exists(__NAMESPACE__ . '\normalize_booking_room_count')
-        ? normalize_booking_room_count($normalized_context['room_count'] ?? 0)
-        : 0;
+    $args['room_count'] = BookingRules::normalizeRoomCount($normalized_context['room_count'] ?? 0);
     $args['accommodation_type'] = (string) ($normalized_context['accommodation_type'] ?? 'standard-rooms');
 
     if ($room_id > 0) {
@@ -449,9 +273,7 @@ function get_checkout_context_url(array $context, int $room_id = 0): string
     }
 
     $args['guests'] = (int) ($normalized_context['guests'] ?? 1);
-    $args['room_count'] = \function_exists(__NAMESPACE__ . '\normalize_booking_room_count')
-        ? normalize_booking_room_count($normalized_context['room_count'] ?? 0)
-        : 0;
+    $args['room_count'] = BookingRules::normalizeRoomCount($normalized_context['room_count'] ?? 0);
     $args['accommodation_type'] = (string) ($normalized_context['accommodation_type'] ?? 'standard-rooms');
 
     if ($room_id > 0) {
@@ -466,7 +288,7 @@ function get_checkout_context_url(array $context, int $room_id = 0): string
  */
 function get_checkout_page_url(): string
 {
-    return get_frontend_page_url('page_checkout_id', '/checkout');
+    return ManagedPages::getCheckoutPageUrl();
 }
 
 /**
@@ -474,7 +296,7 @@ function get_checkout_page_url(): string
  */
 function get_booking_accommodation_page_url(): string
 {
-    return get_frontend_page_url('page_booking_accommodation_id', '/booking-accommodation');
+    return ManagedPages::getBookingAccommodationPageUrl();
 }
 
 /**
@@ -482,7 +304,7 @@ function get_booking_accommodation_page_url(): string
  */
 function get_booking_confirmation_page_url(): string
 {
-    return get_frontend_page_url('page_booking_confirmation_id', '/booking-confirmation');
+    return ManagedPages::getBookingConfirmationPageUrl();
 }
 
 /**
@@ -535,104 +357,7 @@ function maybe_process_booking_room_selection(): string
  */
 function get_booking_results_room_view_data(array $room): ?array
 {
-    $room_id = isset($room['id']) ? (int) $room['id'] : 0;
-
-    if ($room_id <= 0) {
-        return null;
-    }
-
-    $room_slug = isset($room['slug']) ? (string) $room['slug'] : '';
-    $room_category = isset($room['category']) ? (string) $room['category'] : 'standard-rooms';
-    $currency = \class_exists(MustBookingConfig::class)
-        ? (string) MustBookingConfig::get_currency()
-        : 'USD';
-    $primary_image_url = \function_exists(__NAMESPACE__ . '\get_room_main_image_url')
-        ? get_room_main_image_url($room_id, 'large')
-        : '';
-    $gallery_images = \function_exists(__NAMESPACE__ . '\get_room_gallery_image_urls')
-        ? get_room_gallery_image_urls($room_id, 12, 'large')
-        : [];
-    $gallery_images = \array_values(
-        \array_filter(
-            \array_map('strval', \is_array($gallery_images) ? $gallery_images : []),
-            static function (string $url): bool {
-                return $url !== '';
-            }
-        )
-    );
-
-    if ($primary_image_url === '' && !empty($gallery_images)) {
-        $primary_image_url = (string) \array_shift($gallery_images);
-    }
-
-    $lightbox_images = [];
-
-    if ($primary_image_url !== '') {
-        $lightbox_images[] = $primary_image_url;
-    }
-
-    foreach ($gallery_images as $gallery_image) {
-        $gallery_image = (string) $gallery_image;
-
-        if ($gallery_image !== '') {
-            $lightbox_images[] = $gallery_image;
-        }
-    }
-
-    $lightbox_images = \array_values(\array_unique($lightbox_images));
-    $gallery_images = \array_values(
-        \array_filter(
-            \array_unique($gallery_images),
-            static function (string $url) use ($primary_image_url): bool {
-                return $url !== '' && $url !== $primary_image_url;
-            }
-        )
-    );
-    $gallery_images = \array_slice($gallery_images, 0, 3);
-    $details_url = $room_slug !== '' && \function_exists(__NAMESPACE__ . '\get_single_room_url')
-        ? get_single_room_url($room_slug)
-        : get_frontend_page_url('page_rooms_id', '/rooms');
-
-    return [
-        'id' => $room_id,
-        'name' => isset($room['name']) ? (string) $room['name'] : '',
-        'slug' => $room_slug,
-        'category' => $room_category,
-        'category_label' => \function_exists(__NAMESPACE__ . '\get_room_category_label')
-            ? get_room_category_label($room_category)
-            : '',
-        'description' => isset($room['description']) ? (string) $room['description'] : '',
-        'max_guests' => isset($room['max_guests']) ? (int) $room['max_guests'] : 0,
-        'effective_max_guests' => isset($room['effective_max_guests'])
-            ? (int) $room['effective_max_guests']
-            : (isset($room['max_guests']) ? (int) $room['max_guests'] : 0),
-        'available_count' => isset($room['available_count']) ? \max(0, (int) $room['available_count']) : 0,
-        'base_price' => isset($room['base_price']) ? (float) $room['base_price'] : 0.0,
-        'selected_rate_plan_id' => isset($room['selected_rate_plan_id']) ? (int) $room['selected_rate_plan_id'] : 0,
-        'selected_rate_plan_name' => isset($room['selected_rate_plan_name']) ? (string) $room['selected_rate_plan_name'] : '',
-        'selected_rate_plan_description' => isset($room['selected_rate_plan_description']) ? (string) $room['selected_rate_plan_description'] : '',
-        'selected_rate_plan_max_occupancy' => isset($room['selected_rate_plan_max_occupancy']) ? (int) $room['selected_rate_plan_max_occupancy'] : 0,
-        'rate_plans' => isset($room['rate_plans']) && \is_array($room['rate_plans']) ? $room['rate_plans'] : [],
-        'room_size' => isset($room['room_size']) ? (string) $room['room_size'] : '',
-        'beds' => isset($room['beds']) ? (string) $room['beds'] : '',
-        'currency' => $currency,
-        'price_preview_total' => isset($room['price_preview_total']) ? (float) $room['price_preview_total'] : null,
-        'dynamic_total_price' => isset($room['dynamic_total_price']) ? (float) $room['dynamic_total_price'] : null,
-        'dynamic_room_subtotal' => isset($room['dynamic_room_subtotal']) ? (float) $room['dynamic_room_subtotal'] : null,
-        'dynamic_nights' => isset($room['dynamic_nights']) ? (int) $room['dynamic_nights'] : null,
-        'details_url' => $details_url,
-        'primary_image_url' => $primary_image_url,
-        'gallery_images' => \array_slice($gallery_images, 0, 3),
-        'lightbox_images' => $lightbox_images,
-        'room_rules' => \function_exists(__NAMESPACE__ . '\get_room_rules_text')
-            ? get_room_rules_text($room_id)
-            : '',
-        'amenities' => \function_exists(__NAMESPACE__ . '\get_room_amenity_display_items')
-            ? get_room_amenity_display_items($room_id)
-            : [],
-        'people_icon_url' => MUST_HOTEL_BOOKING_URL . 'assets/img/PeopleFill.svg',
-        'surface_icon_url' => MUST_HOTEL_BOOKING_URL . 'assets/img/Surface.svg',
-    ];
+    return RoomViewBuilder::buildBookingResultsRoomViewData($room);
 }
 
 /**
@@ -667,15 +392,9 @@ function format_booking_results_date_range(string $checkin, string $checkout): s
  */
 function format_booking_results_selection_summary(string $accommodation_type, int $guests, int $room_count = 0): string
 {
-    $category_label = \function_exists(__NAMESPACE__ . '\get_room_category_label')
-        ? get_room_category_label($accommodation_type)
-        : \__('Standard Rooms', 'must-hotel-booking');
-    $resolved_room_count = \function_exists(__NAMESPACE__ . '\resolve_booking_room_count')
-        ? resolve_booking_room_count($guests, $room_count, $accommodation_type)
-        : \max(1, $room_count > 0 ? $room_count : 1);
-    $room_count_label = \function_exists(__NAMESPACE__ . '\format_booking_room_count_label')
-        ? format_booking_room_count_label($resolved_room_count)
-        : (string) $resolved_room_count;
+    $category_label = RoomCatalog::getCategoryLabel($accommodation_type);
+    $resolved_room_count = BookingRules::resolveRoomCount($guests, $room_count, $accommodation_type);
+    $room_count_label = BookingRules::formatRoomCountLabel($resolved_room_count);
 
     return \sprintf(
         /* translators: 1: accommodation type label, 2: guests count, 3: room count label. */
@@ -804,18 +523,7 @@ function get_booking_page_view_data(): array
  */
 function is_frontend_booking_page(): bool
 {
-    if (\is_admin()) {
-        return false;
-    }
-
-    $settings = get_plugin_settings();
-    $booking_page_id = isset($settings['page_booking_id']) ? (int) $settings['page_booking_id'] : 0;
-
-    if ($booking_page_id > 0 && \is_page($booking_page_id)) {
-        return true;
-    }
-
-    return \is_page('booking');
+    return ManagedPages::isCurrentPage('page_booking_id', 'booking');
 }
 
 /**
@@ -823,22 +531,7 @@ function is_frontend_booking_page(): bool
  */
 function maybe_sync_frontend_pages(): void
 {
-    if (!\function_exists(__NAMESPACE__ . '\install_frontend_pages')) {
-        return;
-    }
-
-    $settings = get_plugin_settings();
-
-    foreach (get_frontend_pages_config() as $setting_key => $page_config) {
-        $page_id = isset($settings[$setting_key]) ? (int) $settings[$setting_key] : 0;
-
-        if ($page_id > 0 && \get_post($page_id) instanceof \WP_Post) {
-            continue;
-        }
-
-        install_frontend_pages();
-        return;
-    }
+    ManagedPages::sync();
 }
 
 /**
@@ -876,8 +569,8 @@ function enqueue_booking_page_assets(): void
 
     $fixed_room_id = $fixed_room_mode ? (int) ($fixed_room['id'] ?? 0) : 0;
     $fixed_room_name = $fixed_room_mode ? (string) ($fixed_room['name'] ?? '') : '';
-    $fixed_room_category_label = $fixed_room_mode && \function_exists(__NAMESPACE__ . '\get_room_category_label')
-        ? get_room_category_label((string) ($fixed_room['category'] ?? 'standard-rooms'))
+    $fixed_room_category_label = $fixed_room_mode
+        ? RoomCatalog::getCategoryLabel((string) ($fixed_room['category'] ?? 'standard-rooms'))
         : '';
     $arrow_icon_url = MUST_HOTEL_BOOKING_URL . 'assets/img/ArrowRight.svg';
     $bed_icon_url = MUST_HOTEL_BOOKING_URL . 'assets/img/bed.svg';
@@ -944,7 +637,7 @@ function enqueue_booking_page_assets(): void
             'initialStep' => 1,
             'arrowIconUrl' => $arrow_icon_url,
             'bedIconUrl' => $bed_icon_url,
-            'currencySymbol' => get_frontend_currency_symbol(\class_exists(MustBookingConfig::class) ? (string) MustBookingConfig::get_currency() : 'USD'),
+            'currencySymbol' => get_frontend_currency_symbol((string) MustBookingConfig::get_currency()),
             'initial' => [
                 'checkin' => $initial_checkin,
                 'checkout' => $initial_checkout,

@@ -4,6 +4,11 @@ namespace MustHotelBooking\Database;
 
 final class ReservationRepository extends AbstractRepository
 {
+    public function reservationsTableExists(): bool
+    {
+        return $this->tableExists('reservations');
+    }
+
     private function inventoryLockTable(): string
     {
         return $this->wpdb->prefix . 'mhb_inventory_locks';
@@ -223,6 +228,340 @@ final class ReservationRepository extends AbstractRepository
     }
 
     /**
+     * @return array<int, array<string, mixed>>
+     */
+    public function getAdminReservationListRows(): array
+    {
+        if (!$this->reservationsTableExists()) {
+            return [];
+        }
+
+        $rows = $this->wpdb->get_results(
+            'SELECT
+                r.id,
+                r.booking_id,
+                r.room_id,
+                r.guest_id,
+                r.checkin,
+                r.checkout,
+                r.guests,
+                r.status,
+                r.total_price,
+                r.payment_status,
+                r.created_at,
+                rm.name AS room_name,
+                CONCAT_WS(\' \', g.first_name, g.last_name) AS guest_name
+            FROM ' . $this->table('reservations') . ' r
+            LEFT JOIN ' . $this->table('rooms') . ' rm ON rm.id = r.room_id
+            LEFT JOIN ' . $this->table('guests') . ' g ON g.id = r.guest_id
+            ORDER BY r.created_at DESC, r.id DESC',
+            ARRAY_A
+        );
+
+        return \is_array($rows) ? $rows : [];
+    }
+
+    /**
+     * @return array<string, mixed>|null
+     */
+    public function getAdminReservationDetails(int $reservationId): ?array
+    {
+        if ($reservationId <= 0 || !$this->reservationsTableExists()) {
+            return null;
+        }
+
+        $sql = $this->wpdb->prepare(
+            'SELECT
+                r.*,
+                rm.name AS room_name,
+                g.first_name,
+                g.last_name,
+                g.email,
+                g.phone,
+                g.country
+            FROM ' . $this->table('reservations') . ' r
+            LEFT JOIN ' . $this->table('rooms') . ' rm ON rm.id = r.room_id
+            LEFT JOIN ' . $this->table('guests') . ' g ON g.id = r.guest_id
+            WHERE r.id = %d
+            LIMIT 1',
+            $reservationId
+        );
+        $row = $this->wpdb->get_row($sql, ARRAY_A);
+
+        return \is_array($row) ? $row : null;
+    }
+
+    /**
+     * @param array<int, string> $nonBlockingStatuses
+     */
+    public function hasReservationOverlapExcludingId(
+        int $reservationId,
+        int $roomId,
+        string $checkin,
+        string $checkout,
+        array $nonBlockingStatuses = []
+    ): bool {
+        if (
+            $reservationId < 0 ||
+            $roomId <= 0 ||
+            $checkin === '' ||
+            $checkout === '' ||
+            !$this->reservationsTableExists()
+        ) {
+            return false;
+        }
+
+        $statuses = $this->normalizeNonBlockingStatuses($nonBlockingStatuses);
+        $sql = $this->wpdb->prepare(
+            'SELECT 1
+            FROM ' . $this->table('reservations') . '
+            WHERE room_id = %d
+                AND id <> %d
+                AND checkin < %s
+                AND checkout > %s
+                AND status NOT IN (%s, %s, %s)
+            LIMIT 1',
+            $roomId,
+            $reservationId,
+            $checkout,
+            $checkin,
+            $statuses[0],
+            $statuses[1],
+            $statuses[2]
+        );
+
+        return $this->wpdb->get_var($sql) !== null;
+    }
+
+    /**
+     * @param array<string, mixed> $reservationData
+     */
+    public function updateReservation(int $reservationId, array $reservationData): bool
+    {
+        if ($reservationId <= 0 || empty($reservationData) || !$this->reservationsTableExists()) {
+            return false;
+        }
+
+        $updated = $this->wpdb->update(
+            $this->table('reservations'),
+            $reservationData,
+            ['id' => $reservationId],
+            $this->resolveReservationFormats($reservationData),
+            ['%d']
+        );
+
+        return $updated !== false;
+    }
+
+    public function createBlockedReservation(int $roomId, string $checkin, string $checkout, string $createdAt = ''): int
+    {
+        if ($roomId <= 0 || $checkin === '' || $checkout === '' || !$this->reservationsTableExists()) {
+            return 0;
+        }
+
+        $inserted = $this->wpdb->insert(
+            $this->table('reservations'),
+            [
+                'room_id' => $roomId,
+                'guest_id' => 0,
+                'checkin' => $checkin,
+                'checkout' => $checkout,
+                'guests' => 1,
+                'status' => 'blocked',
+                'total_price' => 0.00,
+                'payment_status' => 'blocked',
+                'created_at' => $createdAt !== '' ? $createdAt : \current_time('mysql'),
+            ],
+            ['%d', '%d', '%s', '%s', '%d', '%s', '%f', '%s', '%s']
+        );
+
+        if ($inserted === false) {
+            return 0;
+        }
+
+        return (int) $this->wpdb->insert_id;
+    }
+
+    public function deleteReservation(int $reservationId, string $requiredStatus = ''): bool
+    {
+        if ($reservationId <= 0 || !$this->reservationsTableExists()) {
+            return false;
+        }
+
+        $where = ['id' => $reservationId];
+        $formats = ['%d'];
+
+        if ($requiredStatus !== '') {
+            $where['status'] = $requiredStatus;
+            $formats[] = '%s';
+        }
+
+        $deleted = $this->wpdb->delete(
+            $this->table('reservations'),
+            $where,
+            $formats
+        );
+
+        return $deleted !== false;
+    }
+
+    /**
+     * @return array<int, array<string, mixed>>
+     */
+    public function getCalendarReservationRows(string $startDate, string $endExclusive): array
+    {
+        if ($startDate === '' || $endExclusive === '' || !$this->reservationsTableExists()) {
+            return [];
+        }
+
+        $sql = $this->wpdb->prepare(
+            'SELECT
+                r.id,
+                r.room_id,
+                r.guest_id,
+                r.checkin,
+                r.checkout,
+                r.guests,
+                r.status,
+                r.total_price,
+                r.payment_status,
+                r.created_at,
+                rm.name AS room_name,
+                CONCAT_WS(\' \', g.first_name, g.last_name) AS guest_name
+            FROM ' . $this->table('reservations') . ' r
+            LEFT JOIN ' . $this->table('rooms') . ' rm ON rm.id = r.room_id
+            LEFT JOIN ' . $this->table('guests') . ' g ON g.id = r.guest_id
+            WHERE r.checkin < %s
+                AND r.checkout > %s
+            ORDER BY r.room_id ASC, r.checkin ASC, r.checkout ASC, r.id ASC',
+            $endExclusive,
+            $startDate
+        );
+        $rows = $this->wpdb->get_results($sql, ARRAY_A);
+
+        return \is_array($rows) ? $rows : [];
+    }
+
+    /**
+     * @return array{bookings_today: int, upcoming_checkins: int, upcoming_checkouts: int, total_bookings_this_month: int}
+     */
+    public function getDashboardMetrics(string $today, string $monthStart, string $nextMonthStart): array
+    {
+        $metrics = [
+            'bookings_today' => 0,
+            'upcoming_checkins' => 0,
+            'upcoming_checkouts' => 0,
+            'total_bookings_this_month' => 0,
+        ];
+
+        if (!$this->reservationsTableExists()) {
+            return $metrics;
+        }
+
+        $excluded = ['cancelled', 'blocked', 'expired', 'payment_failed', 'pending_payment'];
+        $metrics['bookings_today'] = (int) $this->wpdb->get_var(
+            $this->wpdb->prepare(
+                'SELECT COUNT(*)
+                FROM ' . $this->table('reservations') . '
+                WHERE DATE(created_at) = %s
+                    AND status NOT IN (%s, %s, %s, %s, %s)',
+                $today,
+                $excluded[0],
+                $excluded[1],
+                $excluded[2],
+                $excluded[3],
+                $excluded[4]
+            )
+        );
+        $metrics['upcoming_checkins'] = (int) $this->wpdb->get_var(
+            $this->wpdb->prepare(
+                'SELECT COUNT(*)
+                FROM ' . $this->table('reservations') . '
+                WHERE checkin > %s
+                    AND status NOT IN (%s, %s, %s, %s, %s)',
+                $today,
+                $excluded[0],
+                $excluded[1],
+                $excluded[2],
+                $excluded[3],
+                $excluded[4]
+            )
+        );
+        $metrics['upcoming_checkouts'] = (int) $this->wpdb->get_var(
+            $this->wpdb->prepare(
+                'SELECT COUNT(*)
+                FROM ' . $this->table('reservations') . '
+                WHERE checkout > %s
+                    AND status NOT IN (%s, %s, %s, %s, %s)',
+                $today,
+                $excluded[0],
+                $excluded[1],
+                $excluded[2],
+                $excluded[3],
+                $excluded[4]
+            )
+        );
+        $metrics['total_bookings_this_month'] = (int) $this->wpdb->get_var(
+            $this->wpdb->prepare(
+                'SELECT COUNT(*)
+                FROM ' . $this->table('reservations') . '
+                WHERE created_at >= %s
+                    AND created_at < %s
+                    AND status NOT IN (%s, %s, %s, %s, %s)',
+                $monthStart,
+                $nextMonthStart,
+                $excluded[0],
+                $excluded[1],
+                $excluded[2],
+                $excluded[3],
+                $excluded[4]
+            )
+        );
+
+        return $metrics;
+    }
+
+    /**
+     * @return array<int, array<string, mixed>>
+     */
+    public function getUpcomingReservationRows(string $today, int $limit = 10): array
+    {
+        if ($today === '' || !$this->reservationsTableExists()) {
+            return [];
+        }
+
+        $limit = \max(1, \min(50, $limit));
+        $excluded = ['cancelled', 'blocked', 'expired', 'payment_failed', 'pending_payment'];
+        $sql = $this->wpdb->prepare(
+            'SELECT
+                id,
+                booking_id,
+                room_id,
+                checkin,
+                checkout,
+                guests,
+                status,
+                total_price,
+                created_at
+            FROM ' . $this->table('reservations') . '
+            WHERE checkin >= %s
+                AND status NOT IN (%s, %s, %s, %s, %s)
+            ORDER BY checkin ASC, checkout ASC, id ASC
+            LIMIT %d',
+            $today,
+            $excluded[0],
+            $excluded[1],
+            $excluded[2],
+            $excluded[3],
+            $excluded[4],
+            $limit
+        );
+        $rows = $this->wpdb->get_results($sql, ARRAY_A);
+
+        return \is_array($rows) ? $rows : [];
+    }
+
+    /**
      * @param array<int, int> $reservationIds
      * @return array<int, array<string, mixed>>
      */
@@ -405,6 +744,33 @@ final class ReservationRepository extends AbstractRepository
         );
 
         return $this->normalizeIds(\is_array($rows) ? $rows : []);
+    }
+
+    /**
+     * @param array<string, mixed> $reservationData
+     * @return array<int, string>
+     */
+    private function resolveReservationFormats(array $reservationData): array
+    {
+        $integerFields = ['room_id', 'room_type_id', 'assigned_room_id', 'rate_plan_id', 'guest_id', 'guests'];
+        $floatFields = ['total_price'];
+        $formats = [];
+
+        foreach (\array_keys($reservationData) as $field) {
+            if (\in_array($field, $integerFields, true)) {
+                $formats[] = '%d';
+                continue;
+            }
+
+            if (\in_array($field, $floatFields, true)) {
+                $formats[] = '%f';
+                continue;
+            }
+
+            $formats[] = '%s';
+        }
+
+        return $formats;
     }
 
     private function getConfirmationRowsQuery(string $whereSql): string

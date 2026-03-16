@@ -2,7 +2,9 @@
 
 namespace MustHotelBooking\Admin;
 
+use MustHotelBooking\Core\ManagedPages;
 use MustHotelBooking\Core\MustBookingConfig;
+use MustHotelBooking\Engine\EmailEngine;
 use MustHotelBooking\Engine\LockEngine;
 use MustHotelBooking\Engine\PaymentEngine;
 
@@ -306,9 +308,9 @@ function sanitize_booking_settings_form_values(array $source): array
  */
 function get_pages_settings_form_defaults(): array
 {
-    $settings = \function_exists(__NAMESPACE__ . '\get_plugin_settings') ? get_plugin_settings() : [];
+    $settings = MustBookingConfig::get_all_settings();
     $defaults = [];
-    $pages_config = \function_exists(__NAMESPACE__ . '\get_frontend_pages_config') ? get_frontend_pages_config() : [];
+    $pages_config = ManagedPages::getConfig();
 
     foreach ($pages_config as $setting_key => $page_config) {
         unset($page_config);
@@ -344,7 +346,7 @@ function get_pages_settings_form_data(?array $submitted_form = null): array
 function sanitize_pages_settings_form_values(array $source): array
 {
     $defaults = get_pages_settings_form_defaults();
-    $pages_config = \function_exists(__NAMESPACE__ . '\get_frontend_pages_config') ? get_frontend_pages_config() : [];
+    $pages_config = ManagedPages::getConfig();
     $errors = [];
     $values = [];
 
@@ -557,8 +559,8 @@ function process_settings_post_action(string $action, array $raw_post, bool $per
             return $state;
         }
 
-        if ($persist && \function_exists(__NAMESPACE__ . '\install_frontend_pages')) {
-            install_frontend_pages();
+        if ($persist) {
+            ManagedPages::install();
         }
 
         $state['notice'] = 'pages_synced';
@@ -825,7 +827,7 @@ function render_booking_settings_section(array $form): void
 function render_pages_settings_section(array $form): void
 {
     $page_options = get_settings_page_options();
-    $pages_config = \function_exists(__NAMESPACE__ . '\get_frontend_pages_config') ? get_frontend_pages_config() : [];
+    $pages_config = ManagedPages::getConfig();
 
     echo '<div class="postbox" style="max-width:1100px; padding:16px;">';
     echo '<h2 style="margin-top:0;">' . \esc_html__('Managed Frontend Pages', 'must-hotel-booking') . '</h2>';
@@ -918,32 +920,42 @@ function get_settings_diagnostics_data(): array
 {
     global $wpdb;
 
+    $roomRepository = \MustHotelBooking\Engine\get_room_repository();
+    $guestRepository = \MustHotelBooking\Engine\get_guest_repository();
+    $inventoryRepository = \MustHotelBooking\Engine\get_inventory_repository();
+    $reservationRepository = \MustHotelBooking\Engine\get_reservation_repository();
+    $availabilityRepository = \MustHotelBooking\Engine\get_availability_repository();
+    $paymentRepository = \MustHotelBooking\Engine\get_payment_repository();
+    $ratePlanRepository = \MustHotelBooking\Engine\get_rate_plan_repository();
+
     $table_checks = [
-        'Rooms' => $wpdb->prefix . 'must_rooms',
-        'Room Types' => $wpdb->prefix . 'mhb_room_types',
-        'Inventory Rooms' => $wpdb->prefix . 'mhb_rooms',
-        'Room Meta' => $wpdb->prefix . 'must_room_meta',
-        'Guests' => $wpdb->prefix . 'must_guests',
-        'Reservations' => $wpdb->prefix . 'must_reservations',
-        'Pricing' => $wpdb->prefix . 'must_pricing',
-        'Availability' => $wpdb->prefix . 'must_availability',
-        'Locks' => $wpdb->prefix . 'mhb_inventory_locks',
-        'Payments' => $wpdb->prefix . 'must_payments',
-        'Taxes' => $wpdb->prefix . 'must_taxes',
-        'Coupons' => $wpdb->prefix . 'must_coupons',
-        'Cancellation Policies' => $wpdb->prefix . 'mhb_cancellation_policies',
-        'Rate Plans' => $wpdb->prefix . 'mhb_rate_plans',
-        'Room Type Rate Plans' => $wpdb->prefix . 'mhb_room_type_rate_plans',
-        'Rate Plan Prices' => $wpdb->prefix . 'mhb_rate_plan_prices',
-        'Seasons' => $wpdb->prefix . 'mhb_seasons',
-        'Seasonal Prices' => $wpdb->prefix . 'mhb_seasonal_prices',
+        ['label' => 'Rooms', 'table_name' => $wpdb->prefix . 'must_rooms', 'exists' => $roomRepository->roomsTableExists()],
+        ['label' => 'Room Types', 'table_name' => $wpdb->prefix . 'mhb_room_types', 'exists' => $inventoryRepository->roomTypesTableExists()],
+        ['label' => 'Inventory Rooms', 'table_name' => $wpdb->prefix . 'mhb_rooms', 'exists' => $inventoryRepository->inventoryRoomsTableExists()],
+        ['label' => 'Room Meta', 'table_name' => $wpdb->prefix . 'must_room_meta', 'exists' => $roomRepository->roomMetaTableExists()],
+        ['label' => 'Guests', 'table_name' => $wpdb->prefix . 'must_guests', 'exists' => $guestRepository->guestsTableExists()],
+        ['label' => 'Reservations', 'table_name' => $wpdb->prefix . 'must_reservations', 'exists' => $reservationRepository->reservationsTableExists()],
+        ['label' => 'Pricing', 'table_name' => $wpdb->prefix . 'must_pricing', 'exists' => does_settings_diagnostic_table_exist($wpdb->prefix . 'must_pricing')],
+        ['label' => 'Availability', 'table_name' => $wpdb->prefix . 'must_availability', 'exists' => $availabilityRepository->availabilityTableExists()],
+        ['label' => 'Locks', 'table_name' => $wpdb->prefix . 'mhb_inventory_locks', 'exists' => $inventoryRepository->inventoryLocksTableExists()],
+        ['label' => 'Payments', 'table_name' => $wpdb->prefix . 'must_payments', 'exists' => $paymentRepository->paymentsTableExists()],
+        ['label' => 'Taxes', 'table_name' => $wpdb->prefix . 'must_taxes', 'exists' => does_settings_diagnostic_table_exist($wpdb->prefix . 'must_taxes')],
+        ['label' => 'Coupons', 'table_name' => $wpdb->prefix . 'must_coupons', 'exists' => does_settings_diagnostic_table_exist($wpdb->prefix . 'must_coupons')],
+        ['label' => 'Cancellation Policies', 'table_name' => $wpdb->prefix . 'mhb_cancellation_policies', 'exists' => does_settings_diagnostic_table_exist($wpdb->prefix . 'mhb_cancellation_policies')],
+        ['label' => 'Rate Plans', 'table_name' => $wpdb->prefix . 'mhb_rate_plans', 'exists' => $ratePlanRepository->ratePlansTableExists()],
+        ['label' => 'Room Type Rate Plans', 'table_name' => $wpdb->prefix . 'mhb_room_type_rate_plans', 'exists' => $ratePlanRepository->roomTypeRatePlansTableExists()],
+        ['label' => 'Rate Plan Prices', 'table_name' => $wpdb->prefix . 'mhb_rate_plan_prices', 'exists' => $ratePlanRepository->ratePlanPricesTableExists()],
+        ['label' => 'Seasons', 'table_name' => $wpdb->prefix . 'mhb_seasons', 'exists' => $ratePlanRepository->seasonsTableExists()],
+        ['label' => 'Seasonal Prices', 'table_name' => $wpdb->prefix . 'mhb_seasonal_prices', 'exists' => $ratePlanRepository->seasonalPricesTableExists()],
     ];
     $tables = [];
     $critical_issues = 0;
     $warnings = 0;
 
-    foreach ($table_checks as $label => $table_name) {
-        $exists = does_settings_diagnostic_table_exist($table_name);
+    foreach ($table_checks as $table_check) {
+        $label = isset($table_check['label']) ? (string) $table_check['label'] : '';
+        $table_name = isset($table_check['table_name']) ? (string) $table_check['table_name'] : '';
+        $exists = !empty($table_check['exists']);
 
         if (!$exists) {
             $critical_issues++;
@@ -960,8 +972,8 @@ function get_settings_diagnostics_data(): array
     }
 
     $pages = [];
-    $pages_config = \function_exists(__NAMESPACE__ . '\get_frontend_pages_config') ? get_frontend_pages_config() : [];
-    $settings = \function_exists(__NAMESPACE__ . '\get_plugin_settings') ? get_plugin_settings() : [];
+    $pages_config = ManagedPages::getConfig();
+    $settings = MustBookingConfig::get_all_settings();
 
     foreach ($pages_config as $setting_key => $page_config) {
         $page_id = isset($settings[$setting_key]) ? (int) $settings[$setting_key] : 0;
@@ -1008,8 +1020,8 @@ function get_settings_diagnostics_data(): array
         'hook' => $cron_hook,
     ];
 
-    $enabled_methods = \function_exists(__NAMESPACE__ . '\get_enabled_payment_methods') ? get_enabled_payment_methods() : [];
-    $payment_catalog = \function_exists(__NAMESPACE__ . '\get_payment_methods_catalog') ? get_payment_methods_catalog() : [];
+    $enabled_methods = get_enabled_payment_methods();
+    $payment_catalog = get_payment_methods_catalog();
     $enabled_method_labels = [];
 
     foreach ($enabled_methods as $method_key) {
@@ -1041,8 +1053,8 @@ function get_settings_diagnostics_data(): array
 
     $room_count = 0;
 
-    if (does_settings_diagnostic_table_exist($wpdb->prefix . 'must_rooms')) {
-        $room_count = (int) $wpdb->get_var('SELECT COUNT(*) FROM ' . $wpdb->prefix . 'must_rooms');
+    if ($roomRepository->roomsTableExists()) {
+        $room_count = $roomRepository->countRooms();
     }
 
     if ($room_count <= 0) {
@@ -1057,9 +1069,7 @@ function get_settings_diagnostics_data(): array
         'site_url' => (string) \home_url('/'),
         'site_environment' => PaymentEngine::getSiteEnvironmentLabel(),
         'room_count' => $room_count,
-        'email_template_count' => \function_exists(__NAMESPACE__ . '\get_email_templates')
-            ? \count((array) get_email_templates())
-            : 0,
+        'email_template_count' => \count(EmailEngine::getTemplates()),
     ];
 
     $overall_status = 'healthy';

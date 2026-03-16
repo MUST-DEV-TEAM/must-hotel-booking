@@ -2,6 +2,8 @@
 
 namespace MustHotelBooking\Engine;
 
+use MustHotelBooking\Core\ReservationStatus;
+
 final class InventoryEngine
 {
     /**
@@ -36,9 +38,7 @@ final class InventoryEngine
 
         $sessionId = $excludeSessionId !== '' ? LockEngine::normalizeSessionId($excludeSessionId) : '';
         $now = LockEngine::getCurrentUtcDatetime();
-        $nonBlockingStatuses = \function_exists(__NAMESPACE__ . '\get_inventory_non_blocking_reservation_statuses')
-            ? get_inventory_non_blocking_reservation_statuses()
-            : ['cancelled', 'expired', 'payment_failed'];
+        $nonBlockingStatuses = ReservationStatus::getInventoryNonBlockingStatuses();
         $rooms = get_inventory_repository()->getAvailableRooms(
             $roomTypeId,
             $checkin,
@@ -168,9 +168,7 @@ final class InventoryEngine
 
     public static function releaseRoom(int $roomId): bool
     {
-        $nonBlockingStatuses = \function_exists(__NAMESPACE__ . '\get_inventory_non_blocking_reservation_statuses')
-            ? get_inventory_non_blocking_reservation_statuses()
-            : ['cancelled', 'expired', 'payment_failed'];
+        $nonBlockingStatuses = ReservationStatus::getInventoryNonBlockingStatuses();
 
         return get_inventory_repository()->releaseRoomAssignments($roomId, $nonBlockingStatuses);
     }

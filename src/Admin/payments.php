@@ -2,6 +2,7 @@
 
 namespace MustHotelBooking\Admin;
 
+use MustHotelBooking\Core\PaymentMethodRegistry;
 use MustHotelBooking\Core\MustBookingConfig;
 use MustHotelBooking\Engine\PaymentEngine;
 
@@ -28,20 +29,7 @@ function get_admin_payments_page_url(array $args = []): string
  */
 function get_payment_methods_catalog(): array
 {
-    return [
-        'pay_at_hotel' => [
-            'label' => \__('Pay at hotel', 'must-hotel-booking'),
-            'description' => \__('Guest pays during check-in or check-out at the property.', 'must-hotel-booking'),
-        ],
-        'bank_transfer' => [
-            'label' => \__('Bank transfer', 'must-hotel-booking'),
-            'description' => \__('Guest pays via manual bank transfer.', 'must-hotel-booking'),
-        ],
-        'stripe' => [
-            'label' => \__('Stripe', 'must-hotel-booking'),
-            'description' => \__('Redirect guests to Stripe Checkout for secure card payment.', 'must-hotel-booking'),
-        ],
-    ];
+    return PaymentMethodRegistry::getCatalog();
 }
 
 /**
@@ -51,11 +39,7 @@ function get_payment_methods_catalog(): array
  */
 function get_default_payment_method_states(): array
 {
-    return [
-        'pay_at_hotel' => true,
-        'bank_transfer' => false,
-        'stripe' => false,
-    ];
+    return PaymentMethodRegistry::getDefaultStates();
 }
 
 /**
@@ -66,21 +50,7 @@ function get_default_payment_method_states(): array
  */
 function normalize_payment_method_states($value): array
 {
-    $defaults = get_default_payment_method_states();
-    $catalog = get_payment_methods_catalog();
-    $states = [];
-
-    if (\is_array($value)) {
-        foreach ($value as $method => $raw_state) {
-            if (!\is_string($method) || !isset($catalog[$method])) {
-                continue;
-            }
-
-            $states[$method] = (bool) $raw_state;
-        }
-    }
-
-    return \array_merge($defaults, $states);
+    return PaymentMethodRegistry::normalizeStates($value);
 }
 
 /**
@@ -90,13 +60,7 @@ function normalize_payment_method_states($value): array
  */
 function get_payment_method_states(): array
 {
-    if (\class_exists(MustBookingConfig::class)) {
-        $saved = MustBookingConfig::get_setting('payment_methods', get_default_payment_method_states());
-
-        return normalize_payment_method_states($saved);
-    }
-
-    return get_default_payment_method_states();
+    return PaymentMethodRegistry::getStates();
 }
 
 /**
@@ -106,15 +70,7 @@ function get_payment_method_states(): array
  */
 function save_payment_method_states(array $states): bool
 {
-    $normalized = normalize_payment_method_states($states);
-
-    if (\class_exists(MustBookingConfig::class)) {
-        MustBookingConfig::set_setting('payment_methods', $normalized);
-
-        return true;
-    }
-
-    return false;
+    return PaymentMethodRegistry::saveStates($states);
 }
 
 /**
@@ -124,16 +80,7 @@ function save_payment_method_states(array $states): bool
  */
 function get_enabled_payment_methods(): array
 {
-    $states = get_payment_method_states();
-    $enabled = [];
-
-    foreach ($states as $method => $is_enabled) {
-        if ($is_enabled) {
-            $enabled[] = $method;
-        }
-    }
-
-    return $enabled;
+    return PaymentMethodRegistry::getEnabled();
 }
 
 /**

@@ -7,7 +7,7 @@ final class Plugin
     public static function activate(): void
     {
         \MustHotelBooking\Database\install_tables();
-        \MustHotelBooking\Frontend\install_frontend_pages();
+        \MustHotelBooking\Core\ManagedPages::install();
         \MustHotelBooking\Engine\LockEngine::scheduleCleanupCron();
 
         \flush_rewrite_rules();
@@ -33,13 +33,12 @@ final class Plugin
 
     public static function initPlugin(): void
     {
-        if (\function_exists('\MustHotelBooking\Frontend\maybe_sync_frontend_pages')) {
-            \MustHotelBooking\Frontend\maybe_sync_frontend_pages();
-        }
+        \MustHotelBooking\Core\ManagedPages::sync();
 
         \MustHotelBooking\Engine\LockEngine::registerHooks();
         \MustHotelBooking\Engine\PaymentEngine::registerHooks();
         \MustHotelBooking\Engine\AvailabilityAjaxController::registerHooks();
+        \MustHotelBooking\Engine\EmailEngine::registerHooks();
 
         \do_action('must_hotel_booking/init');
     }

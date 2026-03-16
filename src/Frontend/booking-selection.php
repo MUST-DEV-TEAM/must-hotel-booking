@@ -2,6 +2,9 @@
 
 namespace MustHotelBooking\Frontend;
 
+use MustHotelBooking\Core\BookingRules;
+use MustHotelBooking\Core\RoomData;
+use MustHotelBooking\Core\RoomViewBuilder;
 use MustHotelBooking\Engine\InventoryEngine;
 use MustHotelBooking\Engine\LockEngine;
 use MustHotelBooking\Engine\PaymentEngine;
@@ -146,9 +149,7 @@ function normalize_booking_selection_context(array $context): array
         'checkin' => isset($context['checkin']) ? \sanitize_text_field((string) $context['checkin']) : '',
         'checkout' => isset($context['checkout']) ? \sanitize_text_field((string) $context['checkout']) : '',
         'guests' => isset($context['guests']) ? \max(1, \absint(\wp_unslash($context['guests']))) : 1,
-        'room_count' => \function_exists(__NAMESPACE__ . '\normalize_booking_room_count')
-            ? normalize_booking_room_count($context['room_count'] ?? 0)
-            : 0,
+        'room_count' => BookingRules::normalizeRoomCount($context['room_count'] ?? 0),
         'accommodation_type' => isset($context['accommodation_type']) ? \sanitize_key((string) $context['accommodation_type']) : 'standard-rooms',
     ];
 }
@@ -526,11 +527,11 @@ function get_booking_selection_room_view_items(): array
         $room_id = isset($selected_room['room_id']) ? (int) $selected_room['room_id'] : 0;
         $rate_plan_id = isset($selected_room['rate_plan_id']) ? (int) $selected_room['rate_plan_id'] : 0;
 
-        if ($room_id <= 0 || !\function_exists(__NAMESPACE__ . '\get_room_record')) {
+        if ($room_id <= 0) {
             continue;
         }
 
-        $room = get_room_record($room_id);
+        $room = RoomData::getRoom($room_id);
 
         if (!\is_array($room)) {
             continue;
@@ -578,9 +579,7 @@ function get_booking_selection_room_view_items(): array
             }
         }
 
-        $room_view = \function_exists(__NAMESPACE__ . '\get_booking_results_room_view_data')
-            ? get_booking_results_room_view_data($room)
-            : $room;
+        $room_view = RoomViewBuilder::buildBookingResultsRoomViewData($room);
 
         if (!\is_array($room_view)) {
             continue;

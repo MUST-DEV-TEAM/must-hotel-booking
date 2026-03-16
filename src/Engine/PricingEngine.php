@@ -2,6 +2,9 @@
 
 namespace MustHotelBooking\Engine;
 
+use MustHotelBooking\Core\MustBookingConfig;
+use MustHotelBooking\Core\RoomViewBuilder;
+
 final class PricingEngine
 {
     /**
@@ -281,9 +284,7 @@ final class PricingEngine
                 }
             }
 
-            $roomView = \function_exists('\MustHotelBooking\Frontend\get_booking_results_room_view_data')
-                ? \MustHotelBooking\Frontend\get_booking_results_room_view_data($room)
-                : $room;
+            $roomView = RoomViewBuilder::buildBookingResultsRoomViewData($room);
 
             if (!\is_array($roomView)) {
                 continue;
@@ -345,13 +346,7 @@ final class PricingEngine
 
     private static function getPricingEngineSettings(): array
     {
-        if (!\function_exists(__NAMESPACE__ . '\get_plugin_settings')) {
-            return [];
-        }
-
-        $settings = get_plugin_settings();
-
-        return \is_array($settings) ? $settings : [];
+        return MustBookingConfig::get_all_settings();
     }
 
     private static function getPricingRuleGroup(array $settings, array $aliases): array

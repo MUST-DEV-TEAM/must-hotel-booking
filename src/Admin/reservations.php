@@ -2,6 +2,7 @@
 
 namespace MustHotelBooking\Admin;
 
+use MustHotelBooking\Core\ReservationStatus;
 use MustHotelBooking\Engine\AvailabilityEngine;
 
 /**
@@ -80,35 +81,7 @@ function get_reservation_payment_status_options(): array
  */
 function get_reservations_list_rows(): array
 {
-    global $wpdb;
-
-    $reservations_table = $wpdb->prefix . 'must_reservations';
-    $rooms_table = $wpdb->prefix . 'must_rooms';
-    $guests_table = $wpdb->prefix . 'must_guests';
-
-    $rows = $wpdb->get_results(
-        "SELECT
-            r.id,
-            r.booking_id,
-            r.room_id,
-            r.guest_id,
-            r.checkin,
-            r.checkout,
-            r.guests,
-            r.status,
-            r.total_price,
-            r.payment_status,
-            r.created_at,
-            rm.name AS room_name,
-            CONCAT_WS(' ', g.first_name, g.last_name) AS guest_name
-        FROM {$reservations_table} r
-        LEFT JOIN {$rooms_table} rm ON rm.id = r.room_id
-        LEFT JOIN {$guests_table} g ON g.id = r.guest_id
-        ORDER BY r.created_at DESC, r.id DESC",
-        ARRAY_A
-    );
-
-    return \is_array($rows) ? $rows : [];
+    return \MustHotelBooking\Engine\get_reservation_repository()->getAdminReservationListRows();
 }
 
 /**
@@ -118,36 +91,7 @@ function get_reservations_list_rows(): array
  */
 function get_reservation_row(int $reservation_id): ?array
 {
-    global $wpdb;
-
-    if ($reservation_id <= 0) {
-        return null;
-    }
-
-    $reservations_table = $wpdb->prefix . 'must_reservations';
-    $rooms_table = $wpdb->prefix . 'must_rooms';
-    $guests_table = $wpdb->prefix . 'must_guests';
-
-    $sql = $wpdb->prepare(
-        "SELECT
-            r.*,
-            rm.name AS room_name,
-            g.first_name,
-            g.last_name,
-            g.email,
-            g.phone,
-            g.country
-        FROM {$reservations_table} r
-        LEFT JOIN {$rooms_table} rm ON rm.id = r.room_id
-        LEFT JOIN {$guests_table} g ON g.id = r.guest_id
-        WHERE r.id = %d
-        LIMIT 1",
-        $reservation_id
-    );
-
-    $row = $wpdb->get_row($sql, ARRAY_A);
-
-    return \is_array($row) ? $row : null;
+    return \MustHotelBooking\Engine\get_reservation_repository()->getAdminReservationDetails($reservation_id);
 }
 
 /**
@@ -155,31 +99,13 @@ function get_reservation_row(int $reservation_id): ?array
  */
 function has_other_reservation_overlap(int $reservation_id, int $room_id, string $checkin, string $checkout): bool
 {
-    global $wpdb;
-
-    $reservations_table = $wpdb->prefix . 'must_reservations';
-    $non_blocking_statuses = \function_exists(__NAMESPACE__ . '\get_inventory_non_blocking_reservation_statuses')
-        ? get_inventory_non_blocking_reservation_statuses()
-        : ['cancelled', 'expired', 'payment_failed'];
-    $sql = $wpdb->prepare(
-        "SELECT 1
-        FROM {$reservations_table}
-        WHERE room_id = %d
-            AND id <> %d
-            AND checkin < %s
-            AND checkout > %s
-            AND status NOT IN (%s, %s, %s)
-        LIMIT 1",
-        $room_id,
+    return \MustHotelBooking\Engine\get_reservation_repository()->hasReservationOverlapExcludingId(
         $reservation_id,
-        $checkout,
+        $room_id,
         $checkin,
-        (string) $non_blocking_statuses[0],
-        (string) $non_blocking_statuses[1],
-        (string) $non_blocking_statuses[2]
+        $checkout,
+        ReservationStatus::getInventoryNonBlockingStatuses()
     );
-
-    return $wpdb->get_var($sql) !== null;
 }
 
 /**
@@ -234,22 +160,16 @@ function maybe_handle_cancel_reservation_request(): void
 
     $reservation = get_reservation_row($reservation_id);
     $previous_status = \is_array($reservation) ? \sanitize_key((string) ($reservation['status'] ?? '')) : '';
-
-    global $wpdb;
-
-    $updated = $wpdb->update(
-        $wpdb->prefix . 'must_reservations',
-        ['status' => 'cancelled'],
-        ['id' => $reservation_id],
-        ['%s'],
-        ['%d']
+    $updated = \MustHotelBooking\Engine\get_reservation_repository()->updateReservation(
+        $reservation_id,
+        ['status' => 'cancelled']
     );
 
-    if ($updated !== false && $previous_status !== 'cancelled') {
+    if ($updated && $previous_status !== 'cancelled') {
         \do_action('must_hotel_booking/reservation_cancelled', $reservation_id);
     }
 
-    \wp_safe_redirect(get_admin_reservations_page_url(['notice' => $updated !== false ? 'reservation_cancelled' : 'action_failed']));
+    \wp_safe_redirect(get_admin_reservations_page_url(['notice' => $updated ? 'reservation_cancelled' : 'action_failed']));
     exit;
 }
 
@@ -272,15 +192,9 @@ function maybe_handle_delete_reservation_request(): void
         exit;
     }
 
-    global $wpdb;
+    $deleted = \MustHotelBooking\Engine\get_reservation_repository()->deleteReservation($reservation_id);
 
-    $deleted = $wpdb->delete(
-        $wpdb->prefix . 'must_reservations',
-        ['id' => $reservation_id],
-        ['%d']
-    );
-
-    \wp_safe_redirect(get_admin_reservations_page_url(['notice' => $deleted !== false ? 'reservation_deleted' : 'action_failed']));
+    \wp_safe_redirect(get_admin_reservations_page_url(['notice' => $deleted ? 'reservation_deleted' : 'action_failed']));
     exit;
 }
 
@@ -361,10 +275,8 @@ function maybe_handle_edit_reservation_submission(): array
         return $errors;
     }
 
-    global $wpdb;
-
-    $updated = $wpdb->update(
-        $wpdb->prefix . 'must_reservations',
+    $updated = \MustHotelBooking\Engine\get_reservation_repository()->updateReservation(
+        $reservation_id,
         [
             'checkin' => $checkin,
             'checkout' => $checkout,
@@ -372,13 +284,10 @@ function maybe_handle_edit_reservation_submission(): array
             'status' => $status,
             'payment_status' => $payment_status,
             'total_price' => \round($total_price, 2),
-        ],
-        ['id' => $reservation_id],
-        ['%s', '%s', '%d', '%s', '%s', '%f'],
-        ['%d']
+        ]
     );
 
-    if ($updated === false) {
+    if (!$updated) {
         return [\__('Unable to update reservation.', 'must-hotel-booking')];
     }
 

@@ -2,6 +2,8 @@
 
 namespace MustHotelBooking\Elementor;
 
+use MustHotelBooking\Core\ManagedPages;
+use MustHotelBooking\Core\RoomCatalog;
 use MustHotelBooking\Core\MustBookingConfig;
 
 /**
@@ -76,22 +78,7 @@ function register_elementor_booking_search_widget_scripts(): void
  */
 function get_booking_page_url_for_widget(): string
 {
-    $default_url = \home_url('/booking');
-
-    if (!\function_exists(__NAMESPACE__ . '\get_plugin_settings')) {
-        return $default_url;
-    }
-
-    $settings = get_plugin_settings();
-    $booking_page_id = isset($settings['page_booking_id']) ? (int) $settings['page_booking_id'] : 0;
-
-    if ($booking_page_id <= 0) {
-        return $default_url;
-    }
-
-    $permalink = \get_permalink($booking_page_id);
-
-    return \is_string($permalink) && $permalink !== '' ? $permalink : $default_url;
+    return ManagedPages::getBookingPageUrl();
 }
 
 /**
@@ -295,8 +282,8 @@ function get_rooms_list_widget_options_for_booking_search(): array
         $selected_category = isset($settings['room_category'])
             ? \sanitize_key((string) $settings['room_category'])
             : 'all';
-        $category_label = $selected_category !== '' && $selected_category !== 'all' && \function_exists(__NAMESPACE__ . '\get_room_category_label')
-            ? get_room_category_label($selected_category)
+        $category_label = $selected_category !== '' && $selected_category !== 'all'
+            ? RoomCatalog::getCategoryLabel($selected_category)
             : \__('All Categories', 'must-hotel-booking');
 
         $options[$widget_id] = \sprintf(

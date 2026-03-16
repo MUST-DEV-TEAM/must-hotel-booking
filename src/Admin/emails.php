@@ -2,6 +2,9 @@
 
 namespace MustHotelBooking\Admin;
 
+use MustHotelBooking\Core\MustBookingConfig;
+use MustHotelBooking\Engine\EmailEngine;
+
 /**
  * Build Emails admin page URL.
  *
@@ -25,11 +28,7 @@ function get_admin_emails_page_url(array $args = []): string
  */
 function get_fallback_email_template_labels(): array
 {
-    return [
-        'booking_confirmation' => \__('Booking confirmation', 'must-hotel-booking'),
-        'admin_booking_notification' => \__('Admin notification', 'must-hotel-booking'),
-        'booking_cancellation' => \__('Booking cancellation', 'must-hotel-booking'),
-    ];
+    return EmailEngine::getTemplateLabels();
 }
 
 /**
@@ -39,15 +38,7 @@ function get_fallback_email_template_labels(): array
  */
 function get_email_template_labels_for_admin(): array
 {
-    if (\function_exists(__NAMESPACE__ . '\get_email_template_labels')) {
-        $labels = get_email_template_labels();
-
-        if (\is_array($labels) && !empty($labels)) {
-            return $labels;
-        }
-    }
-
-    return get_fallback_email_template_labels();
+    return EmailEngine::getTemplateLabels();
 }
 
 /**
@@ -57,22 +48,7 @@ function get_email_template_labels_for_admin(): array
  */
 function get_email_template_placeholders_for_admin(): array
 {
-    if (\function_exists(__NAMESPACE__ . '\get_email_template_placeholders')) {
-        $placeholders = get_email_template_placeholders();
-
-        if (\is_array($placeholders) && !empty($placeholders)) {
-            return \array_values(\array_map('strval', $placeholders));
-        }
-    }
-
-    return [
-        '{booking_id}',
-        '{guest_name}',
-        '{room_name}',
-        '{checkin}',
-        '{checkout}',
-        '{total_price}',
-    ];
+    return \array_values(\array_map('strval', EmailEngine::getTemplatePlaceholders()));
 }
 
 /**
@@ -82,23 +58,7 @@ function get_email_template_placeholders_for_admin(): array
  */
 function get_email_templates_for_admin(): array
 {
-    if (\function_exists(__NAMESPACE__ . '\get_email_templates')) {
-        $templates = get_email_templates();
-
-        if (\is_array($templates) && !empty($templates)) {
-            return $templates;
-        }
-    }
-
-    if (\function_exists(__NAMESPACE__ . '\get_default_email_templates')) {
-        $defaults = get_default_email_templates();
-
-        if (\is_array($defaults) && !empty($defaults)) {
-            return $defaults;
-        }
-    }
-
-    return [];
+    return EmailEngine::getTemplates();
 }
 
 /**
@@ -171,22 +131,11 @@ function maybe_handle_email_templates_save_request(): array
         return [\__('Security check failed. Please try again.', 'must-hotel-booking')];
     }
 
-    if (
-        !\function_exists(__NAMESPACE__ . '\get_plugin_settings') ||
-        !\function_exists(__NAMESPACE__ . '\update_plugin_settings')
-    ) {
-        return [\__('Plugin settings module is unavailable.', 'must-hotel-booking')];
-    }
-
     $raw_templates = isset($_POST['email_templates']) && \is_array($_POST['email_templates']) ? $_POST['email_templates'] : [];
     $sanitized_templates = sanitize_email_templates_payload($raw_templates);
-
-    $settings = get_plugin_settings();
-    $settings_key = \function_exists(__NAMESPACE__ . '\get_email_templates_setting_key')
-        ? get_email_templates_setting_key()
-        : 'email_templates';
-    $settings[$settings_key] = $sanitized_templates;
-    update_plugin_settings($settings);
+    $settings = MustBookingConfig::get_all_settings();
+    $settings[EmailEngine::getTemplatesSettingKey()] = $sanitized_templates;
+    MustBookingConfig::set_all_settings($settings);
 
     \wp_safe_redirect(get_admin_emails_page_url(['notice' => 'templates_saved']));
     exit;

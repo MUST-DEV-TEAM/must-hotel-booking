@@ -2,7 +2,10 @@
 
 namespace MustHotelBooking\Engine;
 
+use MustHotelBooking\Core\ManagedPages;
 use MustHotelBooking\Core\MustBookingConfig;
+use MustHotelBooking\Core\PaymentMethodRegistry;
+use MustHotelBooking\Core\ReservationStatus;
 use MustHotelBooking\Engine\Payment\PaymentFactory;
 use MustHotelBooking\Engine\Payment\PaymentInterface;
 
@@ -59,12 +62,8 @@ final class PaymentEngine
      */
     public static function getCheckoutPaymentMethods(): array
     {
-        $catalog = \function_exists(__NAMESPACE__ . '\get_payment_methods_catalog')
-            ? get_payment_methods_catalog()
-            : [];
-        $enabled = \function_exists(__NAMESPACE__ . '\get_enabled_payment_methods')
-            ? get_enabled_payment_methods()
-            : ['pay_at_hotel'];
+        $catalog = PaymentMethodRegistry::getCatalog();
+        $enabled = PaymentMethodRegistry::getEnabled();
         $options = [];
         $preferredOrder = ['stripe', 'pay_at_hotel', 'bank_transfer'];
 
@@ -260,7 +259,7 @@ final class PaymentEngine
 
     public static function getActiveSiteEnvironment(): string
     {
-        $settings = \function_exists(__NAMESPACE__ . '\get_plugin_settings') ? get_plugin_settings() : [];
+        $settings = MustBookingConfig::get_all_settings();
         $savedEnvironment = \is_array($settings) && isset($settings['site_environment'])
             ? (string) $settings['site_environment']
             : '';
@@ -301,7 +300,7 @@ final class PaymentEngine
     {
         $environment = $environment !== '' ? self::normalizeStripeEnvironment($environment) : self::getActiveSiteEnvironment();
         $keys = self::getStripeEnvironmentSettingKeys($environment);
-        $settings = \function_exists(__NAMESPACE__ . '\get_plugin_settings') ? get_plugin_settings() : [];
+        $settings = MustBookingConfig::get_all_settings();
 
         return [
             'publishable_key' => \is_array($settings) && isset($settings[$keys['publishable_key']]) ? (string) $settings[$keys['publishable_key']] : '',
@@ -460,7 +459,7 @@ final class PaymentEngine
             foreach ($reservationRows as $reservationRow) {
                 $status = isset($reservationRow['status']) ? (string) $reservationRow['status'] : '';
 
-                if (\function_exists(__NAMESPACE__ . '\is_reservation_confirmed_status') && !is_reservation_confirmed_status($status)) {
+                if (!ReservationStatus::isConfirmed($status)) {
                     $shouldIncrementCouponUsage = true;
                     break;
                 }
@@ -654,14 +653,14 @@ final class PaymentEngine
                 'stripe_return' => 'success',
                 'session_id' => '{CHECKOUT_SESSION_ID}',
             ],
-            \MustHotelBooking\Frontend\get_booking_confirmation_page_url()
+            ManagedPages::getBookingConfirmationPageUrl()
         );
         $cancelUrl = \add_query_arg(
             [
                 'payment_method' => 'stripe',
                 'stripe_return' => 'cancel',
             ],
-            \MustHotelBooking\Frontend\get_booking_confirmation_page_url()
+            ManagedPages::getBookingConfirmationPageUrl()
         );
         $expiresAt = \time() + (self::getStripeCheckoutExpiryMinutes() * 60);
         $payload = [

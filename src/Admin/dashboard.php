@@ -170,34 +170,6 @@ function register_admin_menu(): void
 }
 
 /**
- * Get reservations table name.
- */
-function get_dashboard_reservations_table_name(): string
-{
-    global $wpdb;
-
-    return $wpdb->prefix . 'must_reservations';
-}
-
-/**
- * Check if reservations table exists.
- */
-function does_dashboard_reservations_table_exist(): bool
-{
-    global $wpdb;
-
-    $table_name = get_dashboard_reservations_table_name();
-    $table_exists = $wpdb->get_var(
-        $wpdb->prepare(
-            'SHOW TABLES LIKE %s',
-            $table_name
-        )
-    );
-
-    return \is_string($table_exists) && $table_exists !== '';
-}
-
-/**
  * Get date context for dashboard calculations.
  *
  * @return array{today: string, month_start: string, next_month_start: string}
@@ -220,65 +192,13 @@ function get_dashboard_date_context(): array
  */
 function get_dashboard_metrics(): array
 {
-    $metrics = [
-        'bookings_today' => 0,
-        'upcoming_checkins' => 0,
-        'upcoming_checkouts' => 0,
-        'total_bookings_this_month' => 0,
-    ];
-
-    if (!does_dashboard_reservations_table_exist()) {
-        return $metrics;
-    }
-
-    global $wpdb;
-
-    $table_name = get_dashboard_reservations_table_name();
     $date_context = get_dashboard_date_context();
 
-    $metrics['bookings_today'] = (int) $wpdb->get_var(
-        $wpdb->prepare(
-            "SELECT COUNT(*)
-            FROM {$table_name}
-            WHERE DATE(created_at) = %s
-                AND status NOT IN ('cancelled', 'blocked', 'expired', 'payment_failed', 'pending_payment')",
-            $date_context['today']
-        )
+    return \MustHotelBooking\Engine\get_reservation_repository()->getDashboardMetrics(
+        $date_context['today'],
+        $date_context['month_start'],
+        $date_context['next_month_start']
     );
-
-    $metrics['upcoming_checkins'] = (int) $wpdb->get_var(
-        $wpdb->prepare(
-            "SELECT COUNT(*)
-            FROM {$table_name}
-            WHERE checkin > %s
-                AND status NOT IN ('cancelled', 'blocked', 'expired', 'payment_failed', 'pending_payment')",
-            $date_context['today']
-        )
-    );
-
-    $metrics['upcoming_checkouts'] = (int) $wpdb->get_var(
-        $wpdb->prepare(
-            "SELECT COUNT(*)
-            FROM {$table_name}
-            WHERE checkout > %s
-                AND status NOT IN ('cancelled', 'blocked', 'expired', 'payment_failed', 'pending_payment')",
-            $date_context['today']
-        )
-    );
-
-    $metrics['total_bookings_this_month'] = (int) $wpdb->get_var(
-        $wpdb->prepare(
-            "SELECT COUNT(*)
-            FROM {$table_name}
-            WHERE created_at >= %s
-                AND created_at < %s
-                AND status NOT IN ('cancelled', 'blocked', 'expired', 'payment_failed', 'pending_payment')",
-            $date_context['month_start'],
-            $date_context['next_month_start']
-        )
-    );
-
-    return $metrics;
 }
 
 /**
@@ -288,39 +208,12 @@ function get_dashboard_metrics(): array
  */
 function get_dashboard_next_reservations(int $limit = 10): array
 {
-    if (!does_dashboard_reservations_table_exist()) {
-        return [];
-    }
-
-    $limit = \max(1, \min(50, $limit));
-
-    global $wpdb;
-
-    $table_name = get_dashboard_reservations_table_name();
     $date_context = get_dashboard_date_context();
-    $sql = $wpdb->prepare(
-        "SELECT
-            id,
-            booking_id,
-            room_id,
-            checkin,
-            checkout,
-            guests,
-            status,
-            total_price,
-            created_at
-        FROM {$table_name}
-        WHERE checkin >= %s
-            AND status NOT IN ('cancelled', 'blocked', 'expired', 'payment_failed', 'pending_payment')
-        ORDER BY checkin ASC, checkout ASC, id ASC
-        LIMIT %d",
+
+    return \MustHotelBooking\Engine\get_reservation_repository()->getUpcomingReservationRows(
         $date_context['today'],
         $limit
     );
-
-    $rows = $wpdb->get_results($sql, ARRAY_A);
-
-    return \is_array($rows) ? $rows : [];
 }
 
 /**

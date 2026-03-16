@@ -2,6 +2,12 @@
 
 namespace MustHotelBooking\Engine;
 
+use MustHotelBooking\Core\BookingRules;
+use MustHotelBooking\Core\ReservationStatus;
+use MustHotelBooking\Core\RoomCatalog;
+use MustHotelBooking\Core\RoomData;
+use MustHotelBooking\Core\RoomViewBuilder;
+
 final class AvailabilityEngine
 {
     public static function isValidBookingDate(string $date): bool
@@ -133,9 +139,7 @@ final class AvailabilityEngine
             return !empty(InventoryEngine::getAvailableRooms($roomId, $checkin, $checkout, $excludeSessionId));
         }
 
-        $nonBlockingStatuses = \function_exists(__NAMESPACE__ . '\get_inventory_non_blocking_reservation_statuses')
-            ? get_inventory_non_blocking_reservation_statuses()
-            : ['cancelled', 'expired', 'payment_failed'];
+        $nonBlockingStatuses = ReservationStatus::getInventoryNonBlockingStatuses();
 
         return get_availability_repository()->checkRoomAvailability(
             $roomId,
@@ -157,9 +161,7 @@ final class AvailabilityEngine
         }
 
         $guests = \max(1, $guests);
-        $category = \function_exists(__NAMESPACE__ . '\normalize_room_category')
-            ? normalize_room_category($category)
-            : 'standard-rooms';
+        $category = RoomCatalog::normalizeCategory($category);
 
         LockEngine::cleanupExpiredLocks();
 
@@ -238,9 +240,7 @@ final class AvailabilityEngine
         $guests = \max(1, (int) ($context['guests'] ?? 1));
         $requestedRoomCount = (int) ($context['room_count'] ?? 0);
         $effectiveRoomCount = $requestedRoomCount > 0 ? $requestedRoomCount : $resolvedRoomCount;
-        $roomLimit = \function_exists('\MustHotelBooking\Frontend\get_booking_context_guest_limit')
-            ? \MustHotelBooking\Frontend\get_booking_context_guest_limit((string) ($context['accommodation_type'] ?? 'standard-rooms'), $effectiveRoomCount)
-            : 0;
+        $roomLimit = BookingRules::getContextGuestLimit((string) ($context['accommodation_type'] ?? 'standard-rooms'), $effectiveRoomCount);
 
         if ($requestedRoomCount > 0 && $roomLimit > 0 && $guests > $roomLimit) {
             return \sprintf(
@@ -301,9 +301,7 @@ final class AvailabilityEngine
                 'message' => \sprintf(
                     /* translators: 1: room count label, 2: guest count. */
                     \__('Choose %1$s that can host %2$d guests.', 'must-hotel-booking'),
-                    \function_exists('\MustHotelBooking\Frontend\format_booking_room_count_label')
-                        ? \strtolower(\MustHotelBooking\Frontend\format_booking_room_count_label($resolvedRoomCount))
-                        : (string) $resolvedRoomCount,
+                    \strtolower(BookingRules::formatRoomCountLabel($resolvedRoomCount)),
                     $guests
                 ),
                 'tone' => 'neutral',
@@ -361,9 +359,7 @@ final class AvailabilityEngine
             /* translators: 1: selected room count, 2: target room count label. */
             \__('Selected %1$d / %2$s', 'must-hotel-booking'),
             $selectedRoomCount,
-            \function_exists('\MustHotelBooking\Frontend\format_booking_room_count_label')
-                ? \MustHotelBooking\Frontend\format_booking_room_count_label($resolvedRoomCount)
-                : (string) $resolvedRoomCount
+            BookingRules::formatRoomCountLabel($resolvedRoomCount)
         );
     }
 
@@ -379,11 +375,11 @@ final class AvailabilityEngine
         foreach ($selectedRoomIds as $selectedRoomId) {
             $roomId = (int) $selectedRoomId;
 
-            if ($roomId <= 0 || !\function_exists('\MustHotelBooking\Frontend\get_room_record')) {
+            if ($roomId <= 0) {
                 continue;
             }
 
-            $room = \MustHotelBooking\Frontend\get_room_record($roomId);
+            $room = RoomData::getRoom($roomId);
 
             if (!\is_array($room)) {
                 continue;
@@ -402,9 +398,7 @@ final class AvailabilityEngine
                     : \max(1, (int) ($room['max_guests'] ?? 1));
             }
 
-            $roomView = \function_exists('\MustHotelBooking\Frontend\get_booking_results_room_view_data')
-                ? \MustHotelBooking\Frontend\get_booking_results_room_view_data($room)
-                : $room;
+            $roomView = RoomViewBuilder::buildBookingResultsRoomViewData($room);
 
             if (\is_array($roomView)) {
                 $items[] = $roomView;
@@ -425,13 +419,11 @@ final class AvailabilityEngine
         $selectedRatePlanMap = \MustHotelBooking\Frontend\get_booking_selected_room_rate_plan_map();
         $selectedRoomItems = self::getAccommodationSelectedRoomItems($selectedRoomIds);
         $requestedRoomCount = (int) ($context['room_count'] ?? 0);
-        $resolvedRoomCount = \function_exists('\MustHotelBooking\Frontend\resolve_booking_room_count')
-            ? \MustHotelBooking\Frontend\resolve_booking_room_count(
-                (int) ($context['guests'] ?? 1),
-                $requestedRoomCount,
-                (string) ($context['accommodation_type'] ?? 'standard-rooms')
-            )
-            : 1;
+        $resolvedRoomCount = BookingRules::resolveRoomCount(
+            (int) ($context['guests'] ?? 1),
+            $requestedRoomCount,
+            (string) ($context['accommodation_type'] ?? 'standard-rooms')
+        );
         $selectedCapacity = 0;
 
         foreach ($selectedRoomItems as $selectedRoomItem) {

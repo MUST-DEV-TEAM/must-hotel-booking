@@ -2,6 +2,9 @@
 
 namespace MustHotelBooking\Elementor;
 
+use MustHotelBooking\Core\ManagedPages;
+use MustHotelBooking\Core\RoomData;
+
 /**
  * Register Elementor rooms list widget styles.
  */
@@ -45,11 +48,7 @@ function register_elementor_rooms_list_widget_scripts(): void
  */
 function get_rooms_widget_rooms_page_url(): string
 {
-    if (\function_exists(__NAMESPACE__ . '\\get_frontend_page_url')) {
-        return get_frontend_page_url('page_rooms_id', '/rooms');
-    }
-
-    return \home_url('/rooms');
+    return ManagedPages::getRoomsPageUrl();
 }
 
 /**
@@ -57,11 +56,7 @@ function get_rooms_widget_rooms_page_url(): string
  */
 function get_rooms_widget_booking_page_url(): string
 {
-    if (\function_exists(__NAMESPACE__ . '\\get_booking_page_url')) {
-        return get_booking_page_url();
-    }
-
-    return \home_url('/booking');
+    return ManagedPages::getBookingPageUrl();
 }
 
 /**
@@ -71,39 +66,7 @@ function get_rooms_widget_booking_page_url(): string
  */
 function get_rooms_for_widget_render(string $category, int $limit): array
 {
-    if (\function_exists(__NAMESPACE__ . '\\get_rooms_for_display')) {
-        return get_rooms_for_display($category, $limit);
-    }
-
-    global $wpdb;
-
-    $limit = \max(1, \min(200, $limit));
-    $rooms_table = $wpdb->prefix . 'must_rooms';
-    $category_slug = \sanitize_key($category);
-
-    if ($category_slug !== '' && $category_slug !== 'all') {
-        $sql = $wpdb->prepare(
-            "SELECT id, name, slug, category, description, max_guests, base_price, room_size, beds
-            FROM {$rooms_table}
-            WHERE category = %s
-            ORDER BY created_at DESC, id DESC
-            LIMIT %d",
-            $category_slug,
-            $limit
-        );
-    } else {
-        $sql = $wpdb->prepare(
-            "SELECT id, name, slug, category, description, max_guests, base_price, room_size, beds
-            FROM {$rooms_table}
-            ORDER BY created_at DESC, id DESC
-            LIMIT %d",
-            $limit
-        );
-    }
-
-    $rows = $wpdb->get_results($sql, ARRAY_A);
-
-    return \is_array($rows) ? $rows : [];
+    return RoomData::getRoomsForDisplay($category, $limit);
 }
 
 /**
@@ -113,11 +76,7 @@ function get_rooms_for_widget_render(string $category, int $limit): array
  */
 function get_room_gallery_urls_for_widget(int $room_id, int $limit = 3): array
 {
-    if (\function_exists(__NAMESPACE__ . '\\get_room_gallery_image_urls')) {
-        return get_room_gallery_image_urls($room_id, $limit, 'medium_large');
-    }
-
-    return [];
+    return RoomData::getRoomGalleryImageUrls($room_id, $limit, 'medium_large');
 }
 
 /**
@@ -125,11 +84,7 @@ function get_room_gallery_urls_for_widget(int $room_id, int $limit = 3): array
  */
 function get_room_main_image_url_for_widget(int $room_id): string
 {
-    if (\function_exists(__NAMESPACE__ . '\\get_room_main_image_url')) {
-        return get_room_main_image_url($room_id, 'large');
-    }
-
-    return '';
+    return RoomData::getRoomMainImageUrl($room_id, 'large');
 }
 
 /**

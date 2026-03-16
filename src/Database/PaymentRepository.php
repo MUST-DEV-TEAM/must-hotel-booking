@@ -4,6 +4,11 @@ namespace MustHotelBooking\Database;
 
 final class PaymentRepository extends AbstractRepository
 {
+    public function paymentsTableExists(): bool
+    {
+        return $this->tableExists('payments');
+    }
+
     public function getLatestPaymentIdForReservationMethod(int $reservationId, string $method): int
     {
         if ($reservationId <= 0 || \trim($method) === '') {

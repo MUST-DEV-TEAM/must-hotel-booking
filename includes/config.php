@@ -27,10 +27,6 @@ foreach ($class_aliases as $original => $aliases) {
 }
 
 $bootstrap_files = [
-    MUST_HOTEL_BOOKING_PATH . 'src/Admin/00-dependencies.php',
-    MUST_HOTEL_BOOKING_PATH . 'src/Engine/00-dependencies.php',
-    MUST_HOTEL_BOOKING_PATH . 'src/Frontend/00-dependencies.php',
-    MUST_HOTEL_BOOKING_PATH . 'src/Elementor/00-dependencies.php',
     MUST_HOTEL_BOOKING_PATH . 'src/legacy-functions.php',
 ];
 

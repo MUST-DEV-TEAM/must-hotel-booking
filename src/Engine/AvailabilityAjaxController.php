@@ -2,6 +2,11 @@
 
 namespace MustHotelBooking\Engine;
 
+use MustHotelBooking\Core\BookingRules;
+use MustHotelBooking\Core\ReservationStatus;
+use MustHotelBooking\Core\RoomCatalog;
+use MustHotelBooking\Core\RoomViewBuilder;
+
 final class AvailabilityAjaxController
 {
     public static function normalize_disabled_dates_window_days(int $windowDays): int
@@ -19,9 +24,7 @@ final class AvailabilityAjaxController
 
     public static function normalize_availability_room_category(string $category): string
     {
-        return \function_exists(__NAMESPACE__ . '\normalize_room_category')
-            ? normalize_room_category($category)
-            : 'standard-rooms';
+        return RoomCatalog::normalizeCategory($category);
     }
 
     /**
@@ -81,9 +84,7 @@ final class AvailabilityAjaxController
             return [];
         }
 
-        $nonBlockingStatuses = \function_exists(__NAMESPACE__ . '\get_inventory_non_blocking_reservation_statuses')
-            ? get_inventory_non_blocking_reservation_statuses()
-            : ['cancelled', 'expired', 'payment_failed'];
+        $nonBlockingStatuses = ReservationStatus::getInventoryNonBlockingStatuses();
         $rangesByRoom = get_availability_repository()->getReservationRangesByRoomIds(
             $roomIds,
             $rangeStart,
@@ -438,11 +439,9 @@ final class AvailabilityAjaxController
 
     public static function ajax_must_get_disabled_dates(): void
     {
-        $maxBookingGuests = \function_exists(__NAMESPACE__ . '\get_max_booking_guests_limit') ? get_max_booking_guests_limit() : 5;
+        $maxBookingGuests = BookingRules::getMaxBookingGuestsLimit();
         $guests = isset($_REQUEST['guests']) ? \max(1, \min($maxBookingGuests, \absint(\wp_unslash($_REQUEST['guests'])))) : 1;
-        $roomCount = \function_exists(__NAMESPACE__ . '\normalize_booking_room_count')
-            ? normalize_booking_room_count($_REQUEST['room_count'] ?? 0)
-            : 0;
+        $roomCount = BookingRules::normalizeRoomCount($_REQUEST['room_count'] ?? 0);
         $windowDays = isset($_REQUEST['window_days']) ? \absint(\wp_unslash($_REQUEST['window_days'])) : 180;
         $windowDays = self::normalize_disabled_dates_window_days($windowDays);
         $checkin = isset($_REQUEST['checkin']) ? \sanitize_text_field((string) \wp_unslash($_REQUEST['checkin'])) : '';
@@ -461,9 +460,7 @@ final class AvailabilityAjaxController
                 ? self::get_disabled_checkout_dates_for_room($checkin, $roomId, $guests, $windowDays)
                 : [];
         } else {
-            $resolvedRoomCount = \function_exists(__NAMESPACE__ . '\resolve_booking_room_count')
-                ? resolve_booking_room_count($guests, $roomCount, $accommodationType)
-                : 1;
+            $resolvedRoomCount = BookingRules::resolveRoomCount($guests, $roomCount, $accommodationType);
 
             if ($resolvedRoomCount > 1) {
                 $disabledCheckinDates = self::get_disabled_checkin_dates_for_party($guests, $resolvedRoomCount, $windowDays, $accommodationType);
@@ -494,11 +491,9 @@ final class AvailabilityAjaxController
     {
         $checkin = isset($_REQUEST['checkin']) ? \sanitize_text_field((string) \wp_unslash($_REQUEST['checkin'])) : '';
         $checkout = isset($_REQUEST['checkout']) ? \sanitize_text_field((string) \wp_unslash($_REQUEST['checkout'])) : '';
-        $maxBookingGuests = \function_exists(__NAMESPACE__ . '\get_max_booking_guests_limit') ? get_max_booking_guests_limit() : 5;
+        $maxBookingGuests = BookingRules::getMaxBookingGuestsLimit();
         $guests = isset($_REQUEST['guests']) ? \max(1, \min($maxBookingGuests, \absint(\wp_unslash($_REQUEST['guests'])))) : 1;
-        $roomCount = \function_exists(__NAMESPACE__ . '\normalize_booking_room_count')
-            ? normalize_booking_room_count($_REQUEST['room_count'] ?? 0)
-            : 0;
+        $roomCount = BookingRules::normalizeRoomCount($_REQUEST['room_count'] ?? 0);
         $roomId = isset($_REQUEST['room_id']) ? \absint(\wp_unslash($_REQUEST['room_id'])) : 0;
         $accommodationType = isset($_REQUEST['accommodation_type'])
             ? self::normalize_availability_room_category(\sanitize_text_field((string) \wp_unslash($_REQUEST['accommodation_type'])))
@@ -512,9 +507,7 @@ final class AvailabilityAjaxController
         $message = '';
         $resolvedRoomCount = $roomId > 0
             ? 1
-            : (\function_exists(__NAMESPACE__ . '\resolve_booking_room_count')
-                ? resolve_booking_room_count($guests, $roomCount, $accommodationType)
-                : 1);
+            : BookingRules::resolveRoomCount($guests, $roomCount, $accommodationType);
 
         if ($roomId > 0) {
             $room = self::get_available_room_for_ajax_by_id($roomId, $checkin, $checkout, $guests);
@@ -537,16 +530,14 @@ final class AvailabilityAjaxController
             }
 
             if (empty($rooms)) {
-                $message = \function_exists(__NAMESPACE__ . '\get_accommodation_empty_results_message')
-                    ? get_accommodation_empty_results_message(
-                        [
-                            'guests' => $guests,
-                            'room_count' => $roomCount,
-                            'accommodation_type' => $accommodationType,
-                        ],
-                        $resolvedRoomCount
-                    )
-                    : \__('No rooms are available for the selected dates.', 'must-hotel-booking');
+                $message = AvailabilityEngine::getAccommodationEmptyResultsMessage(
+                    [
+                        'guests' => $guests,
+                        'room_count' => $roomCount,
+                        'accommodation_type' => $accommodationType,
+                    ],
+                    $resolvedRoomCount
+                );
             }
         }
 
@@ -600,13 +591,11 @@ final class AvailabilityAjaxController
                 'rate_plans' => RatePlanEngine::getRoomRatePlansWithPricing($currentRoomId, $checkin, $checkout, $pricingGuests),
             ];
 
-            if (\function_exists(__NAMESPACE__ . '\get_booking_results_room_view_data')) {
-                $enrichedPayload = get_booking_results_room_view_data($roomPayload);
+            $enrichedPayload = RoomViewBuilder::buildBookingResultsRoomViewData($roomPayload);
 
-                if ($enrichedPayload !== null) {
-                    $payload[] = $enrichedPayload;
-                    continue;
-                }
+            if ($enrichedPayload !== null) {
+                $payload[] = $enrichedPayload;
+                continue;
             }
 
             $payload[] = $roomPayload;

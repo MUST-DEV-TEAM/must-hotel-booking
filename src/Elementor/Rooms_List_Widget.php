@@ -2,6 +2,8 @@
 
 namespace MustHotelBooking\Elementor;
 
+use MustHotelBooking\Core\RoomCatalog;
+
 class Rooms_List_Widget extends \Elementor\Widget_Base
 {
     public function get_name(): string
@@ -42,10 +44,7 @@ class Rooms_List_Widget extends \Elementor\Widget_Base
     protected function register_controls(): void
     {
         $category_options = ['all' => \__('All Categories', 'must-hotel-booking')];
-
-        if (\function_exists(__NAMESPACE__ . '\\get_room_categories')) {
-            $category_options = \array_merge($category_options, get_room_categories());
-        }
+        $category_options = \array_merge($category_options, RoomCatalog::getCategories());
 
         $this->start_controls_section(
             'section_content',
@@ -119,8 +118,8 @@ class Rooms_List_Widget extends \Elementor\Widget_Base
 
         $category_label = '';
 
-        if ($selected_category !== 'all' && \function_exists(__NAMESPACE__ . '\\get_room_category_label')) {
-            $category_label = get_room_category_label($selected_category);
+        if ($selected_category !== 'all') {
+            $category_label = RoomCatalog::getCategoryLabel($selected_category);
         }
 
         $rooms_page_url = get_rooms_widget_rooms_page_url();

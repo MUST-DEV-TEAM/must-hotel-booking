@@ -2,6 +2,9 @@
 
 namespace MustHotelBooking\Frontend;
 
+use MustHotelBooking\Core\ManagedPages;
+use MustHotelBooking\Core\RoomCatalog;
+use MustHotelBooking\Core\RoomData;
 use MustHotelBooking\Database\RoomRepository;
 
 /**
@@ -9,18 +12,7 @@ use MustHotelBooking\Database\RoomRepository;
  */
 function is_frontend_rooms_page(): bool
 {
-    if (\is_admin()) {
-        return false;
-    }
-
-    $settings = get_plugin_settings();
-    $rooms_page_id = isset($settings['page_rooms_id']) ? (int) $settings['page_rooms_id'] : 0;
-
-    if ($rooms_page_id > 0 && \is_page($rooms_page_id)) {
-        return true;
-    }
-
-    return \is_page('rooms');
+    return ManagedPages::isCurrentPage('page_rooms_id', 'rooms');
 }
 
 /**
@@ -56,7 +48,7 @@ function is_single_room_request(): bool
  */
 function get_room_record_by_slug(string $room_slug): ?array
 {
-    return (new RoomRepository())->getRoomBySlug($room_slug);
+    return RoomData::getRoomBySlug($room_slug);
 }
 
 /**
@@ -74,7 +66,7 @@ function get_single_room_record_from_request(): ?array
     }
 
     if ($room_id > 0) {
-        return get_room_record($room_id);
+        return RoomData::getRoom($room_id);
     }
 
     return null;
@@ -85,9 +77,7 @@ function get_single_room_record_from_request(): ?array
  */
 function get_single_room_url(string $slug): string
 {
-    $rooms_url = get_frontend_page_url('page_rooms_id', '/rooms');
-
-    return \add_query_arg(['room' => \sanitize_title($slug)], $rooms_url);
+    return \add_query_arg(['room' => \sanitize_title($slug)], ManagedPages::getRoomsPageUrl());
 }
 
 /**
@@ -117,7 +107,7 @@ function get_single_room_related_rooms(int $current_room_id, string $category, i
     }
 
     $limit = \max(1, \min(6, $limit));
-    $booking_page_url = get_booking_page_url();
+    $booking_page_url = ManagedPages::getBookingPageUrl();
     $rows = (new RoomRepository())->getRandomRoomsByType($category, $current_room_id, $limit);
 
     if (!\is_array($rows)) {
@@ -138,8 +128,8 @@ function get_single_room_related_rooms(int $current_room_id, string $category, i
             continue;
         }
 
-        $main_image_url = get_room_main_image_url($room_id, 'large');
-        $gallery_urls = get_room_gallery_image_urls($room_id, 10, 'large');
+        $main_image_url = RoomData::getRoomMainImageUrl($room_id, 'large');
+        $gallery_urls = RoomData::getRoomGalleryImageUrls($room_id, 10, 'large');
         $images = [];
 
         if ($main_image_url !== '') {
@@ -190,8 +180,8 @@ function get_single_room_page_view_data(): array
             'success' => false,
             'message' => \__('Room was not found.', 'must-hotel-booking'),
             'room' => null,
-            'booking_url' => get_booking_page_url(),
-            'rooms_url' => get_frontend_page_url('page_rooms_id', '/rooms'),
+            'booking_url' => ManagedPages::getBookingPageUrl(),
+            'rooms_url' => ManagedPages::getRoomsPageUrl(),
             'terms_url' => \home_url('/terms-and-conditions'),
         ];
     }
@@ -199,8 +189,8 @@ function get_single_room_page_view_data(): array
     $room_id = (int) $room['id'];
     $room_slug = isset($room['slug']) ? (string) $room['slug'] : '';
     $room_category = isset($room['category']) ? (string) $room['category'] : '';
-    $main_image_url = get_room_main_image_url($room_id, 'large');
-    $gallery_urls = get_room_gallery_image_urls($room_id, 12, 'large');
+    $main_image_url = RoomData::getRoomMainImageUrl($room_id, 'large');
+    $gallery_urls = RoomData::getRoomGalleryImageUrls($room_id, 12, 'large');
 
     if ($main_image_url === '' && !empty($gallery_urls)) {
         $main_image_url = (string) $gallery_urls[0];
@@ -209,7 +199,7 @@ function get_single_room_page_view_data(): array
 
     $booking_url = \add_query_arg(
         ['room_id' => $room_id],
-        get_booking_page_url()
+        ManagedPages::getBookingPageUrl()
     );
     $related_rooms = get_single_room_related_rooms($room_id, $room_category, 3);
 
@@ -223,18 +213,16 @@ function get_single_room_page_view_data(): array
         'description' => isset($room['description']) ? (string) $room['description'] : '',
         'max_guests' => isset($room['max_guests']) ? (int) $room['max_guests'] : 1,
         'room_size' => isset($room['room_size']) ? (string) $room['room_size'] : '',
-        'room_rules' => get_room_rules_text($room_id),
-        'amenities_intro' => get_room_amenities_intro_text($room_id),
-        'amenities' => get_room_amenity_display_items($room_id),
+        'room_rules' => RoomData::getRoomRulesText($room_id),
+        'amenities_intro' => RoomData::getRoomAmenitiesIntroText($room_id),
+        'amenities' => RoomData::getRoomAmenityDisplayItems($room_id),
         'main_image_url' => $main_image_url,
         'gallery_urls' => $gallery_urls,
         'related_rooms' => $related_rooms,
-        'category_label' => \function_exists(__NAMESPACE__ . '\\get_room_category_label')
-            ? get_room_category_label($room_category)
-            : $room_category,
+        'category_label' => RoomCatalog::getCategoryLabel($room_category),
         'booking_url' => $booking_url,
         'inquiry_url' => get_single_room_inquiry_url($room),
-        'rooms_url' => get_frontend_page_url('page_rooms_id', '/rooms'),
+        'rooms_url' => ManagedPages::getRoomsPageUrl(),
         'terms_url' => \home_url('/terms-and-conditions'),
         'people_icon_url' => MUST_HOTEL_BOOKING_URL . 'assets/img/PeopleFill.svg',
         'surface_icon_url' => MUST_HOTEL_BOOKING_URL . 'assets/img/Surface.svg',

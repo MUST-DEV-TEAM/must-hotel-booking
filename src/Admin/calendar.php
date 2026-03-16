@@ -100,12 +100,7 @@ function get_calendar_range_data(string $start_date, int $days): array
  */
 function get_calendar_rooms(): array
 {
-    global $wpdb;
-
-    $rooms_table = $wpdb->prefix . 'must_rooms';
-    $rows = $wpdb->get_results("SELECT id, name FROM {$rooms_table} ORDER BY name ASC, id ASC", ARRAY_A);
-
-    return \is_array($rows) ? $rows : [];
+    return \MustHotelBooking\Engine\get_room_repository()->getRoomSelectorRows();
 }
 
 /**
@@ -115,39 +110,7 @@ function get_calendar_rooms(): array
  */
 function get_calendar_reservations(string $start_date, string $end_exclusive): array
 {
-    global $wpdb;
-
-    $reservations_table = $wpdb->prefix . 'must_reservations';
-    $rooms_table = $wpdb->prefix . 'must_rooms';
-    $guests_table = $wpdb->prefix . 'must_guests';
-
-    $sql = $wpdb->prepare(
-        "SELECT
-            r.id,
-            r.room_id,
-            r.guest_id,
-            r.checkin,
-            r.checkout,
-            r.guests,
-            r.status,
-            r.total_price,
-            r.payment_status,
-            r.created_at,
-            rm.name AS room_name,
-            CONCAT_WS(' ', g.first_name, g.last_name) AS guest_name
-        FROM {$reservations_table} r
-        LEFT JOIN {$rooms_table} rm ON rm.id = r.room_id
-        LEFT JOIN {$guests_table} g ON g.id = r.guest_id
-        WHERE r.checkin < %s
-            AND r.checkout > %s
-        ORDER BY r.room_id ASC, r.checkin ASC, r.checkout ASC, r.id ASC",
-        $end_exclusive,
-        $start_date
-    );
-
-    $rows = $wpdb->get_results($sql, ARRAY_A);
-
-    return \is_array($rows) ? $rows : [];
+    return \MustHotelBooking\Engine\get_reservation_repository()->getCalendarReservationRows($start_date, $end_exclusive);
 }
 
 /**
@@ -266,36 +229,7 @@ function build_room_calendar_blocks(array $room_reservations, string $range_star
  */
 function get_calendar_reservation_details(int $reservation_id): ?array
 {
-    global $wpdb;
-
-    if ($reservation_id <= 0) {
-        return null;
-    }
-
-    $reservations_table = $wpdb->prefix . 'must_reservations';
-    $rooms_table = $wpdb->prefix . 'must_rooms';
-    $guests_table = $wpdb->prefix . 'must_guests';
-
-    $sql = $wpdb->prepare(
-        "SELECT
-            r.*,
-            rm.name AS room_name,
-            g.first_name,
-            g.last_name,
-            g.email,
-            g.phone,
-            g.country
-        FROM {$reservations_table} r
-        LEFT JOIN {$rooms_table} rm ON rm.id = r.room_id
-        LEFT JOIN {$guests_table} g ON g.id = r.guest_id
-        WHERE r.id = %d
-        LIMIT 1",
-        $reservation_id
-    );
-
-    $row = $wpdb->get_row($sql, ARRAY_A);
-
-    return \is_array($row) ? $row : null;
+    return \MustHotelBooking\Engine\get_reservation_repository()->getAdminReservationDetails($reservation_id);
 }
 
 /**
@@ -412,76 +346,17 @@ function split_calendar_guest_name(string $guest_name): array
  */
 function save_calendar_guest_record(int $guest_id, string $guest_name, string $email, string $phone): int
 {
-    global $wpdb;
-
     $name_parts = split_calendar_guest_name($guest_name);
     $first_name = (string) $name_parts['first_name'];
     $last_name = (string) $name_parts['last_name'];
-    $guests_table = $wpdb->prefix . 'must_guests';
 
-    if ($guest_id > 0) {
-        $updated = $wpdb->update(
-            $guests_table,
-            [
-                'first_name' => $first_name,
-                'last_name' => $last_name,
-                'email' => $email,
-                'phone' => $phone,
-            ],
-            ['id' => $guest_id],
-            ['%s', '%s', '%s', '%s'],
-            ['%d']
-        );
-
-        if ($updated !== false) {
-            return $guest_id;
-        }
-    }
-
-    if ($email !== '') {
-        $existing_guest_id = (int) $wpdb->get_var(
-            $wpdb->prepare(
-                "SELECT id FROM {$guests_table} WHERE email = %s LIMIT 1",
-                $email
-            )
-        );
-
-        if ($existing_guest_id > 0) {
-            $updated = $wpdb->update(
-                $guests_table,
-                [
-                    'first_name' => $first_name,
-                    'last_name' => $last_name,
-                    'phone' => $phone,
-                ],
-                ['id' => $existing_guest_id],
-                ['%s', '%s', '%s'],
-                ['%d']
-            );
-
-            if ($updated !== false) {
-                return $existing_guest_id;
-            }
-        }
-    }
-
-    $inserted = $wpdb->insert(
-        $guests_table,
-        [
-            'first_name' => $first_name,
-            'last_name' => $last_name,
-            'email' => $email,
-            'phone' => $phone,
-            'country' => '',
-        ],
-        ['%s', '%s', '%s', '%s', '%s']
+    return \MustHotelBooking\Engine\get_guest_repository()->saveGuestProfile(
+        $guest_id,
+        $first_name,
+        $last_name,
+        $email,
+        $phone
     );
-
-    if ($inserted === false) {
-        return 0;
-    }
-
-    return (int) $wpdb->insert_id;
 }
 
 /**
@@ -518,21 +393,11 @@ function get_calendar_block_status_class(string $status): string
  */
 function does_calendar_room_exist(int $room_id): bool
 {
-    global $wpdb;
-
     if ($room_id <= 0) {
         return false;
     }
 
-    $rooms_table = $wpdb->prefix . 'must_rooms';
-    $exists = $wpdb->get_var(
-        $wpdb->prepare(
-            "SELECT 1 FROM {$rooms_table} WHERE id = %d LIMIT 1",
-            $room_id
-        )
-    );
-
-    return $exists !== null;
+    return \is_array(\MustHotelBooking\Engine\get_room_repository()->getRoomById($room_id));
 }
 
 /**
@@ -540,24 +405,12 @@ function does_calendar_room_exist(int $room_id): bool
  */
 function has_calendar_reservation_overlap(int $reservation_id, int $room_id, string $checkin, string $checkout): bool
 {
-    global $wpdb;
-
-    $reservations_table = $wpdb->prefix . 'must_reservations';
-    $sql = $wpdb->prepare(
-        "SELECT 1
-        FROM {$reservations_table}
-        WHERE room_id = %d
-            AND id <> %d
-            AND checkin < %s
-            AND checkout > %s
-        LIMIT 1",
-        $room_id,
+    return \MustHotelBooking\Engine\get_reservation_repository()->hasReservationOverlapExcludingId(
         $reservation_id,
-        $checkout,
-        $checkin
+        $room_id,
+        $checkin,
+        $checkout
     );
-
-    return $wpdb->get_var($sql) !== null;
 }
 
 /**
@@ -675,8 +528,6 @@ function maybe_handle_calendar_reservation_update_submission(): array
         return $errors;
     }
 
-    global $wpdb;
-
     $guest_id = (int) ($reservation['guest_id'] ?? 0);
 
     if ($status === 'blocked') {
@@ -701,8 +552,8 @@ function maybe_handle_calendar_reservation_update_submission(): array
     }
 
     $previous_status = \sanitize_key((string) ($reservation['status'] ?? ''));
-    $updated = $wpdb->update(
-        $wpdb->prefix . 'must_reservations',
+    $updated = \MustHotelBooking\Engine\get_reservation_repository()->updateReservation(
+        $reservation_id,
         [
             'room_id' => $room_id,
             'guest_id' => $guest_id,
@@ -714,13 +565,10 @@ function maybe_handle_calendar_reservation_update_submission(): array
             'notes' => $notes,
             'total_price' => $total_price,
             'payment_status' => $payment_status,
-        ],
-        ['id' => $reservation_id],
-        ['%d', '%d', '%s', '%s', '%d', '%s', '%s', '%s', '%f', '%s'],
-        ['%d']
+        ]
     );
 
-    if ($updated === false) {
+    if (!$updated) {
         return [\__('Unable to update reservation.', 'must-hotel-booking')];
     }
 
@@ -947,25 +795,14 @@ function maybe_handle_calendar_block_submission(): array
         ];
     }
 
-    global $wpdb;
-
-    $inserted = $wpdb->insert(
-        $wpdb->prefix . 'must_reservations',
-        [
-            'room_id' => $room_id,
-            'guest_id' => 0,
-            'checkin' => $checkin,
-            'checkout' => $checkout,
-            'guests' => 1,
-            'status' => 'blocked',
-            'total_price' => 0.00,
-            'payment_status' => 'blocked',
-            'created_at' => \current_time('mysql'),
-        ],
-        ['%d', '%d', '%s', '%s', '%d', '%s', '%f', '%s', '%s']
+    $inserted = \MustHotelBooking\Engine\get_reservation_repository()->createBlockedReservation(
+        $room_id,
+        $checkin,
+        $checkout,
+        \current_time('mysql')
     );
 
-    if ($inserted === false) {
+    if ($inserted <= 0) {
         return [
             'errors' => [\__('Unable to create block. Please check database schema.', 'must-hotel-booking')],
             'form' => [
@@ -999,16 +836,7 @@ function maybe_handle_calendar_delete_block_request(): void
         exit;
     }
 
-    global $wpdb;
-
-    $deleted = $wpdb->delete(
-        $wpdb->prefix . 'must_reservations',
-        [
-            'id' => $reservation_id,
-            'status' => 'blocked',
-        ],
-        ['%d', '%s']
-    );
+    $deleted = \MustHotelBooking\Engine\get_reservation_repository()->deleteReservation($reservation_id, 'blocked');
 
     \wp_safe_redirect(get_admin_calendar_page_url(['notice' => $deleted ? 'block_deleted' : 'block_delete_failed']));
     exit;
@@ -1046,22 +874,17 @@ function maybe_handle_calendar_cancel_reservation_request(): void
 
     $previous_status = \sanitize_key((string) ($reservation['status'] ?? ''));
 
-    global $wpdb;
-
-    $updated = $wpdb->update(
-        $wpdb->prefix . 'must_reservations',
-        ['status' => 'cancelled'],
-        ['id' => $reservation_id],
-        ['%s'],
-        ['%d']
+    $updated = \MustHotelBooking\Engine\get_reservation_repository()->updateReservation(
+        $reservation_id,
+        ['status' => 'cancelled']
     );
 
-    if ($updated !== false && $previous_status !== 'cancelled') {
+    if ($updated && $previous_status !== 'cancelled') {
         \do_action('must_hotel_booking/reservation_cancelled', $reservation_id);
     }
 
     $redirect_args = get_calendar_state_redirect_args($reservation_id);
-    $redirect_args['notice'] = $updated !== false ? 'reservation_cancelled' : 'action_failed';
+    $redirect_args['notice'] = $updated ? 'reservation_cancelled' : 'action_failed';
     \wp_safe_redirect(get_admin_calendar_page_url($redirect_args));
     exit;
 }

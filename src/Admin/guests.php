@@ -3,47 +3,6 @@
 namespace MustHotelBooking\Admin;
 
 /**
- * Get guests table name.
- */
-function get_admin_guests_table_name(): string
-{
-    global $wpdb;
-
-    if (\function_exists(__NAMESPACE__ . '\get_guests_table_name')) {
-        return get_guests_table_name();
-    }
-
-    return $wpdb->prefix . 'must_guests';
-}
-
-/**
- * Get reservations table name for guests metrics.
- */
-function get_admin_guests_reservations_table_name(): string
-{
-    global $wpdb;
-
-    return $wpdb->prefix . 'must_reservations';
-}
-
-/**
- * Check if a table exists.
- */
-function does_admin_guests_table_exist(string $table_name): bool
-{
-    global $wpdb;
-
-    $table_exists = $wpdb->get_var(
-        $wpdb->prepare(
-            'SHOW TABLES LIKE %s',
-            $table_name
-        )
-    );
-
-    return \is_string($table_exists) && $table_exists !== '';
-}
-
-/**
  * Build full guest name from row values.
  *
  * @param array<string, mixed> $guest
@@ -72,51 +31,7 @@ function get_admin_guest_full_name(array $guest): string
  */
 function get_admin_guest_rows(): array
 {
-    global $wpdb;
-
-    $guests_table = get_admin_guests_table_name();
-
-    if (!does_admin_guests_table_exist($guests_table)) {
-        return [];
-    }
-
-    $reservations_table = get_admin_guests_reservations_table_name();
-    $has_reservations_table = does_admin_guests_table_exist($reservations_table);
-
-    if ($has_reservations_table) {
-        $rows = $wpdb->get_results(
-            "SELECT
-                g.id,
-                g.first_name,
-                g.last_name,
-                g.email,
-                g.phone,
-                g.country,
-                COUNT(r.id) AS total_bookings
-            FROM {$guests_table} g
-            LEFT JOIN {$reservations_table} r
-                ON r.guest_id = g.id
-            GROUP BY g.id, g.first_name, g.last_name, g.email, g.phone, g.country
-            ORDER BY g.id DESC",
-            ARRAY_A
-        );
-    } else {
-        $rows = $wpdb->get_results(
-            "SELECT
-                g.id,
-                g.first_name,
-                g.last_name,
-                g.email,
-                g.phone,
-                g.country,
-                0 AS total_bookings
-            FROM {$guests_table} g
-            ORDER BY g.id DESC",
-            ARRAY_A
-        );
-    }
-
-    return \is_array($rows) ? $rows : [];
+    return \MustHotelBooking\Engine\get_guest_repository()->getAdminGuestRows();
 }
 
 /**
@@ -126,10 +41,10 @@ function render_admin_guests_page(): void
 {
     ensure_admin_capability();
 
-    $guests_table_name = get_admin_guests_table_name();
-    $reservations_table_name = get_admin_guests_reservations_table_name();
-    $guests_table_exists = does_admin_guests_table_exist($guests_table_name);
-    $reservations_table_exists = does_admin_guests_table_exist($reservations_table_name);
+    $guestRepository = \MustHotelBooking\Engine\get_guest_repository();
+    $reservationRepository = \MustHotelBooking\Engine\get_reservation_repository();
+    $guests_table_exists = $guestRepository->guestsTableExists();
+    $reservations_table_exists = $reservationRepository->reservationsTableExists();
     $guests = get_admin_guest_rows();
 
     echo '<div class="wrap">';

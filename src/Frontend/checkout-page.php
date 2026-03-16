@@ -2,6 +2,7 @@
 
 namespace MustHotelBooking\Frontend;
 
+use MustHotelBooking\Core\ManagedPages;
 use MustHotelBooking\Engine\BookingValidationEngine;
 use MustHotelBooking\Engine\PricingEngine;
 use MustHotelBooking\Engine\ReservationEngine;
@@ -466,10 +467,8 @@ function get_checkout_page_view_data(): array
  */
 function enqueue_checkout_page_assets(): void
 {
-    if (!\is_page() || !\is_page((int) (get_plugin_settings()['page_checkout_id'] ?? 0))) {
-        if (!\is_page('checkout')) {
-            return;
-        }
+    if (!ManagedPages::isCurrentPage('page_checkout_id', 'checkout')) {
+        return;
     }
 
     \wp_enqueue_style(

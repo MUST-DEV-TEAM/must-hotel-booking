@@ -4,6 +4,26 @@ namespace MustHotelBooking\Database;
 
 final class RoomRepository extends AbstractRepository
 {
+    public function getRoomsTableName(): string
+    {
+        return $this->table('rooms');
+    }
+
+    public function getRoomMetaTableName(): string
+    {
+        return $this->table('room_meta');
+    }
+
+    public function roomsTableExists(): bool
+    {
+        return $this->tableExists('rooms');
+    }
+
+    public function roomMetaTableExists(): bool
+    {
+        return $this->tableExists('room_meta');
+    }
+
     private function inventoryLockTable(): string
     {
         return $this->wpdb->prefix . 'mhb_inventory_locks';
@@ -42,7 +62,7 @@ final class RoomRepository extends AbstractRepository
 
         $row = $this->wpdb->get_row(
             $this->wpdb->prepare(
-                'SELECT id, name, slug, category, description, max_guests, base_price, room_size, beds
+                'SELECT *
                 FROM ' . $this->table('rooms') . '
                 WHERE id = %d
                 LIMIT 1',
@@ -52,6 +72,25 @@ final class RoomRepository extends AbstractRepository
         );
 
         return \is_array($row) ? $row : null;
+    }
+
+    /**
+     * @return array<int, array<string, mixed>>
+     */
+    public function getRoomSelectorRows(): array
+    {
+        if (!$this->roomsTableExists()) {
+            return [];
+        }
+
+        $rows = $this->wpdb->get_results(
+            'SELECT id, name
+            FROM ' . $this->getRoomsTableName() . '
+            ORDER BY name ASC, id ASC',
+            ARRAY_A
+        );
+
+        return \is_array($rows) ? $rows : [];
     }
 
     /**
@@ -67,7 +106,7 @@ final class RoomRepository extends AbstractRepository
 
         $row = $this->wpdb->get_row(
             $this->wpdb->prepare(
-                'SELECT id, name, slug, category, description, max_guests, base_price, room_size, beds
+                'SELECT *
                 FROM ' . $this->table('rooms') . '
                 WHERE slug = %s
                 LIMIT 1',
@@ -77,6 +116,203 @@ final class RoomRepository extends AbstractRepository
         );
 
         return \is_array($row) ? $row : null;
+    }
+
+    public function roomSlugExists(string $slug, int $excludeRoomId = 0): bool
+    {
+        $slug = \sanitize_title($slug);
+
+        if ($slug === '' || !$this->roomsTableExists()) {
+            return false;
+        }
+
+        if ($excludeRoomId > 0) {
+            $count = (int) $this->wpdb->get_var(
+                $this->wpdb->prepare(
+                    'SELECT COUNT(*)
+                    FROM ' . $this->getRoomsTableName() . '
+                    WHERE slug = %s
+                        AND id <> %d',
+                    $slug,
+                    $excludeRoomId
+                )
+            );
+        } else {
+            $count = (int) $this->wpdb->get_var(
+                $this->wpdb->prepare(
+                    'SELECT COUNT(*)
+                    FROM ' . $this->getRoomsTableName() . '
+                    WHERE slug = %s',
+                    $slug
+                )
+            );
+        }
+
+        return $count > 0;
+    }
+
+    /**
+     * @param array<string, mixed> $roomData
+     */
+    public function createRoom(array $roomData): int
+    {
+        if (!$this->roomsTableExists()) {
+            return 0;
+        }
+
+        $inserted = $this->wpdb->insert(
+            $this->getRoomsTableName(),
+            [
+                'name' => (string) ($roomData['name'] ?? ''),
+                'slug' => (string) ($roomData['slug'] ?? ''),
+                'category' => (string) ($roomData['category'] ?? ''),
+                'description' => (string) ($roomData['description'] ?? ''),
+                'max_guests' => (int) ($roomData['max_guests'] ?? 1),
+                'base_price' => (float) ($roomData['base_price'] ?? 0.0),
+                'extra_guest_price' => (float) ($roomData['extra_guest_price'] ?? 0.0),
+                'room_size' => (string) ($roomData['room_size'] ?? ''),
+                'beds' => (string) ($roomData['beds'] ?? ''),
+                'created_at' => isset($roomData['created_at']) ? (string) $roomData['created_at'] : \current_time('mysql'),
+            ],
+            ['%s', '%s', '%s', '%s', '%d', '%f', '%f', '%s', '%s', '%s']
+        );
+
+        if ($inserted === false) {
+            return 0;
+        }
+
+        return (int) $this->wpdb->insert_id;
+    }
+
+    /**
+     * @param array<string, mixed> $roomData
+     */
+    public function updateRoom(int $roomId, array $roomData): bool
+    {
+        if ($roomId <= 0 || !$this->roomsTableExists()) {
+            return false;
+        }
+
+        $updated = $this->wpdb->update(
+            $this->getRoomsTableName(),
+            [
+                'name' => (string) ($roomData['name'] ?? ''),
+                'slug' => (string) ($roomData['slug'] ?? ''),
+                'category' => (string) ($roomData['category'] ?? ''),
+                'description' => (string) ($roomData['description'] ?? ''),
+                'max_guests' => (int) ($roomData['max_guests'] ?? 1),
+                'base_price' => (float) ($roomData['base_price'] ?? 0.0),
+                'extra_guest_price' => (float) ($roomData['extra_guest_price'] ?? 0.0),
+                'room_size' => (string) ($roomData['room_size'] ?? ''),
+                'beds' => (string) ($roomData['beds'] ?? ''),
+            ],
+            ['id' => $roomId],
+            ['%s', '%s', '%s', '%s', '%d', '%f', '%f', '%s', '%s'],
+            ['%d']
+        );
+
+        return $updated !== false;
+    }
+
+    /**
+     * @param array<int, string> $amenityKeys
+     * @param array<int, int> $galleryIds
+     */
+    public function saveRoomMeta(
+        int $roomId,
+        int $mainImageId,
+        string $roomRules,
+        string $amenitiesIntro,
+        array $amenityKeys,
+        array $galleryIds
+    ): bool {
+        if ($roomId <= 0 || !$this->tableExists('room_meta')) {
+            return false;
+        }
+
+        $metaTable = $this->getRoomMetaTableName();
+        $deleted = $this->wpdb->query(
+            $this->wpdb->prepare(
+                "DELETE FROM {$metaTable}
+                WHERE room_id = %d
+                    AND meta_key IN ('main_image_id', 'room_rules', 'amenities_intro', 'amenity', 'gallery_image_id')",
+                $roomId
+            )
+        );
+
+        if ($deleted === false) {
+            return false;
+        }
+
+        if ($mainImageId > 0 && !$this->insertRoomMetaRow($roomId, 'main_image_id', (string) $mainImageId)) {
+            return false;
+        }
+
+        if ($roomRules !== '' && !$this->insertRoomMetaRow($roomId, 'room_rules', $roomRules)) {
+            return false;
+        }
+
+        if ($amenitiesIntro !== '' && !$this->insertRoomMetaRow($roomId, 'amenities_intro', $amenitiesIntro)) {
+            return false;
+        }
+
+        foreach ($amenityKeys as $amenityKey) {
+            if (!$this->insertRoomMetaRow($roomId, 'amenity', (string) $amenityKey)) {
+                return false;
+            }
+        }
+
+        foreach ($galleryIds as $galleryId) {
+            $galleryId = (int) $galleryId;
+
+            if ($galleryId <= 0 || $galleryId === $mainImageId) {
+                continue;
+            }
+
+            if (!$this->insertRoomMetaRow($roomId, 'gallery_image_id', (string) $galleryId)) {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    public function deleteRoom(int $roomId): bool
+    {
+        if ($roomId <= 0 || !$this->roomsTableExists()) {
+            return false;
+        }
+
+        $deleted = $this->wpdb->delete(
+            $this->getRoomsTableName(),
+            ['id' => $roomId],
+            ['%d']
+        );
+
+        if ($deleted === false) {
+            return false;
+        }
+
+        if ($this->tableExists('room_meta')) {
+            $this->wpdb->delete(
+                $this->getRoomMetaTableName(),
+                ['room_id' => $roomId],
+                ['%d']
+            );
+        }
+
+        return true;
+    }
+
+    public function countRooms(): int
+    {
+        if (!$this->roomsTableExists()) {
+            return 0;
+        }
+
+        return (int) $this->wpdb->get_var(
+            'SELECT COUNT(*) FROM ' . $this->getRoomsTableName()
+        );
     }
 
     /**
@@ -98,6 +334,162 @@ final class RoomRepository extends AbstractRepository
         );
 
         return \is_array($rows) ? $rows : [];
+    }
+
+    /**
+     * @return array<int, array<string, mixed>>
+     */
+    public function getRoomsListRows(): array
+    {
+        $rows = $this->wpdb->get_results(
+            'SELECT id, name, slug, category, max_guests, base_price FROM ' . $this->getRoomsTableName() . ' ORDER BY created_at DESC, id DESC',
+            ARRAY_A
+        );
+
+        return \is_array($rows) ? $rows : [];
+    }
+
+    private function insertRoomMetaRow(int $roomId, string $metaKey, string $metaValue): bool
+    {
+        return $this->wpdb->insert(
+            $this->getRoomMetaTableName(),
+            [
+                'room_id' => $roomId,
+                'meta_key' => $metaKey,
+                'meta_value' => $metaValue,
+            ],
+            ['%d', '%s', '%s']
+        ) !== false;
+    }
+
+    /**
+     * @return array<int, array<string, mixed>>
+     */
+    public function getRoomsForDisplay(string $category = 'all', int $limit = 50): array
+    {
+        $limit = \max(1, \min(200, $limit));
+        $table = $this->getRoomsTableName();
+        $categorySlug = \sanitize_key($category);
+
+        if ($categorySlug !== '' && $categorySlug !== 'all') {
+            $sql = $this->wpdb->prepare(
+                "SELECT id, name, slug, category, description, max_guests, base_price, room_size, beds
+                FROM {$table}
+                WHERE category = %s
+                ORDER BY created_at DESC, id DESC
+                LIMIT %d",
+                $categorySlug,
+                $limit
+            );
+        } else {
+            $sql = $this->wpdb->prepare(
+                "SELECT id, name, slug, category, description, max_guests, base_price, room_size, beds
+                FROM {$table}
+                ORDER BY created_at DESC, id DESC
+                LIMIT %d",
+                $limit
+            );
+        }
+
+        $rows = $this->wpdb->get_results($sql, ARRAY_A);
+
+        return \is_array($rows) ? $rows : [];
+    }
+
+    public function getRoomMetaTextValue(int $roomId, string $metaKey): string
+    {
+        if ($roomId <= 0 || $metaKey === '') {
+            return '';
+        }
+
+        $value = $this->wpdb->get_var(
+            $this->wpdb->prepare(
+                "SELECT meta_value
+                FROM " . $this->getRoomMetaTableName() . "
+                WHERE room_id = %d AND meta_key = %s
+                LIMIT 1",
+                $roomId,
+                $metaKey
+            )
+        );
+
+        return \is_string($value) ? $value : '';
+    }
+
+    /**
+     * @return array<int, string>
+     */
+    public function getRoomAmenities(int $roomId): array
+    {
+        $rows = $this->wpdb->get_col(
+            $this->wpdb->prepare(
+                "SELECT meta_value
+                FROM " . $this->getRoomMetaTableName() . "
+                WHERE room_id = %d AND meta_key = 'amenity'",
+                $roomId
+            )
+        );
+
+        if (!\is_array($rows)) {
+            return [];
+        }
+
+        return \array_values(
+            \array_filter(
+                \array_map(
+                    static function ($value): string {
+                        return \trim((string) $value);
+                    },
+                    $rows
+                )
+            )
+        );
+    }
+
+    /**
+     * @return array<int, int>
+     */
+    public function getRoomGalleryImageIds(int $roomId): array
+    {
+        $rows = $this->wpdb->get_col(
+            $this->wpdb->prepare(
+                "SELECT meta_value
+                FROM " . $this->getRoomMetaTableName() . "
+                WHERE room_id = %d AND meta_key = 'gallery_image_id'",
+                $roomId
+            )
+        );
+
+        if (!\is_array($rows)) {
+            return [];
+        }
+
+        $ids = [];
+
+        foreach ($rows as $value) {
+            $id = \absint($value);
+
+            if ($id > 0) {
+                $ids[$id] = $id;
+            }
+        }
+
+        return \array_values($ids);
+    }
+
+    public function getRoomMainImageId(int $roomId): int
+    {
+        $value = $this->wpdb->get_var(
+            $this->wpdb->prepare(
+                "SELECT meta_value
+                FROM " . $this->getRoomMetaTableName() . "
+                WHERE room_id = %d AND meta_key = 'main_image_id'
+                LIMIT 1",
+                $roomId
+            )
+        );
+
+        return \absint($value);
     }
 
     /**

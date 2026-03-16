@@ -2,25 +2,8 @@
 
 namespace MustHotelBooking\Admin;
 
-/**
- * Get rooms table name.
- */
-function get_rooms_table_name(): string
-{
-    global $wpdb;
-
-    return $wpdb->prefix . 'must_rooms';
-}
-
-/**
- * Get room meta table name.
- */
-function get_room_meta_table_name(): string
-{
-    global $wpdb;
-
-    return $wpdb->prefix . 'must_room_meta';
-}
+use MustHotelBooking\Core\RoomCatalog;
+use MustHotelBooking\Core\RoomData;
 
 /**
  * Get available room categories.
@@ -29,11 +12,7 @@ function get_room_meta_table_name(): string
  */
 function get_room_categories(): array
 {
-    return [
-        'standard-rooms' => \__('Standard Rooms', 'must-hotel-booking'),
-        'suites' => \__('Suites', 'must-hotel-booking'),
-        'duplex-suite' => \__('Duplex Suite', 'must-hotel-booking'),
-    ];
+    return RoomCatalog::getCategories();
 }
 
 /**
@@ -41,14 +20,7 @@ function get_room_categories(): array
  */
 function normalize_room_category(string $category): string
 {
-    $normalized = \sanitize_key($category);
-    $categories = get_room_categories();
-
-    if (isset($categories[$normalized])) {
-        return $normalized;
-    }
-
-    return 'standard-rooms';
+    return RoomCatalog::normalizeCategory($category);
 }
 
 /**
@@ -56,10 +28,7 @@ function normalize_room_category(string $category): string
  */
 function get_room_category_label(string $category): string
 {
-    $categories = get_room_categories();
-    $slug = normalize_room_category($category);
-
-    return isset($categories[$slug]) ? (string) $categories[$slug] : (string) $categories['standard-rooms'];
+    return RoomCatalog::getCategoryLabel($category);
 }
 
 /**
@@ -85,44 +54,7 @@ function get_admin_rooms_page_url(array $args = []): string
  */
 function get_available_room_amenities(): array
 {
-    return [
-        'air-conditioning' => [
-            'label' => \__('Air conditioning', 'must-hotel-booking'),
-            'icon' => 'airconditioning.svg',
-        ],
-        'cable-channels' => [
-            'label' => \__('Cable channels', 'must-hotel-booking'),
-            'icon' => 'cablechannels.svg',
-        ],
-        'refrigerator' => [
-            'label' => \__('Refrigerator', 'must-hotel-booking'),
-            'icon' => 'refrigerator.svg',
-        ],
-        'flat-screen-tv' => [
-            'label' => \__('Flat-screen TV', 'must-hotel-booking'),
-            'icon' => 'flatscreentv.svg',
-        ],
-        'linen' => [
-            'label' => \__('Linen', 'must-hotel-booking'),
-            'icon' => 'linen.svg',
-        ],
-        'telephone' => [
-            'label' => \__('Telephone', 'must-hotel-booking'),
-            'icon' => 'telephone.svg',
-        ],
-        'dryer' => [
-            'label' => \__('Dryer', 'must-hotel-booking'),
-            'icon' => 'dryer.svg',
-        ],
-        'streaming' => [
-            'label' => \__('Streaming', 'must-hotel-booking'),
-            'icon' => 'streaming.svg',
-        ],
-        'safety-deposit-box' => [
-            'label' => \__('Safety deposit box', 'must-hotel-booking'),
-            'icon' => 'safetydepositbox.svg',
-        ],
-    ];
+    return RoomCatalog::getAvailableAmenities();
 }
 
 /**
@@ -130,31 +62,7 @@ function get_available_room_amenities(): array
  */
 function normalize_room_amenity_key(string $value): string
 {
-    $raw_value = \sanitize_text_field($value);
-
-    if ($raw_value === '') {
-        return '';
-    }
-
-    $available = get_available_room_amenities();
-    $candidate = \sanitize_key(\str_replace('_', '-', $raw_value));
-
-    if (isset($available[$candidate])) {
-        return $candidate;
-    }
-
-    $label_map = [];
-
-    foreach ($available as $key => $option) {
-        $label = isset($option['label']) ? (string) $option['label'] : '';
-        $label_key = \sanitize_key(\str_replace([' ', '_'], '-', $label));
-
-        if ($label_key !== '') {
-            $label_map[$label_key] = $key;
-        }
-    }
-
-    return isset($label_map[$candidate]) ? (string) $label_map[$candidate] : '';
+    return RoomCatalog::normalizeAmenityKey($value);
 }
 
 /**
@@ -230,30 +138,7 @@ function parse_room_main_image_id(string $raw_image_id): int
  */
 function does_room_slug_exist(string $slug, int $exclude_room_id = 0): bool
 {
-    global $wpdb;
-
-    if ($slug === '') {
-        return false;
-    }
-
-    if ($exclude_room_id > 0) {
-        $count = (int) $wpdb->get_var(
-            $wpdb->prepare(
-                'SELECT COUNT(*) FROM ' . get_rooms_table_name() . ' WHERE slug = %s AND id <> %d',
-                $slug,
-                $exclude_room_id
-            )
-        );
-    } else {
-        $count = (int) $wpdb->get_var(
-            $wpdb->prepare(
-                'SELECT COUNT(*) FROM ' . get_rooms_table_name() . ' WHERE slug = %s',
-                $slug
-            )
-        );
-    }
-
-    return $count > 0;
+    return \MustHotelBooking\Engine\get_room_repository()->roomSlugExists($slug, $exclude_room_id);
 }
 
 /**
@@ -359,81 +244,14 @@ function save_room_meta_data(
     array $gallery_ids
 ): void
 {
-    global $wpdb;
-
-    $meta_table = get_room_meta_table_name();
-
-    $wpdb->query(
-        $wpdb->prepare(
-            "DELETE FROM {$meta_table} WHERE room_id = %d AND meta_key IN ('main_image_id', 'room_rules', 'amenities_intro', 'amenity', 'gallery_image_id')",
-            $room_id
-        )
+    \MustHotelBooking\Engine\get_room_repository()->saveRoomMeta(
+        $room_id,
+        $main_image_id,
+        $room_rules,
+        $amenities_intro,
+        $amenity_keys,
+        $gallery_ids
     );
-
-    if ($main_image_id > 0) {
-        $wpdb->insert(
-            $meta_table,
-            [
-                'room_id' => $room_id,
-                'meta_key' => 'main_image_id',
-                'meta_value' => (string) $main_image_id,
-            ],
-            ['%d', '%s', '%s']
-        );
-    }
-
-    if ($room_rules !== '') {
-        $wpdb->insert(
-            $meta_table,
-            [
-                'room_id' => $room_id,
-                'meta_key' => 'room_rules',
-                'meta_value' => $room_rules,
-            ],
-            ['%d', '%s', '%s']
-        );
-    }
-
-    if ($amenities_intro !== '') {
-        $wpdb->insert(
-            $meta_table,
-            [
-                'room_id' => $room_id,
-                'meta_key' => 'amenities_intro',
-                'meta_value' => $amenities_intro,
-            ],
-            ['%d', '%s', '%s']
-        );
-    }
-
-    foreach ($amenity_keys as $amenity_key) {
-        $wpdb->insert(
-            $meta_table,
-            [
-                'room_id' => $room_id,
-                'meta_key' => 'amenity',
-                'meta_value' => $amenity_key,
-            ],
-            ['%d', '%s', '%s']
-        );
-    }
-
-    foreach ($gallery_ids as $image_id) {
-        if ($image_id === $main_image_id) {
-            continue;
-        }
-
-        $wpdb->insert(
-            $meta_table,
-            [
-                'room_id' => $room_id,
-                'meta_key' => 'gallery_image_id',
-                'meta_value' => (string) $image_id,
-            ],
-            ['%d', '%s', '%s']
-        );
-    }
-
 }
 
 /**
@@ -443,10 +261,7 @@ function save_room_meta_data(
  */
 function create_room_record(array $room_data): int
 {
-    global $wpdb;
-
-    $inserted = $wpdb->insert(
-        get_rooms_table_name(),
+    return \MustHotelBooking\Engine\get_room_repository()->createRoom(
         [
             'name' => (string) $room_data['name'],
             'slug' => (string) $room_data['slug'],
@@ -458,15 +273,8 @@ function create_room_record(array $room_data): int
             'room_size' => (string) $room_data['room_size'],
             'beds' => (string) $room_data['beds'],
             'created_at' => \current_time('mysql'),
-        ],
-        ['%s', '%s', '%s', '%s', '%d', '%f', '%f', '%s', '%s', '%s']
+        ]
     );
-
-    if ($inserted === false) {
-        return 0;
-    }
-
-    return (int) $wpdb->insert_id;
 }
 
 /**
@@ -476,10 +284,8 @@ function create_room_record(array $room_data): int
  */
 function update_room_record(int $room_id, array $room_data): bool
 {
-    global $wpdb;
-
-    $updated = $wpdb->update(
-        get_rooms_table_name(),
+    return \MustHotelBooking\Engine\get_room_repository()->updateRoom(
+        $room_id,
         [
             'name' => (string) $room_data['name'],
             'slug' => (string) $room_data['slug'],
@@ -490,13 +296,8 @@ function update_room_record(int $room_id, array $room_data): bool
             'extra_guest_price' => 0.0,
             'room_size' => (string) $room_data['room_size'],
             'beds' => (string) $room_data['beds'],
-        ],
-        ['id' => $room_id],
-        ['%s', '%s', '%s', '%s', '%d', '%f', '%f', '%s', '%s'],
-        ['%d']
+        ]
     );
-
-    return $updated !== false;
 }
 
 /**
@@ -504,17 +305,7 @@ function update_room_record(int $room_id, array $room_data): bool
  */
 function delete_room_record(int $room_id): bool
 {
-    global $wpdb;
-
-    $deleted = $wpdb->delete(get_rooms_table_name(), ['id' => $room_id], ['%d']);
-
-    if ($deleted === false) {
-        return false;
-    }
-
-    $wpdb->delete(get_room_meta_table_name(), ['room_id' => $room_id], ['%d']);
-
-    return true;
+    return \MustHotelBooking\Engine\get_room_repository()->deleteRoom($room_id);
 }
 
 /**
@@ -524,14 +315,7 @@ function delete_room_record(int $room_id): bool
  */
 function get_room_record(int $room_id): ?array
 {
-    global $wpdb;
-
-    $room = $wpdb->get_row(
-        $wpdb->prepare('SELECT * FROM ' . get_rooms_table_name() . ' WHERE id = %d LIMIT 1', $room_id),
-        ARRAY_A
-    );
-
-    return \is_array($room) ? $room : null;
+    return RoomData::getRoom($room_id);
 }
 
 /**
@@ -541,31 +325,7 @@ function get_room_record(int $room_id): ?array
  */
 function get_room_amenities(int $room_id): array
 {
-    global $wpdb;
-
-    $rows = $wpdb->get_col(
-        $wpdb->prepare(
-            "SELECT meta_value
-            FROM " . get_room_meta_table_name() . "
-            WHERE room_id = %d AND meta_key = 'amenity'",
-            $room_id
-        )
-    );
-
-    if (!\is_array($rows)) {
-        return [];
-    }
-
-    return \array_values(
-        \array_filter(
-            \array_map(
-                static function ($value): string {
-                    return \trim((string) $value);
-                },
-                $rows
-            )
-        )
-    );
+    return RoomData::getRoomAmenities($room_id);
 }
 
 /**
@@ -575,32 +335,7 @@ function get_room_amenities(int $room_id): array
  */
 function get_room_gallery_image_ids(int $room_id): array
 {
-    global $wpdb;
-
-    $rows = $wpdb->get_col(
-        $wpdb->prepare(
-            "SELECT meta_value
-            FROM " . get_room_meta_table_name() . "
-            WHERE room_id = %d AND meta_key = 'gallery_image_id'",
-            $room_id
-        )
-    );
-
-    if (!\is_array($rows)) {
-        return [];
-    }
-
-    $ids = [];
-
-    foreach ($rows as $value) {
-        $id = \absint($value);
-
-        if ($id > 0) {
-            $ids[$id] = $id;
-        }
-    }
-
-    return \array_values($ids);
+    return RoomData::getRoomGalleryImageIds($room_id);
 }
 
 /**
@@ -608,19 +343,7 @@ function get_room_gallery_image_ids(int $room_id): array
  */
 function get_room_main_image_id(int $room_id): int
 {
-    global $wpdb;
-
-    $value = $wpdb->get_var(
-        $wpdb->prepare(
-            "SELECT meta_value
-            FROM " . get_room_meta_table_name() . "
-            WHERE room_id = %d AND meta_key = 'main_image_id'
-            LIMIT 1",
-            $room_id
-        )
-    );
-
-    return \absint($value);
+    return RoomData::getRoomMainImageId($room_id);
 }
 
 /**
@@ -628,15 +351,7 @@ function get_room_main_image_id(int $room_id): int
  */
 function get_room_main_image_url(int $room_id, string $size = 'large'): string
 {
-    $image_id = get_room_main_image_id($room_id);
-
-    if ($image_id <= 0) {
-        return '';
-    }
-
-    $url = \wp_get_attachment_image_url($image_id, $size);
-
-    return \is_string($url) ? $url : '';
+    return RoomData::getRoomMainImageUrl($room_id, $size);
 }
 
 /**
@@ -644,24 +359,7 @@ function get_room_main_image_url(int $room_id, string $size = 'large'): string
  */
 function get_room_meta_text_value(int $room_id, string $meta_key): string
 {
-    global $wpdb;
-
-    if ($room_id <= 0 || $meta_key === '') {
-        return '';
-    }
-
-    $value = $wpdb->get_var(
-        $wpdb->prepare(
-            "SELECT meta_value
-            FROM " . get_room_meta_table_name() . "
-            WHERE room_id = %d AND meta_key = %s
-            LIMIT 1",
-            $room_id,
-            $meta_key
-        )
-    );
-
-    return \is_string($value) ? $value : '';
+    return RoomData::getRoomMetaTextValue($room_id, $meta_key);
 }
 
 /**
@@ -669,7 +367,7 @@ function get_room_meta_text_value(int $room_id, string $meta_key): string
  */
 function get_room_rules_text(int $room_id): string
 {
-    return get_room_meta_text_value($room_id, 'room_rules');
+    return RoomData::getRoomRulesText($room_id);
 }
 
 /**
@@ -677,7 +375,7 @@ function get_room_rules_text(int $room_id): string
  */
 function get_room_amenities_intro_text(int $room_id): string
 {
-    return get_room_meta_text_value($room_id, 'amenities_intro');
+    return RoomData::getRoomAmenitiesIntroText($room_id);
 }
 
 /**
@@ -687,33 +385,7 @@ function get_room_amenities_intro_text(int $room_id): string
  */
 function get_room_amenity_display_items(int $room_id): array
 {
-    $selected = get_room_amenities($room_id);
-    $available = get_available_room_amenities();
-    $items = [];
-
-    foreach ($selected as $selected_value) {
-        $key = normalize_room_amenity_key((string) $selected_value);
-
-        if ($key === '' || !isset($available[$key])) {
-            continue;
-        }
-
-        $amenity = $available[$key];
-        $label = isset($amenity['label']) ? (string) $amenity['label'] : '';
-        $icon_file = isset($amenity['icon']) ? (string) $amenity['icon'] : '';
-
-        if ($label === '' || $icon_file === '') {
-            continue;
-        }
-
-        $items[$key] = [
-            'key' => $key,
-            'label' => $label,
-            'icon' => MUST_HOTEL_BOOKING_URL . 'assets/img/' . $icon_file,
-        ];
-    }
-
-    return \array_values($items);
+    return RoomData::getRoomAmenityDisplayItems($room_id);
 }
 
 /**
@@ -723,14 +395,7 @@ function get_room_amenity_display_items(int $room_id): array
  */
 function get_rooms_list_rows(): array
 {
-    global $wpdb;
-
-    $rows = $wpdb->get_results(
-        'SELECT id, name, slug, category, max_guests, base_price FROM ' . get_rooms_table_name() . ' ORDER BY created_at DESC, id DESC',
-        ARRAY_A
-    );
-
-    return \is_array($rows) ? $rows : [];
+    return RoomData::getRoomsListRows();
 }
 
 /**
@@ -740,35 +405,7 @@ function get_rooms_list_rows(): array
  */
 function get_rooms_for_display(string $category = 'all', int $limit = 50): array
 {
-    global $wpdb;
-
-    $limit = \max(1, \min(200, $limit));
-    $table = get_rooms_table_name();
-    $category_slug = \sanitize_key($category);
-
-    if ($category_slug !== '' && $category_slug !== 'all') {
-        $sql = $wpdb->prepare(
-            "SELECT id, name, slug, category, description, max_guests, base_price, room_size, beds
-            FROM {$table}
-            WHERE category = %s
-            ORDER BY created_at DESC, id DESC
-            LIMIT %d",
-            normalize_room_category($category_slug),
-            $limit
-        );
-    } else {
-        $sql = $wpdb->prepare(
-            "SELECT id, name, slug, category, description, max_guests, base_price, room_size, beds
-            FROM {$table}
-            ORDER BY created_at DESC, id DESC
-            LIMIT %d",
-            $limit
-        );
-    }
-
-    $rows = $wpdb->get_results($sql, ARRAY_A);
-
-    return \is_array($rows) ? $rows : [];
+    return RoomData::getRoomsForDisplay($category, $limit);
 }
 
 /**
@@ -778,30 +415,7 @@ function get_rooms_for_display(string $category = 'all', int $limit = 50): array
  */
 function get_room_gallery_image_urls(int $room_id, int $limit = 3, string $size = 'large'): array
 {
-    $limit = \max(1, \min(10, $limit));
-    $ids = get_room_gallery_image_ids($room_id);
-
-    if (empty($ids)) {
-        return [];
-    }
-
-    $urls = [];
-
-    foreach ($ids as $id) {
-        $url = \wp_get_attachment_image_url($id, $size);
-
-        if (!\is_string($url) || $url === '') {
-            continue;
-        }
-
-        $urls[] = $url;
-
-        if (\count($urls) >= $limit) {
-            break;
-        }
-    }
-
-    return $urls;
+    return RoomData::getRoomGalleryImageUrls($room_id, $limit, $size);
 }
 
 /**

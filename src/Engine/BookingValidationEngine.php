@@ -2,6 +2,9 @@
 
 namespace MustHotelBooking\Engine;
 
+use MustHotelBooking\Core\BookingRules;
+use MustHotelBooking\Core\RoomCatalog;
+
 final class BookingValidationEngine
 {
     /**
@@ -15,16 +18,10 @@ final class BookingValidationEngine
         $accommodationTypeRaw = isset($source['accommodation_type'])
             ? \sanitize_text_field((string) \wp_unslash($source['accommodation_type']))
             : 'standard-rooms';
-        $accommodationType = \function_exists(__NAMESPACE__ . '\normalize_room_category')
-            ? normalize_room_category($accommodationTypeRaw)
-            : 'standard-rooms';
-        $roomCount = \function_exists(__NAMESPACE__ . '\normalize_booking_room_count')
-            ? normalize_booking_room_count($source['room_count'] ?? 0)
-            : 0;
+        $accommodationType = RoomCatalog::normalizeCategory($accommodationTypeRaw);
+        $roomCount = BookingRules::normalizeRoomCount($source['room_count'] ?? 0);
         $guestsRaw = isset($source['guests']) ? \wp_unslash($source['guests']) : 1;
-        $maxBookingGuests = \function_exists(__NAMESPACE__ . '\get_max_booking_guests_limit')
-            ? get_max_booking_guests_limit()
-            : 12;
+        $maxBookingGuests = BookingRules::getMaxBookingGuestsLimit();
         $guests = \max(1, \min($maxBookingGuests, \absint($guestsRaw)));
         $errors = [];
 
@@ -62,8 +59,8 @@ final class BookingValidationEngine
      */
     public static function applyFixedRoomContext(array $context, array $room): array
     {
-        $roomCategory = isset($room['category']) && \function_exists(__NAMESPACE__ . '\normalize_room_category')
-            ? normalize_room_category((string) $room['category'])
+        $roomCategory = isset($room['category'])
+            ? RoomCatalog::normalizeCategory((string) $room['category'])
             : 'standard-rooms';
         $roomMaxGuests = isset($room['max_guests']) ? \max(1, (int) $room['max_guests']) : 1;
 

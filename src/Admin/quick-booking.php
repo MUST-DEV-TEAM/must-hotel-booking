@@ -57,12 +57,7 @@ function get_admin_quick_booking_rooms(): array
         return get_calendar_rooms();
     }
 
-    global $wpdb;
-
-    $rooms_table = $wpdb->prefix . 'must_rooms';
-    $rows = $wpdb->get_results("SELECT id, name FROM {$rooms_table} ORDER BY name ASC, id ASC", ARRAY_A);
-
-    return \is_array($rows) ? $rows : [];
+    return \MustHotelBooking\Engine\get_room_repository()->getRoomSelectorRows();
 }
 
 /**
@@ -99,17 +94,7 @@ function does_admin_quick_booking_room_exist(int $room_id): bool
         return does_calendar_room_exist($room_id);
     }
 
-    global $wpdb;
-
-    $rooms_table = $wpdb->prefix . 'must_rooms';
-    $exists = $wpdb->get_var(
-        $wpdb->prepare(
-            "SELECT 1 FROM {$rooms_table} WHERE id = %d LIMIT 1",
-            $room_id
-        )
-    );
-
-    return $exists !== null;
+    return \is_array(\MustHotelBooking\Engine\get_room_repository()->getRoomById($room_id));
 }
 
 /**
@@ -119,22 +104,7 @@ function does_admin_quick_booking_room_exist(int $room_id): bool
  */
 function get_admin_quick_booking_room_row(int $room_id): ?array
 {
-    global $wpdb;
-
-    if ($room_id <= 0) {
-        return null;
-    }
-
-    $rooms_table = $wpdb->prefix . 'must_rooms';
-    $room = $wpdb->get_row(
-        $wpdb->prepare(
-            "SELECT id, name, max_guests FROM {$rooms_table} WHERE id = %d LIMIT 1",
-            $room_id
-        ),
-        ARRAY_A
-    );
-
-    return \is_array($room) ? $room : null;
+    return \MustHotelBooking\Engine\get_room_repository()->getRoomById($room_id);
 }
 
 /**
@@ -172,8 +142,6 @@ function save_admin_quick_booking_guest(string $guest_name, string $email, strin
         return save_calendar_guest_record(0, $guest_name, $email, $phone);
     }
 
-    global $wpdb;
-
     $parts = \preg_split('/\s+/', \trim($guest_name));
     $parts = \is_array($parts) ? \array_values(\array_filter($parts, static function (string $part): bool {
         return $part !== '';
@@ -181,23 +149,13 @@ function save_admin_quick_booking_guest(string $guest_name, string $email, strin
     $first_name = isset($parts[0]) ? (string) $parts[0] : '';
     $last_name = \trim(\implode(' ', \array_slice($parts, 1)));
 
-    $inserted = $wpdb->insert(
-        $wpdb->prefix . 'must_guests',
-        [
-            'first_name' => $first_name,
-            'last_name' => $last_name,
-            'email' => $email,
-            'phone' => $phone,
-            'country' => '',
-        ],
-        ['%s', '%s', '%s', '%s', '%s']
+    return \MustHotelBooking\Engine\get_guest_repository()->saveGuestProfile(
+        0,
+        $first_name,
+        $last_name,
+        $email,
+        $phone
     );
-
-    if ($inserted === false) {
-        return 0;
-    }
-
-    return (int) $wpdb->insert_id;
 }
 
 /**

@@ -45,6 +45,31 @@ final class RatePlanRepository extends AbstractRepository
             : 'price_modifier_type';
     }
 
+    public function ratePlansTableExists(): bool
+    {
+        return $this->mhbTableExists('rate_plans');
+    }
+
+    public function roomTypeRatePlansTableExists(): bool
+    {
+        return $this->mhbTableExists('room_type_rate_plans');
+    }
+
+    public function ratePlanPricesTableExists(): bool
+    {
+        return $this->mhbTableExists('rate_plan_prices');
+    }
+
+    public function seasonsTableExists(): bool
+    {
+        return $this->mhbTableExists('seasons');
+    }
+
+    public function seasonalPricesTableExists(): bool
+    {
+        return $this->mhbTableExists('seasonal_prices');
+    }
+
     /**
      * @return array<int, array<string, mixed>>
      */
