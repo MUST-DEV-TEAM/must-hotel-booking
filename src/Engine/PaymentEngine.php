@@ -65,7 +65,7 @@ final class PaymentEngine
         $catalog = PaymentMethodRegistry::getCatalog();
         $enabled = PaymentMethodRegistry::getEnabled();
         $options = [];
-        $preferredOrder = ['stripe', 'pay_at_hotel', 'bank_transfer'];
+        $preferredOrder = ['stripe', 'pay_at_hotel'];
 
         foreach ($preferredOrder as $method) {
             if (!\in_array($method, $enabled, true)) {
@@ -112,7 +112,7 @@ final class PaymentEngine
         if (empty($options)) {
             $options['pay_at_hotel'] = [
                 'label' => \__('Pay at hotel', 'must-hotel-booking'),
-                'description' => \__('Guest pays during check-in or check-out at the property.', 'must-hotel-booking'),
+                'description' => \__('Guest pays in cash at the property during check-in or check-out.', 'must-hotel-booking'),
             ];
         }
 
@@ -162,15 +162,7 @@ final class PaymentEngine
         $gateway = self::normalizeMethod($paymentMethod);
 
         if ($gateway === 'stripe') {
-            return \__('Pay securely with Stripe', 'must-hotel-booking');
-        }
-
-        if ($paymentMethod === 'bank_transfer') {
-            return \__('Confirm and view bank transfer details', 'must-hotel-booking');
-        }
-
-        if ($paymentMethod === 'paypal') {
-            return \__('Continue to PayPal', 'must-hotel-booking');
+            return \__('Pay now with card', 'must-hotel-booking');
         }
 
         return \__('Confirm reservation', 'must-hotel-booking');
@@ -363,15 +355,6 @@ final class PaymentEngine
                 'payment_status' => 'pending',
                 'clear_selection' => false,
                 'increment_coupon_usage' => false,
-            ];
-        }
-
-        if ($gateway === 'bank_transfer' || $gateway === 'paypal') {
-            return [
-                'reservation_status' => 'pending',
-                'payment_status' => 'pending',
-                'clear_selection' => true,
-                'increment_coupon_usage' => true,
             ];
         }
 

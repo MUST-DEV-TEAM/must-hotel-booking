@@ -25,6 +25,7 @@ class MustBookingConfig
         return [
             'hotel_name' => self::get_wordpress_hotel_name_fallback(),
             'hotel_address' => '',
+            'booking_notification_email' => '',
             'currency' => 'USD',
             'timezone' => self::get_wordpress_timezone_fallback(),
             'tax_rate' => 0.0,
@@ -35,7 +36,6 @@ class MustBookingConfig
             'checkout_time' => '11:00',
             'payment_methods' => [
                 'pay_at_hotel' => true,
-                'bank_transfer' => false,
                 'stripe' => false,
             ],
             'site_environment' => '',
@@ -125,6 +125,22 @@ class MustBookingConfig
     public static function get_hotel_address(): string
     {
         return \trim((string) self::get_setting('hotel_address', ''));
+    }
+
+    /**
+     * Get booking notification email.
+     */
+    public static function get_booking_notification_email(): string
+    {
+        $email = \sanitize_email((string) self::get_setting('booking_notification_email', ''));
+
+        if (\is_email($email)) {
+            return $email;
+        }
+
+        $fallback = \sanitize_email((string) self::get_wp_option('admin_email', ''));
+
+        return \is_email($fallback) ? $fallback : '';
     }
 
     /**

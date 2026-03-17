@@ -666,17 +666,27 @@ final class ReservationRepository extends AbstractRepository
                 r.checkout,
                 r.status,
                 r.total_price,
+                r.payment_status,
                 r.assigned_room_id,
                 r.rate_plan_id,
                 rm.name AS room_name,
                 rp.name AS rate_plan_name,
                 g.first_name,
                 g.last_name,
-                g.email AS guest_email
+                g.email AS guest_email,
+                COALESCE(p.method, \'\') AS payment_method
             FROM ' . $this->table('reservations') . ' r
             LEFT JOIN ' . $this->table('rooms') . ' rm ON rm.id = r.room_id
             LEFT JOIN ' . $this->wpdb->prefix . 'mhb_rate_plans' . ' rp ON rp.id = r.rate_plan_id
             LEFT JOIN ' . $this->table('guests') . ' g ON g.id = r.guest_id
+            LEFT JOIN ' . $this->table('payments') . ' p
+                ON p.id = (
+                    SELECT p2.id
+                    FROM ' . $this->table('payments') . ' p2
+                    WHERE p2.reservation_id = r.id
+                    ORDER BY p2.id DESC
+                    LIMIT 1
+                )
             WHERE r.id = %d
             LIMIT 1',
             $reservationId

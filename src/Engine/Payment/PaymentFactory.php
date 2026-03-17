@@ -14,12 +14,6 @@ final class PaymentFactory
             case 'stripe':
                 return new StripePayment($storageMethod);
 
-            case 'paypal':
-                return new PayPalPayment($storageMethod);
-
-            case 'bank_transfer':
-                return new BankTransferPayment($storageMethod);
-
             case 'cash':
             default:
                 return new CashPayment($storageMethod);
@@ -36,12 +30,6 @@ final class PaymentFactory
 
             case 'stripe':
                 return 'stripe';
-
-            case 'paypal':
-                return 'paypal';
-
-            case 'bank_transfer':
-                return 'bank_transfer';
 
             case 'cash':
             case 'pay_at_hotel':
