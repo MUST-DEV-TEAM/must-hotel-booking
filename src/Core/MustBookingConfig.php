@@ -26,6 +26,12 @@ class MustBookingConfig
             'hotel_name' => self::get_wordpress_hotel_name_fallback(),
             'hotel_address' => '',
             'booking_notification_email' => '',
+            'hotel_phone' => '',
+            'email_logo_url' => '',
+            'email_button_color' => '#141414',
+            'email_footer_text' => \__('We look forward to welcoming you.', 'must-hotel-booking'),
+            'email_layout_type' => 'classic',
+            'custom_email_layout_html' => '',
             'currency' => 'USD',
             'timezone' => self::get_wordpress_timezone_fallback(),
             'tax_rate' => 0.0,
@@ -144,6 +150,59 @@ class MustBookingConfig
     }
 
     /**
+     * Get hotel phone setting.
+     */
+    public static function get_hotel_phone(): string
+    {
+        return \trim((string) self::get_setting('hotel_phone', ''));
+    }
+
+    /**
+     * Get email logo URL.
+     */
+    public static function get_email_logo_url(): string
+    {
+        return \esc_url_raw((string) self::get_setting('email_logo_url', ''));
+    }
+
+    /**
+     * Get email button color.
+     */
+    public static function get_email_button_color(): string
+    {
+        $color = (string) self::get_setting('email_button_color', '#141414');
+        $color = \sanitize_hex_color($color);
+
+        return \is_string($color) && $color !== '' ? $color : '#141414';
+    }
+
+    /**
+     * Get email footer text.
+     */
+    public static function get_email_footer_text(): string
+    {
+        return \trim((string) self::get_setting('email_footer_text', \__('We look forward to welcoming you.', 'must-hotel-booking')));
+    }
+
+    /**
+     * Get active email layout type.
+     */
+    public static function get_email_layout_type(): string
+    {
+        return self::normalize_email_layout_type((string) self::get_setting('email_layout_type', 'classic'));
+    }
+
+    /**
+     * Get custom email layout HTML.
+     */
+    public static function get_custom_email_layout_html(): string
+    {
+        $html = (string) self::get_setting('custom_email_layout_html', '');
+
+        return \str_replace(["\r\n", "\r"], "\n", $html);
+    }
+
+    /**
      * Get currency setting.
      */
     public static function get_currency(): string
@@ -254,6 +313,17 @@ class MustBookingConfig
         $site_name = \trim($site_name);
 
         return $site_name !== '' ? $site_name : 'Hotel';
+    }
+
+    /**
+     * Normalize email layout type.
+     */
+    private static function normalize_email_layout_type(string $value): string
+    {
+        $value = \sanitize_key($value);
+        $allowed = ['classic', 'luxury', 'compact', 'custom'];
+
+        return \in_array($value, $allowed, true) ? $value : 'classic';
     }
 
     /**

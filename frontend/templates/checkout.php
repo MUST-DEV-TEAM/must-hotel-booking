@@ -47,6 +47,30 @@ $stay_days = $nights > 0 ? $nights + 1 : 0;
 $selected_country = isset($guest_form['country']) ? (string) $guest_form['country'] : '';
 $selected_phone_country_code = isset($guest_form['phone_country_code']) ? (string) $guest_form['phone_country_code'] : \must_hotel_booking\get_checkout_default_phone_option_value();
 $phone_number = isset($guest_form['phone_number']) ? (string) $guest_form['phone_number'] : '';
+$selected_phone_option = \MustHotelBooking\Frontend\get_checkout_phone_option_details($selected_phone_country_code);
+$selected_country_option = null;
+
+foreach ($country_options as $country_option) {
+    if ((string) ($country_option['value'] ?? '') === $selected_country) {
+        $selected_country_option = $country_option;
+        break;
+    }
+}
+
+$phone_picker_display_label = \trim((string) ($selected_phone_option['country_code'] ?? '') . ' ' . (string) ($selected_phone_option['dial_code'] ?? ''));
+$phone_picker_display_flag = isset($selected_phone_option['flag']) ? (string) $selected_phone_option['flag'] : '';
+$country_picker_placeholder = \__('Country of Residence*', 'must-hotel-booking');
+$country_picker_display_label = \is_array($selected_country_option)
+    ? (string) ($selected_country_option['name'] ?? $country_picker_placeholder)
+    : $country_picker_placeholder;
+$country_picker_display_flag = \is_array($selected_country_option)
+    ? (string) ($selected_country_option['flag'] ?? '')
+    : '';
+$country_picker_has_selection = \is_array($selected_country_option) && $selected_country !== '';
+$phone_picker_search_placeholder = \__('Search code or country', 'must-hotel-booking');
+$country_picker_search_placeholder = \__('Search country', 'must-hotel-booking');
+$picker_no_results_label = \__('No matches found.', 'must-hotel-booking');
+
 $summary_currency = 'USD';
 
 if (!empty($selected_rooms[0]['room']) && \is_array($selected_rooms[0]['room']) && !empty($selected_rooms[0]['room']['currency'])) {
@@ -82,9 +106,7 @@ $format_display_date = static function (string $date): string {
                         <span><?php echo \esc_html__('Back', 'must-hotel-booking'); ?></span>
                     </a>
                     <a href="<?php echo \esc_url($booking_url); ?>" class="must-booking-stepper-step is-link" data-step="1"><?php echo \esc_html__('Calendar', 'must-hotel-booking'); ?></a>
-                    <?php if ($fixed_room_mode) : ?>
-                        <span class="must-booking-stepper-step is-skipped" data-step="2"><?php echo \esc_html__('Select Accommodation', 'must-hotel-booking'); ?></span>
-                    <?php else : ?>
+                    <?php if (!$fixed_room_mode) : ?>
                         <a href="<?php echo \esc_url($accommodation_url); ?>" class="must-booking-stepper-step is-link" data-step="2"><?php echo \esc_html__('Select Accommodation', 'must-hotel-booking'); ?></a>
                     <?php endif; ?>
                     <span class="must-booking-stepper-step is-active" data-step="3"><?php echo \esc_html__('Guest Information', 'must-hotel-booking'); ?></span>
@@ -409,43 +431,150 @@ $format_display_date = static function (string $date): string {
                                     <input id="must-checkout-email" type="email" name="email" value="<?php echo \esc_attr((string) ($guest_form['email'] ?? '')); ?>" placeholder="<?php echo \esc_attr__('Email*', 'must-hotel-booking'); ?>" required />
                                 </label>
 
-                                <label class="must-checkout-field must-checkout-field-phone">
+                                <div class="must-checkout-field must-checkout-field-phone">
                                     <span class="screen-reader-text"><?php echo \esc_html__('Phone Number', 'must-hotel-booking'); ?></span>
-                                    <span class="must-checkout-phone-shell">
-                                        <select name="phone_country_code" aria-label="<?php echo \esc_attr__('Phone country code', 'must-hotel-booking'); ?>">
-                                            <?php foreach ($phone_country_code_options as $phone_country_code_option) : ?>
-                                                <?php
-                                                $phone_option_value = isset($phone_country_code_option['value']) ? (string) $phone_country_code_option['value'] : '';
-                                                $phone_option_label = isset($phone_country_code_option['label']) ? (string) $phone_country_code_option['label'] : '';
-                                                ?>
-                                                <option value="<?php echo \esc_attr($phone_option_value); ?>"<?php selected($phone_option_value, $selected_phone_country_code); ?>>
-                                                    <?php echo \esc_html($phone_option_label); ?>
-                                                </option>
-                                            <?php endforeach; ?>
-                                        </select>
+                                    <div class="must-checkout-phone-shell">
+                                        <div
+                                            class="must-checkout-picker must-checkout-picker-phone"
+                                            data-checkout-picker="1"
+                                            data-picker-placeholder="<?php echo \esc_attr($phone_picker_display_label); ?>"
+                                        >
+                                            <input type="hidden" name="phone_country_code" value="<?php echo \esc_attr((string) ($selected_phone_option['value'] ?? $selected_phone_country_code)); ?>" data-picker-input="1" />
+                                            <button
+                                                type="button"
+                                                class="must-checkout-picker-toggle"
+                                                data-picker-toggle="1"
+                                                aria-haspopup="listbox"
+                                                aria-expanded="false"
+                                                aria-label="<?php echo \esc_attr__('Phone country code', 'must-hotel-booking'); ?>"
+                                            >
+                                                <span class="must-checkout-picker-toggle-copy">
+                                                    <span class="must-checkout-picker-flag" data-picker-selected-flag="1"><?php echo \esc_html($phone_picker_display_flag); ?></span>
+                                                    <span class="must-checkout-picker-label" data-picker-selected-label="1"><?php echo \esc_html($phone_picker_display_label); ?></span>
+                                                </span>
+                                                <?php if ($dropdown_icon_url !== '') : ?>
+                                                    <img src="<?php echo \esc_url($dropdown_icon_url); ?>" alt="" aria-hidden="true" />
+                                                <?php endif; ?>
+                                            </button>
+                                            <div class="must-checkout-picker-panel" data-picker-panel="1" hidden>
+                                                <div class="must-checkout-picker-search-wrap">
+                                                    <input
+                                                        type="text"
+                                                        class="must-checkout-picker-search"
+                                                        data-picker-search="1"
+                                                        value=""
+                                                        placeholder="<?php echo \esc_attr($phone_picker_search_placeholder); ?>"
+                                                        aria-label="<?php echo \esc_attr($phone_picker_search_placeholder); ?>"
+                                                    />
+                                                </div>
+                                                <div class="must-checkout-picker-options" role="listbox">
+                                                    <?php foreach ($phone_country_code_options as $phone_country_code_option) : ?>
+                                                        <?php
+                                                        $phone_option_value = isset($phone_country_code_option['value']) ? (string) $phone_country_code_option['value'] : '';
+                                                        $phone_option_country_code = isset($phone_country_code_option['country_code']) ? (string) $phone_country_code_option['country_code'] : '';
+                                                        $phone_option_country_name = isset($phone_country_code_option['country_name']) ? (string) $phone_country_code_option['country_name'] : '';
+                                                        $phone_option_dial_code = isset($phone_country_code_option['dial_code']) ? (string) $phone_country_code_option['dial_code'] : '';
+                                                        $phone_option_flag = isset($phone_country_code_option['flag']) ? (string) $phone_country_code_option['flag'] : '';
+                                                        $phone_option_display_label = \trim($phone_option_country_code . ' ' . $phone_option_dial_code);
+                                                        $phone_option_search = \strtolower(\trim($phone_option_country_code . ' ' . $phone_option_country_name . ' ' . $phone_option_dial_code));
+                                                        $phone_option_is_selected = $phone_option_value === (string) ($selected_phone_option['value'] ?? $selected_phone_country_code);
+                                                        ?>
+                                                        <button
+                                                            type="button"
+                                                            class="must-checkout-picker-option<?php echo $phone_option_is_selected ? ' is-selected' : ''; ?>"
+                                                            data-picker-option="1"
+                                                            data-value="<?php echo \esc_attr($phone_option_value); ?>"
+                                                            data-label="<?php echo \esc_attr($phone_option_display_label); ?>"
+                                                            data-flag="<?php echo \esc_attr($phone_option_flag); ?>"
+                                                            data-search="<?php echo \esc_attr($phone_option_search); ?>"
+                                                            role="option"
+                                                            aria-selected="<?php echo $phone_option_is_selected ? 'true' : 'false'; ?>"
+                                                        >
+                                                            <span class="must-checkout-picker-option-flag" aria-hidden="true"><?php echo \esc_html($phone_option_flag); ?></span>
+                                                            <span class="must-checkout-picker-option-copy">
+                                                                <span class="must-checkout-picker-option-title"><?php echo \esc_html($phone_option_country_name); ?></span>
+                                                                <span class="must-checkout-picker-option-meta"><?php echo \esc_html($phone_option_display_label); ?></span>
+                                                            </span>
+                                                        </button>
+                                                    <?php endforeach; ?>
+                                                    <p class="must-checkout-picker-empty" data-picker-empty="1" hidden><?php echo \esc_html($picker_no_results_label); ?></p>
+                                                </div>
+                                            </div>
+                                        </div>
                                         <span class="must-checkout-phone-divider" aria-hidden="true">|</span>
                                         <input id="must-checkout-phone" type="text" name="phone_number" value="<?php echo \esc_attr($phone_number); ?>" placeholder="<?php echo \esc_attr__('Phone Number*', 'must-hotel-booking'); ?>" inputmode="numeric" pattern="[0-9]*" autocomplete="tel-national" required />
-                                    </span>
-                                </label>
+                                    </div>
+                                </div>
 
-                                <label class="must-checkout-field must-checkout-field-select">
+                                <div class="must-checkout-field must-checkout-field-select">
                                     <span class="screen-reader-text"><?php echo \esc_html__('Country of Residence', 'must-hotel-booking'); ?></span>
-                                    <select id="must-checkout-country" name="country" required>
-                                        <option value=""><?php echo \esc_html__('Country of Residence*', 'must-hotel-booking'); ?></option>
-                                        <?php foreach ($country_options as $country_option) : ?>
-                                            <?php
-                                            $country_option_value = isset($country_option['value']) ? (string) $country_option['value'] : '';
-                                            $country_option_label = isset($country_option['label']) ? (string) $country_option['label'] : '';
-                                            ?>
-                                            <option value="<?php echo \esc_attr($country_option_value); ?>"<?php selected($country_option_value, $selected_country); ?>>
-                                                <?php echo \esc_html($country_option_label); ?>
-                                            </option>
-                                        <?php endforeach; ?>
-                                    </select>
-                                    <?php if ($dropdown_icon_url !== '') : ?>
-                                        <img src="<?php echo \esc_url($dropdown_icon_url); ?>" alt="" aria-hidden="true" />
-                                    <?php endif; ?>
-                                </label>
+                                    <div
+                                        class="must-checkout-picker must-checkout-picker-country<?php echo $country_picker_has_selection ? '' : ' is-placeholder'; ?>"
+                                        data-checkout-picker="1"
+                                        data-picker-placeholder="<?php echo \esc_attr($country_picker_placeholder); ?>"
+                                    >
+                                        <input type="hidden" id="must-checkout-country" name="country" value="<?php echo \esc_attr($selected_country); ?>" data-picker-input="1" />
+                                        <button
+                                            type="button"
+                                            class="must-checkout-picker-toggle"
+                                            data-picker-toggle="1"
+                                            aria-haspopup="listbox"
+                                            aria-expanded="false"
+                                            aria-label="<?php echo \esc_attr__('Country of Residence', 'must-hotel-booking'); ?>"
+                                        >
+                                            <span class="must-checkout-picker-toggle-copy">
+                                                <span class="must-checkout-picker-flag<?php echo $country_picker_has_selection ? '' : ' is-hidden'; ?>" data-picker-selected-flag="1"><?php echo \esc_html($country_picker_display_flag); ?></span>
+                                                <span class="must-checkout-picker-label" data-picker-selected-label="1"><?php echo \esc_html($country_picker_display_label); ?></span>
+                                            </span>
+                                            <?php if ($dropdown_icon_url !== '') : ?>
+                                                <img src="<?php echo \esc_url($dropdown_icon_url); ?>" alt="" aria-hidden="true" />
+                                            <?php endif; ?>
+                                        </button>
+                                        <div class="must-checkout-picker-panel" data-picker-panel="1" hidden>
+                                            <div class="must-checkout-picker-search-wrap">
+                                                <input
+                                                    type="text"
+                                                    class="must-checkout-picker-search"
+                                                    data-picker-search="1"
+                                                    value=""
+                                                    placeholder="<?php echo \esc_attr($country_picker_search_placeholder); ?>"
+                                                    aria-label="<?php echo \esc_attr($country_picker_search_placeholder); ?>"
+                                                />
+                                            </div>
+                                            <div class="must-checkout-picker-options" role="listbox">
+                                                <?php foreach ($country_options as $country_option) : ?>
+                                                    <?php
+                                                    $country_option_value = isset($country_option['value']) ? (string) $country_option['value'] : '';
+                                                    $country_option_code = isset($country_option['code']) ? (string) $country_option['code'] : '';
+                                                    $country_option_name = isset($country_option['name']) ? (string) $country_option['name'] : '';
+                                                    $country_option_dial_code = isset($country_option['dial_code']) ? (string) $country_option['dial_code'] : '';
+                                                    $country_option_flag = isset($country_option['flag']) ? (string) $country_option['flag'] : '';
+                                                    $country_option_search = \strtolower(\trim($country_option_code . ' ' . $country_option_name . ' ' . $country_option_dial_code));
+                                                    $country_option_is_selected = $country_option_value === $selected_country;
+                                                    ?>
+                                                    <button
+                                                        type="button"
+                                                        class="must-checkout-picker-option<?php echo $country_option_is_selected ? ' is-selected' : ''; ?>"
+                                                        data-picker-option="1"
+                                                        data-value="<?php echo \esc_attr($country_option_value); ?>"
+                                                        data-label="<?php echo \esc_attr($country_option_name); ?>"
+                                                        data-flag="<?php echo \esc_attr($country_option_flag); ?>"
+                                                        data-search="<?php echo \esc_attr($country_option_search); ?>"
+                                                        role="option"
+                                                        aria-selected="<?php echo $country_option_is_selected ? 'true' : 'false'; ?>"
+                                                    >
+                                                        <span class="must-checkout-picker-option-flag" aria-hidden="true"><?php echo \esc_html($country_option_flag); ?></span>
+                                                        <span class="must-checkout-picker-option-copy">
+                                                            <span class="must-checkout-picker-option-title"><?php echo \esc_html($country_option_name); ?></span>
+                                                            <span class="must-checkout-picker-option-meta"><?php echo \esc_html(\trim($country_option_code . ' ' . $country_option_dial_code)); ?></span>
+                                                        </span>
+                                                    </button>
+                                                <?php endforeach; ?>
+                                                <p class="must-checkout-picker-empty" data-picker-empty="1" hidden><?php echo \esc_html($picker_no_results_label); ?></p>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
                             </div>
                         </div>
 

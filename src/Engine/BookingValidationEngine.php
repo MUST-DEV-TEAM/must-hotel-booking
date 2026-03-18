@@ -18,7 +18,7 @@ final class BookingValidationEngine
         $accommodationTypeRaw = isset($source['accommodation_type'])
             ? \sanitize_text_field((string) \wp_unslash($source['accommodation_type']))
             : 'standard-rooms';
-        $accommodationType = RoomCatalog::normalizeCategory($accommodationTypeRaw);
+        $accommodationType = RoomCatalog::normalizeBookingCategory($accommodationTypeRaw);
         $roomCount = BookingRules::normalizeRoomCount($source['room_count'] ?? 0);
         $guestsRaw = isset($source['guests']) ? \wp_unslash($source['guests']) : 1;
         $maxBookingGuests = BookingRules::getMaxBookingGuestsLimit();
@@ -221,13 +221,15 @@ final class BookingValidationEngine
             ? \MustHotelBooking\Frontend\normalize_checkout_phone_option_value((string) $fallback['phone_country_code'])
             : \MustHotelBooking\Frontend\get_checkout_default_phone_option_value();
 
+        $country = isset($source['country'])
+            ? \MustHotelBooking\Frontend\resolve_checkout_country_code(\sanitize_text_field((string) \wp_unslash($source['country'])))
+            : (string) ($fallback['country'] ?? '');
+
         return [
             'first_name' => isset($source['first_name']) ? \sanitize_text_field((string) \wp_unslash($source['first_name'])) : (string) ($fallback['first_name'] ?? ''),
             'last_name' => isset($source['last_name']) ? \sanitize_text_field((string) \wp_unslash($source['last_name'])) : (string) ($fallback['last_name'] ?? ''),
             'company' => isset($source['company']) ? \sanitize_text_field((string) \wp_unslash($source['company'])) : (string) ($fallback['company'] ?? ''),
-            'country' => isset($source['country'])
-                ? \MustHotelBooking\Frontend\resolve_checkout_country_code(\sanitize_text_field((string) \wp_unslash($source['country'])))
-                : (string) ($fallback['country'] ?? ''),
+            'country' => $country,
             'street_address' => isset($source['street_address']) ? \sanitize_text_field((string) \wp_unslash($source['street_address'])) : (string) ($fallback['street_address'] ?? ''),
             'address_line_2' => isset($source['address_line_2']) ? \sanitize_text_field((string) \wp_unslash($source['address_line_2'])) : (string) ($fallback['address_line_2'] ?? ''),
             'city' => isset($source['city']) ? \sanitize_text_field((string) \wp_unslash($source['city'])) : (string) ($fallback['city'] ?? ''),
@@ -242,7 +244,11 @@ final class BookingValidationEngine
             'email' => isset($source['email']) ? \sanitize_email((string) \wp_unslash($source['email'])) : (string) ($fallback['email'] ?? ''),
             'billing_country' => isset($source['billing_country'])
                 ? \MustHotelBooking\Frontend\resolve_checkout_country_code(\sanitize_text_field((string) \wp_unslash($source['billing_country'])))
-                : (string) ($fallback['billing_country'] ?? ''),
+                : ($country !== ''
+                    ? $country
+                    : ((string) ($fallback['billing_country'] ?? '') !== ''
+                        ? (string) $fallback['billing_country']
+                        : (string) ($fallback['country'] ?? ''))),
             'special_requests' => isset($source['special_requests']) ? \sanitize_textarea_field((string) \wp_unslash($source['special_requests'])) : (string) ($fallback['special_requests'] ?? ''),
         ];
     }
@@ -291,10 +297,6 @@ final class BookingValidationEngine
             $errors[] = \__('Phone number is required.', 'must-hotel-booking');
         }
 
-        if ((string) ($billingForm['billing_country'] ?? '') === '') {
-            $errors[] = \__('Billing country is required.', 'must-hotel-booking');
-        }
-
         return $errors;
     }
 
@@ -320,7 +322,9 @@ final class BookingValidationEngine
                 'city' => (string) ($billingForm['city'] ?? ''),
                 'county' => (string) ($billingForm['county'] ?? ''),
                 'postcode' => (string) ($billingForm['postcode'] ?? ''),
-                'billing_country' => (string) ($billingForm['billing_country'] ?? ''),
+                'billing_country' => (string) (($billingForm['billing_country'] ?? '') !== ''
+                    ? $billingForm['billing_country']
+                    : self::getConfirmationPrimaryCountryCode($billingForm)),
                 'special_requests' => (string) ($billingForm['special_requests'] ?? '') !== ''
                     ? (string) $billingForm['special_requests']
                     : (string) ($guestForm['special_requests'] ?? ''),

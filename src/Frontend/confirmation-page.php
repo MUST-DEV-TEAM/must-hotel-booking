@@ -542,11 +542,18 @@ function enqueue_confirmation_page_assets(): void
         return;
     }
 
+    $booking_page_style_version = \defined('MUST_HOTEL_BOOKING_PATH') && \file_exists(MUST_HOTEL_BOOKING_PATH . 'assets/css/booking-page.css')
+        ? (string) \filemtime(MUST_HOTEL_BOOKING_PATH . 'assets/css/booking-page.css')
+        : MUST_HOTEL_BOOKING_VERSION;
+    $phone_fields_script_version = \defined('MUST_HOTEL_BOOKING_PATH') && \file_exists(MUST_HOTEL_BOOKING_PATH . 'assets/js/booking-phone-fields.js')
+        ? (string) \filemtime(MUST_HOTEL_BOOKING_PATH . 'assets/js/booking-phone-fields.js')
+        : MUST_HOTEL_BOOKING_VERSION;
+
     \wp_enqueue_style(
         'must-hotel-booking-booking-page',
         MUST_HOTEL_BOOKING_URL . 'assets/css/booking-page.css',
         [],
-        MUST_HOTEL_BOOKING_VERSION
+        $booking_page_style_version
     );
 
     \wp_enqueue_script(
@@ -561,7 +568,7 @@ function enqueue_confirmation_page_assets(): void
         'must-hotel-booking-phone-fields',
         MUST_HOTEL_BOOKING_URL . 'assets/js/booking-phone-fields.js',
         [],
-        MUST_HOTEL_BOOKING_VERSION,
+        $phone_fields_script_version,
         true
     );
 }

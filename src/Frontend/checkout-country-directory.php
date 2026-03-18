@@ -350,14 +350,22 @@ function get_checkout_country_flag(string $country_code): string
 {
     $country_code = \strtoupper(\trim($country_code));
 
-    if (!\preg_match('/^[A-Z]{2}$/', $country_code) || !\function_exists('mb_chr')) {
+    if (!\preg_match('/^[A-Z]{2}$/', $country_code)) {
         return '';
     }
 
     $first_codepoint = 0x1F1E6 + (\ord($country_code[0]) - 65);
     $second_codepoint = 0x1F1E6 + (\ord($country_code[1]) - 65);
 
-    return \mb_chr($first_codepoint, 'UTF-8') . \mb_chr($second_codepoint, 'UTF-8');
+    if (\function_exists('mb_chr')) {
+        return \mb_chr($first_codepoint, 'UTF-8') . \mb_chr($second_codepoint, 'UTF-8');
+    }
+
+    return \html_entity_decode(
+        '&#x' . \strtoupper(\dechex($first_codepoint)) . ';' . '&#x' . \strtoupper(\dechex($second_codepoint)) . ';',
+        \ENT_QUOTES,
+        'UTF-8'
+    );
 }
 
 /**
@@ -429,7 +437,7 @@ function normalize_checkout_phone_option_value(string $value): string
 /**
  * Parse a normalized phone option value.
  *
- * @return array{value: string, country_code: string, country_name: string, dial_code: string, label: string}
+ * @return array{value: string, country_code: string, country_name: string, dial_code: string, label: string, flag: string}
  */
 function get_checkout_phone_option_details(string $value): array
 {
@@ -453,13 +461,14 @@ function get_checkout_phone_option_details(string $value): array
         'country_name' => (string) $country['name'],
         'dial_code' => (string) $country['dial_code'],
         'label' => $label,
+        'flag' => $flag,
     ];
 }
 
 /**
  * Get checkout phone options.
  *
- * @return array<int, array{value: string, label: string, country_code: string, country_name: string, dial_code: string}>
+ * @return array<int, array{value: string, label: string, country_code: string, country_name: string, dial_code: string, flag: string}>
  */
 function get_checkout_phone_code_options(): array
 {
@@ -476,7 +485,7 @@ function get_checkout_phone_code_options(): array
 /**
  * Get checkout country options.
  *
- * @return array<int, array{value: string, label: string, code: string, name: string, dial_code: string}>
+ * @return array<int, array{value: string, label: string, code: string, name: string, dial_code: string, flag: string}>
  */
 function get_checkout_country_options(): array
 {
@@ -490,6 +499,7 @@ function get_checkout_country_options(): array
             'code' => (string) $country['code'],
             'name' => (string) $country['name'],
             'dial_code' => (string) $country['dial_code'],
+            'flag' => $flag,
         ];
     }
 

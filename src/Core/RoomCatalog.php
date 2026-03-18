@@ -4,6 +4,8 @@ namespace MustHotelBooking\Core;
 
 final class RoomCatalog
 {
+    public const BOOKING_ALL_CATEGORY = 'all';
+
     /**
      * @return array<string, string>
      */
@@ -14,6 +16,16 @@ final class RoomCatalog
             'suites' => \__('Suites', 'must-hotel-booking'),
             'duplex-suite' => \__('Duplex Suite', 'must-hotel-booking'),
         ];
+    }
+
+    /**
+     * @return array<string, string>
+     */
+    public static function getBookingCategories(): array
+    {
+        return [
+            self::BOOKING_ALL_CATEGORY => \__('ALL', 'must-hotel-booking'),
+        ] + self::getCategories();
     }
 
     public static function normalizeCategory(string $category): string
@@ -28,12 +40,36 @@ final class RoomCatalog
         return 'standard-rooms';
     }
 
+    public static function normalizeBookingCategory(string $category): string
+    {
+        $normalized = \sanitize_key($category);
+
+        if ($normalized === self::BOOKING_ALL_CATEGORY) {
+            return self::BOOKING_ALL_CATEGORY;
+        }
+
+        return self::normalizeCategory($normalized);
+    }
+
     public static function getCategoryLabel(string $category): string
     {
         $categories = self::getCategories();
         $slug = self::normalizeCategory($category);
 
         return isset($categories[$slug]) ? (string) $categories[$slug] : (string) $categories['standard-rooms'];
+    }
+
+    public static function getBookingCategoryLabel(string $category): string
+    {
+        $categories = self::getBookingCategories();
+        $slug = self::normalizeBookingCategory($category);
+
+        return isset($categories[$slug]) ? (string) $categories[$slug] : (string) $categories['standard-rooms'];
+    }
+
+    public static function isBookingAllCategory(string $category): bool
+    {
+        return self::normalizeBookingCategory($category) === self::BOOKING_ALL_CATEGORY;
     }
 
     /**

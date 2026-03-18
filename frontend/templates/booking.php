@@ -15,6 +15,7 @@ $resolved_room_count = isset($view['resolved_room_count']) ? (int) $view['resolv
 $max_booking_guests = isset($view['max_booking_guests']) ? (int) $view['max_booking_guests'] : 12;
 $max_booking_rooms = isset($view['max_booking_rooms']) ? (int) $view['max_booking_rooms'] : 3;
 $accommodation_type = isset($view['accommodation_type']) ? (string) $view['accommodation_type'] : 'standard-rooms';
+$booking_categories = isset($view['booking_categories']) && \is_array($view['booking_categories']) ? $view['booking_categories'] : [];
 $has_search = !empty($view['has_search']);
 $is_valid = !empty($view['is_valid']);
 $booking_url = isset($view['booking_url']) ? (string) $view['booking_url'] : \home_url('/booking');
@@ -91,7 +92,9 @@ if ($checkout !== '') {
                         <span><?php echo \esc_html__('Back', 'must-hotel-booking'); ?></span>
                     </button>
                     <span class="must-booking-stepper-step is-active" data-step="1"><?php echo \esc_html__('Calendar', 'must-hotel-booking'); ?></span>
-                    <span class="must-booking-stepper-step<?php echo $fixed_room_mode ? ' is-skipped' : ''; ?>" data-step="2"><?php echo \esc_html__('Select Accommodation', 'must-hotel-booking'); ?></span>
+                    <?php if (!$fixed_room_mode) : ?>
+                        <span class="must-booking-stepper-step" data-step="2"><?php echo \esc_html__('Select Accommodation', 'must-hotel-booking'); ?></span>
+                    <?php endif; ?>
                     <span class="must-booking-stepper-step" data-step="3"><?php echo \esc_html__('Guest Information', 'must-hotel-booking'); ?></span>
                     <span class="must-booking-stepper-step" data-step="4"><?php echo \esc_html__('Review & Payment', 'must-hotel-booking'); ?></span>
                     <button type="button" id="must-booking-step-next" class="must-booking-stepper-nav is-next">
@@ -221,9 +224,11 @@ if ($checkout !== '') {
                         <label class="must-booking-step-select-row" for="must-booking-accommodation-type">
                             <span><?php echo \esc_html__('Accommodation type', 'must-hotel-booking'); ?></span>
                             <select id="must-booking-accommodation-type" name="accommodation_type">
-                                <option value="standard-rooms" <?php selected($accommodation_type, 'standard-rooms'); ?>><?php echo \esc_html__('Standard Rooms', 'must-hotel-booking'); ?></option>
-                                <option value="suites" <?php selected($accommodation_type, 'suites'); ?>><?php echo \esc_html__('Suites', 'must-hotel-booking'); ?></option>
-                                <option value="duplex-suite" <?php selected($accommodation_type, 'duplex-suite'); ?>><?php echo \esc_html__('Duplex Suite', 'must-hotel-booking'); ?></option>
+                                <?php foreach ($booking_categories as $category_value => $category_label) : ?>
+                                    <option value="<?php echo \esc_attr((string) $category_value); ?>" <?php selected($accommodation_type, (string) $category_value); ?>>
+                                        <?php echo \esc_html((string) $category_label); ?>
+                                    </option>
+                                <?php endforeach; ?>
                             </select>
                         </label>
                     <?php endif; ?>

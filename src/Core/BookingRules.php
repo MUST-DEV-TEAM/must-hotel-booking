@@ -65,6 +65,8 @@ final class BookingRules
             ];
         }
 
+        $capacityMap[RoomCatalog::BOOKING_ALL_CATEGORY] = (int) \max($capacityMap);
+
         return $capacityMap;
     }
 
@@ -78,7 +80,15 @@ final class BookingRules
         }
 
         $capacityMap = self::getRoomCategoryCapacityMap();
-        $normalizedCategory = RoomCatalog::normalizeCategory($accommodationType);
+        $normalizedCategory = RoomCatalog::normalizeBookingCategory($accommodationType);
+
+        if (RoomCatalog::isBookingAllCategory($normalizedCategory)) {
+            $allCapacity = isset($capacityMap[RoomCatalog::BOOKING_ALL_CATEGORY])
+                ? (int) $capacityMap[RoomCatalog::BOOKING_ALL_CATEGORY]
+                : (!empty($capacityMap) ? (int) \max($capacityMap) : 4);
+
+            return \max(1, $allCapacity);
+        }
 
         if (isset($capacityMap[$normalizedCategory])) {
             return \max(1, (int) $capacityMap[$normalizedCategory]);

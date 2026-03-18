@@ -161,7 +161,7 @@ final class AvailabilityEngine
         }
 
         $guests = \max(1, $guests);
-        $category = RoomCatalog::normalizeCategory($category);
+        $category = RoomCatalog::normalizeBookingCategory($category);
 
         LockEngine::cleanupExpiredLocks();
 

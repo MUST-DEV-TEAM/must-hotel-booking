@@ -392,7 +392,7 @@ function format_booking_results_date_range(string $checkin, string $checkout): s
  */
 function format_booking_results_selection_summary(string $accommodation_type, int $guests, int $room_count = 0): string
 {
-    $category_label = RoomCatalog::getCategoryLabel($accommodation_type);
+    $category_label = RoomCatalog::getBookingCategoryLabel($accommodation_type);
     $resolved_room_count = BookingRules::resolveRoomCount($guests, $room_count, $accommodation_type);
     $room_count_label = BookingRules::formatRoomCountLabel($resolved_room_count);
 
@@ -507,6 +507,7 @@ function get_booking_page_view_data(): array
         'max_booking_guests' => $max_booking_guests,
         'max_booking_rooms' => $max_booking_rooms,
         'accommodation_type' => (string) $context['accommodation_type'],
+        'booking_categories' => RoomCatalog::getBookingCategories(),
         'has_search' => $has_search,
         'is_valid' => (bool) $context['is_valid'],
         'initial_step' => 1,

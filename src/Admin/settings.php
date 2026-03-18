@@ -5,6 +5,7 @@ namespace MustHotelBooking\Admin;
 use MustHotelBooking\Core\ManagedPages;
 use MustHotelBooking\Core\MustBookingConfig;
 use MustHotelBooking\Engine\EmailEngine;
+use MustHotelBooking\Engine\EmailLayoutEngine;
 use MustHotelBooking\Engine\LockEngine;
 use MustHotelBooking\Engine\PaymentEngine;
 
@@ -698,10 +699,14 @@ function render_general_settings_section(array $form): void
     $site_environment = isset($form['site_environment']) ? (string) $form['site_environment'] : 'production';
     $environment_catalog = PaymentEngine::getStripeEnvironmentCatalog();
     $current_site_url = (string) \home_url('/');
+    $emails_settings_url = \function_exists(__NAMESPACE__ . '\get_admin_emails_page_url')
+        ? get_admin_emails_page_url()
+        : \admin_url('admin.php?page=must-hotel-booking-emails');
 
     echo '<div class="postbox" style="max-width:960px; padding:16px;">';
     echo '<h2 style="margin-top:0;">' . \esc_html__('Hotel Configuration', 'must-hotel-booking') . '</h2>';
     echo '<p>' . \esc_html__('These settings define the hotel identity and the basic defaults used across the booking flow.', 'must-hotel-booking') . '</p>';
+    echo '<p><a href="' . \esc_url($emails_settings_url) . '">' . \esc_html__('Open Emails settings', 'must-hotel-booking') . '</a> ' . \esc_html__('to manage notification recipients, branding, layout, footer copy, and test sends.', 'must-hotel-booking') . '</p>';
     echo '<form method="post" action="' . \esc_url(get_admin_settings_page_url(['tab' => 'general'])) . '">';
     \wp_nonce_field('must_settings_save_general', 'must_settings_nonce');
     echo '<input type="hidden" name="must_settings_action" value="save_general_settings" />';
@@ -1070,6 +1075,7 @@ function get_settings_diagnostics_data(): array
         'site_environment' => PaymentEngine::getSiteEnvironmentLabel(),
         'room_count' => $room_count,
         'email_template_count' => \count(EmailEngine::getTemplates()),
+        'email_layout_type' => (string) (EmailLayoutEngine::getLayoutTypeLabels()[MustBookingConfig::get_email_layout_type()] ?? MustBookingConfig::get_email_layout_type()),
     ];
 
     $overall_status = 'healthy';
@@ -1151,6 +1157,7 @@ function render_diagnostics_settings_section(): void
     echo '<tr><th>' . \esc_html__('Active site environment', 'must-hotel-booking') . '</th><td>' . \esc_html((string) ($environment['site_environment'] ?? '')) . '</td></tr>';
     echo '<tr><th>' . \esc_html__('Configured rooms', 'must-hotel-booking') . '</th><td>' . \esc_html((string) ($environment['room_count'] ?? 0)) . '</td></tr>';
     echo '<tr><th>' . \esc_html__('Email templates', 'must-hotel-booking') . '</th><td>' . \esc_html((string) ($environment['email_template_count'] ?? 0)) . '</td></tr>';
+    echo '<tr><th>' . \esc_html__('Email layout', 'must-hotel-booking') . '</th><td>' . \esc_html((string) ($environment['email_layout_type'] ?? '')) . '</td></tr>';
     echo '</tbody></table>';
     echo '</div>';
 

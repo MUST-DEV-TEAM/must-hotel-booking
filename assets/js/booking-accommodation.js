@@ -18,13 +18,8 @@
     var lightboxTitle = '';
     var lightboxOpen = false;
     var lightboxLastFocused = null;
-
-    var roomModal = null;
-    var roomModalBodyNode = null;
-    var roomModalCloseNode = null;
-    var roomModalOpen = false;
-    var roomModalLastFocused = null;
     var selectionRequestInFlight = false;
+    var activeInlineDetailsId = '';
 
     function getAccommodationConfig() {
         var config = window.mustBookingAccommodationConfig || {};
@@ -494,102 +489,81 @@
         }
     }
 
-    function buildRoomModal() {
-        if (roomModal) {
-            return;
-        }
-
-        roomModal = document.createElement('div');
-        roomModal.className = 'must-booking-room-modal';
-        roomModal.hidden = true;
-        roomModal.innerHTML =
-            '<div class="must-booking-room-modal-backdrop" data-room-modal-close="1"></div>' +
-            '<div class="must-booking-room-modal-dialog" role="dialog" aria-modal="true">' +
-            '<button type="button" class="must-booking-room-modal-close" aria-label="Close additional details"></button>' +
-            '<div class="must-booking-room-modal-body"></div>' +
-            '</div>';
-
-        document.body.appendChild(roomModal);
-
-        roomModalBodyNode = roomModal.querySelector('.must-booking-room-modal-body');
-        roomModalCloseNode = roomModal.querySelector('.must-booking-room-modal-close');
-
-        roomModal.addEventListener('click', function (event) {
-            var target = event.target;
-
-            if (!(target instanceof HTMLElement)) {
+    function closeInlineDetails(exceptId) {
+        document.querySelectorAll('.must-booking-room-inline-details').forEach(function (detailsNode) {
+            if (!(detailsNode instanceof HTMLElement)) {
                 return;
             }
 
-            if (target.dataset.roomModalClose === '1') {
-                closeRoomModal();
-            }
+            var shouldStayOpen = exceptId !== '' && detailsNode.id === exceptId;
+
+            detailsNode.hidden = !shouldStayOpen;
+            detailsNode.classList.toggle('is-open', shouldStayOpen);
         });
 
-        if (roomModalCloseNode) {
-            roomModalCloseNode.addEventListener('click', closeRoomModal);
-        }
+        document.querySelectorAll(modalTriggerSelector).forEach(function (triggerNode) {
+            if (!(triggerNode instanceof HTMLElement)) {
+                return;
+            }
+
+            var controlsId = String(triggerNode.getAttribute('data-room-inline-details-id') || '');
+            var isExpanded = exceptId !== '' && controlsId === exceptId;
+            triggerNode.setAttribute('aria-expanded', isExpanded ? 'true' : 'false');
+            triggerNode.classList.toggle('is-expanded', isExpanded);
+        });
+
+        activeInlineDetailsId = exceptId || '';
     }
 
-    function closeRoomModal() {
-        if (!roomModal || !roomModalOpen) {
-            return;
-        }
-
-        roomModalOpen = false;
-        roomModal.hidden = true;
-        roomModal.classList.remove('is-open');
-        document.body.classList.remove('must-booking-room-modal-open');
-
-        if (roomModalBodyNode) {
-            roomModalBodyNode.innerHTML = '';
-        }
-
-        if (roomModalLastFocused && typeof roomModalLastFocused.focus === 'function') {
-            roomModalLastFocused.focus();
-        }
-    }
-
-    function openRoomModalFromTrigger(triggerNode) {
+    function toggleInlineDetailsFromTrigger(triggerNode) {
         if (!(triggerNode instanceof HTMLElement)) {
             return;
         }
 
-        var templateId = String(triggerNode.getAttribute('data-room-modal-id') || '');
+        var detailsId = String(triggerNode.getAttribute('data-room-inline-details-id') || '');
 
-        if (templateId === '') {
+        if (detailsId === '') {
             return;
         }
 
-        var templateNode = document.getElementById(templateId);
+        var detailsNode = document.getElementById(detailsId);
 
-        if (!(templateNode instanceof HTMLTemplateElement)) {
+        if (!(detailsNode instanceof HTMLElement)) {
             return;
         }
 
-        buildRoomModal();
-
-        if (!roomModalBodyNode) {
+        if (activeInlineDetailsId === detailsId && !detailsNode.hidden) {
+            closeInlineDetails('');
             return;
         }
 
-        roomModalBodyNode.innerHTML = '';
-        roomModalBodyNode.appendChild(templateNode.content.cloneNode(true));
-        roomModalLastFocused = document.activeElement instanceof HTMLElement ? document.activeElement : null;
-        roomModalOpen = true;
-        roomModal.hidden = false;
-        roomModal.classList.add('is-open');
-        document.body.classList.add('must-booking-room-modal-open');
-
-        if (roomModalCloseNode) {
-            roomModalCloseNode.focus();
-        }
+        closeInlineDetails(detailsId);
     }
 
     function onDocumentClick(event) {
         var target = event.target;
 
         if (!(target instanceof HTMLElement)) {
+            return;
+        }
+
+        var inlineDetailsCloseNode = target.closest('[data-room-inline-details-close="1"]');
+
+        if (inlineDetailsCloseNode) {
+            var inlineDetailsNode = inlineDetailsCloseNode.closest('.must-booking-room-inline-details');
+            var inlineDetailsId = inlineDetailsNode instanceof HTMLElement ? inlineDetailsNode.id : '';
+
+            event.preventDefault();
+            closeInlineDetails('');
+
+            if (inlineDetailsId !== '') {
+                var triggerNode = document.querySelector('[data-room-inline-details-id="' + inlineDetailsId + '"]');
+
+                if (triggerNode instanceof HTMLElement) {
+                    triggerNode.focus();
+                }
+            }
+
             return;
         }
 
@@ -623,7 +597,7 @@
 
         if (modalTriggerNode) {
             event.preventDefault();
-            openRoomModalFromTrigger(modalTriggerNode);
+            toggleInlineDetailsFromTrigger(modalTriggerNode);
             return;
         }
 
@@ -683,13 +657,12 @@
     }
 
     function onDocumentKeyDown(event) {
-        if (roomModalOpen && event.key === 'Escape') {
-            event.preventDefault();
-            closeRoomModal();
-            return;
-        }
-
         if (!lightboxOpen) {
+            if (event.key === 'Escape' && activeInlineDetailsId !== '') {
+                event.preventDefault();
+                closeInlineDetails('');
+            }
+
             return;
         }
 

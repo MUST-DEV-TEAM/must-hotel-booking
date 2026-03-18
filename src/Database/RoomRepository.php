@@ -320,18 +320,33 @@ final class RoomRepository extends AbstractRepository
      */
     public function getRoomsByType(string $category, int $guests = 1): array
     {
-        $rows = $this->wpdb->get_results(
-            $this->wpdb->prepare(
-                'SELECT id, name, slug, category, description, max_guests, base_price, room_size, beds
-                FROM ' . $this->table('rooms') . '
-                WHERE category = %s
-                    AND max_guests >= %d
-                ORDER BY id ASC',
-                \sanitize_key($category),
-                \max(1, $guests)
-            ),
-            ARRAY_A
-        );
+        $normalizedCategory = \sanitize_key($category);
+
+        if ($normalizedCategory === 'all') {
+            $rows = $this->wpdb->get_results(
+                $this->wpdb->prepare(
+                    'SELECT id, name, slug, category, description, max_guests, base_price, room_size, beds
+                    FROM ' . $this->table('rooms') . '
+                    WHERE max_guests >= %d
+                    ORDER BY id ASC',
+                    \max(1, $guests)
+                ),
+                ARRAY_A
+            );
+        } else {
+            $rows = $this->wpdb->get_results(
+                $this->wpdb->prepare(
+                    'SELECT id, name, slug, category, description, max_guests, base_price, room_size, beds
+                    FROM ' . $this->table('rooms') . '
+                    WHERE category = %s
+                        AND max_guests >= %d
+                    ORDER BY id ASC',
+                    $normalizedCategory,
+                    \max(1, $guests)
+                ),
+                ARRAY_A
+            );
+        }
 
         return \is_array($rows) ? $rows : [];
     }
@@ -509,13 +524,13 @@ final class RoomRepository extends AbstractRepository
         $roomsTable = $this->table('rooms');
         $reservationsTable = $this->table('reservations');
         $locksTable = $this->lockTableName();
+        $normalizedCategory = \sanitize_key($category);
+        $categoryFilterSql = $normalizedCategory === 'all' ? '' : 'r.category = %s AND ';
 
         if ($sessionId !== '') {
-            $sql = $this->wpdb->prepare(
-                "SELECT r.*
+            $sqlTemplate = "SELECT r.*
                 FROM {$roomsTable} r
-                WHERE r.category = %s
-                    AND r.max_guests >= %d
+                WHERE {$categoryFilterSql}r.max_guests >= %d
                     AND NOT EXISTS (
                         SELECT 1
                         FROM {$reservationsTable} res
@@ -533,25 +548,40 @@ final class RoomRepository extends AbstractRepository
                             AND l.expires_at > %s
                             AND l.session_id <> %s
                     )
-                ORDER BY r.id ASC",
-                \sanitize_key($category),
-                \max(1, $guests),
-                $checkout,
-                $checkin,
-                $statuses[0],
-                $statuses[1],
-                $statuses[2],
-                $checkout,
-                $checkin,
-                $now,
-                $sessionId
-            );
+                ORDER BY r.id ASC";
+
+            $sql = $normalizedCategory === 'all'
+                ? $this->wpdb->prepare(
+                    $sqlTemplate,
+                    \max(1, $guests),
+                    $checkout,
+                    $checkin,
+                    $statuses[0],
+                    $statuses[1],
+                    $statuses[2],
+                    $checkout,
+                    $checkin,
+                    $now,
+                    $sessionId
+                )
+                : $this->wpdb->prepare(
+                    $sqlTemplate,
+                    $normalizedCategory,
+                    \max(1, $guests),
+                    $checkout,
+                    $checkin,
+                    $statuses[0],
+                    $statuses[1],
+                    $statuses[2],
+                    $checkout,
+                    $checkin,
+                    $now,
+                    $sessionId
+                );
         } else {
-            $sql = $this->wpdb->prepare(
-                "SELECT r.*
+            $sqlTemplate = "SELECT r.*
                 FROM {$roomsTable} r
-                WHERE r.category = %s
-                    AND r.max_guests >= %d
+                WHERE {$categoryFilterSql}r.max_guests >= %d
                     AND NOT EXISTS (
                         SELECT 1
                         FROM {$reservationsTable} res
@@ -568,18 +598,34 @@ final class RoomRepository extends AbstractRepository
                             AND l.checkout > %s
                             AND l.expires_at > %s
                     )
-                ORDER BY r.id ASC",
-                \sanitize_key($category),
-                \max(1, $guests),
-                $checkout,
-                $checkin,
-                $statuses[0],
-                $statuses[1],
-                $statuses[2],
-                $checkout,
-                $checkin,
-                $now
-            );
+                ORDER BY r.id ASC";
+
+            $sql = $normalizedCategory === 'all'
+                ? $this->wpdb->prepare(
+                    $sqlTemplate,
+                    \max(1, $guests),
+                    $checkout,
+                    $checkin,
+                    $statuses[0],
+                    $statuses[1],
+                    $statuses[2],
+                    $checkout,
+                    $checkin,
+                    $now
+                )
+                : $this->wpdb->prepare(
+                    $sqlTemplate,
+                    $normalizedCategory,
+                    \max(1, $guests),
+                    $checkout,
+                    $checkin,
+                    $statuses[0],
+                    $statuses[1],
+                    $statuses[2],
+                    $checkout,
+                    $checkin,
+                    $now
+                );
         }
 
         $rows = $this->wpdb->get_results($sql, ARRAY_A);
@@ -651,17 +697,31 @@ final class RoomRepository extends AbstractRepository
      */
     public function getRoomIdsByTypeAndGuests(string $category, int $guests): array
     {
-        $rows = $this->wpdb->get_col(
-            $this->wpdb->prepare(
-                'SELECT id
-                FROM ' . $this->table('rooms') . '
-                WHERE category = %s
-                    AND max_guests >= %d
-                ORDER BY id ASC',
-                \sanitize_key($category),
-                \max(1, $guests)
-            )
-        );
+        $normalizedCategory = \sanitize_key($category);
+
+        if ($normalizedCategory === 'all') {
+            $rows = $this->wpdb->get_col(
+                $this->wpdb->prepare(
+                    'SELECT id
+                    FROM ' . $this->table('rooms') . '
+                    WHERE max_guests >= %d
+                    ORDER BY id ASC',
+                    \max(1, $guests)
+                )
+            );
+        } else {
+            $rows = $this->wpdb->get_col(
+                $this->wpdb->prepare(
+                    'SELECT id
+                    FROM ' . $this->table('rooms') . '
+                    WHERE category = %s
+                        AND max_guests >= %d
+                    ORDER BY id ASC',
+                    $normalizedCategory,
+                    \max(1, $guests)
+                )
+            );
+        }
 
         return $this->normalizeIds(\is_array($rows) ? $rows : []);
     }

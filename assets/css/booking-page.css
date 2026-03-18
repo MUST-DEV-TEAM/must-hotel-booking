@@ -82,7 +82,9 @@
 }
 
 .must-booking-process-page .must-booking-stepper-step.is-link:hover,
-.must-booking-process-page .must-booking-stepper-step.is-link:focus-visible {
+.must-booking-process-page .must-booking-stepper-step.is-link:focus,
+.must-booking-process-page .must-booking-stepper-step.is-link:focus-visible,
+.must-booking-process-page .must-booking-stepper-step.is-link:active {
     font-weight: 500;
     color: #858585;
     outline: none;
@@ -110,11 +112,29 @@
 }
 
 .must-booking-process-page .must-booking-stepper-nav:hover,
-.must-booking-process-page .must-booking-stepper-nav:focus-visible {
+.must-booking-process-page .must-booking-stepper-nav:focus,
+.must-booking-process-page .must-booking-stepper-nav:focus-visible,
+.must-booking-process-page .must-booking-stepper-nav:active {
     opacity: 1;
     color: #858585;
     background: transparent;
     outline: none;
+}
+
+.must-booking-process-page button:focus,
+.must-booking-process-page button:focus-visible,
+.must-booking-process-page [type="button"]:focus,
+.must-booking-process-page [type="button"]:focus-visible,
+.must-booking-process-page [type="submit"]:focus,
+.must-booking-process-page [type="submit"]:focus-visible,
+.must-booking-process-page input:focus,
+.must-booking-process-page input:focus-visible,
+.must-booking-process-page select:focus,
+.must-booking-process-page select:focus-visible,
+.must-booking-process-page textarea:focus,
+.must-booking-process-page textarea:focus-visible {
+    outline: none;
+    box-shadow: none;
 }
 
 .must-booking-process-page .must-booking-stepper-nav span {
@@ -223,8 +243,11 @@
 }
 
 .must-hotel-booking-page-booking .must-booking-cal-shift:hover,
-.must-hotel-booking-page-booking .must-booking-cal-shift:focus-visible {
+.must-hotel-booking-page-booking .must-booking-cal-shift:focus,
+.must-hotel-booking-page-booking .must-booking-cal-shift:focus-visible,
+.must-hotel-booking-page-booking .must-booking-cal-shift:active {
     background: transparent;
+    box-shadow: none;
     outline: none;
 }
 
@@ -803,10 +826,13 @@
 }
 
 .must-hotel-booking-page-booking .must-booking-check-availability:hover,
-.must-hotel-booking-page-booking .must-booking-check-availability:focus-visible {
+.must-hotel-booking-page-booking .must-booking-check-availability:focus,
+.must-hotel-booking-page-booking .must-booking-check-availability:focus-visible,
+.must-hotel-booking-page-booking .must-booking-check-availability:active {
     background: none;
     border-bottom: 1.5px solid #141414;
     color: #141414;
+    box-shadow: none;
     outline: none;
 }
 
@@ -970,10 +996,36 @@
     padding: 12px 16px;
 }
 
+.must-hotel-booking-page-booking .must-booking-results-filter-field input:hover,
+.must-hotel-booking-page-booking .must-booking-results-filter-field input:focus,
+.must-hotel-booking-page-booking .must-booking-results-filter-field input:focus-visible,
+.must-hotel-booking-page-booking .must-booking-results-filter-field input:active,
+.must-hotel-booking-page-booking .must-booking-results-filter-field select:hover,
+.must-hotel-booking-page-booking .must-booking-results-filter-field select:focus,
+.must-hotel-booking-page-booking .must-booking-results-filter-field select:focus-visible,
+.must-hotel-booking-page-booking .must-booking-results-filter-field select:active {
+    border-color: #141414;
+    background: #f5f3ec;
+    color: #141414;
+    box-shadow: none;
+    outline: none;
+}
+
 .must-hotel-booking-page-booking .must-booking-results-filter-apply {
     align-self: end;
     padding: 0 18px;
     cursor: pointer;
+}
+
+.must-hotel-booking-page-booking .must-booking-results-filter-apply:hover,
+.must-hotel-booking-page-booking .must-booking-results-filter-apply:focus,
+.must-hotel-booking-page-booking .must-booking-results-filter-apply:focus-visible,
+.must-hotel-booking-page-booking .must-booking-results-filter-apply:active {
+    border-color: #141414;
+    background: #f5f3ec;
+    color: #141414;
+    box-shadow: none;
+    outline: none;
 }
 
 .must-hotel-booking-page-booking .must-booking-results-party-status {
@@ -1057,6 +1109,12 @@
     display: flex;
     flex-direction: column;
     gap: 40px;
+}
+
+.must-hotel-booking-page-booking .must-booking-accommodation-room-entry {
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
 }
 
 .must-hotel-booking-page-booking .must-hotel-booking-room-card {
@@ -1334,6 +1392,7 @@
 }
 
 .must-hotel-booking-page-booking .must-booking-room-details:hover,
+.must-hotel-booking-page-booking .must-booking-room-details:focus,
 .must-hotel-booking-page-booking .must-booking-room-details:focus-visible {
     opacity: 0.85;
     outline: none;
@@ -1350,6 +1409,7 @@
 }
 
 .must-hotel-booking-page-booking .must-booking-room-details:hover,
+.must-hotel-booking-page-booking .must-booking-room-details:focus,
 .must-hotel-booking-page-booking .must-booking-room-details:focus-visible,
 .must-hotel-booking-page-booking .must-booking-room-details:active {
     background: transparent;
@@ -1361,6 +1421,7 @@
 }
 
 .must-hotel-booking-page-booking .must-booking-room-book-button:hover,
+.must-hotel-booking-page-booking .must-booking-room-book-button:focus,
 .must-hotel-booking-page-booking .must-booking-room-book-button:focus-visible,
 .must-hotel-booking-page-booking .must-booking-room-book-button:active {
     background: transparent;
@@ -1564,6 +1625,96 @@ body .must-booking-room-modal .must-booking-room-modal-close:active {
 
 .must-booking-room-modal-body {
     width: 100%;
+}
+
+.must-booking-room-inline-details {
+    width: 100%;
+}
+
+.must-booking-room-inline-details-inner {
+    position: relative;
+    width: 100%;
+    padding: 45px;
+    border: 1px solid #141414;
+    background: #fff;
+    box-sizing: border-box;
+}
+
+.must-booking-room-inline-details-close {
+    --must-button-bg: #f5f3ec;
+    --must-button-border: #f5f3ec;
+    --must-button-color: transparent;
+    position: absolute;
+    top: 18px;
+    right: 18px;
+    width: 54px;
+    height: 54px;
+    min-width: 54px;
+    min-height: 54px;
+    margin: 0;
+    padding: 0;
+    border: 0 !important;
+    border-radius: 0 !important;
+    background: #f5f3ec !important;
+    color: transparent;
+    box-shadow: none !important;
+    appearance: none;
+    -webkit-appearance: none;
+    cursor: pointer;
+    font-size: 0;
+    line-height: 1;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    box-sizing: border-box;
+    text-indent: -9999px;
+    overflow: hidden;
+    transform: none !important;
+    z-index: 1;
+}
+
+.must-booking-room-inline-details-close::before,
+.must-booking-room-inline-details-close::after {
+    content: '';
+    position: absolute;
+    left: 50%;
+    top: 50%;
+    width: 24px;
+    height: 2px;
+    background: #141414;
+    transform-origin: center;
+}
+
+.must-booking-room-inline-details-close::before {
+    transform: translate(-50%, -50%) rotate(45deg);
+}
+
+.must-booking-room-inline-details-close::after {
+    transform: translate(-50%, -50%) rotate(-45deg);
+}
+
+.must-booking-room-inline-details-close:hover,
+.must-booking-room-inline-details-close:focus,
+.must-booking-room-inline-details-close:focus-visible,
+.must-booking-room-inline-details-close:active {
+    border: 0 !important;
+    background: #f5f3ec !important;
+    box-shadow: none !important;
+    outline: none !important;
+    transform: none !important;
+}
+
+.must-booking-room-inline-details .must-booking-room-popup-layout {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(260px, 360px);
+    column-gap: 90px;
+    row-gap: 36px;
+    align-items: flex-start;
+}
+
+.must-booking-room-inline-details .must-booking-room-popup-main,
+.must-booking-room-inline-details .must-booking-room-popup-side {
+    min-width: 0;
 }
 
 .must-booking-room-popup-layout {
@@ -1788,6 +1939,50 @@ body .must-booking-room-modal .must-booking-room-modal-close:active {
     outline: none;
 }
 
+.must-hotel-booking-page-checkout .must-checkout-coupon-control input:hover,
+.must-hotel-booking-page-checkout .must-checkout-coupon-control input:focus,
+.must-hotel-booking-page-checkout .must-checkout-coupon-control input:focus-visible,
+.must-hotel-booking-page-checkout .must-checkout-coupon-control input:active {
+    border-color: #141414;
+    background: #f5f3ec;
+    color: #141414;
+    box-shadow: none;
+    outline: none;
+}
+
+.must-hotel-booking-page-checkout .must-checkout-field input:hover,
+.must-hotel-booking-page-checkout .must-checkout-field input:focus,
+.must-hotel-booking-page-checkout .must-checkout-field input:focus-visible,
+.must-hotel-booking-page-checkout .must-checkout-field input:active,
+.must-hotel-booking-page-checkout .must-checkout-field select:hover,
+.must-hotel-booking-page-checkout .must-checkout-field select:focus,
+.must-hotel-booking-page-checkout .must-checkout-field select:focus-visible,
+.must-hotel-booking-page-checkout .must-checkout-field select:active,
+.must-hotel-booking-page-checkout .must-checkout-field textarea:hover,
+.must-hotel-booking-page-checkout .must-checkout-field textarea:focus,
+.must-hotel-booking-page-checkout .must-checkout-field textarea:focus-visible,
+.must-hotel-booking-page-checkout .must-checkout-field textarea:active {
+    border-color: #141414;
+    background: transparent;
+    color: #141414;
+    box-shadow: none;
+    outline: none;
+}
+
+.must-hotel-booking-page-checkout .must-checkout-phone-shell select:hover,
+.must-hotel-booking-page-checkout .must-checkout-phone-shell select:focus,
+.must-hotel-booking-page-checkout .must-checkout-phone-shell select:focus-visible,
+.must-hotel-booking-page-checkout .must-checkout-phone-shell select:active,
+.must-hotel-booking-page-checkout .must-checkout-phone-shell input:hover,
+.must-hotel-booking-page-checkout .must-checkout-phone-shell input:focus,
+.must-hotel-booking-page-checkout .must-checkout-phone-shell input:focus-visible,
+.must-hotel-booking-page-checkout .must-checkout-phone-shell input:active {
+    background: transparent;
+    color: #141414;
+    box-shadow: none;
+    outline: none;
+}
+
 .must-hotel-booking-page-checkout .must-checkout-coupon-control input::placeholder {
     color: #141414;
     opacity: 1;
@@ -1828,14 +2023,18 @@ body .must-booking-room-modal .must-booking-room-modal-close:active {
 }
 
 .must-hotel-booking-page-checkout .must-checkout-coupon-submit:hover,
+.must-hotel-booking-page-checkout .must-checkout-coupon-submit:focus,
 .must-hotel-booking-page-checkout .must-checkout-coupon-submit:focus-visible {
     background: transparent;
     outline: none;
+    box-shadow: none;
 }
 
 .must-hotel-booking-page-checkout .must-checkout-coupon-control.is-filled .must-checkout-coupon-submit:hover,
+.must-hotel-booking-page-checkout .must-checkout-coupon-control.is-filled .must-checkout-coupon-submit:focus,
 .must-hotel-booking-page-checkout .must-checkout-coupon-control.is-filled .must-checkout-coupon-submit:focus-visible {
     background: #141414;
+    box-shadow: none;
 }
 
 .must-hotel-booking-page-checkout .must-checkout-room-stack {
@@ -2169,15 +2368,16 @@ body .must-booking-room-modal .must-booking-room-modal-close:active {
     opacity: 1;
 }
 
+.must-hotel-booking-page-checkout .must-checkout-field select,
+.must-hotel-booking-page-booking-confirmation .must-confirmation-field select,
+.must-hotel-booking-page-checkout .must-checkout-phone-shell select,
+.must-hotel-booking-page-booking-confirmation .must-confirmation-phone-shell select {
+    font-family: 'PP Neue Montreal', 'Segoe UI Emoji', 'Apple Color Emoji', 'Noto Color Emoji', sans-serif;
+}
+
 .must-hotel-booking-page-checkout .must-checkout-field textarea {
     min-height: 98px;
     resize: vertical;
-}
-
-.must-hotel-booking-page-checkout .must-checkout-field select {
-    appearance: none;
-    -webkit-appearance: none;
-    -moz-appearance: none;
 }
 
 .must-hotel-booking-page-checkout .must-checkout-field-phone {
@@ -2185,8 +2385,9 @@ body .must-booking-room-modal .must-booking-room-modal-close:active {
 }
 
 .must-hotel-booking-page-checkout .must-checkout-phone-shell {
+    position: relative;
     display: grid;
-    grid-template-columns: max-content 4px minmax(0, 1fr);
+    grid-template-columns: minmax(170px, max-content) 4px minmax(0, 1fr);
     align-items: center;
     border: 1px solid #141414;
     min-height: 44px;
@@ -2195,17 +2396,13 @@ body .must-booking-room-modal .must-booking-room-modal-close:active {
     box-sizing: border-box;
 }
 
-.must-hotel-booking-page-checkout .must-checkout-phone-shell select,
+.must-hotel-booking-page-checkout .must-checkout-phone-shell .must-checkout-picker {
+    position: static;
+}
+
 .must-hotel-booking-page-checkout .must-checkout-phone-shell input {
     border: 0;
     min-height: 24px;
-}
-
-.must-hotel-booking-page-checkout .must-checkout-phone-shell select {
-    width: auto;
-    min-width: 64px;
-    padding: 0;
-    background: transparent;
 }
 
 .must-hotel-booking-page-checkout .must-checkout-phone-shell input {
@@ -2223,22 +2420,277 @@ body .must-booking-room-modal .must-booking-room-modal-close:active {
 }
 
 .must-hotel-booking-page-checkout .must-checkout-field-select {
-    position: relative;
+    min-width: 0;
 }
 
-.must-hotel-booking-page-checkout .must-checkout-field-select select {
-    padding-right: 52px;
+.must-hotel-booking-page-checkout .must-checkout-picker {
+    position: relative;
+    width: 100%;
+    min-width: 0;
+}
+
+.must-hotel-booking-page-checkout .must-checkout-picker-toggle {
+    display: flex;
+    align-items: center;
+    justify-content: flex-start;
+    gap: 12px;
+    width: 100%;
+    min-height: 44px;
+    margin: 0;
+    border: 1px solid #141414;
+    border-radius: 0;
+    background: transparent;
+    padding: 10px 20px;
+    box-sizing: border-box;
+    font-family: 'PP Neue Montreal', 'Segoe UI Emoji', 'Apple Color Emoji', 'Noto Color Emoji', sans-serif;
+    font-weight: 500;
+    font-size: 16px;
+    line-height: 150%;
+    letter-spacing: -0.011em;
+    color: #141414;
+    text-align: left;
+    appearance: none;
+    -webkit-appearance: none;
+    cursor: pointer;
+}
+
+.must-hotel-booking-page-checkout .must-checkout-picker-toggle-copy {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex: 1 1 auto;
+    justify-content: flex-start;
+    min-width: 0;
+}
+
+.must-hotel-booking-page-checkout .must-checkout-picker-flag,
+.must-hotel-booking-page-checkout .must-checkout-picker-option-flag {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    flex: 0 0 32px;
+    width: 32px;
+    height: 32px;
+    text-align: center;
+    font-family: 'Segoe UI Emoji', 'Apple Color Emoji', 'Noto Color Emoji', sans-serif;
+    font-size: 18px;
+    line-height: 1;
+}
+
+.must-hotel-booking-page-checkout .must-checkout-picker-flag.is-hidden {
+    display: none;
+}
+
+.must-hotel-booking-page-checkout .must-checkout-picker-label {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.must-hotel-booking-page-checkout .must-checkout-picker.is-placeholder .must-checkout-picker-label {
+    color: #c2bfaf;
+}
+
+.must-hotel-booking-page-checkout .must-checkout-picker-toggle img {
+    width: 12px;
+    height: 12px;
+    flex: 0 0 auto;
+    margin-left: auto;
+    pointer-events: none;
+    transition: transform 0.18s ease;
+}
+
+.must-hotel-booking-page-checkout .must-checkout-picker.is-open .must-checkout-picker-toggle img {
+    transform: rotate(180deg);
+}
+
+.must-hotel-booking-page-checkout .must-checkout-picker-panel {
+    position: absolute;
+    top: calc(100% + 12px);
+    left: 0;
+    z-index: 40;
+    width: 100%;
+    min-width: 0;
+    border: 1px solid #141414;
+    background: #fffdf9;
+    box-shadow: 0 28px 68px rgba(20, 20, 20, 0.16);
+    box-sizing: border-box;
+    overflow: hidden;
+}
+
+.must-hotel-booking-page-checkout .must-checkout-picker-panel [hidden] {
+    display: none !important;
+}
+
+.must-hotel-booking-page-checkout .must-checkout-picker-phone .must-checkout-picker-panel {
+    left: 00px;
+    width: 100%;
+    max-width: none;
+}
+
+div.must-confirmation-picker:nth-child(1) > div:nth-child(3) > div:nth-child(1) {
+  padding: 10px;
+}
+
+
+.must-hotel-booking-page-checkout .must-checkout-picker-search-wrap {
+    position: sticky;
+    top: 0;
+    z-index: 2;
+}
+
+.must-hotel-booking-page-checkout .must-checkout-picker-search {
+    width: 100%;
+    min-height: 50px;
+    border: 1px solid #d5cec0;
+    border-radius: 0;
+    background: #ffffff;
+    padding: 12px 16px;
+    box-sizing: border-box;
+    font-family: 'PP Neue Montreal', sans-serif;
+    font-weight: 500;
+    font-size: 15px;
+    line-height: 150%;
+    color: #141414;
+    border-top: 0px !important;
+    border-left: 0px !important;
+    border-right: 0px !important;
+}div.must-checkout-picker:nth-child(1) > div:nth-child(3) > div:nth-child(1) > input:nth-child(1) {
+  padding: 10px;
+}
+
+
+.must-hotel-booking-page-checkout .must-checkout-picker-search::placeholder {
+    color: #b4ae9f;
+    opacity: 1;
+}
+
+.must-hotel-booking-page-checkout .must-checkout-picker-options {
+    max-height: 380px;
+    overflow-y: auto;
+    box-sizing: border-box;
+    scrollbar-width: thin;
+    scrollbar-color: #8c8577 transparent;
+}
+
+.must-hotel-booking-page-checkout .must-checkout-picker-options::-webkit-scrollbar {
+    width: 10px;
+}
+
+.must-hotel-booking-page-checkout .must-checkout-picker-options::-webkit-scrollbar-track {
+    background: transparent;
+}
+
+.must-hotel-booking-page-checkout .must-checkout-picker-options::-webkit-scrollbar-thumb {
+    background: #8c8577;
+    border: 3px solid #ffffff;
+    border-radius: 999px;
+}
+
+.must-hotel-booking-page-checkout .must-checkout-picker-option {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    width: 100%;
+    margin: 0;
+    border: 0;
+    border-radius: 0;
+    background: transparent;
+    padding: 14px 16px;
+    box-sizing: border-box;
+    text-align: left;
+    cursor: pointer;
+    transition: background 0.16s ease, box-shadow 0.16s ease;
+}
+
+.must-hotel-booking-page-checkout .must-checkout-picker-option+.must-checkout-picker-option {
+    border-top: 1px solid #f1ece2;
+}
+
+.must-hotel-booking-page-checkout .must-checkout-picker-option-copy {
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+    min-width: 0;
+}
+
+.must-hotel-booking-page-checkout .must-checkout-picker-option-title {
+    font-family: 'PP Neue Montreal', sans-serif;
+    font-weight: 500;
+    font-size: 16px;
+    line-height: 1.25;
     color: #141414;
 }
 
-.must-hotel-booking-page-checkout .must-checkout-field-select img {
-    position: absolute;
-    right: 20px;
-    top: 50%;
-    width: 12px;
-    height: 12px;
-    pointer-events: none;
-    transform: translateY(-50%);
+.must-hotel-booking-page-checkout .must-checkout-picker-option-meta {
+    font-family: 'PP Neue Montreal', sans-serif;
+    font-weight: 400;
+    font-size: 11px;
+    line-height: 1.3;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: #857f72;
+}
+
+.must-hotel-booking-page-checkout .must-checkout-picker-empty {
+    margin: 0;
+    padding: 16px 12px;
+    font-family: 'PP Neue Montreal', sans-serif;
+    font-weight: 400;
+    font-size: 14px;
+    line-height: 1.4;
+    color: #857f72;
+}
+
+.must-hotel-booking-page-checkout .must-checkout-picker-toggle:hover,
+.must-hotel-booking-page-checkout .must-checkout-picker-toggle:focus,
+.must-hotel-booking-page-checkout .must-checkout-picker-toggle:focus-visible,
+.must-hotel-booking-page-checkout .must-checkout-picker-toggle:active {
+    border-color: #141414;
+    background: transparent;
+    color: #141414;
+    box-shadow: none;
+    outline: none;
+}
+
+.must-hotel-booking-page-checkout .must-checkout-picker-search:hover,
+.must-hotel-booking-page-checkout .must-checkout-picker-search:focus,
+.must-hotel-booking-page-checkout .must-checkout-picker-search:focus-visible,
+.must-hotel-booking-page-checkout .must-checkout-picker-search:active {
+    border-color: #141414;
+    background: #ffffff;
+    color: #141414;
+    box-shadow: none;
+    outline: none;
+}
+
+.must-hotel-booking-page-checkout .must-checkout-picker-option:hover,
+.must-hotel-booking-page-checkout .must-checkout-picker-option:focus,
+.must-hotel-booking-page-checkout .must-checkout-picker-option:focus-visible,
+.must-hotel-booking-page-checkout .must-checkout-picker-option:active,
+.must-hotel-booking-page-checkout .must-checkout-picker-option.is-selected {
+    background: linear-gradient(90deg, #f4efe2 0%, #fbfaf6 100%);
+    box-shadow: inset 3px 0 0 #141414;
+    outline: none;
+}
+
+.must-hotel-booking-page-checkout .must-checkout-picker-option.is-selected .must-checkout-picker-option-title {
+    font-weight: 600;
+}
+
+.must-hotel-booking-page-checkout .must-checkout-phone-shell .must-checkout-picker-toggle {
+    min-height: 24px;
+    border: 0;
+    padding: 0;
+}
+
+.must-hotel-booking-page-checkout .must-checkout-phone-shell .must-checkout-picker-toggle-copy {
+    gap: 8px;
+}
+
+.must-hotel-booking-page-checkout .must-checkout-phone-shell .must-checkout-picker-label {
+    white-space: nowrap;
 }
 
 .must-hotel-booking-page-checkout .must-checkout-payment-label {
@@ -2308,6 +2760,7 @@ body .must-booking-room-modal .must-booking-room-modal-close:active {
 }
 
 .must-hotel-booking-page-checkout .must-checkout-next-step:hover,
+.must-hotel-booking-page-checkout .must-checkout-next-step:focus,
 .must-hotel-booking-page-checkout .must-checkout-next-step:focus-visible,
 .must-hotel-booking-page-checkout .must-checkout-next-step:active {
     background: transparent;
@@ -2351,7 +2804,7 @@ body .must-booking-room-modal .must-booking-room-modal-close:active {
 }
 
 .must-hotel-booking-page-booking-confirmation .must-confirmation-coupon-control:focus-within {
-    width: 272px;
+    width: 243px;
 }
 
 .must-hotel-booking-page-booking-confirmation .must-confirmation-coupon-control input {
@@ -2372,6 +2825,17 @@ body .must-booking-room-modal .must-booking-room-modal-close:active {
 .must-hotel-booking-page-booking-confirmation .must-confirmation-coupon-control input::placeholder {
     color: #141414;
     opacity: 1;
+}
+
+.must-hotel-booking-page-booking-confirmation .must-confirmation-coupon-control input:hover,
+.must-hotel-booking-page-booking-confirmation .must-confirmation-coupon-control input:focus,
+.must-hotel-booking-page-booking-confirmation .must-confirmation-coupon-control input:focus-visible,
+.must-hotel-booking-page-booking-confirmation .must-confirmation-coupon-control input:active {
+    border-color: #141414;
+    background: #f5f3ec;
+    color: #141414;
+    box-shadow: none;
+    outline: none;
 }
 
 .must-hotel-booking-page-booking-confirmation .must-confirmation-coupon-submit {
@@ -2399,10 +2863,12 @@ body .must-booking-room-modal .must-booking-room-modal-close:active {
 }
 
 .must-hotel-booking-page-booking-confirmation .must-confirmation-coupon-submit:hover,
+.must-hotel-booking-page-booking-confirmation .must-confirmation-coupon-submit:focus,
 .must-hotel-booking-page-booking-confirmation .must-confirmation-coupon-submit:focus-visible,
 .must-hotel-booking-page-booking-confirmation .must-confirmation-coupon-submit:active {
     background: transparent;
     outline: none;
+    box-shadow: none;
 }
 
 .must-hotel-booking-page-booking-confirmation .must-confirmation-layout {
@@ -2472,8 +2938,8 @@ body .must-booking-room-modal .must-booking-room-modal-close:active {
 }
 
 .must-hotel-booking-page-booking-confirmation .must-confirmation-field:focus-within {
-    background: #ffffff;
-    box-shadow: inset 0 0 0 1px #141414;
+    background: transparent;
+    box-shadow: none;
 }
 
 .must-hotel-booking-page-booking-confirmation .must-confirmation-field input,
@@ -2495,10 +2961,27 @@ body .must-booking-room-modal .must-booking-room-modal-close:active {
 }
 
 .must-hotel-booking-page-booking-confirmation .must-confirmation-field input::placeholder,
-.must-hotel-booking-page-booking-confirmation .must-confirmation-field textarea::placeholder,
-.must-hotel-booking-page-booking-confirmation .must-confirmation-field select {
+.must-hotel-booking-page-booking-confirmation .must-confirmation-field textarea::placeholder {
     color: #c2bfaf;
     opacity: 1;
+}
+
+.must-hotel-booking-page-booking-confirmation .must-confirmation-field input:hover,
+.must-hotel-booking-page-booking-confirmation .must-confirmation-field input:focus,
+.must-hotel-booking-page-booking-confirmation .must-confirmation-field input:focus-visible,
+.must-hotel-booking-page-booking-confirmation .must-confirmation-field input:active,
+.must-hotel-booking-page-booking-confirmation .must-confirmation-field select:hover,
+.must-hotel-booking-page-booking-confirmation .must-confirmation-field select:focus,
+.must-hotel-booking-page-booking-confirmation .must-confirmation-field select:focus-visible,
+.must-hotel-booking-page-booking-confirmation .must-confirmation-field select:active,
+.must-hotel-booking-page-booking-confirmation .must-confirmation-field textarea:hover,
+.must-hotel-booking-page-booking-confirmation .must-confirmation-field textarea:focus,
+.must-hotel-booking-page-booking-confirmation .must-confirmation-field textarea:focus-visible,
+.must-hotel-booking-page-booking-confirmation .must-confirmation-field textarea:active {
+    background: transparent;
+    color: #141414;
+    box-shadow: none;
+    outline: none;
 }
 
 .must-hotel-booking-page-booking-confirmation .must-confirmation-field select {
@@ -2512,7 +2995,270 @@ body .must-booking-room-modal .must-booking-room-modal-close:active {
     color: #c2bfaf;
 }
 
-.must-hotel-booking-page-booking-confirmation .must-confirmation-field-select img {
+.must-hotel-booking-page-booking-confirmation .must-confirmation-field-select,
+.must-hotel-booking-page-booking-confirmation .must-confirmation-field-phone {
+    display: block;
+    min-width: 0;
+    min-height: 0;
+    border: 0;
+    background: transparent;
+}
+
+.must-hotel-booking-page-booking-confirmation .must-confirmation-field-select:focus-within,
+.must-hotel-booking-page-booking-confirmation .must-confirmation-field-phone:focus-within {
+    background: transparent;
+    box-shadow: none;
+}
+
+.must-hotel-booking-page-booking-confirmation .must-confirmation-picker {
+    position: relative;
+    width: 100%;
+    min-width: 0;
+}
+
+.must-hotel-booking-page-booking-confirmation .must-confirmation-picker-toggle {
+    display: flex;
+    align-items: center;
+    justify-content: flex-start;
+    gap: 12px;
+    width: 100%;
+    min-height: 44px;
+    margin: 0;
+    border: 1px solid #141414;
+    border-radius: 0;
+    background: transparent;
+    padding: 10px 20px;
+    box-sizing: border-box;
+    font-family: 'PP Neue Montreal', 'Segoe UI Emoji', 'Apple Color Emoji', 'Noto Color Emoji', sans-serif;
+    font-weight: 500;
+    font-size: 16px;
+    line-height: 150%;
+    letter-spacing: -0.011em;
+    color: #141414;
+    text-align: left;
+    appearance: none;
+    -webkit-appearance: none;
+    cursor: pointer;
+}
+
+.must-hotel-booking-page-booking-confirmation .must-confirmation-picker-toggle-copy {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex: 1 1 auto;
+    justify-content: flex-start;
+    min-width: 0;
+}
+
+.must-hotel-booking-page-booking-confirmation .must-confirmation-picker-flag,
+.must-hotel-booking-page-booking-confirmation .must-confirmation-picker-option-flag {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    flex: 0 0 32px;
+    width: 32px;
+    height: 32px;
+    text-align: center;
+    font-family: 'Segoe UI Emoji', 'Apple Color Emoji', 'Noto Color Emoji', sans-serif;
+    font-size: 18px;
+    line-height: 1;
+}
+
+.must-hotel-booking-page-booking-confirmation .must-confirmation-picker-flag.is-hidden {
+    display: none;
+}
+
+.must-hotel-booking-page-booking-confirmation .must-confirmation-picker-label {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.must-hotel-booking-page-booking-confirmation .must-confirmation-picker.is-placeholder .must-confirmation-picker-label {
+    color: #c2bfaf;
+}
+
+.must-hotel-booking-page-booking-confirmation .must-confirmation-picker-toggle img {
+    width: 12px;
+    height: 12px;
+    flex: 0 0 auto;
+    margin-left: auto;
+    pointer-events: none;
+    transition: transform 0.18s ease;
+}
+
+.must-hotel-booking-page-booking-confirmation .must-confirmation-picker.is-open .must-confirmation-picker-toggle img {
+    transform: rotate(180deg);
+}
+
+.must-hotel-booking-page-booking-confirmation .must-confirmation-picker-panel {
+    position: absolute;
+    top: calc(100% + 12px);
+    left: 0;
+    z-index: 40;
+    width: 100%;
+    min-width: 0;
+    border: 1px solid #141414;
+    background: #fffdf9;
+    box-shadow: 0 28px 68px rgba(20, 20, 20, 0.16);
+    box-sizing: border-box;
+    overflow: hidden;
+}
+
+.must-hotel-booking-page-booking-confirmation .must-confirmation-picker-panel [hidden] {
+    display: none !important;
+}
+
+.must-hotel-booking-page-booking-confirmation .must-confirmation-picker-phone .must-confirmation-picker-panel {
+    left: 0;
+    width: 100%;
+    max-width: none;
+}
+
+.must-hotel-booking-page-booking-confirmation .must-confirmation-picker-search-wrap {
+    position: sticky;
+    top: 0;
+    z-index: 2;
+}
+
+.must-hotel-booking-page-booking-confirmation .must-confirmation-picker-search {
+    width: 100%;
+    min-height: 50px;
+    border: 1px solid #d5cec0;
+    border-radius: 0;
+    background: #ffffff;
+    padding: 12px 16px;
+    box-sizing: border-box;
+    font-family: 'PP Neue Montreal', sans-serif;
+    font-weight: 500;
+    font-size: 15px;
+    line-height: 150%;
+    color: #141414;
+    border-top: 0px !important;
+    border-left: 0px !important;
+    border-right: 0px !important;
+}
+
+.must-hotel-booking-page-booking-confirmation .must-confirmation-picker-search::placeholder {
+    color: #b4ae9f;
+    opacity: 1;
+}
+
+.must-hotel-booking-page-booking-confirmation .must-confirmation-picker-options {
+    max-height: 380px;
+    overflow-y: auto;
+    box-sizing: border-box;
+    scrollbar-width: thin;
+    scrollbar-color: #8c8577 transparent;
+}
+
+.must-hotel-booking-page-booking-confirmation .must-confirmation-picker-options::-webkit-scrollbar {
+    width: 10px;
+}
+
+.must-hotel-booking-page-booking-confirmation .must-confirmation-picker-options::-webkit-scrollbar-track {
+    background: transparent;
+}
+
+.must-hotel-booking-page-booking-confirmation .must-confirmation-picker-options::-webkit-scrollbar-thumb {
+    background: #8c8577;
+    border: 3px solid #ffffff;
+    border-radius: 999px;
+}
+
+.must-hotel-booking-page-booking-confirmation .must-confirmation-picker-option {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    width: 100%;
+    margin: 0;
+    border: 0;
+    border-radius: 0;
+    background: transparent;
+    padding: 14px 16px;
+    box-sizing: border-box;
+    text-align: left;
+    cursor: pointer;
+    transition: background 0.16s ease, box-shadow 0.16s ease;
+}
+
+.must-hotel-booking-page-booking-confirmation .must-confirmation-picker-option+.must-confirmation-picker-option {
+    border-top: 1px solid #f1ece2;
+}
+
+.must-hotel-booking-page-booking-confirmation .must-confirmation-picker-option-copy {
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+    min-width: 0;
+}
+
+.must-hotel-booking-page-booking-confirmation .must-confirmation-picker-option-title {
+    font-family: 'PP Neue Montreal', sans-serif;
+    font-weight: 500;
+    font-size: 16px;
+    line-height: 1.25;
+    color: #141414;
+}
+
+.must-hotel-booking-page-booking-confirmation .must-confirmation-picker-option-meta {
+    font-family: 'PP Neue Montreal', sans-serif;
+    font-weight: 400;
+    font-size: 11px;
+    line-height: 1.3;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: #857f72;
+}
+
+.must-hotel-booking-page-booking-confirmation .must-confirmation-picker-empty {
+    margin: 0;
+    padding: 16px 12px;
+    font-family: 'PP Neue Montreal', sans-serif;
+    font-weight: 400;
+    font-size: 14px;
+    line-height: 1.4;
+    color: #857f72;
+}
+
+.must-hotel-booking-page-booking-confirmation .must-confirmation-picker-toggle:hover,
+.must-hotel-booking-page-booking-confirmation .must-confirmation-picker-toggle:focus,
+.must-hotel-booking-page-booking-confirmation .must-confirmation-picker-toggle:focus-visible,
+.must-hotel-booking-page-booking-confirmation .must-confirmation-picker-toggle:active {
+    border-color: #141414;
+    background: transparent;
+    color: #141414;
+    box-shadow: none;
+    outline: none;
+}
+
+.must-hotel-booking-page-booking-confirmation .must-confirmation-picker-search:hover,
+.must-hotel-booking-page-booking-confirmation .must-confirmation-picker-search:focus,
+.must-hotel-booking-page-booking-confirmation .must-confirmation-picker-search:focus-visible,
+.must-hotel-booking-page-booking-confirmation .must-confirmation-picker-search:active {
+    border-color: #141414;
+    background: #ffffff;
+    color: #141414;
+    box-shadow: none;
+    outline: none;
+}
+
+.must-hotel-booking-page-booking-confirmation .must-confirmation-picker-option:hover,
+.must-hotel-booking-page-booking-confirmation .must-confirmation-picker-option:focus,
+.must-hotel-booking-page-booking-confirmation .must-confirmation-picker-option:focus-visible,
+.must-hotel-booking-page-booking-confirmation .must-confirmation-picker-option:active,
+.must-hotel-booking-page-booking-confirmation .must-confirmation-picker-option.is-selected {
+    background: linear-gradient(90deg, #f4efe2 0%, #fbfaf6 100%);
+    box-shadow: inset 3px 0 0 #141414;
+    outline: none;
+}
+
+.must-hotel-booking-page-booking-confirmation .must-confirmation-picker-option.is-selected .must-confirmation-picker-option-title {
+    font-weight: 600;
+}
+
+.must-hotel-booking-page-booking-confirmation .must-confirmation-field-select>img {
     position: absolute;
     right: 20px;
     top: 50%;
@@ -2532,33 +3278,64 @@ body .must-booking-room-modal .must-booking-room-modal-close:active {
 }
 
 .must-hotel-booking-page-booking-confirmation .must-confirmation-phone-shell {
-    display: flex;
+    position: relative;
+    display: grid;
+    grid-template-columns: minmax(170px, max-content) 4px minmax(0, 1fr);
     align-items: center;
-    gap: 10px;
+    border: 1px solid #141414;
+    min-height: 44px;
+    column-gap: 10px;
     width: 100%;
     padding: 10px 20px;
     box-sizing: border-box;
 }
 
-.must-hotel-booking-page-booking-confirmation .must-confirmation-phone-shell select,
+.must-hotel-booking-page-booking-confirmation .must-confirmation-phone-shell .must-confirmation-picker {
+    position: static;
+}
+
 .must-hotel-booking-page-booking-confirmation .must-confirmation-phone-shell input {
+    border: 0;
+    min-height: 24px;
     padding: 0;
 }
 
-.must-hotel-booking-page-booking-confirmation .must-confirmation-phone-shell select {
-    flex: 0 1 auto;
-    width: 100%;
-    max-width: 60px;
-    padding-right: 0;
+.must-hotel-booking-page-booking-confirmation .must-confirmation-phone-shell input {
+    min-width: 0;
 }
 
-.must-hotel-booking-page-booking-confirmation .must-confirmation-phone-shell input {
-    flex: 1 1 auto;
+.must-hotel-booking-page-booking-confirmation .must-confirmation-phone-shell input:hover,
+.must-hotel-booking-page-booking-confirmation .must-confirmation-phone-shell input:focus,
+.must-hotel-booking-page-booking-confirmation .must-confirmation-phone-shell input:focus-visible,
+.must-hotel-booking-page-booking-confirmation .must-confirmation-phone-shell input:active {
+    background: transparent;
+    color: #141414;
+    box-shadow: none;
+    outline: none;
 }
 
 .must-hotel-booking-page-booking-confirmation .must-confirmation-phone-divider {
+    width: 4px;
     color: #c2bfaf;
-    flex: 0 0 auto;
+    font-family: 'PP Neue Montreal', sans-serif;
+    font-weight: 500;
+    font-size: 16px;
+    line-height: 150%;
+    text-align: center;
+}
+
+.must-hotel-booking-page-booking-confirmation .must-confirmation-phone-shell .must-confirmation-picker-toggle {
+    min-height: 24px;
+    border: 0;
+    padding: 0;
+}
+
+.must-hotel-booking-page-booking-confirmation .must-confirmation-phone-shell .must-confirmation-picker-toggle-copy {
+    gap: 8px;
+}
+
+.must-hotel-booking-page-booking-confirmation .must-confirmation-phone-shell .must-confirmation-picker-label {
+    white-space: nowrap;
 }
 
 .must-hotel-booking-page-booking-confirmation .must-confirmation-side {
@@ -2723,14 +3500,13 @@ body .must-booking-room-modal .must-booking-room-modal-close:active {
     border-color: #141414;
 }
 
-.must-hotel-booking-page-booking-confirmation .must-confirmation-payment-option input:checked + .must-confirmation-payment-option-visual {
+.must-hotel-booking-page-booking-confirmation .must-confirmation-payment-option input:checked+.must-confirmation-payment-option-visual {
     background: #141414;
     color: #f5f3ec;
 }
 
-.must-hotel-booking-page-booking-confirmation .must-confirmation-payment-option input:focus-visible + .must-confirmation-payment-option-visual {
-    outline: 2px solid #141414;
-    outline-offset: 2px;
+.must-hotel-booking-page-booking-confirmation .must-confirmation-payment-option input:focus-visible+.must-confirmation-payment-option-visual {
+    outline: none;
 }
 
 .must-hotel-booking-page-booking-confirmation .must-confirmation-submit {
@@ -2764,6 +3540,7 @@ body .must-booking-room-modal .must-booking-room-modal-close:active {
 }
 
 .must-hotel-booking-page-booking-confirmation .must-confirmation-submit:hover,
+.must-hotel-booking-page-booking-confirmation .must-confirmation-submit:focus,
 .must-hotel-booking-page-booking-confirmation .must-confirmation-submit:focus-visible,
 .must-hotel-booking-page-booking-confirmation .must-confirmation-submit:active {
     background: transparent;
@@ -2936,6 +3713,15 @@ body .must-booking-room-modal .must-booking-room-modal-close:active {
 
     .must-booking-room-modal-dialog {
         padding: 36px 24px;
+    }
+
+    .must-booking-room-inline-details-inner {
+        padding: 36px 24px;
+    }
+
+    .must-booking-room-inline-details .must-booking-room-popup-layout {
+        grid-template-columns: 1fr;
+        row-gap: 36px;
     }
 
     .must-booking-room-popup-layout {
@@ -3295,6 +4081,15 @@ body .must-booking-room-modal .must-booking-room-modal-close:active {
         max-height: calc(100vh - 32px);
     }
 
+    .must-booking-room-inline-details-inner {
+        padding: 22px 18px;
+    }
+
+    .must-booking-room-inline-details-close {
+        top: 8px;
+        right: 8px;
+    }
+
     body .must-booking-room-modal .must-booking-room-modal-close {
         top: 8px;
         right: 8px;
@@ -3349,6 +4144,11 @@ body .must-booking-room-modal .must-booking-room-modal-close:active {
         align-items: stretch;
     }
 
+    .must-hotel-booking-page-checkout .must-checkout-picker-phone .must-checkout-picker-panel {
+        width: calc(100% + 40px);
+        max-width: none;
+    }
+
     .must-hotel-booking-page-checkout .must-checkout-phone-divider {
         display: none;
     }
@@ -3380,8 +4180,13 @@ body .must-booking-room-modal .must-booking-room-modal-close:active {
     }
 
     .must-hotel-booking-page-booking-confirmation .must-confirmation-phone-shell {
-        flex-direction: column;
+        grid-template-columns: 1fr;
         align-items: stretch;
+    }
+
+    .must-hotel-booking-page-booking-confirmation .must-confirmation-picker-phone .must-confirmation-picker-panel {
+        width: calc(100% + 40px);
+        max-width: none;
     }
 
     .must-hotel-booking-page-booking-confirmation .must-confirmation-phone-divider {

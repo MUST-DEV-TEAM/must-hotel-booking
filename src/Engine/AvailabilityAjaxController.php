@@ -24,7 +24,7 @@ final class AvailabilityAjaxController
 
     public static function normalize_availability_room_category(string $category): string
     {
-        return RoomCatalog::normalizeCategory($category);
+        return RoomCatalog::normalizeBookingCategory($category);
     }
 
     /**
