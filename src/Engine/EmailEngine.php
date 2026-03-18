@@ -18,9 +18,12 @@ final class EmailEngine
     public static function getTemplateLabels(): array
     {
         return [
-            'booking_confirmation' => \__('Booking confirmation', 'must-hotel-booking'),
-            'admin_booking_notification' => \__('Admin notification', 'must-hotel-booking'),
-            'booking_cancellation' => \__('Booking cancellation', 'must-hotel-booking'),
+            'guest_booking_confirmed_paid' => \__('Guest booking confirmed (paid)', 'must-hotel-booking'),
+            'guest_booking_confirmed_pay_at_hotel' => \__('Guest booking confirmed (pay at hotel)', 'must-hotel-booking'),
+            'admin_new_booking_paid' => \__('Admin new booking (paid)', 'must-hotel-booking'),
+            'admin_new_booking_pay_at_hotel' => \__('Admin new booking (pay at hotel)', 'must-hotel-booking'),
+            'guest_booking_cancelled' => \__('Guest booking cancelled', 'must-hotel-booking'),
+            'admin_booking_cancelled' => \__('Admin booking cancelled', 'must-hotel-booking'),
         ];
     }
 
@@ -32,10 +35,16 @@ final class EmailEngine
         return [
             '{booking_id}',
             '{guest_name}',
+            '{guest_email}',
             '{room_name}',
             '{checkin}',
             '{checkout}',
             '{total_price}',
+            '{currency}',
+            '{payment_method}',
+            '{payment_status}',
+            '{hotel_name}',
+            '{hotel_address}',
         ];
     }
 
@@ -45,17 +54,29 @@ final class EmailEngine
     public static function getDefaultTemplates(): array
     {
         return [
-            'booking_confirmation' => [
-                'subject' => \__('Booking Confirmation - {booking_id}', 'must-hotel-booking'),
-                'body' => __("Hello {guest_name},\n\nYour booking has been confirmed.\n\nBooking ID: {booking_id}\nRoom: {room_name}\nCheck-in: {checkin}\nCheck-out: {checkout}\nTotal Price: {total_price}\n\nThank you.", 'must-hotel-booking'),
+            'guest_booking_confirmed_paid' => [
+                'subject' => \__('Booking Confirmed - {booking_id}', 'must-hotel-booking'),
+                'body' => __("Hello {guest_name},\n\nYour booking is confirmed and your online payment has been received.\n\nBooking ID: {booking_id}\nRoom: {room_name}\nCheck-in: {checkin}\nCheck-out: {checkout}\nTotal: {total_price} {currency}\nPayment Method: {payment_method}\nPayment Status: {payment_status}\n\n{hotel_name}\n{hotel_address}", 'must-hotel-booking'),
             ],
-            'admin_booking_notification' => [
-                'subject' => \__('New Booking Received - {booking_id}', 'must-hotel-booking'),
-                'body' => __("A new booking was received.\n\nBooking ID: {booking_id}\nGuest: {guest_name}\nRoom: {room_name}\nCheck-in: {checkin}\nCheck-out: {checkout}\nTotal Price: {total_price}", 'must-hotel-booking'),
+            'guest_booking_confirmed_pay_at_hotel' => [
+                'subject' => \__('Reservation Confirmed - {booking_id}', 'must-hotel-booking'),
+                'body' => __("Hello {guest_name},\n\nYour reservation is confirmed.\nPayment will be collected at the hotel.\n\nBooking ID: {booking_id}\nRoom: {room_name}\nCheck-in: {checkin}\nCheck-out: {checkout}\nTotal: {total_price} {currency}\nPayment Method: {payment_method}\nPayment Status: {payment_status}\n\n{hotel_name}\n{hotel_address}", 'must-hotel-booking'),
             ],
-            'booking_cancellation' => [
+            'admin_new_booking_paid' => [
+                'subject' => \__('New Paid Booking - {booking_id}', 'must-hotel-booking'),
+                'body' => __("A new paid booking was received.\n\nBooking ID: {booking_id}\nGuest: {guest_name}\nGuest Email: {guest_email}\nRoom: {room_name}\nCheck-in: {checkin}\nCheck-out: {checkout}\nTotal: {total_price} {currency}\nPayment Method: {payment_method}\nPayment Status: {payment_status}", 'must-hotel-booking'),
+            ],
+            'admin_new_booking_pay_at_hotel' => [
+                'subject' => \__('New Reservation - Pay at Hotel - {booking_id}', 'must-hotel-booking'),
+                'body' => __("A new pay-at-hotel reservation was received.\n\nBooking ID: {booking_id}\nGuest: {guest_name}\nGuest Email: {guest_email}\nRoom: {room_name}\nCheck-in: {checkin}\nCheck-out: {checkout}\nTotal: {total_price} {currency}\nPayment Method: {payment_method}\nPayment Status: {payment_status}", 'must-hotel-booking'),
+            ],
+            'guest_booking_cancelled' => [
                 'subject' => \__('Booking Cancelled - {booking_id}', 'must-hotel-booking'),
-                'body' => __("Booking cancellation notice.\n\nBooking ID: {booking_id}\nGuest: {guest_name}\nRoom: {room_name}\nCheck-in: {checkin}\nCheck-out: {checkout}\nTotal Price: {total_price}", 'must-hotel-booking'),
+                'body' => __("Hello {guest_name},\n\nYour booking has been cancelled.\n\nBooking ID: {booking_id}\nRoom: {room_name}\nCheck-in: {checkin}\nCheck-out: {checkout}\nTotal: {total_price} {currency}\n\n{hotel_name}", 'must-hotel-booking'),
+            ],
+            'admin_booking_cancelled' => [
+                'subject' => \__('Booking Cancelled - {booking_id}', 'must-hotel-booking'),
+                'body' => __("A booking has been cancelled.\n\nBooking ID: {booking_id}\nGuest: {guest_name}\nGuest Email: {guest_email}\nRoom: {room_name}\nCheck-in: {checkin}\nCheck-out: {checkout}\nTotal: {total_price} {currency}\nPayment Method: {payment_method}\nPayment Status: {payment_status}", 'must-hotel-booking'),
             ],
         ];
     }
@@ -144,8 +165,17 @@ final class EmailEngine
             return;
         }
 
-        self::sendGuestBookingConfirmationEmail($reservation);
-        self::sendAdminNewBookingNotificationEmail($reservation);
+        $paymentMethod = isset($reservation['payment_method']) ? \sanitize_key((string) $reservation['payment_method']) : '';
+        $gateway = \MustHotelBooking\Engine\PaymentEngine::normalizeMethod($paymentMethod);
+
+        if ($gateway === 'stripe') {
+            self::sendTemplateToGuest('guest_booking_confirmed_paid', $reservation);
+            self::sendTemplateToAdmin('admin_new_booking_paid', $reservation);
+            return;
+        }
+
+        self::sendTemplateToGuest('guest_booking_confirmed_pay_at_hotel', $reservation);
+        self::sendTemplateToAdmin('admin_new_booking_pay_at_hotel', $reservation);
     }
 
     public static function handleReservationCancelledNotifications(int $reservationId): void
@@ -156,8 +186,8 @@ final class EmailEngine
             return;
         }
 
-        self::sendGuestBookingCancellationEmail($reservation);
-        self::sendAdminBookingCancellationEmail($reservation);
+        self::sendTemplateToGuest('guest_booking_cancelled', $reservation);
+        self::sendTemplateToAdmin('admin_booking_cancelled', $reservation);
     }
 
     /**
@@ -199,13 +229,23 @@ final class EmailEngine
             $roomName = \__('Room', 'must-hotel-booking');
         }
 
+        $paymentMethod = isset($reservation['payment_method']) ? (string) $reservation['payment_method'] : '';
+        $paymentStatus = isset($reservation['payment_status']) ? (string) $reservation['payment_status'] : '';
+        $currency = MustBookingConfig::get_currency();
+
         return [
             '{booking_id}' => self::getReservationEmailBookingId($reservation),
             '{guest_name}' => self::getReservationEmailGuestName($reservation),
+            '{guest_email}' => (string) ($reservation['guest_email'] ?? ''),
             '{room_name}' => $roomName,
             '{checkin}' => (string) ($reservation['checkin'] ?? ''),
             '{checkout}' => (string) ($reservation['checkout'] ?? ''),
             '{total_price}' => \number_format_i18n((float) ($reservation['total_price'] ?? 0.0), 2),
+            '{currency}' => $currency,
+            '{payment_method}' => $paymentMethod,
+            '{payment_status}' => $paymentStatus,
+            '{hotel_name}' => MustBookingConfig::get_hotel_name(),
+            '{hotel_address}' => MustBookingConfig::get_hotel_address(),
         ];
     }
 
@@ -235,9 +275,7 @@ final class EmailEngine
 
     private static function getBookingAdminNotificationEmail(): string
     {
-        $email = \sanitize_email((string) MustBookingConfig::get_wp_option('admin_email', ''));
-
-        return \is_email($email) ? $email : '';
+        return MustBookingConfig::get_booking_notification_email();
     }
 
     private static function sendBookingEmail(string $recipientEmail, string $subject, string $message): bool
@@ -257,10 +295,10 @@ final class EmailEngine
         );
     }
 
-    private static function sendGuestBookingConfirmationEmail(array $reservation): bool
+    private static function sendTemplateToGuest(string $templateKey, array $reservation): bool
     {
         $guestEmail = isset($reservation['guest_email']) ? (string) $reservation['guest_email'] : '';
-        $emailContent = self::buildReservationEmailContent('booking_confirmation', $reservation);
+        $emailContent = self::buildReservationEmailContent($templateKey, $reservation);
 
         return self::sendBookingEmail(
             $guestEmail,
@@ -269,34 +307,10 @@ final class EmailEngine
         );
     }
 
-    private static function sendAdminNewBookingNotificationEmail(array $reservation): bool
+    private static function sendTemplateToAdmin(string $templateKey, array $reservation): bool
     {
         $adminEmail = self::getBookingAdminNotificationEmail();
-        $emailContent = self::buildReservationEmailContent('admin_booking_notification', $reservation);
-
-        return self::sendBookingEmail(
-            $adminEmail,
-            (string) ($emailContent['subject'] ?? ''),
-            (string) ($emailContent['body'] ?? '')
-        );
-    }
-
-    private static function sendGuestBookingCancellationEmail(array $reservation): bool
-    {
-        $guestEmail = isset($reservation['guest_email']) ? (string) $reservation['guest_email'] : '';
-        $emailContent = self::buildReservationEmailContent('booking_cancellation', $reservation);
-
-        return self::sendBookingEmail(
-            $guestEmail,
-            (string) ($emailContent['subject'] ?? ''),
-            (string) ($emailContent['body'] ?? '')
-        );
-    }
-
-    private static function sendAdminBookingCancellationEmail(array $reservation): bool
-    {
-        $adminEmail = self::getBookingAdminNotificationEmail();
-        $emailContent = self::buildReservationEmailContent('booking_cancellation', $reservation);
+        $emailContent = self::buildReservationEmailContent($templateKey, $reservation);
 
         return self::sendBookingEmail(
             $adminEmail,

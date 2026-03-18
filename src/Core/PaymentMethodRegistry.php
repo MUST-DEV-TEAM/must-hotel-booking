@@ -12,15 +12,11 @@ final class PaymentMethodRegistry
         return [
             'pay_at_hotel' => [
                 'label' => \__('Pay at hotel', 'must-hotel-booking'),
-                'description' => \__('Guest pays during check-in or check-out at the property.', 'must-hotel-booking'),
-            ],
-            'bank_transfer' => [
-                'label' => \__('Bank transfer', 'must-hotel-booking'),
-                'description' => \__('Guest pays via manual bank transfer.', 'must-hotel-booking'),
+                'description' => \__('Guest pays in cash at the property during check-in or check-out.', 'must-hotel-booking'),
             ],
             'stripe' => [
                 'label' => \__('Stripe', 'must-hotel-booking'),
-                'description' => \__('Redirect guests to Stripe Checkout for secure card payment.', 'must-hotel-booking'),
+                'description' => \__('Guest pays online immediately with card via Stripe Checkout.', 'must-hotel-booking'),
             ],
         ];
     }
@@ -32,7 +28,6 @@ final class PaymentMethodRegistry
     {
         return [
             'pay_at_hotel' => true,
-            'bank_transfer' => false,
             'stripe' => false,
         ];
     }

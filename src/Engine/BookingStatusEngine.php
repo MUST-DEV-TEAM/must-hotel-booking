@@ -153,22 +153,6 @@ final class BookingStatusEngine
             ];
         }
 
-        if (!empty($statuses) && \count(\array_unique($statuses)) === 1 && $statuses[0] === 'pending') {
-            if ($paymentMethodHint === 'bank_transfer' || $gateway === 'paypal') {
-                return [
-                    'heading' => \__('Booking Pending Payment', 'must-hotel-booking'),
-                    'message' => $paymentMethodHint === 'paypal'
-                        ? \__('Your booking request has been received and is waiting for PayPal payment confirmation.', 'must-hotel-booking')
-                        : \__('Your booking request has been received and is waiting for bank transfer payment confirmation.', 'must-hotel-booking'),
-                ];
-            }
-
-            return [
-                'heading' => \__('Booking Pending', 'must-hotel-booking'),
-                'message' => \__('Your booking has been received and is awaiting final processing.', 'must-hotel-booking'),
-            ];
-        }
-
         if (!empty($statuses) && \count(\array_unique($statuses)) === 1 && $statuses[0] === 'expired') {
             return [
                 'heading' => \__('Payment Session Expired', 'must-hotel-booking'),
@@ -179,7 +163,7 @@ final class BookingStatusEngine
         if (!empty($statuses) && \count(\array_unique($statuses)) === 1 && $statuses[0] === 'payment_failed') {
             return [
                 'heading' => \__('Payment Failed', 'must-hotel-booking'),
-                'message' => \__('We were not able to confirm your payment. Please try again or choose another payment method.', 'must-hotel-booking'),
+                'message' => \__('We could not confirm your payment. Please try again.', 'must-hotel-booking'),
             ];
         }
 
@@ -190,10 +174,10 @@ final class BookingStatusEngine
             ];
         }
 
-        if ($paymentMethodHint === 'pay_at_hotel' || $gateway === 'cash') {
+        if ($gateway === 'cash' || $paymentMethodHint === 'pay_at_hotel') {
             return [
                 'heading' => \__('Booking Confirmed', 'must-hotel-booking'),
-                'message' => \__('Your stay is confirmed. Payment will be collected at the hotel.', 'must-hotel-booking'),
+                'message' => \__('Your reservation is confirmed. Payment will be collected at the hotel.', 'must-hotel-booking'),
             ];
         }
 

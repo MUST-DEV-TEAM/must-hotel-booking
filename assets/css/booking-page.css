@@ -1341,10 +1341,12 @@
 
 .must-hotel-booking-page-booking .must-booking-results-filter:hover,
 .must-hotel-booking-page-booking .must-booking-results-filter:focus-visible,
-.must-hotel-booking-page-booking .must-booking-results-filter:active {
+.must-hotel-booking-page-booking .must-booking-results-filter:active,
+.must-hotel-booking-page-booking .must-booking-results-filter:focus {
     opacity: 1;
     background: transparent !important;
     outline: none;
+    color: unset;
 }
 
 .must-hotel-booking-page-booking .must-booking-room-details:hover,
