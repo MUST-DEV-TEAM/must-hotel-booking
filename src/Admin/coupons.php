@@ -2,385 +2,83 @@
 
 namespace MustHotelBooking\Admin;
 
-use MustHotelBooking\Engine\AvailabilityEngine;
-use MustHotelBooking\Engine\PricingEngine;
-
 /**
- * Get coupons table name.
- */
-function get_admin_coupons_table_name(): string
-{
-    return PricingEngine::getCouponsTableName();
-}
-
-/**
- * Build coupons admin page URL.
- *
- * @param array<string, scalar> $args
+ * @param array<string, scalar|int|bool> $args
  */
 function get_admin_coupons_page_url(array $args = []): string
 {
-    $base_url = \admin_url('admin.php?page=must-hotel-booking-coupons');
+    $baseUrl = \admin_url('admin.php?page=must-hotel-booking-coupons');
 
     if (empty($args)) {
-        return $base_url;
+        return $baseUrl;
     }
 
-    return \add_query_arg($args, $base_url);
+    return \add_query_arg($args, $baseUrl);
 }
 
-/**
- * Coupon discount types.
- *
- * @return array<string, string>
- */
-function get_coupon_type_options(): array
+function is_coupons_admin_request(): bool
 {
-    return [
-        'percentage' => \__('Percentage', 'must-hotel-booking'),
-        'fixed' => \__('Fixed', 'must-hotel-booking'),
-    ];
+    $page = isset($_REQUEST['page']) ? \sanitize_key((string) \wp_unslash($_REQUEST['page'])) : '';
+
+    return $page === 'must-hotel-booking-coupons';
 }
 
 /**
- * Validate coupon date in YYYY-MM-DD format.
- */
-function is_valid_coupon_date(string $date): bool
-{
-    $candidate = \trim($date);
-
-    if (AvailabilityEngine::isValidBookingDate($candidate)) {
-        return true;
-    }
-
-    $parsed = \DateTimeImmutable::createFromFormat('Y-m-d', $candidate);
-
-    return $parsed instanceof \DateTimeImmutable && $parsed->format('Y-m-d') === $candidate;
-}
-
-/**
- * Check if coupon code already exists.
- */
-function does_coupon_code_exist(string $code, int $exclude_id = 0): bool
-{
-    global $wpdb;
-
-    if ($code === '') {
-        return false;
-    }
-
-    if ($exclude_id > 0) {
-        $count = (int) $wpdb->get_var(
-            $wpdb->prepare(
-                'SELECT COUNT(*) FROM ' . get_admin_coupons_table_name() . ' WHERE code = %s AND id <> %d',
-                $code,
-                $exclude_id
-            )
-        );
-    } else {
-        $count = (int) $wpdb->get_var(
-            $wpdb->prepare(
-                'SELECT COUNT(*) FROM ' . get_admin_coupons_table_name() . ' WHERE code = %s',
-                $code
-            )
-        );
-    }
-
-    return $count > 0;
-}
-
-/**
- * Build default coupon form values.
- *
  * @return array<string, mixed>
  */
-function get_coupon_form_defaults(): array
+function get_coupons_admin_save_state(): array
 {
-    $today = \current_time('Y-m-d');
-    $next_month = (new \DateTimeImmutable($today))->modify('+30 day')->format('Y-m-d');
+    global $mustHotelBookingCouponsAdminSaveState;
 
-    return [
-        'coupon_id' => 0,
-        'code' => '',
-        'discount_type' => 'percentage',
-        'discount_value' => 0.00,
-        'valid_from' => $today,
-        'valid_until' => $next_month,
-        'usage_limit' => 0,
-        'usage_count' => 0,
+    if (isset($mustHotelBookingCouponsAdminSaveState) && \is_array($mustHotelBookingCouponsAdminSaveState)) {
+        return $mustHotelBookingCouponsAdminSaveState;
+    }
+
+    $mustHotelBookingCouponsAdminSaveState = [
+        'errors' => [],
+        'form' => null,
+        'selected_coupon_id' => 0,
     ];
+
+    return $mustHotelBookingCouponsAdminSaveState;
 }
 
 /**
- * Sanitize and validate coupon form values.
- *
- * @param array<string, mixed> $source
- * @return array<string, mixed>
+ * @param array<string, mixed> $state
  */
-function sanitize_coupon_form_values(array $source): array
+function set_coupons_admin_save_state(array $state): void
 {
-    $coupon_id = isset($source['coupon_id']) ? \absint(\wp_unslash($source['coupon_id'])) : 0;
-    $code = isset($source['code']) ? \strtoupper(\sanitize_text_field((string) \wp_unslash($source['code']))) : '';
-    $discount_type = isset($source['discount_type']) ? \sanitize_key((string) \wp_unslash($source['discount_type'])) : 'percentage';
-    $discount_value = isset($source['discount_value']) ? (float) \wp_unslash($source['discount_value']) : 0.0;
-    $valid_from = isset($source['valid_from']) ? \sanitize_text_field((string) \wp_unslash($source['valid_from'])) : '';
-    $valid_until = isset($source['valid_until']) ? \sanitize_text_field((string) \wp_unslash($source['valid_until'])) : '';
-    $usage_limit = isset($source['usage_limit']) ? \max(0, \absint(\wp_unslash($source['usage_limit']))) : 0;
-    $errors = [];
-
-    $code = (string) \preg_replace('/[^A-Z0-9_-]/', '', $code);
-    $type_options = get_coupon_type_options();
-
-    if ($code === '') {
-        $errors[] = \__('Coupon code is required.', 'must-hotel-booking');
-    } elseif (does_coupon_code_exist($code, $coupon_id)) {
-        $errors[] = \__('Coupon code already exists.', 'must-hotel-booking');
-    }
-
-    if (!isset($type_options[$discount_type])) {
-        $errors[] = \__('Coupon type must be percentage or fixed.', 'must-hotel-booking');
-    }
-
-    if ($discount_value <= 0) {
-        $errors[] = \__('Discount value must be greater than zero.', 'must-hotel-booking');
-    }
-
-    if (!is_valid_coupon_date($valid_from) || !is_valid_coupon_date($valid_until)) {
-        $errors[] = \__('Valid from and valid until dates are required.', 'must-hotel-booking');
-    } elseif ($valid_from > $valid_until) {
-        $errors[] = \__('Valid until date must be on or after valid from date.', 'must-hotel-booking');
-    }
-
-    return [
-        'coupon_id' => $coupon_id,
-        'code' => $code,
-        'discount_type' => $discount_type,
-        'discount_value' => \round($discount_value, 2),
-        'valid_from' => $valid_from,
-        'valid_until' => $valid_until,
-        'usage_limit' => $usage_limit,
-        'errors' => $errors,
-    ];
+    global $mustHotelBookingCouponsAdminSaveState;
+    $mustHotelBookingCouponsAdminSaveState = $state;
 }
 
-/**
- * Get coupon row by ID.
- *
- * @return array<string, mixed>|null
- */
-function get_coupon_row(int $coupon_id): ?array
+function clear_coupons_admin_save_state(): void
 {
-    global $wpdb;
-
-    if ($coupon_id <= 0) {
-        return null;
-    }
-
-    $coupon = $wpdb->get_row(
-        $wpdb->prepare(
-            'SELECT id, code, discount_type, discount_value, valid_from, valid_until, usage_limit, usage_count, created_at
-            FROM ' . get_admin_coupons_table_name() . ' WHERE id = %d LIMIT 1',
-            $coupon_id
-        ),
-        ARRAY_A
-    );
-
-    return \is_array($coupon) ? $coupon : null;
+    set_coupons_admin_save_state([
+        'errors' => [],
+        'form' => null,
+        'selected_coupon_id' => 0,
+    ]);
 }
 
-/**
- * Get coupon rows for table.
- *
- * @return array<int, array<string, mixed>>
- */
-function get_coupon_rows(): array
+function maybe_handle_coupon_admin_actions_early(): void
 {
-    global $wpdb;
-
-    $rows = $wpdb->get_results(
-        'SELECT id, code, discount_type, discount_value, valid_from, valid_until, usage_limit, usage_count, created_at
-        FROM ' . get_admin_coupons_table_name() . '
-        ORDER BY id DESC',
-        ARRAY_A
-    );
-
-    return \is_array($rows) ? $rows : [];
-}
-
-/**
- * Handle delete coupon action.
- */
-function maybe_handle_coupon_delete_request(): void
-{
-    $action = isset($_GET['action']) ? \sanitize_key((string) \wp_unslash($_GET['action'])) : '';
-
-    if ($action !== 'delete_coupon') {
+    if (!is_coupons_admin_request()) {
         return;
     }
 
-    $coupon_id = isset($_GET['coupon_id']) ? \absint(\wp_unslash($_GET['coupon_id'])) : 0;
-    $nonce = isset($_GET['_wpnonce']) ? (string) \wp_unslash($_GET['_wpnonce']) : '';
+    ensure_admin_capability();
+    $query = CouponAdminQuery::fromRequest(\is_array($_REQUEST) ? $_REQUEST : []);
+    $requestMethod = isset($_SERVER['REQUEST_METHOD']) ? \strtoupper((string) $_SERVER['REQUEST_METHOD']) : 'GET';
 
-    if ($coupon_id <= 0 || !\wp_verify_nonce($nonce, 'must_coupon_delete_' . $coupon_id)) {
-        \wp_safe_redirect(get_admin_coupons_page_url(['notice' => 'invalid_nonce']));
-        exit;
+    if ($requestMethod === 'POST') {
+        set_coupons_admin_save_state((new CouponAdminActions())->handleSaveRequest($query));
+        return;
     }
 
-    global $wpdb;
-
-    $deleted = $wpdb->delete(get_admin_coupons_table_name(), ['id' => $coupon_id], ['%d']);
-
-    \wp_safe_redirect(get_admin_coupons_page_url(['notice' => $deleted !== false ? 'coupon_deleted' : 'coupon_delete_failed']));
-    exit;
+    (new CouponAdminActions())->handleGetAction($query);
 }
 
-/**
- * Handle save coupon action.
- *
- * @return array<string, mixed>
- */
-function maybe_handle_coupon_save_request(): array
-{
-    $request_method = isset($_SERVER['REQUEST_METHOD']) ? \strtoupper((string) $_SERVER['REQUEST_METHOD']) : 'GET';
-
-    if ($request_method !== 'POST') {
-        return [
-            'errors' => [],
-            'form' => null,
-        ];
-    }
-
-    $action = isset($_POST['must_coupon_action']) ? \sanitize_key((string) \wp_unslash($_POST['must_coupon_action'])) : '';
-
-    if ($action !== 'save_coupon') {
-        return [
-            'errors' => [],
-            'form' => null,
-        ];
-    }
-
-    $nonce = isset($_POST['must_coupon_nonce']) ? (string) \wp_unslash($_POST['must_coupon_nonce']) : '';
-
-    if (!\wp_verify_nonce($nonce, 'must_coupon_save')) {
-        return [
-            'errors' => [\__('Security check failed. Please try again.', 'must-hotel-booking')],
-            'form' => null,
-        ];
-    }
-
-    /** @var array<string, mixed> $raw_post */
-    $raw_post = \is_array($_POST) ? $_POST : [];
-    $coupon_data = sanitize_coupon_form_values($raw_post);
-    $coupon_id = (int) $coupon_data['coupon_id'];
-
-    if (!empty($coupon_data['errors'])) {
-        return [
-            'errors' => (array) $coupon_data['errors'],
-            'form' => $coupon_data,
-        ];
-    }
-
-    global $wpdb;
-
-    $payload = [
-        'code' => (string) $coupon_data['code'],
-        'discount_type' => (string) $coupon_data['discount_type'],
-        'discount_value' => (float) $coupon_data['discount_value'],
-        'valid_from' => (string) $coupon_data['valid_from'],
-        'valid_until' => (string) $coupon_data['valid_until'],
-        'usage_limit' => (int) $coupon_data['usage_limit'],
-    ];
-
-    $saved_coupon_id = 0;
-
-    if ($coupon_id > 0) {
-        $updated = $wpdb->update(
-            get_admin_coupons_table_name(),
-            $payload,
-            ['id' => $coupon_id],
-            ['%s', '%s', '%f', '%s', '%s', '%d'],
-            ['%d']
-        );
-
-        if ($updated !== false) {
-            $saved_coupon_id = $coupon_id;
-        }
-    } else {
-        $payload['usage_count'] = 0;
-        $payload['created_at'] = \current_time('mysql');
-
-        $inserted = $wpdb->insert(
-            get_admin_coupons_table_name(),
-            $payload,
-            ['%s', '%s', '%f', '%s', '%s', '%d', '%d', '%s']
-        );
-
-        if ($inserted !== false) {
-            $saved_coupon_id = (int) $wpdb->insert_id;
-        }
-    }
-
-    if ($saved_coupon_id <= 0) {
-        return [
-            'errors' => [\__('Unable to save coupon. Please check database schema.', 'must-hotel-booking')],
-            'form' => $coupon_data,
-        ];
-    }
-
-    \wp_safe_redirect(
-        get_admin_coupons_page_url(
-            [
-                'notice' => $coupon_id > 0 ? 'coupon_updated' : 'coupon_created',
-                'action' => 'edit',
-                'coupon_id' => $saved_coupon_id,
-            ]
-        )
-    );
-    exit;
-}
-
-/**
- * Build coupon form data.
- *
- * @param array<string, mixed>|null $submitted_form
- * @return array<string, mixed>
- */
-function get_coupon_form_data(?array $submitted_form = null): array
-{
-    $defaults = get_coupon_form_defaults();
-
-    if (\is_array($submitted_form)) {
-        return \array_merge($defaults, $submitted_form);
-    }
-
-    $action = isset($_GET['action']) ? \sanitize_key((string) \wp_unslash($_GET['action'])) : '';
-    $coupon_id = isset($_GET['coupon_id']) ? \absint(\wp_unslash($_GET['coupon_id'])) : 0;
-
-    if ($action !== 'edit' || $coupon_id <= 0) {
-        return $defaults;
-    }
-
-    $coupon = get_coupon_row($coupon_id);
-
-    if (!\is_array($coupon)) {
-        return $defaults;
-    }
-
-    return [
-        'coupon_id' => (int) ($coupon['id'] ?? 0),
-        'code' => (string) ($coupon['code'] ?? ''),
-        'discount_type' => (string) ($coupon['discount_type'] ?? 'percentage'),
-        'discount_value' => (float) ($coupon['discount_value'] ?? 0),
-        'valid_from' => (string) ($coupon['valid_from'] ?? $defaults['valid_from']),
-        'valid_until' => (string) ($coupon['valid_until'] ?? $defaults['valid_until']),
-        'usage_limit' => (int) ($coupon['usage_limit'] ?? 0),
-        'usage_count' => (int) ($coupon['usage_count'] ?? 0),
-    ];
-}
-
-/**
- * Render coupons admin notices.
- */
 function render_coupons_admin_notice_from_query(): void
 {
     $notice = isset($_GET['notice']) ? \sanitize_key((string) \wp_unslash($_GET['notice'])) : '';
@@ -392,137 +90,256 @@ function render_coupons_admin_notice_from_query(): void
     $messages = [
         'coupon_created' => ['success', \__('Coupon created successfully.', 'must-hotel-booking')],
         'coupon_updated' => ['success', \__('Coupon updated successfully.', 'must-hotel-booking')],
+        'coupon_enabled' => ['success', \__('Coupon enabled.', 'must-hotel-booking')],
+        'coupon_disabled' => ['success', \__('Coupon disabled.', 'must-hotel-booking')],
         'coupon_deleted' => ['success', \__('Coupon deleted successfully.', 'must-hotel-booking')],
-        'coupon_delete_failed' => ['error', \__('Unable to delete coupon.', 'must-hotel-booking')],
+        'coupon_delete_blocked' => ['error', \__('Coupon cannot be deleted because reservations already use it.', 'must-hotel-booking')],
+        'coupon_not_found' => ['error', \__('Coupon could not be found.', 'must-hotel-booking')],
         'invalid_nonce' => ['error', \__('Security check failed. Please try again.', 'must-hotel-booking')],
+        'action_failed' => ['error', \__('Unable to complete the requested coupon action.', 'must-hotel-booking')],
     ];
 
     if (!isset($messages[$notice])) {
         return;
     }
 
-    $type = (string) $messages[$notice][0];
-    $message = (string) $messages[$notice][1];
-    $class = $type === 'success' ? 'notice notice-success' : 'notice notice-error';
-
-    echo '<div class="' . \esc_attr($class) . '"><p>' . \esc_html($message) . '</p></div>';
+    $class = (string) $messages[$notice][0] === 'success' ? 'notice notice-success' : 'notice notice-error';
+    echo '<div class="' . \esc_attr($class) . '"><p>' . \esc_html((string) $messages[$notice][1]) . '</p></div>';
 }
 
 /**
- * Render coupons admin page.
+ * @param array<int, string> $errors
  */
-function render_admin_coupons_page(): void
+function render_coupon_error_notice(array $errors): void
 {
-    ensure_admin_capability();
+    if (empty($errors)) {
+        return;
+    }
 
-    maybe_handle_coupon_delete_request();
+    echo '<div class="notice notice-error"><ul>';
+    foreach ($errors as $error) {
+        echo '<li>' . \esc_html((string) $error) . '</li>';
+    }
+    echo '</ul></div>';
+}
 
-    $save_state = maybe_handle_coupon_save_request();
-    $errors = isset($save_state['errors']) && \is_array($save_state['errors']) ? $save_state['errors'] : [];
-    $submitted_form = isset($save_state['form']) && \is_array($save_state['form']) ? $save_state['form'] : null;
+/**
+ * @param array<int, array<string, string>> $summaryCards
+ */
+function render_coupon_summary_cards(array $summaryCards): void
+{
+    echo '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:16px;margin:18px 0;">';
 
-    $form = get_coupon_form_data($submitted_form);
-    $coupons = get_coupon_rows();
-    $types = get_coupon_type_options();
-    $is_edit_mode = (int) $form['coupon_id'] > 0;
-
-    echo '<div class="wrap">';
-    echo '<h1>' . \esc_html__('Coupons', 'must-hotel-booking') . '</h1>';
-
-    render_coupons_admin_notice_from_query();
-
-    if (!empty($errors)) {
-        echo '<div class="notice notice-error"><ul>';
-
-        foreach ($errors as $error) {
-            echo '<li>' . \esc_html((string) $error) . '</li>';
+    foreach ($summaryCards as $card) {
+        if (!\is_array($card)) {
+            continue;
         }
 
-        echo '</ul></div>';
+        echo '<article class="postbox" style="margin:0;padding:18px 20px;">';
+        echo '<p style="margin:0 0 8px 0;color:#646970;font-size:12px;text-transform:uppercase;letter-spacing:0.06em;">' . \esc_html((string) ($card['label'] ?? '')) . '</p>';
+        echo '<strong style="display:block;font-size:32px;line-height:1.1;">' . \esc_html((string) ($card['value'] ?? '0')) . '</strong>';
+        echo '<p style="margin:8px 0 0 0;color:#646970;">' . \esc_html((string) ($card['meta'] ?? '')) . '</p>';
+        echo '</article>';
     }
 
+    echo '</div>';
+}
+
+/**
+ * @param array<string, mixed> $filters
+ */
+function render_coupon_filters(array $filters): void
+{
     echo '<div class="postbox" style="padding:16px;margin-bottom:20px;">';
-    echo '<h2 style="margin-top:0;">' . \esc_html($is_edit_mode ? __('Edit Coupon', 'must-hotel-booking') : __('Create Coupon', 'must-hotel-booking')) . '</h2>';
-    echo '<form method="post" action="' . \esc_url(get_admin_coupons_page_url()) . '">';
-    \wp_nonce_field('must_coupon_save', 'must_coupon_nonce');
-
-    echo '<input type="hidden" name="must_coupon_action" value="save_coupon" />';
-    echo '<input type="hidden" name="coupon_id" value="' . \esc_attr((string) $form['coupon_id']) . '" />';
-
+    echo '<h2 style="margin-top:0;">' . \esc_html__('Filters', 'must-hotel-booking') . '</h2>';
+    echo '<form method="get" action="' . \esc_url(\admin_url('admin.php')) . '">';
+    echo '<input type="hidden" name="page" value="must-hotel-booking-coupons" />';
     echo '<table class="form-table" role="presentation"><tbody>';
-    echo '<tr><th scope="row"><label for="must-coupon-code">' . \esc_html__('Coupon code', 'must-hotel-booking') . '</label></th>';
-    echo '<td><input id="must-coupon-code" type="text" class="regular-text" name="code" value="' . \esc_attr((string) $form['code']) . '" required /></td></tr>';
-
-    echo '<tr><th scope="row"><label for="must-coupon-type">' . \esc_html__('Discount type', 'must-hotel-booking') . '</label></th>';
-    echo '<td><select id="must-coupon-type" name="discount_type">';
-
-    foreach ($types as $value => $label) {
-        $selected = ((string) $form['discount_type'] === $value) ? ' selected' : '';
-        echo '<option value="' . \esc_attr($value) . '"' . $selected . '>' . \esc_html($label) . '</option>';
+    echo '<tr><th scope="row"><label for="must-coupon-filter-search">' . \esc_html__('Search', 'must-hotel-booking') . '</label></th><td><input id="must-coupon-filter-search" class="regular-text" type="search" name="search" value="' . \esc_attr((string) ($filters['search'] ?? '')) . '" placeholder="' . \esc_attr__('Code or internal name', 'must-hotel-booking') . '" /></td></tr>';
+    echo '<tr><th scope="row"><label for="must-coupon-filter-status">' . \esc_html__('Status', 'must-hotel-booking') . '</label></th><td><select id="must-coupon-filter-status" name="status">';
+    foreach (
+        [
+            '' => __('All statuses', 'must-hotel-booking'),
+            'active' => __('Active', 'must-hotel-booking'),
+            'inactive' => __('Inactive', 'must-hotel-booking'),
+            'expired' => __('Expired', 'must-hotel-booking'),
+            'scheduled' => __('Scheduled', 'must-hotel-booking'),
+            'fully_used' => __('Fully used', 'must-hotel-booking'),
+            'currently_valid' => __('Currently valid', 'must-hotel-booking'),
+        ] as $value => $label
+    ) {
+        echo '<option value="' . \esc_attr($value) . '"' . \selected((string) ($filters['status'] ?? ''), $value, false) . '>' . \esc_html($label) . '</option>';
     }
-
     echo '</select></td></tr>';
-
-    echo '<tr><th scope="row"><label for="must-coupon-value">' . \esc_html__('Discount value', 'must-hotel-booking') . '</label></th>';
-    echo '<td><input id="must-coupon-value" type="number" min="0.01" step="0.01" name="discount_value" value="' . \esc_attr((string) $form['discount_value']) . '" required /></td></tr>';
-
-    echo '<tr><th scope="row"><label for="must-coupon-valid-from">' . \esc_html__('Valid from', 'must-hotel-booking') . '</label></th>';
-    echo '<td><input id="must-coupon-valid-from" type="date" name="valid_from" value="' . \esc_attr((string) $form['valid_from']) . '" required /></td></tr>';
-
-    echo '<tr><th scope="row"><label for="must-coupon-valid-until">' . \esc_html__('Valid until', 'must-hotel-booking') . '</label></th>';
-    echo '<td><input id="must-coupon-valid-until" type="date" name="valid_until" value="' . \esc_attr((string) $form['valid_until']) . '" required /></td></tr>';
-
-    echo '<tr><th scope="row"><label for="must-coupon-usage-limit">' . \esc_html__('Usage limit', 'must-hotel-booking') . '</label></th>';
-    echo '<td><input id="must-coupon-usage-limit" type="number" min="0" step="1" name="usage_limit" value="' . \esc_attr((string) $form['usage_limit']) . '" required />';
-    echo '<p class="description">' . \esc_html__('Set 0 for unlimited usage.', 'must-hotel-booking') . '</p></td></tr>';
-    echo '</tbody></table>';
-
-    \submit_button($is_edit_mode ? __('Update Coupon', 'must-hotel-booking') : __('Create Coupon', 'must-hotel-booking'));
-
-    if ($is_edit_mode) {
-        echo '<a class="button button-secondary" href="' . \esc_url(get_admin_coupons_page_url()) . '">' . \esc_html__('Add New Coupon', 'must-hotel-booking') . '</a>';
+    echo '<tr><th scope="row"><label for="must-coupon-filter-type">' . \esc_html__('Discount Type', 'must-hotel-booking') . '</label></th><td><select id="must-coupon-filter-type" name="discount_type">';
+    foreach (
+        [
+            '' => __('All discount types', 'must-hotel-booking'),
+            'percentage' => __('Percentage', 'must-hotel-booking'),
+            'fixed' => __('Fixed', 'must-hotel-booking'),
+        ] as $value => $label
+    ) {
+        echo '<option value="' . \esc_attr($value) . '"' . \selected((string) ($filters['discount_type'] ?? ''), $value, false) . '>' . \esc_html($label) . '</option>';
     }
-
+    echo '</select></td></tr>';
+    echo '</tbody></table>';
+    \submit_button(\__('Apply Filters', 'must-hotel-booking'));
+    echo ' <a class="button" href="' . \esc_url(get_admin_coupons_page_url()) . '">' . \esc_html__('Reset', 'must-hotel-booking') . '</a>';
     echo '</form>';
     echo '</div>';
+}
 
-    echo '<h2>' . \esc_html__('Coupons List', 'must-hotel-booking') . '</h2>';
-    echo '<table class="widefat striped">';
-    echo '<thead><tr>';
-    echo '<th>' . \esc_html__('Coupon code', 'must-hotel-booking') . '</th>';
-    echo '<th>' . \esc_html__('Discount type', 'must-hotel-booking') . '</th>';
-    echo '<th>' . \esc_html__('Discount value', 'must-hotel-booking') . '</th>';
-    echo '<th>' . \esc_html__('Valid from', 'must-hotel-booking') . '</th>';
-    echo '<th>' . \esc_html__('Valid until', 'must-hotel-booking') . '</th>';
-    echo '<th>' . \esc_html__('Usage limit', 'must-hotel-booking') . '</th>';
-    echo '<th>' . \esc_html__('Used', 'must-hotel-booking') . '</th>';
+/**
+ * @param array<int, array<string, mixed>> $rows
+ */
+function render_coupon_table(array $rows): void
+{
+    echo '<div class="postbox" style="padding:16px;margin-bottom:20px;">';
+    echo '<h2 style="margin-top:0;">' . \esc_html__('Coupons Overview', 'must-hotel-booking') . '</h2>';
+    echo '<table class="widefat striped"><thead><tr>';
+    echo '<th>' . \esc_html__('Coupon Code', 'must-hotel-booking') . '</th>';
+    echo '<th>' . \esc_html__('Name', 'must-hotel-booking') . '</th>';
+    echo '<th>' . \esc_html__('Discount', 'must-hotel-booking') . '</th>';
+    echo '<th>' . \esc_html__('Status', 'must-hotel-booking') . '</th>';
+    echo '<th>' . \esc_html__('Valid From', 'must-hotel-booking') . '</th>';
+    echo '<th>' . \esc_html__('Valid Until', 'must-hotel-booking') . '</th>';
+    echo '<th>' . \esc_html__('Usage', 'must-hotel-booking') . '</th>';
+    echo '<th>' . \esc_html__('Remaining', 'must-hotel-booking') . '</th>';
+    echo '<th>' . \esc_html__('Last Used', 'must-hotel-booking') . '</th>';
     echo '<th>' . \esc_html__('Actions', 'must-hotel-booking') . '</th>';
     echo '</tr></thead><tbody>';
 
-    if (empty($coupons)) {
-        echo '<tr><td colspan="8">' . \esc_html__('No coupons found.', 'must-hotel-booking') . '</td></tr>';
+    if (empty($rows)) {
+        echo '<tr><td colspan="10">' . \esc_html__('No coupons matched the current filters.', 'must-hotel-booking') . '</td></tr>';
     } else {
-        foreach ($coupons as $coupon) {
-            $coupon_id = isset($coupon['id']) ? (int) $coupon['id'] : 0;
-            $type = isset($coupon['discount_type']) ? (string) $coupon['discount_type'] : 'percentage';
-            $edit_url = get_admin_coupons_page_url(['action' => 'edit', 'coupon_id' => $coupon_id]);
-            $delete_url = \wp_nonce_url(
-                get_admin_coupons_page_url(['action' => 'delete_coupon', 'coupon_id' => $coupon_id]),
-                'must_coupon_delete_' . $coupon_id
-            );
+        foreach ($rows as $row) {
+            if (!\is_array($row)) {
+                continue;
+            }
 
             echo '<tr>';
-            echo '<td>' . \esc_html((string) ($coupon['code'] ?? '')) . '</td>';
-            echo '<td>' . \esc_html(isset($types[$type]) ? $types[$type] : $type) . '</td>';
-            echo '<td>' . \esc_html(\number_format_i18n((float) ($coupon['discount_value'] ?? 0), 2)) . '</td>';
-            echo '<td>' . \esc_html((string) ($coupon['valid_from'] ?? '')) . '</td>';
-            echo '<td>' . \esc_html((string) ($coupon['valid_until'] ?? '')) . '</td>';
-            echo '<td>' . \esc_html((string) ((int) ($coupon['usage_limit'] ?? 0))) . '</td>';
-            echo '<td>' . \esc_html((string) ((int) ($coupon['usage_count'] ?? 0))) . '</td>';
-            echo '<td>';
-            echo '<a class="button button-small" href="' . \esc_url($edit_url) . '">' . \esc_html__('Edit', 'must-hotel-booking') . '</a> ';
-            echo '<a class="button button-small button-link-delete" href="' . \esc_url($delete_url) . '" onclick="return confirm(\'' . \esc_js(__('Delete this coupon?', 'must-hotel-booking')) . '\');">' . \esc_html__('Delete', 'must-hotel-booking') . '</a>';
-            echo '</td>';
+            echo '<td><strong><a href="' . \esc_url((string) ($row['edit_url'] ?? '')) . '">' . \esc_html((string) ($row['code'] ?? '')) . '</a></strong></td>';
+            echo '<td>' . \esc_html((string) (($row['name'] ?? '') !== '' ? $row['name'] : '—')) . '</td>';
+            echo '<td>' . \esc_html((string) ($row['discount_value'] ?? '')) . '</td>';
+            echo '<td>' . \esc_html((string) ($row['status'] ?? '')) . '</td>';
+            echo '<td>' . \esc_html((string) ($row['valid_from'] ?? '')) . '</td>';
+            echo '<td>' . \esc_html((string) ($row['valid_until'] ?? '')) . '</td>';
+            echo '<td>' . \esc_html((string) ($row['usage'] ?? 0)) . '</td>';
+            echo '<td>' . \esc_html((string) ($row['remaining'] ?? '')) . '</td>';
+            echo '<td>' . \esc_html((string) ($row['last_used'] ?? '')) . '</td>';
+            echo '<td><a class="button button-small" href="' . \esc_url((string) ($row['edit_url'] ?? '')) . '">' . \esc_html__('Edit', 'must-hotel-booking') . '</a> ';
+            echo '<a class="button button-small" href="' . \esc_url((string) ($row['toggle_url'] ?? '')) . '">' . \esc_html(!empty($row['is_active']) ? __('Disable', 'must-hotel-booking') : __('Enable', 'must-hotel-booking')) . '</a> ';
+            echo '<a class="button button-small" href="' . \esc_url((string) ($row['reservations_url'] ?? '')) . '">' . \esc_html__('Reservations', 'must-hotel-booking') . '</a> ';
+            echo '<a class="button button-small button-link-delete" href="' . \esc_url((string) ($row['delete_url'] ?? '')) . '" onclick="return confirm(\'' . \esc_js(__('Delete this coupon?', 'must-hotel-booking')) . '\');">' . \esc_html__('Delete', 'must-hotel-booking') . '</a>';
+
+            if (!empty($row['warnings'])) {
+                echo '<ul style="margin:8px 0 0 18px;">';
+                foreach ((array) $row['warnings'] as $warning) {
+                    echo '<li>' . \esc_html((string) $warning) . '</li>';
+                }
+                echo '</ul>';
+            }
+
+            echo '</td></tr>';
+        }
+    }
+
+    echo '</tbody></table>';
+    echo '</div>';
+}
+
+/**
+ * @param array<string, mixed>|null $form
+ */
+function render_coupon_form(?array $form): void
+{
+    if (!\is_array($form)) {
+        return;
+    }
+
+    $isEdit = (int) ($form['coupon_id'] ?? 0) > 0;
+    echo '<div class="postbox" style="padding:16px;margin-bottom:20px;">';
+    echo '<h2 style="margin-top:0;">' . \esc_html($isEdit ? __('Edit Coupon', 'must-hotel-booking') : __('Create Coupon', 'must-hotel-booking')) . '</h2>';
+    echo '<form method="post" action="' . \esc_url(get_admin_coupons_page_url()) . '">';
+    \wp_nonce_field('must_coupon_save', 'must_coupon_nonce');
+    echo '<input type="hidden" name="must_coupon_action" value="save_coupon" />';
+    echo '<input type="hidden" name="coupon_id" value="' . \esc_attr((string) ($form['coupon_id'] ?? 0)) . '" />';
+    echo '<table class="form-table" role="presentation"><tbody>';
+    echo '<tr><th scope="row"><label for="must-coupon-code">' . \esc_html__('Coupon code', 'must-hotel-booking') . '</label></th><td><input id="must-coupon-code" class="regular-text" type="text" name="code" value="' . \esc_attr((string) ($form['code'] ?? '')) . '" required /></td></tr>';
+    echo '<tr><th scope="row"><label for="must-coupon-name">' . \esc_html__('Internal name', 'must-hotel-booking') . '</label></th><td><input id="must-coupon-name" class="regular-text" type="text" name="name" value="' . \esc_attr((string) ($form['name'] ?? '')) . '" /></td></tr>';
+    echo '<tr><th scope="row">' . \esc_html__('Active', 'must-hotel-booking') . '</th><td><label><input type="checkbox" name="is_active" value="1"' . \checked(!empty($form['is_active']), true, false) . ' /> ' . \esc_html__('Coupon can be used in checkout', 'must-hotel-booking') . '</label></td></tr>';
+    echo '<tr><th scope="row"><label for="must-coupon-discount-type">' . \esc_html__('Discount type', 'must-hotel-booking') . '</label></th><td><select id="must-coupon-discount-type" name="discount_type"><option value="percentage"' . \selected((string) ($form['discount_type'] ?? ''), 'percentage', false) . '>' . \esc_html__('Percentage', 'must-hotel-booking') . '</option><option value="fixed"' . \selected((string) ($form['discount_type'] ?? ''), 'fixed', false) . '>' . \esc_html__('Fixed', 'must-hotel-booking') . '</option></select></td></tr>';
+    echo '<tr><th scope="row"><label for="must-coupon-discount-value">' . \esc_html__('Discount value', 'must-hotel-booking') . '</label></th><td><input id="must-coupon-discount-value" type="number" min="0.01" step="0.01" name="discount_value" value="' . \esc_attr((string) ($form['discount_value'] ?? 0)) . '" required /></td></tr>';
+    echo '<tr><th scope="row"><label for="must-coupon-minimum-booking-amount">' . \esc_html__('Minimum booking amount', 'must-hotel-booking') . '</label></th><td><input id="must-coupon-minimum-booking-amount" type="number" min="0" step="0.01" name="minimum_booking_amount" value="' . \esc_attr((string) ($form['minimum_booking_amount'] ?? 0)) . '" /></td></tr>';
+    echo '<tr><th scope="row"><label for="must-coupon-valid-from">' . \esc_html__('Valid from', 'must-hotel-booking') . '</label></th><td><input id="must-coupon-valid-from" type="date" name="valid_from" value="' . \esc_attr((string) ($form['valid_from'] ?? '')) . '" required /></td></tr>';
+    echo '<tr><th scope="row"><label for="must-coupon-valid-until">' . \esc_html__('Valid until', 'must-hotel-booking') . '</label></th><td><input id="must-coupon-valid-until" type="date" name="valid_until" value="' . \esc_attr((string) ($form['valid_until'] ?? '')) . '" required /></td></tr>';
+    echo '<tr><th scope="row"><label for="must-coupon-usage-limit">' . \esc_html__('Usage limit', 'must-hotel-booking') . '</label></th><td><input id="must-coupon-usage-limit" type="number" min="0" step="1" name="usage_limit" value="' . \esc_attr((string) ($form['usage_limit'] ?? 0)) . '" />';
+    echo '<p class="description">' . \esc_html__('Set 0 for unlimited usage.', 'must-hotel-booking') . '</p></td></tr>';
+    echo '<tr><th scope="row">' . \esc_html__('Used / Remaining', 'must-hotel-booking') . '</th><td>' . \esc_html((string) ((int) ($form['used_count'] ?? 0))) . ' / ' . \esc_html(isset($form['remaining_usage']) && $form['remaining_usage'] !== null ? (string) $form['remaining_usage'] : __('Unlimited', 'must-hotel-booking')) . '</td></tr>';
+    echo '</tbody></table>';
+    \submit_button($isEdit ? __('Save Coupon', 'must-hotel-booking') : __('Create Coupon', 'must-hotel-booking'));
+    echo '</form>';
+
+    if (!empty($form['warnings'])) {
+        echo '<h3>' . \esc_html__('Warnings', 'must-hotel-booking') . '</h3><ul>';
+        foreach ((array) $form['warnings'] as $warning) {
+            echo '<li>' . \esc_html((string) $warning) . '</li>';
+        }
+        echo '</ul>';
+    }
+    echo '</div>';
+}
+
+/**
+ * @param array<string, mixed>|null $detail
+ */
+function render_coupon_detail(?array $detail): void
+{
+    if (!\is_array($detail)) {
+        return;
+    }
+
+    $coupon = isset($detail['coupon']) && \is_array($detail['coupon']) ? $detail['coupon'] : [];
+    $state = isset($detail['state']) && \is_array($detail['state']) ? $detail['state'] : [];
+    echo '<div class="postbox" style="padding:16px;margin-bottom:20px;">';
+    echo '<h2 style="margin-top:0;">' . \esc_html__('Coupon Detail', 'must-hotel-booking') . '</h2>';
+    echo '<table class="widefat striped" style="margin-bottom:20px;"><tbody>';
+    echo '<tr><th>' . \esc_html__('Coupon code', 'must-hotel-booking') . '</th><td>' . \esc_html((string) ($coupon['code'] ?? '')) . '</td></tr>';
+    echo '<tr><th>' . \esc_html__('Name', 'must-hotel-booking') . '</th><td>' . \esc_html((string) (($coupon['name'] ?? '') !== '' ? $coupon['name'] : '—')) . '</td></tr>';
+    echo '<tr><th>' . \esc_html__('Status', 'must-hotel-booking') . '</th><td>' . \esc_html((string) ($state['status'] ?? 'inactive')) . '</td></tr>';
+    echo '<tr><th>' . \esc_html__('Usable now', 'must-hotel-booking') . '</th><td>' . \esc_html(!empty($state['usable_now']) ? __('Yes', 'must-hotel-booking') : __('No', 'must-hotel-booking')) . '</td></tr>';
+    echo '<tr><th>' . \esc_html__('Reservations using this coupon', 'must-hotel-booking') . '</th><td>' . \esc_html((string) ((int) ($coupon['used_count'] ?? 0))) . '</td></tr>';
+    echo '<tr><th>' . \esc_html__('Future reservations using this coupon', 'must-hotel-booking') . '</th><td>' . \esc_html((string) ((int) ($coupon['future_reservation_count'] ?? 0))) . '</td></tr>';
+    echo '<tr><th>' . \esc_html__('Last used', 'must-hotel-booking') . '</th><td>' . \esc_html((string) (($coupon['last_used_at'] ?? '') !== '' ? $coupon['last_used_at'] : '—')) . '</td></tr>';
+    echo '</tbody></table>';
+
+    if (!empty($detail['warnings'])) {
+        echo '<h3>' . \esc_html__('Warnings', 'must-hotel-booking') . '</h3><ul>';
+        foreach ((array) $detail['warnings'] as $warning) {
+            echo '<li>' . \esc_html((string) $warning) . '</li>';
+        }
+        echo '</ul>';
+    }
+
+    echo '<h3>' . \esc_html__('Reservations Using This Coupon', 'must-hotel-booking') . '</h3>';
+    echo '<table class="widefat striped"><thead><tr><th>' . \esc_html__('Booking ID', 'must-hotel-booking') . '</th><th>' . \esc_html__('Guest', 'must-hotel-booking') . '</th><th>' . \esc_html__('Accommodation', 'must-hotel-booking') . '</th><th>' . \esc_html__('Stay', 'must-hotel-booking') . '</th><th>' . \esc_html__('Status', 'must-hotel-booking') . '</th><th>' . \esc_html__('Discount', 'must-hotel-booking') . '</th><th>' . \esc_html__('Action', 'must-hotel-booking') . '</th></tr></thead><tbody>';
+
+    if (empty($detail['usage_rows'])) {
+        echo '<tr><td colspan="7">' . \esc_html__('No reservations have used this coupon yet.', 'must-hotel-booking') . '</td></tr>';
+    } else {
+        foreach ((array) $detail['usage_rows'] as $usageRow) {
+            if (!\is_array($usageRow)) {
+                continue;
+            }
+
+            echo '<tr>';
+            echo '<td>' . \esc_html((string) ($usageRow['booking_id'] ?? '')) . '</td>';
+            echo '<td>' . \esc_html((string) ($usageRow['guest_name'] ?? '')) . '<br /><span style="color:#646970;">' . \esc_html((string) ($usageRow['guest_email'] ?? '')) . '</span></td>';
+            echo '<td>' . \esc_html((string) ($usageRow['room_name'] ?? '')) . '</td>';
+            echo '<td>' . \esc_html((string) ($usageRow['checkin'] ?? '')) . ' → ' . \esc_html((string) ($usageRow['checkout'] ?? '')) . '</td>';
+            echo '<td>' . \esc_html((string) ($usageRow['status'] ?? '')) . ' | ' . \esc_html((string) ($usageRow['payment_status'] ?? '')) . '</td>';
+            echo '<td>' . \esc_html((string) ($usageRow['discount_total'] ?? '')) . '</td>';
+            echo '<td><a class="button button-small" href="' . \esc_url((string) ($usageRow['detail_url'] ?? '')) . '">' . \esc_html__('Open Reservation', 'must-hotel-booking') . '</a></td>';
             echo '</tr>';
         }
     }
@@ -530,3 +347,60 @@ function render_admin_coupons_page(): void
     echo '</tbody></table>';
     echo '</div>';
 }
+
+/**
+ * @param array<string, mixed> $pagination
+ * @param array<string, scalar|int|bool> $args
+ */
+function render_coupon_pagination(array $pagination, array $args): void
+{
+    $totalPages = isset($pagination['total_pages']) ? (int) $pagination['total_pages'] : 1;
+
+    if ($totalPages <= 1) {
+        return;
+    }
+
+    $currentPage = isset($pagination['current_page']) ? (int) $pagination['current_page'] : 1;
+    echo '<div class="tablenav"><div class="tablenav-pages">';
+    echo \wp_kses_post(
+        \paginate_links([
+            'base' => \esc_url_raw(get_admin_coupons_page_url(\array_merge($args, ['paged' => '%#%']))),
+            'format' => '',
+            'current' => $currentPage,
+            'total' => $totalPages,
+        ])
+    );
+    echo '</div></div>';
+}
+
+function render_admin_coupons_page(): void
+{
+    ensure_admin_capability();
+
+    $query = CouponAdminQuery::fromRequest(\is_array($_REQUEST) ? $_REQUEST : []);
+    $pageData = (new CouponAdminDataProvider())->getPageData($query, get_coupons_admin_save_state());
+    clear_coupons_admin_save_state();
+
+    echo '<div class="wrap">';
+    echo '<h1>' . \esc_html__('Coupons', 'must-hotel-booking') . '</h1>';
+    echo '<p class="description">' . \esc_html__('Manage booking discounts used by checkout, reservation totals, and payment collection from one operational screen.', 'must-hotel-booking') . '</p>';
+    echo '<p><a class="button button-secondary" href="' . \esc_url(get_admin_pricing_page_url()) . '">' . \esc_html__('Open Rates & Pricing', 'must-hotel-booking') . '</a> ';
+    echo '<a class="button button-secondary" href="' . \esc_url(get_admin_reservations_page_url()) . '">' . \esc_html__('Open Reservations', 'must-hotel-booking') . '</a> ';
+    echo '<a class="button button-secondary" href="' . \esc_url(get_admin_payments_page_url()) . '">' . \esc_html__('Open Payments', 'must-hotel-booking') . '</a></p>';
+
+    render_coupons_admin_notice_from_query();
+    render_coupon_error_notice(isset($pageData['errors']) && \is_array($pageData['errors']) ? $pageData['errors'] : []);
+    render_coupon_summary_cards(isset($pageData['summary_cards']) && \is_array($pageData['summary_cards']) ? $pageData['summary_cards'] : []);
+    render_coupon_filters(isset($pageData['filters']) && \is_array($pageData['filters']) ? $pageData['filters'] : []);
+    echo '<div class="notice notice-info inline"><p>' . \esc_html((string) ($pageData['calculation_note'] ?? '')) . '</p></div>';
+    render_coupon_table(isset($pageData['rows']) && \is_array($pageData['rows']) ? $pageData['rows'] : []);
+    render_coupon_pagination(
+        isset($pageData['pagination']) && \is_array($pageData['pagination']) ? $pageData['pagination'] : [],
+        $query->buildUrlArgs()
+    );
+    render_coupon_form(isset($pageData['form']) && \is_array($pageData['form']) ? $pageData['form'] : null);
+    render_coupon_detail(isset($pageData['detail']) && \is_array($pageData['detail']) ? $pageData['detail'] : null);
+    echo '</div>';
+}
+
+\add_action('admin_init', __NAMESPACE__ . '\maybe_handle_coupon_admin_actions_early', 1);

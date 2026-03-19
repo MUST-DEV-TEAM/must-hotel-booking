@@ -173,7 +173,27 @@ final class PaymentEngine
      */
     public static function getCouponRuleByCode(string $couponCode): ?array
     {
-        return get_payment_repository()->getCouponByCode($couponCode);
+        $coupon = CouponService::getCouponByCode($couponCode);
+
+        if (!\is_array($coupon)) {
+            return null;
+        }
+
+        return [
+            'id' => isset($coupon['id']) ? (int) $coupon['id'] : 0,
+            'code' => isset($coupon['code']) ? (string) $coupon['code'] : '',
+            'name' => isset($coupon['name']) ? (string) $coupon['name'] : '',
+            'enabled' => !empty($coupon['is_active']),
+            'type' => ((string) ($coupon['discount_type'] ?? 'percentage')) === 'fixed' ? 'fixed' : 'percent',
+            'value' => isset($coupon['discount_value']) ? (float) $coupon['discount_value'] : 0.0,
+            'discount_type' => isset($coupon['discount_type']) ? (string) $coupon['discount_type'] : 'percentage',
+            'discount_value' => isset($coupon['discount_value']) ? (float) $coupon['discount_value'] : 0.0,
+            'minimum_booking_amount' => isset($coupon['minimum_booking_amount']) ? (float) $coupon['minimum_booking_amount'] : 0.0,
+            'valid_from' => isset($coupon['valid_from']) ? (string) $coupon['valid_from'] : '',
+            'valid_until' => isset($coupon['valid_until']) ? (string) $coupon['valid_until'] : '',
+            'usage_limit' => isset($coupon['usage_limit']) ? (int) $coupon['usage_limit'] : 0,
+            'used_count' => isset($coupon['used_count']) ? (int) $coupon['used_count'] : 0,
+        ];
     }
 
     /**
@@ -469,11 +489,7 @@ final class PaymentEngine
                         )
                     );
 
-                foreach ($couponIds as $couponId) {
-                    if ($couponId > 0) {
-                        PricingEngine::incrementCouponUsageCount($couponId);
-                    }
-                }
+                unset($couponIds);
             }
 
             return [
@@ -866,9 +882,7 @@ final class PaymentEngine
             BookingStatusEngine::updateReservationStatuses($reservationIds, 'confirmed', 'paid');
             BookingStatusEngine::createPaymentRows($reservationIds, 'stripe', 'paid', $paymentIntent !== '' ? $paymentIntent : $sessionId);
 
-            foreach ($couponIds as $couponId) {
-                PricingEngine::incrementCouponUsageCount($couponId);
-            }
+            unset($couponIds);
         } elseif ($type === 'checkout.session.expired') {
             BookingStatusEngine::failPendingStripeReservations($reservationIds, 'expired');
         }

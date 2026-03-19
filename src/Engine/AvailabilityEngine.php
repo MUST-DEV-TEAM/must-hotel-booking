@@ -35,92 +35,7 @@ final class AvailabilityEngine
 
     public static function checkBookingRestrictions(int $roomId, string $checkin, string $checkout): bool
     {
-        if ($roomId <= 0 || !self::isValidBookingDate($checkin) || !self::isValidBookingDate($checkout) || $checkin >= $checkout) {
-            return false;
-        }
-
-        $nights = self::getAvailabilityNightsCount($checkin, $checkout);
-
-        if ($nights <= 0) {
-            return false;
-        }
-
-        $rules = get_availability_repository()->getAvailabilityRules($roomId);
-
-        if (empty($rules)) {
-            return true;
-        }
-
-        $minimumStay = 0;
-        $maximumStay = 0;
-
-        foreach ($rules as $rule) {
-            if (!\is_array($rule)) {
-                continue;
-            }
-
-            $ruleType = isset($rule['rule_type']) ? \sanitize_key((string) $rule['rule_type']) : '';
-            $startDate = isset($rule['availability_date']) ? (string) $rule['availability_date'] : '';
-            $endDate = isset($rule['end_date']) ? (string) $rule['end_date'] : '';
-
-            if ($endDate === '') {
-                $endDate = $startDate;
-            }
-
-            if (($startDate !== '' && !self::isValidBookingDate($startDate)) || ($endDate !== '' && !self::isValidBookingDate($endDate))) {
-                continue;
-            }
-
-            if ($startDate !== '' && $endDate !== '' && $startDate > $endDate) {
-                continue;
-            }
-
-            if ($ruleType === 'minimum_stay') {
-                $value = \max(0, (int) ($rule['rule_value'] ?? 0));
-
-                if ($value > $minimumStay) {
-                    $minimumStay = $value;
-                }
-
-                continue;
-            }
-
-            if ($ruleType === 'maximum_stay') {
-                $value = \max(0, (int) ($rule['rule_value'] ?? 0));
-
-                if ($value > 0 && ($maximumStay === 0 || $value < $maximumStay)) {
-                    $maximumStay = $value;
-                }
-
-                continue;
-            }
-
-            if ($startDate === '' || $endDate === '') {
-                continue;
-            }
-
-            if ($ruleType === 'closed_arrival' && $checkin >= $startDate && $checkin <= $endDate) {
-                return false;
-            }
-
-            if ($ruleType === 'closed_departure' && $checkout >= $startDate && $checkout <= $endDate) {
-                return false;
-            }
-
-            if ($ruleType === 'maintenance_block' && $startDate < $checkout && $endDate >= $checkin) {
-                return false;
-            }
-        }
-
-        if ($minimumStay > 0 && $nights < $minimumStay) {
-            return false;
-        }
-
-        if ($maximumStay > 0 && $nights > $maximumStay) {
-            return false;
-        }
-
-        return true;
+        return !empty(AvailabilityRulesService::evaluateRestrictions($roomId, $checkin, $checkout)['allowed']);
     }
 
     public static function checkAvailability(int $roomId, string $checkin, string $checkout, string $excludeSessionId = ''): bool
@@ -129,26 +44,7 @@ final class AvailabilityEngine
             return false;
         }
 
-        if (!self::checkBookingRestrictions($roomId, $checkin, $checkout)) {
-            return false;
-        }
-
-        $excludeSessionId = $excludeSessionId !== '' ? LockEngine::normalizeSessionId($excludeSessionId) : '';
-
-        if (InventoryEngine::hasInventoryForRoomType($roomId)) {
-            return !empty(InventoryEngine::getAvailableRooms($roomId, $checkin, $checkout, $excludeSessionId));
-        }
-
-        $nonBlockingStatuses = ReservationStatus::getInventoryNonBlockingStatuses();
-
-        return get_availability_repository()->checkRoomAvailability(
-            $roomId,
-            $checkin,
-            $checkout,
-            $nonBlockingStatuses,
-            LockEngine::getCurrentUtcDatetime(),
-            $excludeSessionId
-        );
+        return !empty(AvailabilityRulesService::evaluateAvailability($roomId, $checkin, $checkout, $excludeSessionId)['bookable']);
     }
 
     /**

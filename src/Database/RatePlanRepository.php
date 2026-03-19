@@ -313,6 +313,74 @@ final class RatePlanRepository extends AbstractRepository
         return \is_array($rows) ? $rows : [];
     }
 
+    /**
+     * @param array<int, int> $roomTypeIds
+     * @return array<int, array<string, mixed>>
+     */
+    public function getRoomTypeRatePlanSummaryMap(array $roomTypeIds): array
+    {
+        $roomTypeIds = \array_values(
+            \array_filter(
+                \array_map('intval', $roomTypeIds),
+                static function (int $roomTypeId): bool {
+                    return $roomTypeId > 0;
+                }
+            )
+        );
+
+        if (
+            empty($roomTypeIds) ||
+            !$this->mhbTableExists('room_type_rate_plans') ||
+            !$this->mhbTableExists('rate_plans')
+        ) {
+            return [];
+        }
+
+        $rows = $this->wpdb->get_results(
+            $this->wpdb->prepare(
+                'SELECT
+                    rtrp.room_type_id,
+                    COUNT(DISTINCT rtrp.rate_plan_id) AS assignment_count,
+                    COUNT(DISTINCT CASE WHEN rp.is_active = 1 THEN rtrp.rate_plan_id END) AS active_assignment_count,
+                    MAX(rtrp.base_price) AS assigned_base_price,
+                    MAX(rtrp.max_occupancy) AS max_assigned_occupancy
+                FROM ' . $this->mhbTable('room_type_rate_plans') . ' rtrp
+                LEFT JOIN ' . $this->mhbTable('rate_plans') . ' rp ON rp.id = rtrp.rate_plan_id
+                WHERE rtrp.room_type_id IN (' . \implode(', ', \array_fill(0, \count($roomTypeIds), '%d')) . ')
+                GROUP BY rtrp.room_type_id
+                ORDER BY rtrp.room_type_id ASC',
+                ...$roomTypeIds
+            ),
+            ARRAY_A
+        );
+        $summary = [];
+
+        if (!\is_array($rows)) {
+            return $summary;
+        }
+
+        foreach ($rows as $row) {
+            if (!\is_array($row)) {
+                continue;
+            }
+
+            $roomTypeId = isset($row['room_type_id']) ? (int) $row['room_type_id'] : 0;
+
+            if ($roomTypeId <= 0) {
+                continue;
+            }
+
+            $summary[$roomTypeId] = [
+                'assignment_count' => isset($row['assignment_count']) ? (int) $row['assignment_count'] : 0,
+                'active_assignment_count' => isset($row['active_assignment_count']) ? (int) $row['active_assignment_count'] : 0,
+                'assigned_base_price' => isset($row['assigned_base_price']) ? (float) $row['assigned_base_price'] : 0.0,
+                'max_assigned_occupancy' => isset($row['max_assigned_occupancy']) ? (int) $row['max_assigned_occupancy'] : 0,
+            ];
+        }
+
+        return $summary;
+    }
+
     public function createRatePlan(array $data): int
     {
         if (!$this->mhbTableExists('rate_plans')) {

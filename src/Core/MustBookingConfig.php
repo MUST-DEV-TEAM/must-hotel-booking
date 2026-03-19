@@ -26,6 +26,9 @@ class MustBookingConfig
             'hotel_name' => self::get_wordpress_hotel_name_fallback(),
             'hotel_address' => '',
             'booking_notification_email' => '',
+            'email_from_name' => '',
+            'email_from_email' => '',
+            'email_reply_to' => '',
             'hotel_phone' => '',
             'email_logo_url' => '',
             'email_button_color' => '#141414',
@@ -147,6 +150,31 @@ class MustBookingConfig
         $fallback = \sanitize_email((string) self::get_wp_option('admin_email', ''));
 
         return \is_email($fallback) ? $fallback : '';
+    }
+
+    public static function get_email_from_name(): string
+    {
+        $value = \trim((string) self::get_setting('email_from_name', ''));
+
+        return $value !== '' ? $value : self::get_hotel_name();
+    }
+
+    public static function get_email_from_email(): string
+    {
+        $email = \sanitize_email((string) self::get_setting('email_from_email', ''));
+
+        if (\is_email($email)) {
+            return $email;
+        }
+
+        return self::get_booking_notification_email();
+    }
+
+    public static function get_email_reply_to(): string
+    {
+        $email = \sanitize_email((string) self::get_setting('email_reply_to', ''));
+
+        return \is_email($email) ? $email : '';
     }
 
     /**

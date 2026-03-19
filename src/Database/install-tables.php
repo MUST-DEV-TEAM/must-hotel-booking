@@ -406,11 +406,12 @@ function seed_inventory_model_from_legacy_rooms(): void
             $inventory_rooms_table,
             [
                 'room_type_id' => $room_type_id,
+                'title' => $room_type_data['name'],
                 'room_number' => 'RT-' . $room_type_id . '-1',
                 'floor' => 0,
                 'status' => 'available',
             ],
-            ['%d', '%s', '%d', '%s']
+            ['%d', '%s', '%s', '%d', '%s']
         );
     }
 }
@@ -435,16 +436,29 @@ function install_tables(): void
         slug VARCHAR(191) NOT NULL,
         category VARCHAR(100) NOT NULL DEFAULT 'standard-rooms',
         description LONGTEXT NULL,
+        internal_code VARCHAR(100) NOT NULL DEFAULT '',
+        is_active TINYINT(1) NOT NULL DEFAULT 1,
+        is_bookable TINYINT(1) NOT NULL DEFAULT 1,
+        is_online_bookable TINYINT(1) NOT NULL DEFAULT 1,
+        is_calendar_visible TINYINT(1) NOT NULL DEFAULT 1,
+        sort_order INT(11) NOT NULL DEFAULT 0,
+        max_adults SMALLINT(5) UNSIGNED NOT NULL DEFAULT 1,
+        max_children SMALLINT(5) UNSIGNED NOT NULL DEFAULT 0,
         max_guests SMALLINT(5) UNSIGNED NOT NULL DEFAULT 1,
+        default_occupancy SMALLINT(5) UNSIGNED NOT NULL DEFAULT 1,
         base_price DECIMAL(12,2) NOT NULL DEFAULT 0.00,
         extra_guest_price DECIMAL(12,2) NOT NULL DEFAULT 0.00,
         room_size VARCHAR(100) NOT NULL DEFAULT '',
         beds VARCHAR(100) NOT NULL DEFAULT '',
+        admin_notes LONGTEXT NULL,
         created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
         PRIMARY KEY  (id),
         KEY slug (slug),
         KEY category (category),
-        KEY max_guests (max_guests)
+        KEY max_guests (max_guests),
+        KEY is_active (is_active),
+        KEY is_bookable (is_bookable),
+        KEY sort_order (sort_order)
     ) {$charset_collate};";
 
     $tables[] = "CREATE TABLE {$prefix}must_room_meta (
@@ -470,12 +484,24 @@ function install_tables(): void
     $tables[] = "CREATE TABLE {$prefix}mhb_rooms (
         id BIGINT(20) UNSIGNED NOT NULL AUTO_INCREMENT,
         room_type_id BIGINT(20) UNSIGNED NOT NULL,
+        title VARCHAR(191) NOT NULL DEFAULT '',
         room_number VARCHAR(100) NOT NULL DEFAULT '',
         floor INT(11) NOT NULL DEFAULT 0,
         status VARCHAR(30) NOT NULL DEFAULT 'available',
+        is_active TINYINT(1) NOT NULL DEFAULT 1,
+        is_bookable TINYINT(1) NOT NULL DEFAULT 1,
+        is_calendar_visible TINYINT(1) NOT NULL DEFAULT 1,
+        sort_order INT(11) NOT NULL DEFAULT 0,
+        capacity_override SMALLINT(5) UNSIGNED NOT NULL DEFAULT 0,
+        building VARCHAR(100) NOT NULL DEFAULT '',
+        section VARCHAR(100) NOT NULL DEFAULT '',
+        admin_notes LONGTEXT NULL,
         PRIMARY KEY  (id),
         KEY room_type_id (room_type_id),
         KEY status (status),
+        KEY is_active (is_active),
+        KEY is_bookable (is_bookable),
+        KEY sort_order (sort_order),
         UNIQUE KEY room_number (room_number)
     ) {$charset_collate};";
 
@@ -486,8 +512,13 @@ function install_tables(): void
         email VARCHAR(190) NOT NULL DEFAULT '',
         phone VARCHAR(50) NOT NULL DEFAULT '',
         country VARCHAR(100) NOT NULL DEFAULT '',
+        admin_notes LONGTEXT NULL,
+        vip_flag TINYINT(1) NOT NULL DEFAULT 0,
+        problem_flag TINYINT(1) NOT NULL DEFAULT 0,
         PRIMARY KEY  (id),
-        KEY email (email)
+        KEY email (email),
+        KEY vip_flag (vip_flag),
+        KEY problem_flag (problem_flag)
     ) {$charset_collate};";
 
     $tables[] = "CREATE TABLE {$prefix}must_reservations (
@@ -505,6 +536,9 @@ function install_tables(): void
         booking_source VARCHAR(50) NOT NULL DEFAULT 'website',
         notes LONGTEXT NULL,
         total_price DECIMAL(12,2) NOT NULL DEFAULT 0.00,
+        coupon_id BIGINT(20) UNSIGNED NOT NULL DEFAULT 0,
+        coupon_code VARCHAR(100) NOT NULL DEFAULT '',
+        coupon_discount_total DECIMAL(12,2) NOT NULL DEFAULT 0.00,
         payment_status VARCHAR(50) NOT NULL DEFAULT 'unpaid',
         created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
         PRIMARY KEY  (id),
@@ -518,7 +552,9 @@ function install_tables(): void
         KEY stay_dates (checkin, checkout),
         KEY status (status),
         KEY booking_source (booking_source),
-        KEY payment_status (payment_status)
+        KEY payment_status (payment_status),
+        KEY coupon_id (coupon_id),
+        KEY coupon_code (coupon_code)
     ) {$charset_collate};";
 
     $tables[] = "CREATE TABLE {$prefix}must_pricing (
@@ -530,18 +566,24 @@ function install_tables(): void
         price_override DECIMAL(12,2) NOT NULL DEFAULT 0.00,
         weekend_price DECIMAL(12,2) NOT NULL DEFAULT 0.00,
         minimum_nights SMALLINT(5) UNSIGNED NOT NULL DEFAULT 1,
+        priority INT(11) NOT NULL DEFAULT 10,
+        is_active TINYINT(1) NOT NULL DEFAULT 1,
         created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
         PRIMARY KEY  (id),
         KEY room_id (room_id),
         KEY date_range (start_date, end_date),
-        KEY minimum_nights (minimum_nights)
+        KEY minimum_nights (minimum_nights),
+        KEY is_active (is_active),
+        KEY room_status_dates (room_id, is_active, start_date, end_date, priority)
     ) {$charset_collate};";
 
     $tables[] = "CREATE TABLE {$prefix}must_availability (
         id BIGINT(20) UNSIGNED NOT NULL AUTO_INCREMENT,
         room_id BIGINT(20) UNSIGNED NOT NULL DEFAULT 0,
+        name VARCHAR(191) NOT NULL DEFAULT '',
         availability_date DATE NULL DEFAULT NULL,
         end_date DATE NULL DEFAULT NULL,
+        is_active TINYINT(1) NOT NULL DEFAULT 1,
         is_available TINYINT(1) NOT NULL DEFAULT 1,
         reason VARCHAR(191) NOT NULL DEFAULT '',
         rule_type VARCHAR(50) NOT NULL DEFAULT '',
@@ -549,11 +591,13 @@ function install_tables(): void
         updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
         PRIMARY KEY  (id),
         KEY room_id (room_id),
+        KEY is_active (is_active),
         KEY rule_type (rule_type),
         KEY availability_date (availability_date),
         KEY end_date (end_date),
         KEY room_rule (room_id, rule_type),
-        KEY room_day (room_id, availability_date)
+        KEY room_day (room_id, availability_date),
+        KEY room_status_range (room_id, is_active, availability_date, end_date, rule_type)
     ) {$charset_collate};";
 
     $tables[] = "CREATE TABLE {$prefix}mhb_inventory_locks (
@@ -601,17 +645,22 @@ function install_tables(): void
     $tables[] = "CREATE TABLE {$prefix}must_coupons (
         id BIGINT(20) UNSIGNED NOT NULL AUTO_INCREMENT,
         code VARCHAR(100) NOT NULL DEFAULT '',
+        name VARCHAR(191) NOT NULL DEFAULT '',
+        is_active TINYINT(1) NOT NULL DEFAULT 1,
         discount_type VARCHAR(20) NOT NULL DEFAULT 'percentage',
         discount_value DECIMAL(12,2) NOT NULL DEFAULT 0.00,
+        minimum_booking_amount DECIMAL(12,2) NOT NULL DEFAULT 0.00,
         valid_from DATE NOT NULL,
         valid_until DATE NOT NULL,
         usage_limit INT(10) UNSIGNED NOT NULL DEFAULT 0,
         usage_count INT(10) UNSIGNED NOT NULL DEFAULT 0,
+        updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
         created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
         PRIMARY KEY  (id),
         UNIQUE KEY code (code),
         KEY valid_range (valid_from, valid_until),
-        KEY usage_limit (usage_limit)
+        KEY usage_limit (usage_limit),
+        KEY is_active (is_active)
     ) {$charset_collate};";
 
     $tables[] = "CREATE TABLE {$prefix}must_activity_log (

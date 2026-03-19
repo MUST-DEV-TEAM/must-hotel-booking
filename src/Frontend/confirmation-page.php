@@ -7,6 +7,8 @@ use MustHotelBooking\Core\MustBookingConfig;
 use MustHotelBooking\Core\ReservationStatus;
 use MustHotelBooking\Engine\BookingStatusEngine;
 use MustHotelBooking\Engine\BookingValidationEngine;
+use MustHotelBooking\Engine\CancellationEngine;
+use MustHotelBooking\Engine\EmailEngine;
 use MustHotelBooking\Engine\PaymentEngine;
 use MustHotelBooking\Engine\ReservationEngine;
 
@@ -84,6 +86,86 @@ function build_confirmation_guest_form(array $guest_form, array $billing_form): 
 function get_confirmation_result_copy(array $reservations, string $payment_method_hint = ''): array
 {
     return BookingStatusEngine::getConfirmationResultCopy($reservations, $payment_method_hint);
+}
+
+/**
+ * @return array{messages: array<int, string>, booking_id: string, reservation_ids: array<int, int>, payment_method_hint: string}
+ */
+function handle_confirmation_cancellation_request(): array
+{
+    $result = [
+        'messages' => [],
+        'booking_id' => '',
+        'reservation_ids' => [],
+        'payment_method_hint' => '',
+    ];
+
+    $requestAction = isset($_GET['must_action']) ? \sanitize_key((string) \wp_unslash($_GET['must_action'])) : '';
+
+    if ($requestAction !== 'cancel_reservation') {
+        return $result;
+    }
+
+    $reservationId = isset($_GET['reservation_id']) ? \absint($_GET['reservation_id']) : 0;
+    $bookingId = isset($_GET['booking_id']) ? \sanitize_text_field((string) \wp_unslash($_GET['booking_id'])) : '';
+    $token = isset($_GET['cancel_token']) ? \sanitize_text_field((string) \wp_unslash($_GET['cancel_token'])) : '';
+    $reservation = $reservationId > 0 ? \MustHotelBooking\Engine\get_reservation_repository()->getReservationEmailData($reservationId) : null;
+
+    $result['booking_id'] = $bookingId;
+    $result['reservation_ids'] = $reservationId > 0 ? [$reservationId] : [];
+
+    if (!\is_array($reservation)) {
+        $result['messages'][] = \__('This cancellation link is no longer valid.', 'must-hotel-booking');
+        return $result;
+    }
+
+    $result['payment_method_hint'] = (string) ($reservation['payment_method'] ?? '');
+
+    if (
+        (string) ($reservation['booking_id'] ?? '') !== $bookingId
+        || !EmailEngine::isValidGuestCancellationToken($reservationId, $bookingId, (string) ($reservation['guest_email'] ?? ''), $token)
+    ) {
+        $result['messages'][] = \__('This cancellation link is invalid or has expired.', 'must-hotel-booking');
+        return $result;
+    }
+
+    $status = \sanitize_key((string) ($reservation['status'] ?? ''));
+
+    if ($status === 'cancelled') {
+        $result['messages'][] = \__('This reservation is already cancelled.', 'must-hotel-booking');
+        return $result;
+    }
+
+    if (\in_array($status, ['completed', 'blocked'], true)) {
+        $result['messages'][] = \__('This reservation can no longer be cancelled online.', 'must-hotel-booking');
+        return $result;
+    }
+
+    if (!EmailEngine::canAutoCancelReservation($reservation)) {
+        $details = CancellationEngine::getPenaltyDetails($reservationId, \current_time('mysql'));
+        $message = \__('This reservation was paid online and cannot be auto-cancelled from the email link. Contact the hotel to review refund and cancellation options.', 'must-hotel-booking');
+
+        if (!empty($details['policy_name'])) {
+            $message .= ' ' . \sprintf(
+                /* translators: %s is policy name. */
+                \__('Cancellation policy: %s.', 'must-hotel-booking'),
+                (string) $details['policy_name']
+            );
+        }
+
+        $result['messages'][] = $message;
+        return $result;
+    }
+
+    BookingStatusEngine::updateReservationStatuses(
+        [$reservationId],
+        'cancelled',
+        \sanitize_key((string) ($reservation['payment_status'] ?? ''))
+    );
+
+    $result['messages'][] = \__('Your reservation has been cancelled successfully.', 'must-hotel-booking');
+
+    return $result;
 }
 
 /**
@@ -436,12 +518,19 @@ function get_pending_confirmation_page_view_data(): array
  */
 function get_confirmation_page_view_data(): array
 {
-    $reservation_ids = get_confirmation_reservation_ids_from_query();
+    $cancellationResult = handle_confirmation_cancellation_request();
+    $reservation_ids = !empty($cancellationResult['reservation_ids'])
+        ? $cancellationResult['reservation_ids']
+        : get_confirmation_reservation_ids_from_query();
     $reservations = [];
-    $messages = [];
+    $messages = (array) ($cancellationResult['messages'] ?? []);
     $payment_method_hint = isset($_GET['payment_method']) ? \sanitize_key((string) \wp_unslash($_GET['payment_method'])) : '';
     $stripe_return = isset($_GET['stripe_return']) ? \sanitize_key((string) \wp_unslash($_GET['stripe_return'])) : '';
     $session_id = isset($_GET['session_id']) ? \sanitize_text_field((string) \wp_unslash($_GET['session_id'])) : '';
+
+    if ($payment_method_hint === '' && !empty($cancellationResult['payment_method_hint'])) {
+        $payment_method_hint = \sanitize_key((string) $cancellationResult['payment_method_hint']);
+    }
 
     if (!empty($reservation_ids)) {
         if (PaymentEngine::normalizeMethod($payment_method_hint) === 'stripe' && $session_id !== '') {
@@ -460,7 +549,9 @@ function get_confirmation_page_view_data(): array
 
         $reservations = ReservationEngine::getConfirmationRowsByIds($reservation_ids);
     } else {
-        $booking_id = isset($_GET['booking_id']) ? \sanitize_text_field((string) \wp_unslash($_GET['booking_id'])) : '';
+        $booking_id = !empty($cancellationResult['booking_id'])
+            ? (string) $cancellationResult['booking_id']
+            : (isset($_GET['booking_id']) ? \sanitize_text_field((string) \wp_unslash($_GET['booking_id'])) : '');
 
         if ($booking_id !== '') {
             $reservations = ReservationEngine::getConfirmationRowsByBookingId($booking_id);

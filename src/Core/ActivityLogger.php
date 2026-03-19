@@ -80,6 +80,7 @@ final class ActivityLogger
 
         $templateKey = isset($emailEvent['template_key']) ? \sanitize_key((string) $emailEvent['template_key']) : '';
         $recipientEmail = isset($emailEvent['recipient_email']) ? \sanitize_email((string) $emailEvent['recipient_email']) : '';
+        $emailMode = isset($emailEvent['email_mode']) ? \sanitize_key((string) $emailEvent['email_mode']) : 'automated';
         $templateLabel = $templateKey !== '' ? $templateKey : \__('email notification', 'must-hotel-booking');
         $message = $success
             ? \sprintf(
@@ -108,6 +109,7 @@ final class ActivityLogger
                         'reservation_id' => $reservationId,
                         'template_key' => $templateKey,
                         'recipient_email' => $recipientEmail,
+                        'email_mode' => $emailMode,
                     ]
                 ),
             ]

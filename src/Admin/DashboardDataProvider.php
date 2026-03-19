@@ -137,7 +137,7 @@ final class DashboardDataProvider
                 'label' => \__('Unpaid Reservations', 'must-hotel-booking'),
                 'value' => (string) $summary['unpaid_reservations'],
                 'descriptor' => \__('Not fully paid yet.', 'must-hotel-booking'),
-                'url' => get_admin_reservations_page_url(['preset' => 'unpaid']),
+                'url' => get_admin_payments_page_url(['payment_group' => 'due']),
             ],
             [
                 'label' => \__('Occupancy Today', 'must-hotel-booking'),
@@ -145,7 +145,7 @@ final class DashboardDataProvider
                 'descriptor' => $unitCount > 0
                     ? \sprintf(\__('%1$d / %2$d units occupied.', 'must-hotel-booking'), (int) $summary['occupied_units'], $unitCount)
                     : \__('No active units configured yet.', 'must-hotel-booking'),
-                'url' => get_admin_calendar_page_url(['start' => \current_time('Y-m-d'), 'days' => 14]),
+                'url' => get_admin_calendar_page_url(['start_date' => \current_time('Y-m-d'), 'weeks' => 2]),
             ],
             [
                 'label' => \__('Revenue Today', 'must-hotel-booking'),
@@ -185,7 +185,7 @@ final class DashboardDataProvider
                 \__('Missing payment record', 'must-hotel-booking'),
                 \__('Reservation total exists, but no payment ledger row was found.', 'must-hotel-booking'),
                 $this->formatReservationReference($reservation),
-                $this->getReservationViewUrl((int) ($reservation['id'] ?? 0))
+                get_admin_payments_page_url(['action' => 'view', 'reservation_id' => (int) ($reservation['id'] ?? 0)])
             );
         }
 
@@ -206,7 +206,7 @@ final class DashboardDataProvider
                     ? \__('Stripe reported a failed payment for this reservation.', 'must-hotel-booking')
                     : \__('Stripe payment has remained pending longer than expected.', 'must-hotel-booking'),
                 $reference,
-                $this->getReservationViewUrl((int) ($payment['reservation_id'] ?? 0))
+                get_admin_payments_page_url(['action' => 'view', 'reservation_id' => (int) ($payment['reservation_id'] ?? 0)])
             );
         }
 
@@ -253,32 +253,41 @@ final class DashboardDataProvider
         }
 
         foreach ($this->roomRepository->getRoomsMissingBasePrice(3) as $room) {
+            $roomId = isset($room['id']) ? (int) $room['id'] : 0;
             $items[] = $this->makeAttentionItem(
                 'warning',
                 \__('Accommodation missing pricing', 'must-hotel-booking'),
                 \__('Base price is still 0.00 on this accommodation.', 'must-hotel-booking'),
                 (string) ($room['name'] ?? ''),
-                get_admin_rooms_page_url()
+                $roomId > 0
+                    ? get_admin_pricing_page_url(['room_id' => $roomId, 'setup' => 'missing_pricing'])
+                    : get_admin_pricing_page_url(['setup' => 'missing_pricing'])
             );
         }
 
         foreach ($this->ratePlanRepository->getRoomTypesMissingPricing(3) as $roomType) {
+            $roomTypeId = isset($roomType['id']) ? (int) $roomType['id'] : 0;
             $items[] = $this->makeAttentionItem(
                 'warning',
                 \__('Accommodation missing rate pricing', 'must-hotel-booking'),
                 \__('No active rate plan or fallback base price is available for this room type.', 'must-hotel-booking'),
                 (string) ($roomType['name'] ?? ''),
-                get_admin_pricing_page_url()
+                $roomTypeId > 0
+                    ? get_admin_pricing_page_url(['room_id' => $roomTypeId, 'setup' => 'missing_pricing'])
+                    : get_admin_pricing_page_url(['setup' => 'missing_pricing'])
             );
         }
 
         foreach ($this->inventoryRepository->getRoomTypesMissingInventory(3) as $roomType) {
+            $roomTypeId = isset($roomType['id']) ? (int) $roomType['id'] : 0;
             $items[] = $this->makeAttentionItem(
                 'warning',
                 \__('Accommodation missing availability setup', 'must-hotel-booking'),
                 \__('Room type exists without any physical inventory rooms assigned.', 'must-hotel-booking'),
                 (string) ($roomType['name'] ?? ''),
-                get_admin_calendar_page_url()
+                $roomTypeId > 0
+                    ? get_admin_availability_rules_page_url(['room_id' => $roomTypeId])
+                    : get_admin_availability_rules_page_url()
             );
         }
 
@@ -536,7 +545,7 @@ final class DashboardDataProvider
     {
         return [
             ['label' => \__('Create Reservation', 'must-hotel-booking'), 'url' => get_admin_reservation_create_page_url()],
-            ['label' => \__('Open Calendar', 'must-hotel-booking'), 'url' => get_admin_calendar_page_url(['start' => \current_time('Y-m-d'), 'days' => 30])],
+            ['label' => \__('Open Calendar', 'must-hotel-booking'), 'url' => get_admin_calendar_page_url(['start_date' => \current_time('Y-m-d'), 'weeks' => 2])],
             ['label' => \__("View Today's Arrivals", 'must-hotel-booking'), 'url' => get_admin_reservations_page_url(['preset' => 'arrivals_today'])],
             ['label' => \__("View Today's Departures", 'must-hotel-booking'), 'url' => get_admin_reservations_page_url(['preset' => 'departures_today'])],
             ['label' => \__('Open Payments', 'must-hotel-booking'), 'url' => get_admin_payments_page_url()],

@@ -20,12 +20,15 @@ final class ReservationAdminActions
     /** @var \MustHotelBooking\Database\ActivityRepository */
     private $activityRepository;
 
+    private PaymentAdminActions $paymentAdminActions;
+
     public function __construct()
     {
         $this->reservationRepository = \MustHotelBooking\Engine\get_reservation_repository();
         $this->guestRepository = \MustHotelBooking\Engine\get_guest_repository();
         $this->paymentRepository = \MustHotelBooking\Engine\get_payment_repository();
         $this->activityRepository = \MustHotelBooking\Engine\get_activity_repository();
+        $this->paymentAdminActions = new PaymentAdminActions();
     }
 
     public function handleRequest(): void
@@ -221,96 +224,17 @@ final class ReservationAdminActions
 
     private function markReservationPending(int $reservationId): bool
     {
-        $reservation = $this->reservationRepository->getReservation($reservationId);
-
-        if (!\is_array($reservation)) {
-            return false;
-        }
-
-        $currentStatus = \sanitize_key((string) ($reservation['status'] ?? ''));
-
-        if (\in_array($currentStatus, ['cancelled', 'blocked'], true)) {
-            return false;
-        }
-
-        $paymentStatus = \sanitize_key((string) ($reservation['payment_status'] ?? ''));
-        $targetStatus = $paymentStatus === 'pending' ? 'pending_payment' : 'pending';
-        $updated = $this->reservationRepository->updateReservationStatus(
-            $reservationId,
-            $targetStatus,
-            $paymentStatus !== '' ? $paymentStatus : 'unpaid'
-        );
-
-        if ($updated) {
-            $this->logReservationActivity(
-                $reservationId,
-                $reservation,
-                'reservation_pending',
-                'warning',
-                \__('Reservation moved back to pending.', 'must-hotel-booking')
-            );
-        }
-
-        return $updated;
+        return $this->paymentAdminActions->applyAdminPaymentAction($reservationId, 'mark_pending');
     }
 
     private function markReservationPaid(int $reservationId): bool
     {
-        $reservation = $this->reservationRepository->getReservation($reservationId);
-
-        if (!\is_array($reservation)) {
-            return false;
-        }
-
-        $currentStatus = \sanitize_key((string) ($reservation['status'] ?? ''));
-        $currentPaymentStatus = \sanitize_key((string) ($reservation['payment_status'] ?? ''));
-
-        if (\in_array($currentStatus, ['cancelled', 'blocked'], true) || $currentPaymentStatus === 'paid') {
-            return false;
-        }
-
-        $targetStatus = \in_array($currentStatus, ['confirmed', 'completed'], true) ? $currentStatus : 'confirmed';
-        BookingStatusEngine::updateReservationStatuses([$reservationId], $targetStatus, 'paid');
-
-        $latestPayment = $this->paymentRepository->getLatestPaymentForReservation($reservationId);
-        $method = \sanitize_key((string) ($latestPayment['method'] ?? ''));
-
-        if ($method === '') {
-            $method = 'pay_at_hotel';
-        }
-
-        BookingStatusEngine::createPaymentRows([$reservationId], $method, 'paid');
-
-        return true;
+        return $this->paymentAdminActions->applyAdminPaymentAction($reservationId, 'mark_paid');
     }
 
     private function markReservationUnpaid(int $reservationId): bool
     {
-        $reservation = $this->reservationRepository->getReservation($reservationId);
-
-        if (!\is_array($reservation)) {
-            return false;
-        }
-
-        $currentStatus = \sanitize_key((string) ($reservation['status'] ?? ''));
-
-        if (\in_array($currentStatus, ['cancelled', 'blocked'], true)) {
-            return false;
-        }
-
-        $updated = $this->reservationRepository->updateReservationStatus($reservationId, $currentStatus, 'unpaid');
-
-        if ($updated) {
-            $this->logReservationActivity(
-                $reservationId,
-                $reservation,
-                'payment_marked_unpaid',
-                'warning',
-                \__('Payment status set to unpaid.', 'must-hotel-booking')
-            );
-        }
-
-        return $updated;
+        return $this->paymentAdminActions->applyAdminPaymentAction($reservationId, 'mark_unpaid');
     }
 
     private function cancelReservation(int $reservationId): bool

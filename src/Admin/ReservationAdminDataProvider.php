@@ -4,6 +4,7 @@ namespace MustHotelBooking\Admin;
 
 use MustHotelBooking\Core\MustBookingConfig;
 use MustHotelBooking\Core\PaymentMethodRegistry;
+use MustHotelBooking\Engine\PaymentStatusService;
 
 final class ReservationAdminDataProvider
 {
@@ -83,6 +84,7 @@ final class ReservationAdminDataProvider
         $bookingId = $this->formatReservationReference($reservation);
         $paymentRows = $this->paymentRepository->getPaymentsForReservation($reservationId);
         $paymentSummary = $this->paymentRepository->getReservationPaymentSummary($reservationId);
+        $paymentState = PaymentStatusService::buildReservationPaymentState($reservation, $paymentRows);
         $assignedRoomId = isset($reservation['assigned_room_id']) ? (int) $reservation['assigned_room_id'] : 0;
         $assignedRoom = $assignedRoomId > 0 ? $this->inventoryRepository->getInventoryRoomById($assignedRoomId) : null;
         $ratePlanId = isset($reservation['rate_plan_id']) ? (int) $reservation['rate_plan_id'] : 0;
@@ -103,8 +105,8 @@ final class ReservationAdminDataProvider
         }
 
         $totalPrice = isset($reservation['total_price']) ? (float) $reservation['total_price'] : 0.0;
-        $amountPaid = isset($paymentSummary['amount_paid']) ? (float) $paymentSummary['amount_paid'] : 0.0;
-        $amountDue = \max(0.0, $totalPrice - $amountPaid);
+        $amountPaid = isset($paymentState['amount_paid']) ? (float) $paymentState['amount_paid'] : 0.0;
+        $amountDue = isset($paymentState['amount_due']) ? (float) $paymentState['amount_due'] : \max(0.0, $totalPrice - $amountPaid);
 
         return [
             'id' => $reservationId,
@@ -114,10 +116,10 @@ final class ReservationAdminDataProvider
             'summary' => [
                 'reservation_status' => $this->formatReservationStatusLabel((string) ($reservation['status'] ?? '')),
                 'reservation_status_key' => (string) ($reservation['status'] ?? ''),
-                'payment_status' => $this->formatPaymentStatusLabel((string) ($reservation['payment_status'] ?? '')),
-                'payment_status_key' => (string) ($reservation['payment_status'] ?? ''),
-                'payment_method' => $this->formatPaymentMethodLabel((string) ($paymentSummary['latest_method'] ?? '')),
-                'payment_method_key' => (string) ($paymentSummary['latest_method'] ?? ''),
+                'payment_status' => $this->formatPaymentStatusLabel((string) ($paymentState['derived_status'] ?? (string) ($reservation['payment_status'] ?? ''))),
+                'payment_status_key' => (string) ($paymentState['derived_status'] ?? (string) ($reservation['payment_status'] ?? '')),
+                'payment_method' => $this->formatPaymentMethodLabel((string) ($paymentState['method'] ?? (string) ($paymentSummary['latest_method'] ?? ''))),
+                'payment_method_key' => (string) ($paymentState['method'] ?? (string) ($paymentSummary['latest_method'] ?? '')),
                 'created_at' => $this->formatDateTime((string) ($reservation['created_at'] ?? '')),
                 'source' => (string) ($reservation['booking_source'] ?? ''),
             ],
@@ -129,6 +131,9 @@ final class ReservationAdminDataProvider
                 'phone' => (string) ($reservation['phone'] ?? ''),
                 'country' => (string) ($reservation['country'] ?? ''),
                 'full_name' => $this->formatGuestName($reservation),
+                'guest_url' => isset($reservation['guest_id']) && (int) $reservation['guest_id'] > 0
+                    ? get_admin_guests_page_url(['guest_id' => (int) $reservation['guest_id']])
+                    : '',
             ],
             'stay' => [
                 'accommodation' => isset($reservation['room_name']) && (string) $reservation['room_name'] !== ''
@@ -151,9 +156,12 @@ final class ReservationAdminDataProvider
                 'stored_total' => $totalPrice,
                 'amount_paid' => $amountPaid,
                 'amount_due' => $amountDue,
+                'coupon_code' => (string) ($reservation['coupon_code'] ?? ''),
+                'coupon_discount_total' => isset($reservation['coupon_discount_total']) ? (float) $reservation['coupon_discount_total'] : 0.0,
             ],
             'payments' => $this->formatPaymentRows($paymentRows),
             'payment_summary' => $paymentSummary,
+            'payment_state' => $paymentState,
             'emails' => $emailRows,
             'timeline' => $timelineRows,
         ];
@@ -313,6 +321,10 @@ final class ReservationAdminDataProvider
                 'id' => $reservationId,
                 'booking_id' => $this->formatReservationReference($row),
                 'guest' => $this->formatGuestName($row),
+                'guest_id' => isset($row['guest_id']) ? (int) $row['guest_id'] : 0,
+                'guest_url' => isset($row['guest_id']) && (int) $row['guest_id'] > 0
+                    ? get_admin_guests_page_url(['guest_id' => (int) $row['guest_id']])
+                    : '',
                 'guest_email' => (string) ($row['guest_email'] ?? ''),
                 'guest_phone' => (string) ($row['guest_phone'] ?? ''),
                 'accommodation' => isset($row['room_name']) && (string) $row['room_name'] !== ''

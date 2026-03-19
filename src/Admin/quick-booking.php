@@ -329,8 +329,23 @@ function maybe_handle_admin_quick_booking_submission(): array
     $redirectTarget = isset($_POST['must_quick_booking_redirect_target'])
         ? \sanitize_key((string) \wp_unslash($_POST['must_quick_booking_redirect_target']))
         : 'dashboard';
+    $returnUrl = isset($_POST['must_quick_booking_return_url'])
+        ? \esc_url_raw((string) \wp_unslash($_POST['must_quick_booking_return_url']))
+        : '';
 
     if (
+        $redirectTarget === 'calendar' &&
+        $returnUrl !== '' &&
+        \function_exists(__NAMESPACE__ . '\get_admin_calendar_page_url')
+    ) {
+        $redirect_url = \add_query_arg(
+            [
+                'notice' => 'reservation_created',
+                'reservation_id' => $reservation_id,
+            ],
+            $returnUrl
+        );
+    } elseif (
         $redirectTarget === 'reservation_detail' &&
         \function_exists(__NAMESPACE__ . '\get_admin_reservation_detail_page_url')
     ) {
@@ -396,13 +411,74 @@ function render_admin_quick_booking_panel(?array $submitted_form = null, array $
     $redirectTarget = isset($options['redirect_target']) && (string) $options['redirect_target'] !== ''
         ? \sanitize_key((string) $options['redirect_target'])
         : 'dashboard';
+    $returnUrl = isset($options['return_url']) && (string) $options['return_url'] !== ''
+        ? \esc_url_raw((string) $options['return_url'])
+        : '';
+    $title = isset($options['title']) && (string) $options['title'] !== ''
+        ? (string) $options['title']
+        : \__('Quick Booking', 'must-hotel-booking');
+    $eyebrow = isset($options['eyebrow']) && (string) $options['eyebrow'] !== ''
+        ? (string) $options['eyebrow']
+        : \__('Front Desk Shortcut', 'must-hotel-booking');
+    $description = isset($options['description']) && (string) $options['description'] !== ''
+        ? (string) $options['description']
+        : \__('Create a confirmed reservation fast, with live availability and pricing before you submit.', 'must-hotel-booking');
+    $submitLabel = isset($options['submit_label']) && (string) $options['submit_label'] !== ''
+        ? (string) $options['submit_label']
+        : \__('Create Reservation', 'must-hotel-booking');
+    $roomLabel = \__('No room selected', 'must-hotel-booking');
+
+    foreach ($rooms as $room) {
+        if (!\is_array($room)) {
+            continue;
+        }
+
+        if ((int) ($room['id'] ?? 0) !== (int) ($form['room_id'] ?? 0)) {
+            continue;
+        }
+
+        $roomLabel = (string) ($room['name'] ?? $roomLabel);
+        break;
+    }
+
+    $nightsLabel = \__('Select valid stay dates', 'must-hotel-booking');
+
+    if (AvailabilityEngine::isValidBookingDate($checkin) && AvailabilityEngine::isValidBookingDate($checkout) && $checkin < $checkout) {
+        $nightCount = (int) (new \DateTimeImmutable($checkin))->diff(new \DateTimeImmutable($checkout))->format('%a');
+        $nightsLabel = \sprintf(
+            /* translators: %d is the number of nights. */
+            \_n('%d night', '%d nights', $nightCount, 'must-hotel-booking'),
+            $nightCount
+        );
+    }
+
+    $destinationLabel = \__('Returns to dashboard after save', 'must-hotel-booking');
+
+    if ($redirectTarget === 'calendar') {
+        $destinationLabel = \__('Returns to calendar after save', 'must-hotel-booking');
+    } elseif ($redirectTarget === 'reservation_detail') {
+        $destinationLabel = \__('Opens the new reservation detail page', 'must-hotel-booking');
+    } elseif ($redirectTarget === 'reservations') {
+        $destinationLabel = \__('Opens the reservations list after save', 'must-hotel-booking');
+    }
 
     echo '<div class="must-admin-quick-booking-panel postbox">';
     echo '<div class="must-admin-quick-booking-panel-inner">';
-    echo '<h2>' . \esc_html__('Quick Booking Panel', 'must-hotel-booking') . '</h2>';
+    echo '<div class="must-quick-booking-header">';
+    echo '<div class="must-quick-booking-header-copy">';
+    echo '<span class="must-quick-booking-eyebrow">' . \esc_html($eyebrow) . '</span>';
+    echo '<h2>' . \esc_html($title) . '</h2>';
+    echo '<p class="must-quick-booking-description">' . \esc_html($description) . '</p>';
+    echo '</div>';
+    echo '<div class="must-quick-booking-header-meta">';
+    echo '<span class="must-quick-booking-pill is-strong">' . \esc_html($nightsLabel) . '</span>';
+    echo '<span class="must-quick-booking-pill">' . \esc_html(\sprintf(_n('%d guest', '%d guests', $guests, 'must-hotel-booking'), $guests)) . '</span>';
+    echo '<span class="must-quick-booking-pill">' . \esc_html($roomLabel) . '</span>';
+    echo '</div>';
+    echo '</div>';
 
     if (!empty($errors)) {
-        echo '<div class="notice notice-error"><ul>';
+        echo '<div class="must-quick-booking-errors notice notice-error"><ul>';
 
         foreach ($errors as $error) {
             echo '<li>' . \esc_html((string) $error) . '</li>';
@@ -416,7 +492,18 @@ function render_admin_quick_booking_panel(?array $submitted_form = null, array $
     echo '<input type="hidden" name="must_quick_booking_action" value="create_quick_booking" />';
     echo '<input type="hidden" name="must_quick_booking_redirect_target" value="' . \esc_attr($redirectTarget) . '" />';
 
-    echo '<label>';
+    if ($returnUrl !== '') {
+        echo '<input type="hidden" name="must_quick_booking_return_url" value="' . \esc_attr($returnUrl) . '" />';
+    }
+
+    echo '<div class="must-quick-booking-section must-quick-booking-form-full-row">';
+    echo '<div class="must-quick-booking-section-head">';
+    echo '<h3>' . \esc_html__('Stay Details', 'must-hotel-booking') . '</h3>';
+    echo '<p>' . \esc_html__('Choose the room, date range, and party size before guest details.', 'must-hotel-booking') . '</p>';
+    echo '</div>';
+    echo '<div class="must-quick-booking-fields-grid is-stay">';
+
+    echo '<label class="must-quick-booking-field">';
     echo '<span>' . \esc_html__('Room', 'must-hotel-booking') . '</span>';
     echo '<select name="room_id" required>';
     echo '<option value="">' . \esc_html__('Select room', 'must-hotel-booking') . '</option>';
@@ -430,37 +517,46 @@ function render_admin_quick_booking_panel(?array $submitted_form = null, array $
     echo '</select>';
     echo '</label>';
 
-    echo '<label>';
+    echo '<label class="must-quick-booking-field">';
     echo '<span>' . \esc_html__('Check-in', 'must-hotel-booking') . '</span>';
     echo '<input type="date" name="checkin" value="' . \esc_attr($checkin) . '" required />';
     echo '</label>';
 
-    echo '<label>';
+    echo '<label class="must-quick-booking-field">';
     echo '<span>' . \esc_html__('Check-out', 'must-hotel-booking') . '</span>';
     echo '<input type="date" name="checkout" value="' . \esc_attr($checkout) . '" required />';
     echo '</label>';
 
-    echo '<label>';
+    echo '<label class="must-quick-booking-field">';
     echo '<span>' . \esc_html__('Guests', 'must-hotel-booking') . '</span>';
     echo '<input type="number" name="guests" min="1" step="1" value="' . \esc_attr((string) $guests) . '" required />';
     echo '</label>';
+    echo '</div>';
+    echo '</div>';
 
-    echo '<label>';
+    echo '<div class="must-quick-booking-section must-quick-booking-form-full-row">';
+    echo '<div class="must-quick-booking-section-head">';
+    echo '<h3>' . \esc_html__('Guest & Source', 'must-hotel-booking') . '</h3>';
+    echo '<p>' . \esc_html__('Capture the key guest details and where the booking came from.', 'must-hotel-booking') . '</p>';
+    echo '</div>';
+    echo '<div class="must-quick-booking-fields-grid is-guest">';
+
+    echo '<label class="must-quick-booking-field">';
     echo '<span>' . \esc_html__('Guest name', 'must-hotel-booking') . '</span>';
     echo '<input type="text" name="guest_name" value="' . \esc_attr((string) ($form['guest_name'] ?? '')) . '" required />';
     echo '</label>';
 
-    echo '<label>';
+    echo '<label class="must-quick-booking-field">';
     echo '<span>' . \esc_html__('Phone', 'must-hotel-booking') . '</span>';
     echo '<input type="text" name="phone" value="' . \esc_attr((string) ($form['phone'] ?? '')) . '" />';
     echo '</label>';
 
-    echo '<label>';
+    echo '<label class="must-quick-booking-field">';
     echo '<span>' . \esc_html__('Email', 'must-hotel-booking') . '</span>';
     echo '<input type="email" name="email" value="' . \esc_attr((string) ($form['email'] ?? '')) . '" required />';
     echo '</label>';
 
-    echo '<label>';
+    echo '<label class="must-quick-booking-field">';
     echo '<span>' . \esc_html__('Booking source', 'must-hotel-booking') . '</span>';
     echo '<select name="booking_source" required>';
 
@@ -471,18 +567,37 @@ function render_admin_quick_booking_panel(?array $submitted_form = null, array $
 
     echo '</select>';
     echo '</label>';
+    echo '</div>';
+    echo '</div>';
 
-    echo '<label class="must-quick-booking-form-full-row">';
+    echo '<div class="must-quick-booking-section must-quick-booking-form-full-row">';
+    echo '<div class="must-quick-booking-section-head">';
+    echo '<h3>' . \esc_html__('Notes', 'must-hotel-booking') . '</h3>';
+    echo '<p>' . \esc_html__('Add any internal context the front desk or reservations team should see later.', 'must-hotel-booking') . '</p>';
+    echo '</div>';
+    echo '<label class="must-quick-booking-field must-quick-booking-form-full-row">';
     echo '<span>' . \esc_html__('Notes', 'must-hotel-booking') . '</span>';
     echo '<textarea name="notes" rows="3">' . \esc_textarea((string) ($form['notes'] ?? '')) . '</textarea>';
     echo '</label>';
-
-    echo '<div class="must-quick-booking-live must-quick-booking-form-full-row">';
-    echo '<p class="must-quick-booking-status" aria-live="polite">' . \esc_html__('Select room, dates, and guests to check availability.', 'must-hotel-booking') . '</p>';
-    echo '<p class="must-quick-booking-price"><strong>' . \esc_html__('Calculated price:', 'must-hotel-booking') . '</strong> <span class="must-quick-booking-price-value">-</span></p>';
     echo '</div>';
 
-    echo '<button type="submit" class="button button-primary">' . \esc_html__('Create Reservation', 'must-hotel-booking') . '</button>';
+    echo '<div class="must-quick-booking-checkout must-quick-booking-form-full-row">';
+    echo '<div class="must-quick-booking-live">';
+    echo '<div class="must-quick-booking-live-head">';
+    echo '<div>';
+    echo '<strong>' . \esc_html__('Booking Check', 'must-hotel-booking') . '</strong>';
+    echo '<p>' . \esc_html($destinationLabel) . '</p>';
+    echo '</div>';
+    echo '<span class="must-quick-booking-pill is-strong">' . \esc_html__('Live Preview', 'must-hotel-booking') . '</span>';
+    echo '</div>';
+    echo '<p class="must-quick-booking-status is-info" aria-live="polite">' . \esc_html__('Select room, dates, and guests to check availability.', 'must-hotel-booking') . '</p>';
+    echo '<p class="must-quick-booking-price"><strong>' . \esc_html__('Calculated price', 'must-hotel-booking') . '</strong><span class="must-quick-booking-price-value">-</span></p>';
+    echo '<div class="must-quick-booking-submit-row">';
+    echo '<p class="must-quick-booking-submit-copy">' . \esc_html__('Submitting creates a confirmed reservation immediately if the room is still available.', 'must-hotel-booking') . '</p>';
+    echo '<button type="submit" class="button button-primary">' . \esc_html($submitLabel) . '</button>';
+    echo '</div>';
+    echo '</div>';
+    echo '</div>';
     echo '</form>';
     echo '</div>';
     echo '</div>';
@@ -599,7 +714,7 @@ function enqueue_admin_quick_booking_assets(): void
     }
 
     $page = \sanitize_key((string) \wp_unslash($_GET['page']));
-    $supported_pages = ['must-hotel-booking'];
+    $supported_pages = ['must-hotel-booking', 'must-hotel-booking-calendar', 'must-hotel-booking-reservation-create'];
 
     if (!\in_array($page, $supported_pages, true)) {
         return;

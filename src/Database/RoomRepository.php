@@ -77,16 +77,34 @@ final class RoomRepository extends AbstractRepository
     /**
      * @return array<int, array<string, mixed>>
      */
-    public function getRoomSelectorRows(): array
+    public function getRoomSelectorRows(bool $includeInactive = true, bool $onlyBookable = false): array
     {
         if (!$this->roomsTableExists()) {
             return [];
         }
 
+        $where = [];
+
+        if (!$includeInactive) {
+            $where[] = 'is_active = 1';
+        }
+
+        if ($onlyBookable) {
+            $where[] = 'is_bookable = 1';
+        }
+
+        $sql = 'SELECT id, name, category, is_active, is_bookable
+            FROM ' . $this->getRoomsTableName();
+
+        if (!empty($where)) {
+            $sql .= ' WHERE ' . \implode(' AND ', $where);
+        }
+
+        $sql .= '
+            ORDER BY sort_order ASC, name ASC, id ASC';
+
         $rows = $this->wpdb->get_results(
-            'SELECT id, name
-            FROM ' . $this->getRoomsTableName() . '
-            ORDER BY name ASC, id ASC',
+            $sql,
             ARRAY_A
         );
 
@@ -167,14 +185,24 @@ final class RoomRepository extends AbstractRepository
                 'slug' => (string) ($roomData['slug'] ?? ''),
                 'category' => (string) ($roomData['category'] ?? ''),
                 'description' => (string) ($roomData['description'] ?? ''),
+                'internal_code' => (string) ($roomData['internal_code'] ?? ''),
+                'is_active' => !empty($roomData['is_active']) ? 1 : 0,
+                'is_bookable' => !empty($roomData['is_bookable']) ? 1 : 0,
+                'is_online_bookable' => !empty($roomData['is_online_bookable']) ? 1 : 0,
+                'is_calendar_visible' => !empty($roomData['is_calendar_visible']) ? 1 : 0,
+                'sort_order' => (int) ($roomData['sort_order'] ?? 0),
+                'max_adults' => (int) ($roomData['max_adults'] ?? 1),
+                'max_children' => (int) ($roomData['max_children'] ?? 0),
                 'max_guests' => (int) ($roomData['max_guests'] ?? 1),
+                'default_occupancy' => (int) ($roomData['default_occupancy'] ?? 1),
                 'base_price' => (float) ($roomData['base_price'] ?? 0.0),
                 'extra_guest_price' => (float) ($roomData['extra_guest_price'] ?? 0.0),
                 'room_size' => (string) ($roomData['room_size'] ?? ''),
                 'beds' => (string) ($roomData['beds'] ?? ''),
+                'admin_notes' => (string) ($roomData['admin_notes'] ?? ''),
                 'created_at' => isset($roomData['created_at']) ? (string) $roomData['created_at'] : \current_time('mysql'),
             ],
-            ['%s', '%s', '%s', '%s', '%d', '%f', '%f', '%s', '%s', '%s']
+            ['%s', '%s', '%s', '%s', '%s', '%d', '%d', '%d', '%d', '%d', '%d', '%d', '%d', '%d', '%f', '%f', '%s', '%s', '%s', '%s']
         );
 
         if ($inserted === false) {
@@ -200,14 +228,24 @@ final class RoomRepository extends AbstractRepository
                 'slug' => (string) ($roomData['slug'] ?? ''),
                 'category' => (string) ($roomData['category'] ?? ''),
                 'description' => (string) ($roomData['description'] ?? ''),
+                'internal_code' => (string) ($roomData['internal_code'] ?? ''),
+                'is_active' => !empty($roomData['is_active']) ? 1 : 0,
+                'is_bookable' => !empty($roomData['is_bookable']) ? 1 : 0,
+                'is_online_bookable' => !empty($roomData['is_online_bookable']) ? 1 : 0,
+                'is_calendar_visible' => !empty($roomData['is_calendar_visible']) ? 1 : 0,
+                'sort_order' => (int) ($roomData['sort_order'] ?? 0),
+                'max_adults' => (int) ($roomData['max_adults'] ?? 1),
+                'max_children' => (int) ($roomData['max_children'] ?? 0),
                 'max_guests' => (int) ($roomData['max_guests'] ?? 1),
+                'default_occupancy' => (int) ($roomData['default_occupancy'] ?? 1),
                 'base_price' => (float) ($roomData['base_price'] ?? 0.0),
                 'extra_guest_price' => (float) ($roomData['extra_guest_price'] ?? 0.0),
                 'room_size' => (string) ($roomData['room_size'] ?? ''),
                 'beds' => (string) ($roomData['beds'] ?? ''),
+                'admin_notes' => (string) ($roomData['admin_notes'] ?? ''),
             ],
             ['id' => $roomId],
-            ['%s', '%s', '%s', '%s', '%d', '%f', '%f', '%s', '%s'],
+            ['%s', '%s', '%s', '%s', '%s', '%d', '%d', '%d', '%d', '%d', '%d', '%d', '%d', '%d', '%f', '%f', '%s', '%s', '%s'],
             ['%d']
         );
 
@@ -395,11 +433,41 @@ final class RoomRepository extends AbstractRepository
     public function getRoomsListRows(): array
     {
         $rows = $this->wpdb->get_results(
-            'SELECT id, name, slug, category, max_guests, base_price FROM ' . $this->getRoomsTableName() . ' ORDER BY created_at DESC, id DESC',
+            'SELECT
+                id,
+                name,
+                slug,
+                category,
+                description,
+                internal_code,
+                is_active,
+                is_bookable,
+                is_online_bookable,
+                is_calendar_visible,
+                sort_order,
+                max_adults,
+                max_children,
+                max_guests,
+                default_occupancy,
+                base_price,
+                room_size,
+                beds,
+                admin_notes,
+                created_at
+            FROM ' . $this->getRoomsTableName() . '
+            ORDER BY sort_order ASC, name ASC, id ASC',
             ARRAY_A
         );
 
         return \is_array($rows) ? $rows : [];
+    }
+
+    /**
+     * @return array<int, array<string, mixed>>
+     */
+    public function getAccommodationAdminRows(): array
+    {
+        return $this->getRoomsListRows();
     }
 
     private function insertRoomMetaRow(int $roomId, string $metaKey, string $metaValue): bool
@@ -886,13 +954,16 @@ final class RoomRepository extends AbstractRepository
                     end_date,
                     price_override,
                     weekend_price,
-                    minimum_nights
+                    minimum_nights,
+                    priority,
+                    is_active
                 FROM ' . $this->table('pricing') . '
                 WHERE start_date < %s
                     AND end_date >= %s
                     AND minimum_nights <= %d
+                    AND is_active = 1
                     AND (room_id = 0 OR room_id = %d)
-                ORDER BY room_id DESC, minimum_nights DESC, start_date DESC, end_date ASC, id DESC',
+                ORDER BY room_id DESC, priority DESC, minimum_nights DESC, start_date DESC, end_date ASC, id DESC',
                 $checkout,
                 $checkin,
                 $nights,

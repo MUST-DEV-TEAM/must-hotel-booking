@@ -99,6 +99,8 @@ function get_reservation_payment_status_options(): array
         'unpaid' => \__('Unpaid', 'must-hotel-booking'),
         'pending' => \__('Pending', 'must-hotel-booking'),
         'paid' => \__('Paid', 'must-hotel-booking'),
+        'partially_paid' => \__('Partially Paid', 'must-hotel-booking'),
+        'pay_at_hotel' => \__('Pay At Hotel', 'must-hotel-booking'),
         'failed' => \__('Failed', 'must-hotel-booking'),
         'cancelled' => \__('Cancelled', 'must-hotel-booking'),
         'refunded' => \__('Refunded', 'must-hotel-booking'),
@@ -291,6 +293,201 @@ function render_admin_reservation_badge(string $label, string $tone): string
     return '<span class="must-dashboard-status-badge is-compact must-reservation-badge ' . \esc_attr($className) . '">' . \esc_html($normalizedLabel) . '</span>';
 }
 
+function format_admin_reservations_display_date(string $date): string
+{
+    $date = \trim($date);
+
+    if ($date === '') {
+        return '';
+    }
+
+    $timestamp = \strtotime($date);
+
+    if ($timestamp === false) {
+        return $date;
+    }
+
+    return \wp_date(\get_option('date_format'), $timestamp);
+}
+
+/**
+ * @param array<int, array<string, mixed>> $quickFilters
+ * @return array<string, array<string, mixed>>
+ */
+function get_admin_reservations_quick_filter_map(array $quickFilters): array
+{
+    $map = [];
+
+    foreach ($quickFilters as $filter) {
+        if (!\is_array($filter) || empty($filter['slug'])) {
+            continue;
+        }
+
+        $map[(string) $filter['slug']] = $filter;
+    }
+
+    return $map;
+}
+
+/**
+ * @param array<int, array<string, mixed>> $quickFilters
+ */
+function render_admin_reservations_overview(array $quickFilters): void
+{
+    $filterMap = get_admin_reservations_quick_filter_map($quickFilters);
+    $cards = [
+        [
+            'slug' => 'all',
+            'label' => \__('Total Reservations', 'must-hotel-booking'),
+            'description' => \__('Every booking currently tracked in the system.', 'must-hotel-booking'),
+            'icon' => 'dashicons-index-card',
+        ],
+        [
+            'slug' => 'arrivals_today',
+            'label' => \__('Arrivals Today', 'must-hotel-booking'),
+            'description' => \__('Guests expected to check in today.', 'must-hotel-booking'),
+            'icon' => 'dashicons-arrow-down-alt',
+        ],
+        [
+            'slug' => 'departures_today',
+            'label' => \__('Departures Today', 'must-hotel-booking'),
+            'description' => \__('Guests scheduled to check out today.', 'must-hotel-booking'),
+            'icon' => 'dashicons-arrow-up-alt',
+        ],
+        [
+            'slug' => 'in_house_today',
+            'label' => \__('In-House', 'must-hotel-booking'),
+            'description' => \__('Reservations currently staying on property.', 'must-hotel-booking'),
+            'icon' => 'dashicons-building',
+        ],
+        [
+            'slug' => 'unpaid',
+            'label' => \__('Needs Payment', 'must-hotel-booking'),
+            'description' => \__('Reservations still waiting on payment collection.', 'must-hotel-booking'),
+            'icon' => 'dashicons-money-alt',
+        ],
+    ];
+
+    echo '<div class="must-reservations-overview">';
+
+    foreach ($cards as $card) {
+        $slug = (string) $card['slug'];
+        $filter = isset($filterMap[$slug]) ? $filterMap[$slug] : [];
+        $count = isset($filter['count']) ? (int) $filter['count'] : 0;
+        $url = isset($filter['url']) ? (string) $filter['url'] : get_admin_reservations_page_url();
+        $isCurrent = !empty($filter['current']);
+
+        echo '<a class="must-reservations-stat-card' . ($isCurrent ? ' is-current' : '') . '" href="' . \esc_url($url) . '"' . ($isCurrent ? ' aria-current="page"' : '') . '>';
+        echo '<span class="must-reservations-stat-icon dashicons ' . \esc_attr((string) $card['icon']) . '" aria-hidden="true"></span>';
+        echo '<span class="must-reservations-stat-label">' . \esc_html((string) $card['label']) . '</span>';
+        echo '<strong class="must-reservations-stat-value">' . \esc_html((string) $count) . '</strong>';
+        echo '<span class="must-reservations-stat-copy">' . \esc_html((string) $card['description']) . '</span>';
+        echo '</a>';
+    }
+
+    echo '</div>';
+}
+
+/**
+ * @param array<string, mixed> $filters
+ * @param array<string, mixed> $pageData
+ */
+function render_admin_reservations_active_filters(array $filters, array $pageData): void
+{
+    $chips = [];
+    $statusOptions = isset($pageData['status_options']) && \is_array($pageData['status_options']) ? $pageData['status_options'] : [];
+    $paymentStatusOptions = isset($pageData['payment_status_options']) && \is_array($pageData['payment_status_options']) ? $pageData['payment_status_options'] : [];
+    $paymentMethodOptions = isset($pageData['payment_method_options']) && \is_array($pageData['payment_method_options']) ? $pageData['payment_method_options'] : [];
+    $roomOptions = isset($pageData['room_options']) && \is_array($pageData['room_options']) ? $pageData['room_options'] : [];
+
+    if (!empty($filters['search'])) {
+        $chips[] = [
+            'label' => \__('Search', 'must-hotel-booking'),
+            'value' => (string) $filters['search'],
+        ];
+    }
+
+    if (!empty($filters['status']) && isset($statusOptions[(string) $filters['status']])) {
+        $chips[] = [
+            'label' => \__('Reservation', 'must-hotel-booking'),
+            'value' => (string) $statusOptions[(string) $filters['status']],
+        ];
+    }
+
+    if (!empty($filters['payment_status']) && isset($paymentStatusOptions[(string) $filters['payment_status']])) {
+        $chips[] = [
+            'label' => \__('Payment', 'must-hotel-booking'),
+            'value' => (string) $paymentStatusOptions[(string) $filters['payment_status']],
+        ];
+    }
+
+    if (!empty($filters['payment_method']) && isset($paymentMethodOptions[(string) $filters['payment_method']])) {
+        $chips[] = [
+            'label' => \__('Method', 'must-hotel-booking'),
+            'value' => (string) $paymentMethodOptions[(string) $filters['payment_method']],
+        ];
+    }
+
+    if (!empty($filters['room_id'])) {
+        foreach ($roomOptions as $roomOption) {
+            if (!\is_array($roomOption)) {
+                continue;
+            }
+
+            if ((int) ($roomOption['id'] ?? 0) !== (int) $filters['room_id']) {
+                continue;
+            }
+
+            $chips[] = [
+                'label' => \__('Accommodation', 'must-hotel-booking'),
+                'value' => (string) ($roomOption['name'] ?? ''),
+            ];
+            break;
+        }
+    }
+
+    if (!empty($filters['checkin_month'])) {
+        $monthTimestamp = \strtotime((string) $filters['checkin_month'] . '-01');
+        $chips[] = [
+            'label' => \__('Month', 'must-hotel-booking'),
+            'value' => $monthTimestamp !== false
+                ? \wp_date('F Y', $monthTimestamp)
+                : (string) $filters['checkin_month'],
+        ];
+    }
+
+    if (!empty($filters['checkin_from'])) {
+        $chips[] = [
+            'label' => \__('Check-in from', 'must-hotel-booking'),
+            'value' => format_admin_reservations_display_date((string) $filters['checkin_from']),
+        ];
+    }
+
+    if (!empty($filters['checkin_to'])) {
+        $chips[] = [
+            'label' => \__('Check-in to', 'must-hotel-booking'),
+            'value' => format_admin_reservations_display_date((string) $filters['checkin_to']),
+        ];
+    }
+
+    if (empty($chips)) {
+        return;
+    }
+
+    echo '<div class="must-reservations-active-filters">';
+    echo '<span class="must-reservations-active-filters-title">' . \esc_html__('Active filters', 'must-hotel-booking') . '</span>';
+
+    foreach ($chips as $chip) {
+        echo '<span class="must-reservations-active-filter-chip">';
+        echo '<span class="must-reservations-active-filter-label">' . \esc_html((string) $chip['label']) . '</span>';
+        echo '<span class="must-reservations-active-filter-value">' . \esc_html((string) $chip['value']) . '</span>';
+        echo '</span>';
+    }
+
+    echo '<a class="must-reservations-active-filter-reset" href="' . \esc_url(get_admin_reservations_page_url()) . '">' . \esc_html__('Clear all', 'must-hotel-booking') . '</a>';
+    echo '</div>';
+}
+
 function format_admin_reservation_method_label(string $method): string
 {
     $method = \sanitize_key($method);
@@ -312,28 +509,26 @@ function render_admin_reservations_quick_filters(array $quickFilters): void
         return;
     }
 
-    echo '<ul class="subsubsub must-reservations-quick-filters">';
+    echo '<div class="must-reservations-filter-strip">';
+    echo '<div class="must-reservations-filter-strip-label">' . \esc_html__('Quick views', 'must-hotel-booking') . '</div>';
+    echo '<ul class="must-reservations-quick-filters">';
 
-    foreach ($quickFilters as $index => $filter) {
+    foreach ($quickFilters as $filter) {
         if (!\is_array($filter)) {
             continue;
         }
 
-        $class = !empty($filter['current']) ? ' class="current"' : '';
+        $class = 'must-reservations-quick-filter' . (!empty($filter['current']) ? ' is-current' : '');
         echo '<li>';
-        echo '<a href="' . \esc_url((string) ($filter['url'] ?? '')) . '"' . $class . '>';
-        echo \esc_html((string) ($filter['label'] ?? ''));
-        echo ' <span class="count">(' . \esc_html((string) ((int) ($filter['count'] ?? 0))) . ')</span>';
+        echo '<a class="' . \esc_attr($class) . '" href="' . \esc_url((string) ($filter['url'] ?? '')) . '"' . (!empty($filter['current']) ? ' aria-current="page"' : '') . '>';
+        echo '<span class="must-reservations-quick-filter-label">' . \esc_html((string) ($filter['label'] ?? '')) . '</span>';
+        echo '<span class="must-reservations-quick-filter-count">' . \esc_html((string) ((int) ($filter['count'] ?? 0))) . '</span>';
         echo '</a>';
-
-        if ($index < (\count($quickFilters) - 1)) {
-            echo ' | ';
-        }
-
         echo '</li>';
     }
 
     echo '</ul>';
+    echo '</div>';
 }
 
 /**
@@ -354,17 +549,28 @@ function render_admin_reservations_filters(array $filters, array $pageData): voi
         echo '<input type="hidden" name="quick_filter" value="' . \esc_attr((string) $filters['quick_filter']) . '" />';
     }
 
-    echo '<div class="must-reservations-toolbar-row">';
-    echo '<label class="screen-reader-text" for="must-reservations-search">' . \esc_html__('Search reservations', 'must-hotel-booking') . '</label>';
-    echo '<input id="must-reservations-search" type="search" name="search" value="' . \esc_attr((string) ($filters['search'] ?? '')) . '" placeholder="' . \esc_attr__('Booking ID, guest, email, phone, accommodation', 'must-hotel-booking') . '" class="regular-text" />';
-    \submit_button(\__('Search', 'must-hotel-booking'), 'secondary', '', false);
-    echo ' <a class="button button-secondary" href="' . \esc_url(get_admin_reservations_page_url()) . '">' . \esc_html__('Reset', 'must-hotel-booking') . '</a>';
+    echo '<div class="must-reservations-toolbar-panel">';
+    echo '<div class="must-reservations-toolbar-heading">';
+    echo '<div>';
+    echo '<h2>' . \esc_html__('Refine the reservation list', 'must-hotel-booking') . '</h2>';
+    echo '<p>' . \esc_html__('Search by guest or booking details, then narrow the queue by reservation state, payment, accommodation, or arrival window.', 'must-hotel-booking') . '</p>';
+    echo '</div>';
+    echo '<div class="must-reservations-toolbar-actions">';
+    echo '<button type="submit" class="button button-primary">' . \esc_html__('Apply Filters', 'must-hotel-booking') . '</button>';
+    echo '<a class="button button-secondary" href="' . \esc_url(get_admin_reservations_page_url()) . '">' . \esc_html__('Reset', 'must-hotel-booking') . '</a>';
+    echo '</div>';
     echo '</div>';
 
-    echo '<div class="must-reservations-toolbar-row">';
+    echo '<div class="must-reservations-toolbar-grid">';
 
-    echo '<label>';
-    echo '<span class="screen-reader-text">' . \esc_html__('Filter by reservation status', 'must-hotel-booking') . '</span>';
+    echo '<label class="must-reservations-field must-reservations-search-field" for="must-reservations-search">';
+    echo '<span class="must-reservations-field-label">' . \esc_html__('Search reservations', 'must-hotel-booking') . '</span>';
+    echo '<input id="must-reservations-search" type="search" name="search" value="' . \esc_attr((string) ($filters['search'] ?? '')) . '" placeholder="' . \esc_attr__('Booking ID, guest, email, phone, accommodation', 'must-hotel-booking') . '" />';
+    echo '<span class="must-reservations-field-help">' . \esc_html__('Find a reservation by booking reference, guest, contact details, or accommodation name.', 'must-hotel-booking') . '</span>';
+    echo '</label>';
+
+    echo '<label class="must-reservations-field">';
+    echo '<span class="must-reservations-field-label">' . \esc_html__('Reservation status', 'must-hotel-booking') . '</span>';
     echo '<select name="status">';
 
     foreach ($statusOptions as $value => $label) {
@@ -375,8 +581,8 @@ function render_admin_reservations_filters(array $filters, array $pageData): voi
     echo '</select>';
     echo '</label>';
 
-    echo '<label>';
-    echo '<span class="screen-reader-text">' . \esc_html__('Filter by payment status', 'must-hotel-booking') . '</span>';
+    echo '<label class="must-reservations-field">';
+    echo '<span class="must-reservations-field-label">' . \esc_html__('Payment status', 'must-hotel-booking') . '</span>';
     echo '<select name="payment_status">';
 
     foreach ($paymentStatusOptions as $value => $label) {
@@ -387,8 +593,8 @@ function render_admin_reservations_filters(array $filters, array $pageData): voi
     echo '</select>';
     echo '</label>';
 
-    echo '<label>';
-    echo '<span class="screen-reader-text">' . \esc_html__('Filter by payment method', 'must-hotel-booking') . '</span>';
+    echo '<label class="must-reservations-field">';
+    echo '<span class="must-reservations-field-label">' . \esc_html__('Payment method', 'must-hotel-booking') . '</span>';
     echo '<select name="payment_method">';
 
     foreach ($paymentMethodOptions as $value => $label) {
@@ -399,8 +605,8 @@ function render_admin_reservations_filters(array $filters, array $pageData): voi
     echo '</select>';
     echo '</label>';
 
-    echo '<label>';
-    echo '<span class="screen-reader-text">' . \esc_html__('Filter by accommodation', 'must-hotel-booking') . '</span>';
+    echo '<label class="must-reservations-field">';
+    echo '<span class="must-reservations-field-label">' . \esc_html__('Accommodation', 'must-hotel-booking') . '</span>';
     echo '<select name="room_id">';
     echo '<option value="">' . \esc_html__('All accommodations', 'must-hotel-booking') . '</option>';
 
@@ -417,22 +623,23 @@ function render_admin_reservations_filters(array $filters, array $pageData): voi
     echo '</select>';
     echo '</label>';
 
-    echo '<label>';
-    echo '<span class="screen-reader-text">' . \esc_html__('Check-in month', 'must-hotel-booking') . '</span>';
+    echo '<label class="must-reservations-field">';
+    echo '<span class="must-reservations-field-label">' . \esc_html__('Check-in month', 'must-hotel-booking') . '</span>';
     echo '<input type="month" name="checkin_month" value="' . \esc_attr((string) ($filters['checkin_month'] ?? '')) . '" />';
     echo '</label>';
 
-    echo '<label>';
-    echo '<span class="screen-reader-text">' . \esc_html__('Check-in from', 'must-hotel-booking') . '</span>';
+    echo '<label class="must-reservations-field">';
+    echo '<span class="must-reservations-field-label">' . \esc_html__('Check-in from', 'must-hotel-booking') . '</span>';
     echo '<input type="date" name="checkin_from" value="' . \esc_attr((string) ($filters['checkin_from'] ?? '')) . '" />';
     echo '</label>';
 
-    echo '<label>';
-    echo '<span class="screen-reader-text">' . \esc_html__('Check-in to', 'must-hotel-booking') . '</span>';
+    echo '<label class="must-reservations-field">';
+    echo '<span class="must-reservations-field-label">' . \esc_html__('Check-in to', 'must-hotel-booking') . '</span>';
     echo '<input type="date" name="checkin_to" value="' . \esc_attr((string) ($filters['checkin_to'] ?? '')) . '" />';
     echo '</label>';
 
-    \submit_button(\__('Apply Filters', 'must-hotel-booking'), 'secondary', '', false);
+    echo '</div>';
+    render_admin_reservations_active_filters($filters, $pageData);
     echo '</div>';
     echo '</form>';
 }
@@ -452,7 +659,14 @@ function render_admin_reservations_pagination(array $pagination, array $filters)
     }
 
     echo '<div class="must-reservations-pagination">';
-    echo '<span class="displaying-num">' . \esc_html(\sprintf(\_n('%d reservation', '%d reservations', $totalItems, 'must-hotel-booking'), $totalItems)) . '</span>';
+    echo '<div class="must-reservations-pagination-copy">';
+    echo '<span class="must-reservations-pagination-total">' . \esc_html(\sprintf(\_n('%d reservation', '%d reservations', $totalItems, 'must-hotel-booking'), $totalItems)) . '</span>';
+
+    if ($totalPages > 1) {
+        echo '<span class="must-reservations-pagination-page">' . \esc_html(\sprintf(\__('Page %1$d of %2$d', 'must-hotel-booking'), $currentPage, $totalPages)) . '</span>';
+    }
+
+    echo '</div>';
 
     if ($totalPages > 1) {
         $baseArgs = get_admin_reservations_list_query_args($filters);
@@ -557,11 +771,17 @@ function render_admin_reservations_table(array $pageData): void
     $bulkActions = isset($pageData['bulk_actions']) && \is_array($pageData['bulk_actions']) ? $pageData['bulk_actions'] : [];
     $returnUrl = get_admin_reservations_current_list_url($filters);
 
-    echo '<form method="post" action="' . \esc_url(get_admin_reservations_page_url()) . '">';
+    echo '<form method="post" action="' . \esc_url(get_admin_reservations_page_url()) . '" class="must-reservations-list-form">';
     \wp_nonce_field('must_reservation_admin_action', 'must_reservation_admin_nonce');
     echo '<input type="hidden" name="must_reservation_admin_action" value="bulk_apply" />';
     echo '<input type="hidden" name="return_url" value="' . \esc_attr($returnUrl) . '" />';
 
+    echo '<div class="must-reservations-table-card">';
+    echo '<div class="must-reservations-table-topbar">';
+    echo '<div class="must-reservations-table-intro">';
+    echo '<h2>' . \esc_html__('Reservation queue', 'must-hotel-booking') . '</h2>';
+    echo '<p>' . \esc_html__('Use bulk actions for routine updates, or open any reservation for the full guest, payment, and communication context.', 'must-hotel-booking') . '</p>';
+    echo '</div>';
     echo '<div class="must-reservations-bulk-bar">';
     echo '<label class="screen-reader-text" for="must-reservations-bulk-action">' . \esc_html__('Bulk action', 'must-hotel-booking') . '</label>';
     echo '<select id="must-reservations-bulk-action" name="bulk_action">';
@@ -571,31 +791,35 @@ function render_admin_reservations_table(array $pageData): void
         echo '<option value="' . \esc_attr((string) $value) . '">' . \esc_html((string) $label) . '</option>';
     }
 
-    echo '</select> ';
-    \submit_button(\__('Apply', 'must-hotel-booking'), 'secondary', '', false);
+    echo '</select>';
+    echo '<button type="submit" class="button button-secondary">' . \esc_html__('Apply', 'must-hotel-booking') . '</button>';
+    echo '</div>';
     echo '</div>';
 
+    echo '<div class="must-reservations-table-scroll">';
     echo '<table class="widefat striped must-reservations-table">';
     echo '<thead><tr>';
     echo '<td class="check-column"><label class="screen-reader-text" for="must-reservations-toggle-all">' . \esc_html__('Select all reservations', 'must-hotel-booking') . '</label><input type="checkbox" id="must-reservations-toggle-all" /></td>';
-    echo '<th>' . \esc_html__('Booking ID', 'must-hotel-booking') . '</th>';
+    echo '<th>' . \esc_html__('Booking', 'must-hotel-booking') . '</th>';
     echo '<th>' . \esc_html__('Guest', 'must-hotel-booking') . '</th>';
-    echo '<th>' . \esc_html__('Accommodation', 'must-hotel-booking') . '</th>';
-    echo '<th>' . \esc_html__('Check-in', 'must-hotel-booking') . '</th>';
-    echo '<th>' . \esc_html__('Check-out', 'must-hotel-booking') . '</th>';
-    echo '<th>' . \esc_html__('Nights', 'must-hotel-booking') . '</th>';
-    echo '<th>' . \esc_html__('Guests', 'must-hotel-booking') . '</th>';
-    echo '<th>' . \esc_html__('Reservation Status', 'must-hotel-booking') . '</th>';
-    echo '<th>' . \esc_html__('Payment Status', 'must-hotel-booking') . '</th>';
-    echo '<th>' . \esc_html__('Payment Method', 'must-hotel-booking') . '</th>';
-    echo '<th>' . \esc_html__('Total', 'must-hotel-booking') . '</th>';
-    echo '<th>' . \esc_html__('Created', 'must-hotel-booking') . '</th>';
+    echo '<th>' . \esc_html__('Stay', 'must-hotel-booking') . '</th>';
+    echo '<th>' . \esc_html__('Status', 'must-hotel-booking') . '</th>';
+    echo '<th>' . \esc_html__('Payment', 'must-hotel-booking') . '</th>';
     echo '<th>' . \esc_html__('Actions', 'must-hotel-booking') . '</th>';
     echo '</tr></thead><tbody>';
 
     if (empty($rows)) {
-        echo '<tr><td colspan="13">' . \esc_html__('No reservations matched the current filters.', 'must-hotel-booking') . '</td></tr>';
+        echo '<tr class="must-reservations-empty-row"><td colspan="7">';
+        echo '<div class="must-reservations-empty-state">';
+        echo '<span class="dashicons dashicons-search" aria-hidden="true"></span>';
+        echo '<strong>' . \esc_html__('No reservations matched the current filters.', 'must-hotel-booking') . '</strong>';
+        echo '<p>' . \esc_html__('Try clearing one or more filters, or widen the date range to bring more reservations into view.', 'must-hotel-booking') . '</p>';
+        echo '<a class="button button-secondary" href="' . \esc_url(get_admin_reservations_page_url()) . '">' . \esc_html__('Reset filters', 'must-hotel-booking') . '</a>';
+        echo '</div>';
+        echo '</td></tr>';
         echo '</tbody></table>';
+        echo '</div>';
+        echo '</div>';
         echo '</form>';
 
         return;
@@ -609,54 +833,91 @@ function render_admin_reservations_table(array $pageData): void
         $reservationId = isset($row['id']) ? (int) $row['id'] : 0;
         $viewUrl = get_admin_reservation_row_action_url('view', $row, $returnUrl);
         $editUrl = get_admin_reservation_row_action_url('edit', $row, $returnUrl);
-        $guestMeta = [];
-
-        if (!empty($row['guest_email'])) {
-            $guestMeta[] = (string) $row['guest_email'];
-        }
-
-        if (!empty($row['guest_phone'])) {
-            $guestMeta[] = (string) $row['guest_phone'];
-        }
+        $guestName = (string) ($row['guest'] ?? '');
+        $guestEmail = (string) ($row['guest_email'] ?? '');
+        $guestPhone = (string) ($row['guest_phone'] ?? '');
+        $paymentMethod = isset($row['payment_method']) && (string) $row['payment_method'] !== ''
+            ? (string) $row['payment_method']
+            : format_admin_reservation_method_label((string) ($row['payment_method_key'] ?? ''));
+        $nights = (int) ($row['nights'] ?? 0);
+        $guestCount = (int) ($row['guests'] ?? 0);
 
         echo '<tr>';
-        echo '<th scope="row" class="check-column"><input type="checkbox" class="must-reservation-select" name="reservation_ids[]" value="' . \esc_attr((string) $reservationId) . '" /></th>';
-        echo '<td><strong><a href="' . \esc_url($viewUrl) . '">' . \esc_html((string) ($row['booking_id'] ?? '')) . '</a></strong></td>';
-        echo '<td><strong>' . \esc_html((string) ($row['guest'] ?? '')) . '</strong>';
+        echo '<td class="check-column must-reservations-selection-cell"><input type="checkbox" class="must-reservation-select" name="reservation_ids[]" value="' . \esc_attr((string) $reservationId) . '" /></td>';
+        echo '<th scope="row" class="must-reservations-booking-cell" data-label="' . \esc_attr__('Booking', 'must-hotel-booking') . '">';
+        echo '<a class="must-reservations-booking-link" href="' . \esc_url($viewUrl) . '">' . \esc_html((string) ($row['booking_id'] ?? '')) . '</a>';
+        echo '<div class="must-reservations-booking-meta">';
+        echo '<span class="must-reservations-booking-meta-label">' . \esc_html__('Created', 'must-hotel-booking') . '</span>';
+        echo '<strong>' . \esc_html((string) ($row['created'] ?? '')) . '</strong>';
+        echo '</div>';
+        echo '</th>';
 
-        if (!empty($guestMeta)) {
-            echo '<div class="description">' . \esc_html(\implode(' | ', $guestMeta)) . '</div>';
+        echo '<td class="must-reservations-guest-cell" data-label="' . \esc_attr__('Guest', 'must-hotel-booking') . '">';
+        if (!empty($row['guest_url'])) {
+            echo '<div class="must-reservations-guest-name"><a href="' . \esc_url((string) $row['guest_url']) . '">' . \esc_html($guestName !== '' ? $guestName : \__('Guest not attached', 'must-hotel-booking')) . '</a></div>';
+        } else {
+            echo '<div class="must-reservations-guest-name">' . \esc_html($guestName !== '' ? $guestName : \__('Guest not attached', 'must-hotel-booking')) . '</div>';
+        }
+
+        if ($guestEmail !== '') {
+            echo '<a class="must-reservations-contact-link" href="mailto:' . \esc_attr($guestEmail) . '">' . \esc_html($guestEmail) . '</a>';
+        }
+
+        if ($guestPhone !== '') {
+            echo '<a class="must-reservations-contact-link" href="tel:' . \esc_attr($guestPhone) . '">' . \esc_html($guestPhone) . '</a>';
         }
 
         echo '</td>';
-        echo '<td>' . \esc_html((string) ($row['accommodation'] ?? '')) . '</td>';
-        echo '<td>' . \esc_html((string) ($row['checkin'] ?? '')) . '</td>';
-        echo '<td>' . \esc_html((string) ($row['checkout'] ?? '')) . '</td>';
-        echo '<td>' . \esc_html((string) ((int) ($row['nights'] ?? 0))) . '</td>';
-        echo '<td>' . \esc_html((string) ((int) ($row['guests'] ?? 0))) . '</td>';
-        echo '<td>' . render_admin_reservation_badge((string) ($row['reservation_status'] ?? ''), (string) ($row['reservation_status_key'] ?? '')) . '</td>';
-        echo '<td>' . render_admin_reservation_badge((string) ($row['payment_status'] ?? ''), (string) ($row['payment_status_key'] ?? '')) . '</td>';
-        echo '<td>' . \esc_html(format_admin_reservation_method_label((string) ($row['payment_method_key'] ?? ''))) . '</td>';
-        echo '<td>' . \esc_html((string) ($row['total'] ?? '')) . '</td>';
-        echo '<td>' . \esc_html((string) ($row['created'] ?? '')) . '</td>';
-        echo '<td><div class="must-reservations-row-actions">';
-        echo '<a class="button button-small" href="' . \esc_url($viewUrl) . '">' . \esc_html__('View', 'must-hotel-booking') . '</a>';
-        echo '<a class="button button-small" href="' . \esc_url($editUrl) . '">' . \esc_html__('Edit', 'must-hotel-booking') . '</a>';
+
+        echo '<td class="must-reservations-stay-cell" data-label="' . \esc_attr__('Stay', 'must-hotel-booking') . '">';
+        echo '<div class="must-reservations-stay-title">' . \esc_html((string) ($row['accommodation'] ?? '')) . '</div>';
+        echo '<div class="must-reservations-stay-dates">';
+        echo '<span>' . \esc_html(format_admin_reservations_display_date((string) ($row['checkin'] ?? ''))) . '</span>';
+        echo '<span class="must-reservations-stay-arrow" aria-hidden="true">&rarr;</span>';
+        echo '<span>' . \esc_html(format_admin_reservations_display_date((string) ($row['checkout'] ?? ''))) . '</span>';
+        echo '</div>';
+        echo '<div class="must-reservations-stay-meta">';
+        echo '<span>' . \esc_html(\sprintf(\_n('%d night', '%d nights', $nights, 'must-hotel-booking'), $nights)) . '</span>';
+        echo '<span>' . \esc_html(\sprintf(\_n('%d guest', '%d guests', $guestCount, 'must-hotel-booking'), $guestCount)) . '</span>';
+        echo '</div>';
+        echo '</td>';
+
+        echo '<td class="must-reservations-status-cell" data-label="' . \esc_attr__('Status', 'must-hotel-booking') . '">';
+        echo '<div class="must-reservations-status-stack">';
+        echo '<div class="must-reservations-status-line">';
+        echo '<span class="must-reservations-status-label">' . \esc_html__('Reservation', 'must-hotel-booking') . '</span>';
+        echo render_admin_reservation_badge((string) ($row['reservation_status'] ?? ''), (string) ($row['reservation_status_key'] ?? ''));
+        echo '</div>';
+        echo '<div class="must-reservations-status-line">';
+        echo '<span class="must-reservations-status-label">' . \esc_html__('Payment', 'must-hotel-booking') . '</span>';
+        echo render_admin_reservation_badge((string) ($row['payment_status'] ?? ''), (string) ($row['payment_status_key'] ?? ''));
+        echo '</div>';
+        echo '</div>';
+        echo '</td>';
+
+        echo '<td class="must-reservations-payment-cell" data-label="' . \esc_attr__('Payment', 'must-hotel-booking') . '">';
+        echo '<strong class="must-reservations-total">' . \esc_html((string) ($row['total'] ?? '')) . '</strong>';
+        echo '<div class="must-reservations-payment-method">' . \esc_html($paymentMethod) . '</div>';
+        echo '</td>';
+
+        echo '<td class="must-reservations-actions-cell" data-label="' . \esc_attr__('Actions', 'must-hotel-booking') . '"><div class="must-reservations-row-actions">';
+        echo '<a class="button button-small button-primary must-reservations-row-action" href="' . \esc_url($viewUrl) . '">' . \esc_html__('View', 'must-hotel-booking') . '</a>';
+        echo '<a class="button button-small must-reservations-row-action" href="' . \esc_url($editUrl) . '">' . \esc_html__('Edit', 'must-hotel-booking') . '</a>';
 
         if (can_confirm_reservation_row($row)) {
-            echo '<a class="button button-small" href="' . \esc_url(get_admin_reservation_row_action_url('confirm', $row, $returnUrl)) . '">' . \esc_html__('Confirm', 'must-hotel-booking') . '</a>';
+            echo '<a class="button button-small must-reservations-row-action is-accent" href="' . \esc_url(get_admin_reservation_row_action_url('confirm', $row, $returnUrl)) . '">' . \esc_html__('Confirm', 'must-hotel-booking') . '</a>';
         }
 
         if (can_mark_reservation_paid_row($row)) {
-            echo '<a class="button button-small" href="' . \esc_url(get_admin_reservation_row_action_url('mark_paid', $row, $returnUrl)) . '">' . \esc_html__('Mark Paid', 'must-hotel-booking') . '</a>';
+            echo '<a class="button button-small must-reservations-row-action is-accent" href="' . \esc_url(get_admin_reservation_row_action_url('mark_paid', $row, $returnUrl)) . '">' . \esc_html__('Mark Paid', 'must-hotel-booking') . '</a>';
         }
 
         if (can_resend_reservation_email_row($row)) {
-            echo '<a class="button button-small" href="' . \esc_url(get_admin_reservation_row_action_url('resend_guest_email', $row, $returnUrl)) . '">' . \esc_html__('Resend Email', 'must-hotel-booking') . '</a>';
+            echo '<a class="button button-small must-reservations-row-action" href="' . \esc_url(get_admin_reservation_row_action_url('resend_guest_email', $row, $returnUrl)) . '">' . \esc_html__('Resend Email', 'must-hotel-booking') . '</a>';
         }
 
         if (can_cancel_reservation_row($row)) {
-            echo '<a class="button button-small button-link-delete" href="' . \esc_url(get_admin_reservation_row_action_url('cancel', $row, $returnUrl)) . '" onclick="return confirm(\'' . \esc_js(__('Cancel this reservation?', 'must-hotel-booking')) . '\');">' . \esc_html__('Cancel', 'must-hotel-booking') . '</a>';
+            echo '<a class="button button-small must-reservations-row-action is-danger" href="' . \esc_url(get_admin_reservation_row_action_url('cancel', $row, $returnUrl)) . '" onclick="return confirm(\'' . \esc_js(__('Cancel this reservation?', 'must-hotel-booking')) . '\');">' . \esc_html__('Cancel', 'must-hotel-booking') . '</a>';
         }
 
         echo '</div></td>';
@@ -664,6 +925,8 @@ function render_admin_reservations_table(array $pageData): void
     }
 
     echo '</tbody></table>';
+    echo '</div>';
+    echo '</div>';
     echo '</form>';
 }
 
@@ -709,6 +972,18 @@ function render_admin_reservation_detail_page_content(array $detailData): void
     $currentUrl = $mode === 'edit'
         ? get_admin_reservation_detail_page_url($reservationId, ['mode' => 'edit'])
         : get_admin_reservation_detail_page_url($reservationId);
+    $calendarUrl = \function_exists(__NAMESPACE__ . '\get_admin_calendar_page_url')
+        ? get_admin_calendar_page_url(
+            [
+                'start_date' => isset($stay['checkin']) ? (string) $stay['checkin'] : \current_time('Y-m-d'),
+                'weeks' => 2,
+                'room_id' => isset($detailData['reservation']['room_id']) ? (int) $detailData['reservation']['room_id'] : 0,
+                'focus_room_id' => isset($detailData['reservation']['room_id']) ? (int) $detailData['reservation']['room_id'] : 0,
+                'focus_date' => isset($stay['checkin']) ? (string) $stay['checkin'] : \current_time('Y-m-d'),
+                'reservation_id' => $reservationId,
+            ]
+        )
+        : '';
 
     echo '<div class="must-reservation-detail-header">';
     echo '<div>';
@@ -722,6 +997,10 @@ function render_admin_reservation_detail_page_content(array $detailData): void
         echo '<a class="button button-secondary" href="' . \esc_url(get_admin_reservation_detail_page_url($reservationId)) . '">' . \esc_html__('View Mode', 'must-hotel-booking') . '</a>';
     } else {
         echo '<a class="button button-primary" href="' . \esc_url(get_admin_reservation_detail_page_url($reservationId, ['mode' => 'edit'])) . '">' . \esc_html__('Edit Guest & Notes', 'must-hotel-booking') . '</a>';
+    }
+
+    if ($calendarUrl !== '') {
+        echo '<a class="button button-secondary" href="' . \esc_url($calendarUrl) . '">' . \esc_html__('Open in Calendar', 'must-hotel-booking') . '</a>';
     }
 
     echo '<a class="button button-secondary" href="' . \esc_url(get_admin_reservation_create_page_url()) . '">' . \esc_html__('Add Reservation', 'must-hotel-booking') . '</a>';
@@ -790,7 +1069,13 @@ function render_admin_reservation_detail_page_content(array $detailData): void
         echo '</form>';
     } else {
         echo '<table class="widefat striped"><tbody>';
-        echo '<tr><th>' . \esc_html__('Guest', 'must-hotel-booking') . '</th><td>' . \esc_html((string) ($guest['full_name'] ?? \__('Guest details missing', 'must-hotel-booking'))) . '</td></tr>';
+        echo '<tr><th>' . \esc_html__('Guest', 'must-hotel-booking') . '</th><td>';
+        if (!empty($guest['guest_url'])) {
+            echo '<a href="' . \esc_url((string) $guest['guest_url']) . '">' . \esc_html((string) ($guest['full_name'] ?? \__('Guest details missing', 'must-hotel-booking'))) . '</a>';
+        } else {
+            echo \esc_html((string) ($guest['full_name'] ?? \__('Guest details missing', 'must-hotel-booking')));
+        }
+        echo '</td></tr>';
         echo '<tr><th>' . \esc_html__('Email', 'must-hotel-booking') . '</th><td>' . \esc_html((string) ($guest['email'] ?? '')) . '</td></tr>';
         echo '<tr><th>' . \esc_html__('Phone', 'must-hotel-booking') . '</th><td>' . \esc_html((string) ($guest['phone'] ?? '')) . '</td></tr>';
         echo '<tr><th>' . \esc_html__('Country / Residence', 'must-hotel-booking') . '</th><td>' . \esc_html((string) ($guest['country'] ?? '')) . '</td></tr>';
@@ -803,7 +1088,17 @@ function render_admin_reservation_detail_page_content(array $detailData): void
     echo '<h2>' . \esc_html__('Pricing / Totals', 'must-hotel-booking') . '</h2>';
     echo '<table class="widefat striped"><tbody>';
     echo '<tr><th>' . \esc_html__('Base amount', 'must-hotel-booking') . '</th><td>&ndash;</td></tr>';
-    echo '<tr><th>' . \esc_html__('Discounts', 'must-hotel-booking') . '</th><td>&ndash;</td></tr>';
+    $couponCode = isset($pricing['coupon_code']) ? (string) $pricing['coupon_code'] : '';
+    $couponDiscountTotal = isset($pricing['coupon_discount_total']) ? (float) $pricing['coupon_discount_total'] : 0.0;
+    echo '<tr><th>' . \esc_html__('Coupon / Discount', 'must-hotel-booking') . '</th><td>';
+    if ($couponCode !== '' || $couponDiscountTotal > 0.0) {
+        echo \esc_html($couponCode !== '' ? $couponCode : __('Coupon applied', 'must-hotel-booking'));
+        echo ' | ';
+        echo \esc_html('-' . \number_format_i18n($couponDiscountTotal, 2) . ' ' . (string) ($pricing['currency'] ?? ''));
+    } else {
+        echo '&ndash;';
+    }
+    echo '</td></tr>';
     echo '<tr><th>' . \esc_html__('Taxes / Fees', 'must-hotel-booking') . '</th><td>&ndash;</td></tr>';
     echo '<tr><th>' . \esc_html__('Final total', 'must-hotel-booking') . '</th><td>' . \esc_html(\number_format_i18n((float) ($pricing['stored_total'] ?? 0), 2) . ' ' . (string) ($pricing['currency'] ?? '')) . '</td></tr>';
     echo '<tr><th>' . \esc_html__('Amount paid', 'must-hotel-booking') . '</th><td>' . \esc_html(\number_format_i18n((float) ($pricing['amount_paid'] ?? 0), 2) . ' ' . (string) ($pricing['currency'] ?? '')) . '</td></tr>';
@@ -938,19 +1233,29 @@ function render_admin_reservations_page(): void
     $filters = isset($pageData['filters']) && \is_array($pageData['filters']) ? $pageData['filters'] : [];
     $pagination = isset($pageData['pagination']) && \is_array($pageData['pagination']) ? $pageData['pagination'] : [];
     $quickFilters = isset($pageData['quick_filters']) && \is_array($pageData['quick_filters']) ? $pageData['quick_filters'] : [];
+    $calendarUrl = \function_exists(__NAMESPACE__ . '\get_admin_calendar_page_url')
+        ? get_admin_calendar_page_url(['start_date' => \current_time('Y-m-d'), 'weeks' => 2])
+        : '';
 
-    echo '<div class="wrap">';
-    echo '<div class="must-reservations-header">';
-    echo '<div>';
+    echo '<div class="wrap must-reservations-page">';
+    echo '<div class="must-reservations-header must-reservations-hero">';
+    echo '<div class="must-reservations-header-copy">';
+    echo '<span class="must-reservations-eyebrow">' . \esc_html__('Front Desk Workspace', 'must-hotel-booking') . '</span>';
     echo '<h1>' . \esc_html__('Reservations', 'must-hotel-booking') . '</h1>';
-    echo '<p class="description">' . \esc_html__('Search, filter, and act on reservations quickly, then open a single reservation detail page for guest, stay, payment, email, and activity context.', 'must-hotel-booking') . '</p>';
+    echo '<p class="description">' . \esc_html__('Track arrivals, spot payment exceptions, and move into the full reservation detail view from a cleaner daily operations board.', 'must-hotel-booking') . '</p>';
     echo '</div>';
     echo '<div class="must-reservations-header-actions">';
+
+    if ($calendarUrl !== '') {
+        echo '<a class="button must-reservations-header-link" href="' . \esc_url($calendarUrl) . '">' . \esc_html__('Open Calendar', 'must-hotel-booking') . '</a>';
+    }
+
     echo '<a class="button button-primary" href="' . \esc_url(get_admin_reservation_create_page_url()) . '">' . \esc_html__('Add Reservation', 'must-hotel-booking') . '</a>';
     echo '</div>';
     echo '</div>';
 
     render_admin_reservations_notice_from_query();
+    render_admin_reservations_overview($quickFilters);
     render_admin_reservations_quick_filters($quickFilters);
     render_admin_reservations_filters($filters, $pageData);
     render_admin_reservations_pagination($pagination, $filters);
@@ -1028,6 +1333,10 @@ function render_admin_reservation_create_page(): void
             [
                 'action_url' => get_admin_reservation_create_page_url(),
                 'redirect_target' => 'reservation_detail',
+                'eyebrow' => \__('Manual Reservation', 'must-hotel-booking'),
+                'title' => \__('Create Reservation', 'must-hotel-booking'),
+                'description' => \__('Use the fast validated flow here when staff already know the room, dates, and guest details.', 'must-hotel-booking'),
+                'submit_label' => \__('Create Reservation', 'must-hotel-booking'),
             ]
         );
     }

@@ -128,8 +128,6 @@ final class PricingEngine
         $roomSubtotal = self::roundPrice($baseAmount);
 
         $settings = self::getPricingEngineSettings();
-        $couponRules = self::getPricingRuleGroup($settings, ['coupons', 'coupon_rules']);
-        $tableCouponRule = PaymentEngine::getCouponRuleByCode($couponCode);
         $tableTaxFeeRules = self::getTaxFeeRulesFromTable();
 
         if (!empty($tableTaxFeeRules)) {
@@ -150,12 +148,12 @@ final class PricingEngine
         }
 
         $discountBase = self::roundPrice($roomSubtotal + $feesTotal);
-        $couponRule = \is_array($tableCouponRule) ? $tableCouponRule : self::findCouponRule($couponCode, $couponRules);
-        $discount = self::calculateCouponDiscount($discountBase, $couponCode, $couponRule);
+        $discount = CouponService::resolveCouponForBooking($couponCode, $discountBase, $checkin);
+
         $appliedCouponId = 0;
 
-        if ($discount['amount'] > 0 && \is_array($couponRule) && isset($couponRule['id'])) {
-            $appliedCouponId = (int) $couponRule['id'];
+        if ($discount['amount'] > 0 && isset($discount['coupon']) && \is_array($discount['coupon']) && isset($discount['coupon']['id'])) {
+            $appliedCouponId = (int) $discount['coupon']['id'];
         }
 
         $subtotalAfterDiscount = self::roundPrice(\max(0.0, $discountBase - $discount['amount']));
@@ -332,11 +330,6 @@ final class PricingEngine
         global $wpdb;
 
         return $wpdb->prefix . 'must_coupons';
-    }
-
-    public static function incrementCouponUsageCount(int $couponId): bool
-    {
-        return get_payment_repository()->incrementCouponUsage($couponId);
     }
 
     private static function roundPrice(float $value): float
@@ -755,33 +748,6 @@ final class PricingEngine
         return (bool) $enabled;
     }
 
-    private static function findCouponRule(string $couponCode, array $couponRules): ?array
-    {
-        $needle = \strtoupper(\trim($couponCode));
-
-        if ($needle === '') {
-            return null;
-        }
-
-        foreach ($couponRules as $ruleKey => $ruleValue) {
-            if (!\is_array($ruleValue)) {
-                continue;
-            }
-
-            $resolvedCode = isset($ruleValue['code']) ? (string) $ruleValue['code'] : '';
-
-            if ($resolvedCode === '' && \is_string($ruleKey)) {
-                $resolvedCode = $ruleKey;
-            }
-
-            if (\strtoupper(\trim($resolvedCode)) === $needle) {
-                return $ruleValue;
-            }
-        }
-
-        return null;
-    }
-
     private static function calculateFeeTotal(array $feeRules, float $roomSubtotal, int $nights, int $guests): array
     {
         $total = 0.0;
@@ -829,52 +795,6 @@ final class PricingEngine
         return [
             'total' => self::roundPrice($total),
             'lines' => $lines,
-        ];
-    }
-
-    private static function calculateCouponDiscount(float $discountBase, string $couponCode, ?array $couponRule): array
-    {
-        if ($couponRule === null || $discountBase <= 0 || !self::isPricingRuleEnabled($couponRule)) {
-            return [
-                'amount' => 0.0,
-                'applied_code' => '',
-            ];
-        }
-
-        $type = isset($couponRule['type']) ? (string) $couponRule['type'] : 'fixed';
-        $value = isset($couponRule['value']) ? (float) $couponRule['value'] : 0.0;
-
-        if ($value <= 0) {
-            return [
-                'amount' => 0.0,
-                'applied_code' => '',
-            ];
-        }
-
-        $discount = ($type === 'percent' || $type === 'percentage')
-            ? $discountBase * ($value / 100)
-            : $value;
-
-        if (isset($couponRule['max_discount'])) {
-            $maxDiscount = (float) $couponRule['max_discount'];
-
-            if ($maxDiscount > 0) {
-                $discount = \min($discount, $maxDiscount);
-            }
-        }
-
-        $discount = \min(self::roundPrice($discount), self::roundPrice($discountBase));
-
-        if ($discount <= 0) {
-            return [
-                'amount' => 0.0,
-                'applied_code' => '',
-            ];
-        }
-
-        return [
-            'amount' => $discount,
-            'applied_code' => \strtoupper(\trim($couponCode)),
         ];
     }
 

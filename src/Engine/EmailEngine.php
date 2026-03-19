@@ -29,29 +29,40 @@ final class EmailEngine
     }
 
     /**
+     * @return array<string, string>
+     */
+    public static function getTemplatePlaceholderLabels(): array
+    {
+        return [
+            '{booking_id}' => \__('Booking reference shown to staff and guests.', 'must-hotel-booking'),
+            '{guest_name}' => \__('Guest full name when available.', 'must-hotel-booking'),
+            '{guest_email}' => \__('Guest email address.', 'must-hotel-booking'),
+            '{room_name}' => \__('Accommodation or rate-plan name.', 'must-hotel-booking'),
+            '{checkin}' => \__('Formatted check-in date.', 'must-hotel-booking'),
+            '{checkout}' => \__('Formatted check-out date.', 'must-hotel-booking'),
+            '{total_price}' => \__('Formatted booking total without currency code.', 'must-hotel-booking'),
+            '{currency}' => \__('Hotel currency code.', 'must-hotel-booking'),
+            '{payment_method}' => \__('Resolved payment method label.', 'must-hotel-booking'),
+            '{payment_status}' => \__('Resolved payment status label.', 'must-hotel-booking'),
+            '{hotel_name}' => \__('Configured hotel name.', 'must-hotel-booking'),
+            '{hotel_address}' => \__('Configured hotel address.', 'must-hotel-booking'),
+            '{hotel_email}' => \__('Configured booking/admin email.', 'must-hotel-booking'),
+            '{hotel_phone}' => \__('Configured hotel phone.', 'must-hotel-booking'),
+            '{hotel_phone_href}' => \__('Telephone link version of the hotel phone.', 'must-hotel-booking'),
+            '{hotel_website}' => \__('Site home URL.', 'must-hotel-booking'),
+            '{cancellation_url}' => \__('Guest cancellation/review link when available.', 'must-hotel-booking'),
+            '{cancellation_action_label}' => \__('Cancellation CTA label based on the booking payment state.', 'must-hotel-booking'),
+            '{cancellation_details}' => \__('Cancellation guidance shown in the email body.', 'must-hotel-booking'),
+            '{email_footer_text}' => \__('Configured shared footer text.', 'must-hotel-booking'),
+        ];
+    }
+
+    /**
      * @return array<int, string>
      */
     public static function getTemplatePlaceholders(): array
     {
-        return [
-            '{booking_id}',
-            '{guest_name}',
-            '{guest_email}',
-            '{room_name}',
-            '{checkin}',
-            '{checkout}',
-            '{total_price}',
-            '{currency}',
-            '{payment_method}',
-            '{payment_status}',
-            '{hotel_name}',
-            '{hotel_address}',
-            '{hotel_email}',
-            '{hotel_phone}',
-            '{hotel_phone_href}',
-            '{hotel_website}',
-            '{email_footer_text}',
-        ];
+        return \array_keys(self::getTemplatePlaceholderLabels());
     }
 
     /**
@@ -63,8 +74,11 @@ final class EmailEngine
 
         foreach (self::getTemplateDefinitions() as $templateKey => $definition) {
             $templates[$templateKey] = [
+                'enabled' => isset($definition['enabled']) ? (int) $definition['enabled'] : 1,
                 'subject' => (string) ($definition['subject'] ?? ''),
+                'heading' => (string) ($definition['heading'] ?? ''),
                 'body' => (string) ($definition['body'] ?? ''),
+                'updated_at' => '',
             ];
         }
 
@@ -72,7 +86,7 @@ final class EmailEngine
     }
 
     /**
-     * @return array<string, array<string, string>>
+     * @return array<string, array<string, mixed>>
      */
     public static function getTemplates(): array
     {
@@ -97,13 +111,13 @@ final class EmailEngine
     }
 
     /**
-     * @return array<string, string>
+     * @return array<string, mixed>
      */
     public static function getTemplate(string $templateKey): array
     {
         $templates = self::getTemplates();
 
-        return $templates[$templateKey] ?? ['subject' => '', 'body' => ''];
+        return $templates[$templateKey] ?? ['enabled' => 1, 'subject' => '', 'heading' => '', 'body' => '', 'updated_at' => ''];
     }
 
     /**
@@ -119,10 +133,69 @@ final class EmailEngine
                 ? $templates[$templateKey]
                 : [];
 
+            if (!isset($row['updated_at'])) {
+                $row['updated_at'] = \current_time('mysql');
+            }
+
             $sanitizedTemplates[$templateKey] = self::sanitizeTemplateRow($row, $defaultTemplate);
         }
 
         MustBookingConfig::set_setting(self::getTemplatesSettingKey(), $sanitizedTemplates);
+    }
+
+    public static function resetTemplate(string $templateKey): bool
+    {
+        $templateKey = \sanitize_key($templateKey);
+        $defaults = self::getDefaultTemplates();
+
+        if (!isset($defaults[$templateKey])) {
+            return false;
+        }
+
+        $templates = self::getTemplates();
+        $templates[$templateKey] = \array_merge(
+            $defaults[$templateKey],
+            [
+                'enabled' => 1,
+                'updated_at' => \current_time('mysql'),
+            ]
+        );
+        self::saveTemplates($templates);
+
+        return true;
+    }
+
+    /**
+     * @return array<string, array<string, mixed>>
+     */
+    public static function getTemplateRecords(): array
+    {
+        $records = [];
+        $definitions = self::getTemplateDefinitions();
+        $templates = self::getTemplates();
+
+        foreach ($definitions as $templateKey => $definition) {
+            $template = isset($templates[$templateKey]) && \is_array($templates[$templateKey]) ? $templates[$templateKey] : [];
+            $records[$templateKey] = [
+                'key' => $templateKey,
+                'label' => (string) ($definition['label'] ?? $templateKey),
+                'audience' => (string) ($definition['audience'] ?? 'guest'),
+                'flow_type' => (string) ($definition['flow_type'] ?? 'general'),
+                'trigger' => (string) ($definition['trigger'] ?? ''),
+                'used_in_flow' => !empty($definition['used_in_flow']) ? 1 : 0,
+                'enabled' => !empty($template['enabled']) ? 1 : 0,
+                'subject' => (string) ($template['subject'] ?? ''),
+                'heading' => (string) ($template['heading'] ?? ''),
+                'body' => (string) ($template['body'] ?? ''),
+                'updated_at' => (string) ($template['updated_at'] ?? ''),
+                'default_subject' => (string) ($definition['subject'] ?? ''),
+                'default_heading' => (string) ($definition['heading'] ?? ''),
+                'default_body' => (string) ($definition['body'] ?? ''),
+                'cta_label' => (string) ($definition['cta_label'] ?? ''),
+            ];
+        }
+
+        return $records;
     }
 
     public static function registerHooks(): void
@@ -150,14 +223,14 @@ final class EmailEngine
             return;
         }
 
-        self::sendNotificationForTemplate('guest_booking_cancelled', $reservation, (string) ($reservation['guest_email'] ?? ''));
-        self::sendNotificationForTemplate('admin_booking_cancelled', $reservation, MustBookingConfig::get_booking_notification_email());
+        self::sendNotificationForTemplate('guest_booking_cancelled', $reservation, (string) ($reservation['guest_email'] ?? ''), 'automated');
+        self::sendNotificationForTemplate('admin_booking_cancelled', $reservation, MustBookingConfig::get_booking_notification_email(), 'automated');
     }
 
     /**
      * @return array{success: bool, message: string}
      */
-    public static function sendTestEmail(string $templateKey, string $recipientEmail): array
+    public static function sendTestEmail(string $templateKey, string $recipientEmail, int $reservationId = 0): array
     {
         $templateKey = \sanitize_key($templateKey);
         $recipientEmail = \sanitize_email($recipientEmail);
@@ -177,13 +250,34 @@ final class EmailEngine
             ];
         }
 
-        $rendered = self::renderTemplateEmail(
-            $templateKey,
-            self::buildTestPlaceholders($templateKey, $recipientEmail),
-            self::buildTestEmailMeta()
+        $preview = self::renderTemplatePreview($templateKey, $reservationId, $recipientEmail);
+
+        if (empty($preview['success'])) {
+            return [
+                'success' => false,
+                'message' => (string) ($preview['message'] ?? \__('Unable to build the test email preview.', 'must-hotel-booking')),
+            ];
+        }
+
+        $sent = self::dispatchEmail(
+            $recipientEmail,
+            '[TEST] ' . (string) ($preview['subject'] ?? ''),
+            (string) ($preview['html'] ?? '')
         );
 
-        if (!self::dispatchEmail($recipientEmail, $rendered['subject'], $rendered['html'])) {
+        \do_action(
+            'must_hotel_booking/email_dispatch_result',
+            [
+                'success' => $sent,
+                'template_key' => $templateKey,
+                'recipient_email' => $recipientEmail,
+                'reservation_id' => isset($preview['reservation_id']) ? (int) $preview['reservation_id'] : 0,
+                'booking_id' => (string) ($preview['booking_id'] ?? ''),
+                'email_mode' => 'test',
+            ]
+        );
+
+        if (!$sent) {
             return [
                 'success' => false,
                 'message' => \sprintf(
@@ -208,9 +302,10 @@ final class EmailEngine
     /**
      * @return array{success: bool, sent: int, failed: array<int, string>, message: string}
      */
-    public static function sendAllTestEmails(string $recipientEmail): array
+    public static function sendAllTestEmails(string $recipientEmail, int $reservationId = 0): array
     {
         $recipientEmail = \sanitize_email($recipientEmail);
+        $labels = self::getTemplateLabels();
 
         if (!\is_email($recipientEmail)) {
             return [
@@ -223,16 +318,18 @@ final class EmailEngine
 
         $sent = 0;
         $failed = [];
+        $sentLabels = [];
 
         foreach (\array_keys(self::getTemplateDefinitions()) as $templateKey) {
-            $result = self::sendTestEmail($templateKey, $recipientEmail);
+            $result = self::sendTestEmail($templateKey, $recipientEmail, $reservationId);
 
             if (!empty($result['success'])) {
                 $sent++;
+                $sentLabels[] = (string) ($labels[$templateKey] ?? $templateKey);
                 continue;
             }
 
-            $failed[] = (string) $result['message'];
+            $failed[] = (string) ($labels[$templateKey] ?? $templateKey) . ': ' . (string) $result['message'];
         }
 
         if (empty($failed)) {
@@ -245,7 +342,7 @@ final class EmailEngine
                     \__('Sent %1$d test emails to %2$s.', 'must-hotel-booking'),
                     $sent,
                     $recipientEmail
-                ),
+                ) . ' ' . \implode(', ', $sentLabels),
             ];
         }
 
@@ -259,7 +356,62 @@ final class EmailEngine
                 $sent,
                 \count($failed),
                 $recipientEmail
-            ),
+            ) . (!empty($sentLabels) ? ' ' . \__('Sent:', 'must-hotel-booking') . ' ' . \implode(', ', $sentLabels) : ''),
+        ];
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    public static function renderTemplatePreview(string $templateKey, int $reservationId = 0, string $recipientEmail = ''): array
+    {
+        $templateKey = \sanitize_key($templateKey);
+        $definitions = self::getTemplateDefinitions();
+
+        if (!isset($definitions[$templateKey])) {
+            return [
+                'success' => false,
+                'message' => \__('Unknown email template.', 'must-hotel-booking'),
+            ];
+        }
+
+        $recipientEmail = \sanitize_email($recipientEmail);
+        $reservation = $reservationId > 0 ? self::getReservationForEmail($reservationId) : null;
+
+        if ($reservationId > 0 && !\is_array($reservation)) {
+            return [
+                'success' => false,
+                'message' => \__('Selected reservation could not be loaded for preview.', 'must-hotel-booking'),
+            ];
+        }
+
+        if (\is_array($reservation)) {
+            $placeholders = self::buildReservationPlaceholders($reservation);
+
+            if ($recipientEmail !== '') {
+                $placeholders['{guest_email}'] = $recipientEmail;
+            }
+
+            $meta = [
+                'reservation_id' => isset($reservation['id']) ? (int) $reservation['id'] : 0,
+                'booking_id' => (string) ($reservation['booking_id'] ?? ''),
+            ];
+        } else {
+            $placeholders = self::buildTestPlaceholders($templateKey, $recipientEmail !== '' ? $recipientEmail : 'preview@example.com');
+            $meta = self::buildTestEmailMeta();
+        }
+
+        $rendered = self::renderTemplateEmail($templateKey, $placeholders, $meta);
+
+        return [
+            'success' => true,
+            'template_key' => $templateKey,
+            'subject' => (string) ($rendered['subject'] ?? ''),
+            'html' => (string) ($rendered['html'] ?? ''),
+            'placeholders' => $placeholders,
+            'reservation_id' => isset($meta['reservation_id']) ? (int) $meta['reservation_id'] : 0,
+            'booking_id' => (string) ($meta['booking_id'] ?? ''),
+            'is_live_context' => \is_array($reservation),
         ];
     }
 
@@ -276,8 +428,8 @@ final class EmailEngine
         }
 
         $templateKeys = self::resolveConfirmedTemplateKeys($reservation);
-        self::sendNotificationForTemplate($templateKeys['guest'], $reservation, (string) ($reservation['guest_email'] ?? ''));
-        self::sendNotificationForTemplate($templateKeys['admin'], $reservation, MustBookingConfig::get_booking_notification_email());
+        self::sendNotificationForTemplate($templateKeys['guest'], $reservation, (string) ($reservation['guest_email'] ?? ''), 'automated');
+        self::sendNotificationForTemplate($templateKeys['admin'], $reservation, MustBookingConfig::get_booking_notification_email(), 'automated');
     }
 
     public static function resendGuestReservationEmail(int $reservationId): bool
@@ -292,7 +444,8 @@ final class EmailEngine
         return self::sendNotificationForTemplate(
             $templateKeys['guest'],
             $reservation,
-            (string) ($reservation['guest_email'] ?? '')
+            (string) ($reservation['guest_email'] ?? ''),
+            'manual'
         );
     }
 
@@ -308,18 +461,37 @@ final class EmailEngine
         return self::sendNotificationForTemplate(
             $templateKeys['admin'],
             $reservation,
-            MustBookingConfig::get_booking_notification_email()
+            MustBookingConfig::get_booking_notification_email(),
+            'manual'
         );
     }
 
     /**
      * @param array<string, mixed> $reservation
      */
-    private static function sendNotificationForTemplate(string $templateKey, array $reservation, string $recipientEmail): bool
+    private static function sendNotificationForTemplate(string $templateKey, array $reservation, string $recipientEmail, string $emailMode = 'automated'): bool
     {
         $recipientEmail = \sanitize_email($recipientEmail);
 
         if (!\is_email($recipientEmail)) {
+            return false;
+        }
+
+        $template = self::getTemplate($templateKey);
+
+        if (empty($template['enabled'])) {
+            \do_action(
+                'must_hotel_booking/email_dispatch_result',
+                [
+                    'success' => false,
+                    'template_key' => $templateKey,
+                    'recipient_email' => $recipientEmail,
+                    'reservation_id' => isset($reservation['id']) ? (int) $reservation['id'] : 0,
+                    'booking_id' => (string) ($reservation['booking_id'] ?? ''),
+                    'email_mode' => $emailMode,
+                ]
+            );
+
             return false;
         }
 
@@ -342,6 +514,7 @@ final class EmailEngine
                 'recipient_email' => $recipientEmail,
                 'reservation_id' => isset($reservation['id']) ? (int) $reservation['id'] : 0,
                 'booking_id' => (string) ($reservation['booking_id'] ?? ''),
+                'email_mode' => $emailMode,
             ]
         );
 
@@ -404,7 +577,7 @@ final class EmailEngine
         $definition = $definitions[$templateKey] ?? [];
         $template = self::getTemplate($templateKey);
         $subject = self::renderPlainTextTemplate((string) ($template['subject'] ?? ''), $placeholders);
-        $heading = self::renderPlainTextTemplate((string) ($definition['heading'] ?? ''), $placeholders);
+        $heading = self::renderPlainTextTemplate((string) ($template['heading'] ?? ($definition['heading'] ?? '')), $placeholders);
         $hotelName = $placeholders['{hotel_name}'] ?? '';
         $hotelWebsite = $placeholders['{hotel_website}'] ?? '';
         $logoUrl = MustBookingConfig::get_email_logo_url();
@@ -466,7 +639,7 @@ final class EmailEngine
         if ($containsHtml) {
             $rendered = \strtr($template, self::getPlaceholderReplacementMap($placeholders, true));
 
-            return \force_balance_tags(\wp_kses_post($rendered));
+            return \force_balance_tags(self::sanitizeEmailHtml($rendered));
         }
 
         return \wpautop(\esc_html(\strtr($template, self::getPlaceholderReplacementMap($placeholders, false))));
@@ -494,6 +667,7 @@ final class EmailEngine
     private static function buildReservationPlaceholders(array $reservation): array
     {
         $hotelPhone = MustBookingConfig::get_hotel_phone();
+        $cancellationDetails = self::buildCancellationDetailsText($reservation);
 
         return [
             '{booking_id}' => self::resolveBookingId($reservation),
@@ -516,6 +690,9 @@ final class EmailEngine
             '{hotel_phone}' => $hotelPhone,
             '{hotel_phone_href}' => self::normalizePhoneHref($hotelPhone),
             '{hotel_website}' => (string) \home_url('/'),
+            '{cancellation_url}' => self::buildGuestCancellationUrl($reservation),
+            '{cancellation_action_label}' => self::getCancellationActionLabel($reservation),
+            '{cancellation_details}' => $cancellationDetails,
             '{email_footer_text}' => MustBookingConfig::get_email_footer_text(),
         ];
     }
@@ -550,6 +727,21 @@ final class EmailEngine
             '{hotel_phone}' => $hotelPhone,
             '{hotel_phone_href}' => self::normalizePhoneHref($hotelPhone),
             '{hotel_website}' => (string) \home_url('/'),
+            '{cancellation_url}' => \add_query_arg(
+                [
+                    'booking_id' => 'TEST-1001',
+                    'reservation_id' => 1001,
+                    'must_action' => 'cancel_reservation',
+                    'cancel_token' => 'test-token',
+                ],
+                ManagedPages::getBookingConfirmationPageUrl()
+            ),
+            '{cancellation_action_label}' => \str_contains($templateKey, '_paid')
+                ? \__('Review cancellation options', 'must-hotel-booking')
+                : \__('Cancel reservation', 'must-hotel-booking'),
+            '{cancellation_details}' => \str_contains($templateKey, '_paid')
+                ? \__('Paid online bookings may require refund review before cancellation is finalized.', 'must-hotel-booking')
+                : \__('You can cancel this pay-at-hotel reservation from the link in this email before arrival.', 'must-hotel-booking'),
             '{email_footer_text}' => MustBookingConfig::get_email_footer_text(),
         ];
     }
@@ -624,7 +816,7 @@ final class EmailEngine
     private static function buildTestEmailMeta(): array
     {
         return [
-            'reservation_id' => 1001,
+            'reservation_id' => 0,
             'booking_id' => 'TEST-1001',
         ];
     }
@@ -637,11 +829,24 @@ final class EmailEngine
             return false;
         }
 
+        $headers = ['Content-Type: text/html; charset=UTF-8'];
+        $fromEmail = MustBookingConfig::get_email_from_email();
+        $fromName = MustBookingConfig::get_email_from_name();
+        $replyTo = MustBookingConfig::get_email_reply_to();
+
+        if (\is_email($fromEmail)) {
+            $headers[] = 'From: ' . \wp_specialchars_decode($fromName, ENT_QUOTES) . ' <' . $fromEmail . '>';
+        }
+
+        if (\is_email($replyTo)) {
+            $headers[] = 'Reply-To: ' . $replyTo;
+        }
+
         return (bool) \wp_mail(
             $recipientEmail,
             $subject,
             $html,
-            ['Content-Type: text/html; charset=UTF-8']
+            $headers
         );
     }
 
@@ -661,16 +866,23 @@ final class EmailEngine
 
     /**
      * @param array<string, mixed> $template
-     * @param array<string, string> $defaults
-     * @return array<string, string>
+     * @param array<string, mixed> $defaults
+     * @return array<string, mixed>
      */
     private static function sanitizeTemplateRow(array $template, array $defaults): array
     {
+        $enabled = !empty($template['enabled']) ? 1 : (!empty($defaults['enabled']) ? 1 : 0);
         $subject = isset($template['subject']) ? \sanitize_text_field((string) $template['subject']) : '';
-        $body = isset($template['body']) ? \str_replace(["\r\n", "\r"], "\n", \wp_kses_post((string) $template['body'])) : '';
+        $heading = isset($template['heading']) ? \sanitize_text_field((string) $template['heading']) : '';
+        $body = isset($template['body']) ? \str_replace(["\r\n", "\r"], "\n", (string) $template['body']) : '';
+        $updatedAt = isset($template['updated_at']) ? \sanitize_text_field((string) $template['updated_at']) : '';
 
         if ($subject === '') {
             $subject = (string) ($defaults['subject'] ?? '');
+        }
+
+        if ($heading === '') {
+            $heading = (string) ($defaults['heading'] ?? '');
         }
 
         if (\trim($body) === '') {
@@ -678,9 +890,46 @@ final class EmailEngine
         }
 
         return [
+            'enabled' => $enabled,
             'subject' => $subject,
+            'heading' => $heading,
             'body' => $body,
+            'updated_at' => $updatedAt,
         ];
+    }
+
+    /**
+     * @param array<string, mixed> $reservation
+     */
+    public static function buildGuestCancellationUrl(array $reservation): string
+    {
+        $reservationId = isset($reservation['id']) ? (int) $reservation['id'] : 0;
+        $bookingId = self::resolveBookingId($reservation);
+
+        if ($reservationId <= 0 || $bookingId === '') {
+            return '';
+        }
+
+        return \add_query_arg(
+            [
+                'booking_id' => $bookingId,
+                'reservation_id' => $reservationId,
+                'must_action' => 'cancel_reservation',
+                'cancel_token' => self::buildGuestCancellationToken($reservationId, $bookingId, (string) ($reservation['guest_email'] ?? '')),
+            ],
+            ManagedPages::getBookingConfirmationPageUrl()
+        );
+    }
+
+    public static function isValidGuestCancellationToken(int $reservationId, string $bookingId, string $guestEmail, string $token): bool
+    {
+        if ($reservationId <= 0 || \trim($bookingId) === '' || \trim($token) === '') {
+            return false;
+        }
+
+        $expected = self::buildGuestCancellationToken($reservationId, $bookingId, $guestEmail);
+
+        return $expected !== '' && \hash_equals($expected, $token);
     }
 
     /**
@@ -740,6 +989,121 @@ final class EmailEngine
     private static function formatAmount(float $amount): string
     {
         return \number_format_i18n($amount, 2);
+    }
+
+    /**
+     * @param array<string, mixed> $reservation
+     */
+    private static function getCancellationActionLabel(array $reservation): string
+    {
+        if (self::canAutoCancelReservation($reservation)) {
+            return \__('Cancel reservation', 'must-hotel-booking');
+        }
+
+        return \__('Review cancellation options', 'must-hotel-booking');
+    }
+
+    /**
+     * @param array<string, mixed> $reservation
+     */
+    public static function canAutoCancelReservation(array $reservation): bool
+    {
+        $paymentMethod = self::normalizeStoredPaymentMethod((string) ($reservation['payment_method'] ?? ''));
+        $paymentStatus = \sanitize_key((string) ($reservation['payment_status'] ?? ''));
+        $status = \sanitize_key((string) ($reservation['status'] ?? ''));
+
+        if (\in_array($status, ['cancelled', 'completed', 'blocked'], true)) {
+            return false;
+        }
+
+        if ($paymentMethod === 'stripe' || $paymentStatus === 'paid') {
+            return false;
+        }
+
+        return true;
+    }
+
+    /**
+     * @param array<string, mixed> $reservation
+     */
+    private static function buildCancellationDetailsText(array $reservation): string
+    {
+        $reservationId = isset($reservation['id']) ? (int) $reservation['id'] : 0;
+        $paymentMethod = self::normalizeStoredPaymentMethod((string) ($reservation['payment_method'] ?? ''));
+        $details = $reservationId > 0 ? CancellationEngine::getPenaltyDetails($reservationId, \current_time('mysql')) : [];
+
+        if ($paymentMethod === 'stripe' || \sanitize_key((string) ($reservation['payment_status'] ?? '')) === 'paid') {
+            return \__('This booking was paid online. Contact the hotel to review refund and cancellation options before changes are finalized.', 'must-hotel-booking');
+        }
+
+        if (!empty($details['policy_name'])) {
+            $message = \sprintf(
+                /* translators: %s is policy name. */
+                \__('Cancellation policy: %s.', 'must-hotel-booking'),
+                (string) $details['policy_name']
+            );
+
+            if (!empty($details['penalty_applied']) && isset($details['penalty_amount'])) {
+                $message .= ' ' . \sprintf(
+                    /* translators: %s is penalty amount. */
+                    \__('Current cancellation penalty: %s.', 'must-hotel-booking'),
+                    self::formatAmount((float) $details['penalty_amount'])
+                );
+            }
+
+            return $message;
+        }
+
+        return \__('You can use the cancellation link below if your plans change before arrival.', 'must-hotel-booking');
+    }
+
+    private static function buildGuestCancellationToken(int $reservationId, string $bookingId, string $guestEmail): string
+    {
+        if ($reservationId <= 0 || \trim($bookingId) === '') {
+            return '';
+        }
+
+        return \wp_hash($reservationId . '|' . \trim($bookingId) . '|' . \strtolower(\trim($guestEmail)), 'auth');
+    }
+
+    private static function sanitizeEmailHtml(string $html): string
+    {
+        $allowed = \wp_kses_allowed_html('post');
+
+        $globalAttrs = ['style' => true, 'class' => true, 'id' => true];
+        $extraTags = [
+            'table' => ['style' => true, 'class' => true, 'width' => true, 'border' => true, 'cellpadding' => true, 'cellspacing' => true, 'align' => true, 'role' => true],
+            'tbody' => $globalAttrs,
+            'thead' => $globalAttrs,
+            'tfoot' => $globalAttrs,
+            'tr' => $globalAttrs,
+            'td' => ['style' => true, 'class' => true, 'colspan' => true, 'rowspan' => true, 'align' => true, 'valign' => true, 'width' => true],
+            'th' => ['style' => true, 'class' => true, 'colspan' => true, 'rowspan' => true, 'align' => true, 'valign' => true, 'width' => true, 'scope' => true],
+            'div' => $globalAttrs,
+            'span' => $globalAttrs,
+            'p' => ['style' => true, 'class' => true, 'align' => true],
+            'a' => ['href' => true, 'style' => true, 'class' => true, 'target' => true, 'rel' => true, 'title' => true],
+            'img' => ['src' => true, 'alt' => true, 'width' => true, 'height' => true, 'style' => true, 'class' => true],
+            'h1' => $globalAttrs,
+            'h2' => $globalAttrs,
+            'h3' => $globalAttrs,
+            'h4' => $globalAttrs,
+            'ul' => $globalAttrs,
+            'ol' => $globalAttrs,
+            'li' => $globalAttrs,
+            'br' => [],
+            'hr' => ['style' => true, 'class' => true],
+            'strong' => $globalAttrs,
+            'em' => $globalAttrs,
+        ];
+
+        foreach ($extraTags as $tag => $attrs) {
+            $allowed[$tag] = isset($allowed[$tag]) && \is_array($allowed[$tag])
+                ? \array_merge($allowed[$tag], $attrs)
+                : $attrs;
+        }
+
+        return \wp_kses($html, $allowed);
     }
 
     private static function normalizeStoredPaymentMethod(string $method): string
@@ -810,56 +1174,80 @@ final class EmailEngine
     /**
      * @return array<string, array<string, string>>
      */
-    private static function getTemplateDefinitions(): array
+    public static function getTemplateDefinitions(): array
     {
         return [
             'guest_booking_confirmed_paid' => [
                 'label' => \__('Guest: Booking Confirmed (Paid)', 'must-hotel-booking'),
                 'audience' => 'guest',
+                'flow_type' => 'paid',
+                'trigger' => \__('Sent when a reservation becomes confirmed with a paid online booking.', 'must-hotel-booking'),
+                'used_in_flow' => true,
+                'enabled' => 1,
                 'heading' => \__('Your stay is confirmed', 'must-hotel-booking'),
                 'cta_label' => \__('View booking', 'must-hotel-booking'),
-                'subject' => \__('Booking {booking_id} confirmed at {hotel_name}', 'must-hotel-booking'),
-                'body' => \__("Hello {guest_name},\n\nThank you for choosing {hotel_name}. Your payment has been received and your reservation is confirmed.\n\nYour stay in {room_name} is booked from {checkin} to {checkout}.", 'must-hotel-booking'),
+                'subject' => \__('Paid booking {booking_id} confirmed at {hotel_name}', 'must-hotel-booking'),
+                'body' => \__("<p>Hello {guest_name},</p><p>Thank you for choosing {hotel_name}. Your payment has been received and your reservation is confirmed.</p><p>Your stay in <strong>{room_name}</strong> is booked from <strong>{checkin}</strong> to <strong>{checkout}</strong>.</p><p>{cancellation_details}</p>", 'must-hotel-booking'),
             ],
             'guest_booking_confirmed_pay_at_hotel' => [
                 'label' => \__('Guest: Booking Confirmed (Pay at Hotel)', 'must-hotel-booking'),
                 'audience' => 'guest',
+                'flow_type' => 'pay_at_hotel',
+                'trigger' => \__('Sent when a reservation is confirmed with payment collected at the hotel.', 'must-hotel-booking'),
+                'used_in_flow' => true,
+                'enabled' => 1,
                 'heading' => \__('Your stay is confirmed', 'must-hotel-booking'),
                 'cta_label' => \__('View booking', 'must-hotel-booking'),
-                'subject' => \__('Booking {booking_id} confirmed at {hotel_name}', 'must-hotel-booking'),
-                'body' => \__("Hello {guest_name},\n\nYour reservation at {hotel_name} is confirmed.\n\nYour stay in {room_name} is booked from {checkin} to {checkout}. Payment will be collected at the hotel.", 'must-hotel-booking'),
+                'subject' => \__('Pay-at-hotel booking {booking_id} confirmed at {hotel_name}', 'must-hotel-booking'),
+                'body' => \__("<p>Hello {guest_name},</p><p>Your reservation at {hotel_name} is confirmed.</p><p>Your stay in <strong>{room_name}</strong> is booked from <strong>{checkin}</strong> to <strong>{checkout}</strong>. Payment will be collected at the hotel.</p><p>{cancellation_details}</p><p><a href=\"{cancellation_url}\">{cancellation_action_label}</a></p>", 'must-hotel-booking'),
             ],
             'admin_new_booking_paid' => [
                 'label' => \__('Admin: New Booking (Paid)', 'must-hotel-booking'),
                 'audience' => 'admin',
+                'flow_type' => 'paid',
+                'trigger' => \__('Sent to staff when a paid booking is confirmed.', 'must-hotel-booking'),
+                'used_in_flow' => true,
+                'enabled' => 1,
                 'heading' => \__('New paid booking received', 'must-hotel-booking'),
                 'cta_label' => \__('Open reservation', 'must-hotel-booking'),
                 'subject' => \__('New paid booking {booking_id} for {guest_name}', 'must-hotel-booking'),
-                'body' => \__("A new paid booking has been confirmed.\n\nGuest: {guest_name}\nEmail: {guest_email}\nRoom: {room_name}\nStay: {checkin} to {checkout}", 'must-hotel-booking'),
+                'body' => \__("<p>A new paid booking has been confirmed.</p><p><strong>Guest:</strong> {guest_name}<br /><strong>Email:</strong> {guest_email}<br /><strong>Room:</strong> {room_name}<br /><strong>Stay:</strong> {checkin} to {checkout}</p><p>{cancellation_details}</p>", 'must-hotel-booking'),
             ],
             'admin_new_booking_pay_at_hotel' => [
                 'label' => \__('Admin: New Booking (Pay at Hotel)', 'must-hotel-booking'),
                 'audience' => 'admin',
+                'flow_type' => 'pay_at_hotel',
+                'trigger' => \__('Sent to staff when a pay-at-hotel booking is confirmed.', 'must-hotel-booking'),
+                'used_in_flow' => true,
+                'enabled' => 1,
                 'heading' => \__('New pay-at-hotel booking received', 'must-hotel-booking'),
                 'cta_label' => \__('Open reservation', 'must-hotel-booking'),
                 'subject' => \__('New pay-at-hotel booking {booking_id} for {guest_name}', 'must-hotel-booking'),
-                'body' => \__("A new reservation has been confirmed with payment to be collected at the hotel.\n\nGuest: {guest_name}\nEmail: {guest_email}\nRoom: {room_name}\nStay: {checkin} to {checkout}", 'must-hotel-booking'),
+                'body' => \__("<p>A new reservation has been confirmed with payment to be collected at the hotel.</p><p><strong>Guest:</strong> {guest_name}<br /><strong>Email:</strong> {guest_email}<br /><strong>Room:</strong> {room_name}<br /><strong>Stay:</strong> {checkin} to {checkout}</p><p>{cancellation_details}</p>", 'must-hotel-booking'),
             ],
             'guest_booking_cancelled' => [
                 'label' => \__('Guest: Booking Cancelled', 'must-hotel-booking'),
                 'audience' => 'guest',
+                'flow_type' => 'general',
+                'trigger' => \__('Sent when a reservation is cancelled.', 'must-hotel-booking'),
+                'used_in_flow' => true,
+                'enabled' => 1,
                 'heading' => \__('Your booking was cancelled', 'must-hotel-booking'),
                 'cta_label' => \__('Review booking', 'must-hotel-booking'),
                 'subject' => \__('Booking {booking_id} cancelled', 'must-hotel-booking'),
-                'body' => \__("Hello {guest_name},\n\nYour booking for {room_name} from {checkin} to {checkout} has been cancelled.\n\nIf you need help with a new reservation, contact {hotel_name}.", 'must-hotel-booking'),
+                'body' => \__("<p>Hello {guest_name},</p><p>Your booking for <strong>{room_name}</strong> from <strong>{checkin}</strong> to <strong>{checkout}</strong> has been cancelled.</p><p>If you need help with a new reservation, contact {hotel_name}.</p>", 'must-hotel-booking'),
             ],
             'admin_booking_cancelled' => [
                 'label' => \__('Admin: Booking Cancelled', 'must-hotel-booking'),
                 'audience' => 'admin',
+                'flow_type' => 'general',
+                'trigger' => \__('Sent to staff when a reservation is cancelled.', 'must-hotel-booking'),
+                'used_in_flow' => true,
+                'enabled' => 1,
                 'heading' => \__('Booking cancelled', 'must-hotel-booking'),
                 'cta_label' => \__('Open reservation', 'must-hotel-booking'),
                 'subject' => \__('Booking {booking_id} cancelled by or for {guest_name}', 'must-hotel-booking'),
-                'body' => \__("A booking has been cancelled.\n\nGuest: {guest_name}\nEmail: {guest_email}\nRoom: {room_name}\nStay: {checkin} to {checkout}", 'must-hotel-booking'),
+                'body' => \__("<p>A booking has been cancelled.</p><p><strong>Guest:</strong> {guest_name}<br /><strong>Email:</strong> {guest_email}<br /><strong>Room:</strong> {room_name}<br /><strong>Stay:</strong> {checkin} to {checkout}</p>", 'must-hotel-booking'),
             ],
         ];
     }

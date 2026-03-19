@@ -775,7 +775,6 @@ final class ReservationEngine
             ? \sanitize_key((string) $options['payment_status'])
             : 'pending';
         $clearSelection = !isset($options['clear_selection']) || (bool) $options['clear_selection'];
-        $incrementCouponUsage = !isset($options['increment_coupon_usage']) || (bool) $options['increment_coupon_usage'];
 
         if (empty($context['is_valid'])) {
             return [
@@ -926,13 +925,20 @@ final class ReservationEngine
             }
 
             $appliedCouponId = isset($pricing['applied_coupon_id']) ? (int) $pricing['applied_coupon_id'] : 0;
+            $appliedCouponCode = isset($pricing['applied_coupon']) ? (string) $pricing['applied_coupon'] : '';
+            $couponDiscountTotal = isset($pricing['discount_total']) ? (float) $pricing['discount_total'] : 0.0;
 
             if ($appliedCouponId > 0) {
                 $appliedCouponIds[$appliedCouponId] = $appliedCouponId;
+            }
 
-                if ($incrementCouponUsage) {
-                    PricingEngine::incrementCouponUsageCount($appliedCouponId);
-                }
+            if ($appliedCouponId > 0 || $appliedCouponCode !== '' || $couponDiscountTotal > 0.0) {
+                $reservationRepository->updateReservationCouponData(
+                    $reservationId,
+                    $appliedCouponId,
+                    $appliedCouponCode,
+                    $couponDiscountTotal
+                );
             }
 
             $reservationIds[] = $reservationId;
