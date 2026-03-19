@@ -162,6 +162,92 @@ final class InventoryRepository extends AbstractRepository
         return \is_array($rows) ? $rows : [];
     }
 
+    public function countInventoryRooms(): int
+    {
+        if (!$this->mhbTableExists('rooms')) {
+            return 0;
+        }
+
+        return (int) $this->wpdb->get_var(
+            'SELECT COUNT(*) FROM ' . $this->roomsTable()
+        );
+    }
+
+    public function countUnavailableInventoryRooms(): int
+    {
+        if (!$this->mhbTableExists('rooms')) {
+            return 0;
+        }
+
+        return (int) $this->wpdb->get_var(
+            $this->wpdb->prepare(
+                'SELECT COUNT(*)
+                FROM ' . $this->roomsTable() . '
+                WHERE status <> %s',
+                'available'
+            )
+        );
+    }
+
+    /**
+     * @return array<int, array<string, mixed>>
+     */
+    public function getUnavailableInventoryRooms(int $limit = 5): array
+    {
+        if (!$this->mhbTableExists('rooms')) {
+            return [];
+        }
+
+        $limit = \max(1, \min(20, $limit));
+        $rows = $this->wpdb->get_results(
+            $this->wpdb->prepare(
+                'SELECT id, room_type_id, room_number, floor, status
+                FROM ' . $this->roomsTable() . '
+                WHERE status <> %s
+                ORDER BY floor ASC, room_number ASC, id ASC
+                LIMIT %d',
+                'available',
+                $limit
+            ),
+            ARRAY_A
+        );
+
+        return \is_array($rows) ? $rows : [];
+    }
+
+    /**
+     * @return array<int, array<string, mixed>>
+     */
+    public function getRoomTypesMissingInventory(int $limit = 5): array
+    {
+        if (
+            !$this->mhbTableExists('room_types') ||
+            !$this->mhbTableExists('rooms')
+        ) {
+            return [];
+        }
+
+        $limit = \max(1, \min(20, $limit));
+        $rows = $this->wpdb->get_results(
+            $this->wpdb->prepare(
+                'SELECT
+                    rt.id,
+                    rt.name,
+                    rt.capacity,
+                    rt.base_price
+                FROM ' . $this->roomTypesTable() . ' rt
+                LEFT JOIN ' . $this->roomsTable() . ' r ON r.room_type_id = rt.id
+                WHERE r.id IS NULL
+                ORDER BY rt.name ASC, rt.id ASC
+                LIMIT %d',
+                $limit
+            ),
+            ARRAY_A
+        );
+
+        return \is_array($rows) ? $rows : [];
+    }
+
     /**
      * @param array<int, string> $nonBlockingStatuses
      * @return array<int, array<string, mixed>>

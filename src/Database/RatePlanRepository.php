@@ -275,6 +275,44 @@ final class RatePlanRepository extends AbstractRepository
         return \is_array($rows) ? $rows : [];
     }
 
+    /**
+     * @return array<int, array<string, mixed>>
+     */
+    public function getRoomTypesMissingPricing(int $limit = 5): array
+    {
+        if (
+            !$this->mhbTableExists('room_types') ||
+            !$this->mhbTableExists('room_type_rate_plans') ||
+            !$this->mhbTableExists('rate_plans')
+        ) {
+            return [];
+        }
+
+        $limit = \max(1, \min(20, $limit));
+        $rows = $this->wpdb->get_results(
+            $this->wpdb->prepare(
+                'SELECT
+                    rt.id,
+                    rt.name,
+                    rt.base_price
+                FROM ' . $this->mhbTable('room_types') . ' rt
+                LEFT JOIN ' . $this->mhbTable('room_type_rate_plans') . ' rtrp
+                    ON rtrp.room_type_id = rt.id
+                LEFT JOIN ' . $this->mhbTable('rate_plans') . ' rp
+                    ON rp.id = rtrp.rate_plan_id
+                    AND rp.is_active = 1
+                GROUP BY rt.id, rt.name, rt.base_price
+                HAVING COUNT(rp.id) = 0 AND MAX(rt.base_price) <= 0
+                ORDER BY rt.name ASC, rt.id ASC
+                LIMIT %d',
+                $limit
+            ),
+            ARRAY_A
+        );
+
+        return \is_array($rows) ? $rows : [];
+    }
+
     public function createRatePlan(array $data): int
     {
         if (!$this->mhbTableExists('rate_plans')) {

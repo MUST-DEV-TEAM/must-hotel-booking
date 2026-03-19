@@ -3,6 +3,22 @@
 namespace MustHotelBooking\Admin;
 
 /**
+ * Build Guests admin page URL.
+ *
+ * @param array<string, scalar> $args
+ */
+function get_admin_guests_page_url(array $args = []): string
+{
+    $base_url = \admin_url('admin.php?page=must-hotel-booking-guests');
+
+    if (empty($args)) {
+        return $base_url;
+    }
+
+    return \add_query_arg($args, $base_url);
+}
+
+/**
  * Build full guest name from row values.
  *
  * @param array<string, mixed> $guest

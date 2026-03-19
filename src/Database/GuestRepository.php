@@ -10,6 +10,29 @@ final class GuestRepository extends AbstractRepository
     }
 
     /**
+     * @return array<string, mixed>|null
+     */
+    public function getGuestById(int $guestId): ?array
+    {
+        if ($guestId <= 0 || !$this->guestsTableExists()) {
+            return null;
+        }
+
+        $row = $this->wpdb->get_row(
+            $this->wpdb->prepare(
+                'SELECT id, first_name, last_name, email, phone, country
+                FROM ' . $this->table('guests') . '
+                WHERE id = %d
+                LIMIT 1',
+                $guestId
+            ),
+            ARRAY_A
+        );
+
+        return \is_array($row) ? $row : null;
+    }
+
+    /**
      * @param array<string, mixed> $guestData
      */
     public function createGuest(array $guestData): int
@@ -96,6 +119,74 @@ final class GuestRepository extends AbstractRepository
                 'country' => '',
             ]
         );
+    }
+
+    public function saveAdminGuestProfile(
+        int $guestId,
+        string $firstName,
+        string $lastName,
+        string $email,
+        string $phone,
+        string $country
+    ): int {
+        if (!$this->guestsTableExists()) {
+            return 0;
+        }
+
+        $guestData = [
+            'first_name' => $firstName,
+            'last_name' => $lastName,
+            'email' => $email,
+            'phone' => $phone,
+            'country' => $country,
+        ];
+
+        if ($guestId > 0) {
+            $updated = $this->wpdb->update(
+                $this->table('guests'),
+                $guestData,
+                ['id' => $guestId],
+                ['%s', '%s', '%s', '%s', '%s'],
+                ['%d']
+            );
+
+            if ($updated !== false) {
+                return $guestId;
+            }
+        }
+
+        if ($email !== '') {
+            $existingGuestId = (int) $this->wpdb->get_var(
+                $this->wpdb->prepare(
+                    'SELECT id
+                    FROM ' . $this->table('guests') . '
+                    WHERE email = %s
+                    LIMIT 1',
+                    $email
+                )
+            );
+
+            if ($existingGuestId > 0) {
+                $updated = $this->wpdb->update(
+                    $this->table('guests'),
+                    [
+                        'first_name' => $firstName,
+                        'last_name' => $lastName,
+                        'phone' => $phone,
+                        'country' => $country,
+                    ],
+                    ['id' => $existingGuestId],
+                    ['%s', '%s', '%s', '%s'],
+                    ['%d']
+                );
+
+                if ($updated !== false) {
+                    return $existingGuestId;
+                }
+            }
+        }
+
+        return $this->createGuest($guestData);
     }
 
     /**

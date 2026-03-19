@@ -932,6 +932,7 @@ function get_settings_diagnostics_data(): array
     $availabilityRepository = \MustHotelBooking\Engine\get_availability_repository();
     $paymentRepository = \MustHotelBooking\Engine\get_payment_repository();
     $ratePlanRepository = \MustHotelBooking\Engine\get_rate_plan_repository();
+    $activityRepository = \MustHotelBooking\Engine\get_activity_repository();
 
     $table_checks = [
         ['label' => 'Rooms', 'table_name' => $wpdb->prefix . 'must_rooms', 'exists' => $roomRepository->roomsTableExists()],
@@ -944,6 +945,7 @@ function get_settings_diagnostics_data(): array
         ['label' => 'Availability', 'table_name' => $wpdb->prefix . 'must_availability', 'exists' => $availabilityRepository->availabilityTableExists()],
         ['label' => 'Locks', 'table_name' => $wpdb->prefix . 'mhb_inventory_locks', 'exists' => $inventoryRepository->inventoryLocksTableExists()],
         ['label' => 'Payments', 'table_name' => $wpdb->prefix . 'must_payments', 'exists' => $paymentRepository->paymentsTableExists()],
+        ['label' => 'Activity Log', 'table_name' => $wpdb->prefix . 'must_activity_log', 'exists' => $activityRepository->activityTableExists()],
         ['label' => 'Taxes', 'table_name' => $wpdb->prefix . 'must_taxes', 'exists' => does_settings_diagnostic_table_exist($wpdb->prefix . 'must_taxes')],
         ['label' => 'Coupons', 'table_name' => $wpdb->prefix . 'must_coupons', 'exists' => does_settings_diagnostic_table_exist($wpdb->prefix . 'must_coupons')],
         ['label' => 'Cancellation Policies', 'table_name' => $wpdb->prefix . 'mhb_cancellation_policies', 'exists' => does_settings_diagnostic_table_exist($wpdb->prefix . 'mhb_cancellation_policies')],

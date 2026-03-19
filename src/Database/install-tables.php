@@ -614,6 +614,23 @@ function install_tables(): void
         KEY usage_limit (usage_limit)
     ) {$charset_collate};";
 
+    $tables[] = "CREATE TABLE {$prefix}must_activity_log (
+        id BIGINT(20) UNSIGNED NOT NULL AUTO_INCREMENT,
+        event_type VARCHAR(60) NOT NULL DEFAULT '',
+        severity VARCHAR(20) NOT NULL DEFAULT 'info',
+        entity_type VARCHAR(60) NOT NULL DEFAULT '',
+        entity_id BIGINT(20) UNSIGNED NOT NULL DEFAULT 0,
+        reference VARCHAR(191) NOT NULL DEFAULT '',
+        message VARCHAR(255) NOT NULL DEFAULT '',
+        context_json LONGTEXT NULL,
+        created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        PRIMARY KEY  (id),
+        KEY event_type (event_type),
+        KEY severity (severity),
+        KEY entity_lookup (entity_type, entity_id),
+        KEY created_at (created_at)
+    ) {$charset_collate};";
+
     $tables[] = "CREATE TABLE {$prefix}mhb_cancellation_policies (
         id BIGINT(20) UNSIGNED NOT NULL AUTO_INCREMENT,
         name VARCHAR(191) NOT NULL DEFAULT '',

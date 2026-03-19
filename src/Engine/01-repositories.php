@@ -3,6 +3,7 @@
 namespace MustHotelBooking\Engine;
 
 use MustHotelBooking\Database\AvailabilityRepository;
+use MustHotelBooking\Database\ActivityRepository;
 use MustHotelBooking\Database\CancellationPolicyRepository;
 use MustHotelBooking\Database\GuestRepository;
 use MustHotelBooking\Database\InventoryRepository;
@@ -61,6 +62,17 @@ function get_availability_repository(): AvailabilityRepository
 
     if (!$repository instanceof AvailabilityRepository) {
         $repository = new AvailabilityRepository();
+    }
+
+    return $repository;
+}
+
+function get_activity_repository(): ActivityRepository
+{
+    static $repository = null;
+
+    if (!$repository instanceof ActivityRepository) {
+        $repository = new ActivityRepository();
     }
 
     return $repository;

@@ -104,13 +104,48 @@ final class BookingStatusEngine
                     unset($paymentData['transaction_id']);
                 }
 
-                $paymentRepository->updatePayment($existingPaymentId, $paymentData);
+                $updated = $paymentRepository->updatePayment($existingPaymentId, $paymentData);
+
+                if ($updated) {
+                    \do_action(
+                        'must_hotel_booking/payment_recorded',
+                        [
+                            'payment_id' => $existingPaymentId,
+                            'reservation_id' => $reservationId,
+                            'method' => $method,
+                            'status' => $status,
+                            'amount' => isset($paymentData['amount']) ? (float) $paymentData['amount'] : 0.0,
+                            'transaction_id' => $transactionId,
+                            'paid_at' => isset($paymentData['paid_at']) ? (string) $paymentData['paid_at'] : '',
+                            'created_at' => \current_time('mysql'),
+                            'is_update' => true,
+                        ]
+                    );
+                }
+
                 continue;
             }
 
             $paymentData['reservation_id'] = $reservationId;
             $paymentData['created_at'] = \current_time('mysql');
-            $paymentRepository->createPayment($paymentData);
+            $paymentId = $paymentRepository->createPayment($paymentData);
+
+            if ($paymentId > 0) {
+                \do_action(
+                    'must_hotel_booking/payment_recorded',
+                    [
+                        'payment_id' => $paymentId,
+                        'reservation_id' => $reservationId,
+                        'method' => $method,
+                        'status' => $status,
+                        'amount' => isset($paymentData['amount']) ? (float) $paymentData['amount'] : 0.0,
+                        'transaction_id' => $transactionId,
+                        'paid_at' => isset($paymentData['paid_at']) ? (string) $paymentData['paid_at'] : '',
+                        'created_at' => (string) $paymentData['created_at'],
+                        'is_update' => false,
+                    ]
+                );
+            }
         }
     }
 

@@ -116,6 +116,78 @@ final class AvailabilityRepository extends AbstractRepository
         return \is_array($rows) ? $rows : [];
     }
 
+    public function countAvailabilityRules(): int
+    {
+        if (!$this->availabilityTableExists()) {
+            return 0;
+        }
+
+        return (int) $this->wpdb->get_var(
+            'SELECT COUNT(*) FROM ' . $this->table('availability')
+        );
+    }
+
+    public function countActiveMaintenanceBlocks(string $today): int
+    {
+        if ($today === '' || !$this->availabilityTableExists()) {
+            return 0;
+        }
+
+        return (int) $this->wpdb->get_var(
+            $this->wpdb->prepare(
+                'SELECT COUNT(DISTINCT room_id)
+                FROM ' . $this->table('availability') . '
+                WHERE room_id > 0
+                    AND rule_type = %s
+                    AND availability_date <= %s
+                    AND (end_date IS NULL OR end_date = %s OR end_date >= %s)',
+                'maintenance_block',
+                $today,
+                '',
+                $today
+            )
+        );
+    }
+
+    /**
+     * @return array<int, array<string, mixed>>
+     */
+    public function getActiveMaintenanceBlocks(string $today, int $limit = 5): array
+    {
+        if ($today === '' || !$this->availabilityTableExists()) {
+            return [];
+        }
+
+        $limit = \max(1, \min(20, $limit));
+        $rows = $this->wpdb->get_results(
+            $this->wpdb->prepare(
+                'SELECT
+                    a.id,
+                    a.room_id,
+                    a.availability_date,
+                    a.end_date,
+                    a.reason,
+                    rm.name AS room_name
+                FROM ' . $this->table('availability') . ' a
+                LEFT JOIN ' . $this->table('rooms') . ' rm ON rm.id = a.room_id
+                WHERE a.room_id > 0
+                    AND a.rule_type = %s
+                    AND a.availability_date <= %s
+                    AND (a.end_date IS NULL OR a.end_date = %s OR a.end_date >= %s)
+                ORDER BY a.availability_date ASC, a.id DESC
+                LIMIT %d',
+                'maintenance_block',
+                $today,
+                '',
+                $today,
+                $limit
+            ),
+            ARRAY_A
+        );
+
+        return \is_array($rows) ? $rows : [];
+    }
+
     public function saveGlobalStayRules(int $minimumStay, int $maximumStay, string $today, string $now): bool
     {
         if (!$this->availabilityTableExists()) {

@@ -21,219 +21,158 @@ function ensure_admin_capability(): void
 }
 
 /**
- * Render a placeholder admin page shell.
- */
-function render_admin_placeholder_page(string $title): void
-{
-    ensure_admin_capability();
-
-    echo '<div class="wrap">';
-    echo '<h1>' . \esc_html($title) . '</h1>';
-    echo '<p>' . \esc_html__('This screen is a placeholder and will be implemented in a future iteration.', 'must-hotel-booking') . '</p>';
-    echo '</div>';
-}
-
-/**
  * Register top-level and submenu admin pages.
  */
 function register_admin_menu(): void
 {
     $capability = get_admin_capability();
-    $parent_slug = 'must-hotel-booking';
+    $parentSlug = 'must-hotel-booking';
 
     \add_menu_page(
         'MUST Hotel Booking',
         'MUST Hotel Booking',
         $capability,
-        $parent_slug,
+        $parentSlug,
         __NAMESPACE__ . '\render_admin_dashboard_page',
         'dashicons-calendar',
         26
     );
 
-    \add_submenu_page(
-        $parent_slug,
-        'Dashboard',
-        'Dashboard',
-        $capability,
-        $parent_slug,
-        __NAMESPACE__ . '\render_admin_dashboard_page'
-    );
+    foreach (get_admin_menu_pages() as $page) {
+        \add_submenu_page(
+            $parentSlug,
+            (string) $page['title'],
+            (string) $page['menu_title'],
+            $capability,
+            (string) $page['slug'],
+            (string) $page['callback']
+        );
+    }
 
-    \add_submenu_page(
-        $parent_slug,
-        'Reservations',
-        'Reservations',
-        $capability,
-        'must-hotel-booking-reservations',
-        __NAMESPACE__ . '\render_admin_reservations_page'
-    );
-
-    \add_submenu_page(
-        $parent_slug,
-        'Calendar',
-        'Calendar',
-        $capability,
-        'must-hotel-booking-calendar',
-        __NAMESPACE__ . '\render_admin_calendar_page'
-    );
-
-    \add_submenu_page(
-        $parent_slug,
-        'Rooms',
-        'Rooms',
-        $capability,
-        'must-hotel-booking-rooms',
-        __NAMESPACE__ . '\render_admin_rooms_page'
-    );
-
-    \add_submenu_page(
-        $parent_slug,
-        'Rates & Pricing',
-        'Rates & Pricing',
-        $capability,
-        'must-hotel-booking-pricing',
-        __NAMESPACE__ . '\render_admin_pricing_page'
-    );
-
-    \add_submenu_page(
-        $parent_slug,
-        'Rate Plans',
-        'Rate Plans',
-        $capability,
-        'must-hotel-booking-rate-plans',
-        __NAMESPACE__ . '\render_admin_rate_plans_page'
-    );
-
-    \add_submenu_page(
-        $parent_slug,
-        'Availability Rules',
-        'Availability Rules',
-        $capability,
-        'must-hotel-booking-availability-rules',
-        __NAMESPACE__ . '\render_admin_availability_rules_page'
-    );
-
-    \add_submenu_page(
-        $parent_slug,
-        'Coupons',
-        'Coupons',
-        $capability,
-        'must-hotel-booking-coupons',
-        __NAMESPACE__ . '\render_admin_coupons_page'
-    );
-
-    \add_submenu_page(
-        $parent_slug,
-        'Guests',
-        'Guests',
-        $capability,
-        'must-hotel-booking-guests',
-        __NAMESPACE__ . '\render_admin_guests_page'
-    );
-
-    \add_submenu_page(
-        $parent_slug,
-        'Payments',
-        'Payments',
-        $capability,
-        'must-hotel-booking-payments',
-        __NAMESPACE__ . '\render_admin_payments_page'
-    );
-
-    \add_submenu_page(
-        $parent_slug,
-        'Taxes & Fees',
-        'Taxes & Fees',
-        $capability,
-        'must-hotel-booking-taxes',
-        __NAMESPACE__ . '\render_admin_taxes_page'
-    );
-
-    \add_submenu_page(
-        $parent_slug,
-        'Emails',
-        'Emails',
-        $capability,
-        'must-hotel-booking-emails',
-        __NAMESPACE__ . '\render_admin_emails_page'
-    );
-
-    \add_submenu_page(
-        $parent_slug,
-        'Settings',
-        'Settings',
-        $capability,
-        'must-hotel-booking-settings',
-        __NAMESPACE__ . '\render_admin_settings_page'
-    );
+    foreach (get_hidden_admin_menu_pages() as $page) {
+        \add_submenu_page(
+            null,
+            (string) $page['title'],
+            (string) $page['menu_title'],
+            $capability,
+            (string) $page['slug'],
+            (string) $page['callback']
+        );
+    }
 }
 
 /**
- * Get date context for dashboard calculations.
- *
- * @return array{today: string, month_start: string, next_month_start: string}
+ * @return array<int, array<string, string>>
  */
-function get_dashboard_date_context(): array
+function get_admin_menu_pages(): array
 {
-    $now = new \DateTimeImmutable(\current_time('mysql'));
-
     return [
-        'today' => $now->format('Y-m-d'),
-        'month_start' => $now->modify('first day of this month')->format('Y-m-01'),
-        'next_month_start' => $now->modify('first day of next month')->format('Y-m-01'),
+        [
+            'title' => 'Dashboard',
+            'menu_title' => 'Dashboard',
+            'slug' => 'must-hotel-booking',
+            'callback' => __NAMESPACE__ . '\render_admin_dashboard_page',
+        ],
+        [
+            'title' => 'Reservations',
+            'menu_title' => 'Reservations',
+            'slug' => 'must-hotel-booking-reservations',
+            'callback' => __NAMESPACE__ . '\render_admin_reservations_page',
+        ],
+        [
+            'title' => 'Calendar',
+            'menu_title' => 'Calendar',
+            'slug' => 'must-hotel-booking-calendar',
+            'callback' => __NAMESPACE__ . '\render_admin_calendar_page',
+        ],
+        [
+            'title' => 'Accommodations',
+            'menu_title' => 'Accommodations',
+            'slug' => 'must-hotel-booking-rooms',
+            'callback' => __NAMESPACE__ . '\render_admin_rooms_page',
+        ],
+        [
+            'title' => 'Rates & Pricing',
+            'menu_title' => 'Rates & Pricing',
+            'slug' => 'must-hotel-booking-pricing',
+            'callback' => __NAMESPACE__ . '\render_admin_pricing_page',
+        ],
+        [
+            'title' => 'Availability Rules',
+            'menu_title' => 'Availability Rules',
+            'slug' => 'must-hotel-booking-availability-rules',
+            'callback' => __NAMESPACE__ . '\render_admin_availability_rules_page',
+        ],
+        [
+            'title' => 'Payments',
+            'menu_title' => 'Payments',
+            'slug' => 'must-hotel-booking-payments',
+            'callback' => __NAMESPACE__ . '\render_admin_payments_page',
+        ],
+        [
+            'title' => 'Emails',
+            'menu_title' => 'Emails',
+            'slug' => 'must-hotel-booking-emails',
+            'callback' => __NAMESPACE__ . '\render_admin_emails_page',
+        ],
+        [
+            'title' => 'Guests',
+            'menu_title' => 'Guests',
+            'slug' => 'must-hotel-booking-guests',
+            'callback' => __NAMESPACE__ . '\render_admin_guests_page',
+        ],
+        [
+            'title' => 'Coupons',
+            'menu_title' => 'Coupons',
+            'slug' => 'must-hotel-booking-coupons',
+            'callback' => __NAMESPACE__ . '\render_admin_coupons_page',
+        ],
+        [
+            'title' => 'Reports',
+            'menu_title' => 'Reports',
+            'slug' => 'must-hotel-booking-reports',
+            'callback' => __NAMESPACE__ . '\render_admin_reports_page',
+        ],
+        [
+            'title' => 'Settings',
+            'menu_title' => 'Settings',
+            'slug' => 'must-hotel-booking-settings',
+            'callback' => __NAMESPACE__ . '\render_admin_settings_page',
+        ],
     ];
 }
 
 /**
- * Get dashboard metric counters.
- *
- * @return array{bookings_today: int, upcoming_checkins: int, upcoming_checkouts: int, total_bookings_this_month: int}
+ * @return array<int, array<string, string>>
  */
-function get_dashboard_metrics(): array
+function get_hidden_admin_menu_pages(): array
 {
-    $date_context = get_dashboard_date_context();
-
-    return \MustHotelBooking\Engine\get_reservation_repository()->getDashboardMetrics(
-        $date_context['today'],
-        $date_context['month_start'],
-        $date_context['next_month_start']
-    );
-}
-
-/**
- * Get next reservations for the dashboard summary table.
- *
- * @return array<int, array<string, mixed>>
- */
-function get_dashboard_next_reservations(int $limit = 10): array
-{
-    $date_context = get_dashboard_date_context();
-
-    return \MustHotelBooking\Engine\get_reservation_repository()->getUpcomingReservationRows(
-        $date_context['today'],
-        $limit
-    );
-}
-
-/**
- * Format booking ID for dashboard output.
- */
-function format_dashboard_booking_id(array $reservation): string
-{
-    $booking_id = isset($reservation['booking_id']) ? \trim((string) $reservation['booking_id']) : '';
-
-    if ($booking_id !== '') {
-        return $booking_id;
-    }
-
-    $reservation_id = isset($reservation['id']) ? (int) $reservation['id'] : 0;
-
-    if ($reservation_id <= 0) {
-        return '';
-    }
-
-    return 'RES-' . $reservation_id;
+    return [
+        [
+            'title' => 'Reservation',
+            'menu_title' => 'Reservation',
+            'slug' => 'must-hotel-booking-reservation',
+            'callback' => __NAMESPACE__ . '\render_admin_reservation_detail_page',
+        ],
+        [
+            'title' => 'Add Reservation',
+            'menu_title' => 'Add Reservation',
+            'slug' => 'must-hotel-booking-reservation-create',
+            'callback' => __NAMESPACE__ . '\render_admin_reservation_create_page',
+        ],
+        [
+            'title' => 'Rate Plans',
+            'menu_title' => 'Rate Plans',
+            'slug' => 'must-hotel-booking-rate-plans',
+            'callback' => __NAMESPACE__ . '\render_admin_rate_plans_page',
+        ],
+        [
+            'title' => 'Taxes & Fees',
+            'menu_title' => 'Taxes & Fees',
+            'slug' => 'must-hotel-booking-taxes',
+            'callback' => __NAMESPACE__ . '\render_admin_taxes_page',
+        ],
+    ];
 }
 
 /**
@@ -243,95 +182,330 @@ function render_admin_dashboard_page(): void
 {
     ensure_admin_capability();
 
-    $quick_booking_state = [
+    $quickBookingState = [
         'errors' => [],
         'form' => null,
     ];
 
     if (\function_exists(__NAMESPACE__ . '\maybe_handle_admin_quick_booking_submission')) {
-        $quick_booking_state = maybe_handle_admin_quick_booking_submission();
+        $quickBookingState = maybe_handle_admin_quick_booking_submission();
     }
 
-    $quick_booking_errors = isset($quick_booking_state['errors']) && \is_array($quick_booking_state['errors'])
-        ? $quick_booking_state['errors']
+    $quickBookingErrors = isset($quickBookingState['errors']) && \is_array($quickBookingState['errors'])
+        ? $quickBookingState['errors']
         : [];
-    $quick_booking_form = isset($quick_booking_state['form']) && \is_array($quick_booking_state['form'])
-        ? $quick_booking_state['form']
+    $quickBookingForm = isset($quickBookingState['form']) && \is_array($quickBookingState['form'])
+        ? $quickBookingState['form']
         : null;
-
-    $metrics = get_dashboard_metrics();
-    $next_reservations = get_dashboard_next_reservations(10);
-    $table_exists = does_dashboard_reservations_table_exist();
+    $dashboardData = (new DashboardDataProvider())->getDashboardData();
+    $reservationsTableExists = \MustHotelBooking\Engine\get_reservation_repository()->reservationsTableExists();
+    $kpis = isset($dashboardData['kpis']) && \is_array($dashboardData['kpis']) ? $dashboardData['kpis'] : [];
+    $attentionItems = isset($dashboardData['attention_items']) && \is_array($dashboardData['attention_items']) ? $dashboardData['attention_items'] : [];
+    $healthItems = isset($dashboardData['health_items']) && \is_array($dashboardData['health_items']) ? $dashboardData['health_items'] : [];
+    $recentReservations = isset($dashboardData['recent_reservations']) && \is_array($dashboardData['recent_reservations']) ? $dashboardData['recent_reservations'] : [];
+    $recentActivity = isset($dashboardData['recent_activity']) && \is_array($dashboardData['recent_activity']) ? $dashboardData['recent_activity'] : [];
+    $quickActions = isset($dashboardData['quick_actions']) && \is_array($dashboardData['quick_actions']) ? $dashboardData['quick_actions'] : [];
 
     echo '<div class="wrap">';
     echo '<h1>' . \esc_html__('Dashboard', 'must-hotel-booking') . '</h1>';
+    echo '<p class="description">' . \esc_html__('Front desk, reservations, payments, and configuration issues are surfaced here first so staff can move straight into the operational page that needs action.', 'must-hotel-booking') . '</p>';
 
     if (\function_exists(__NAMESPACE__ . '\render_dashboard_quick_booking_notice_from_query')) {
         render_dashboard_quick_booking_notice_from_query();
     }
 
-    if (!$table_exists) {
-        echo '<div class="notice notice-warning"><p>' . \esc_html__('Reservations table was not found. Please reactivate the plugin to create database tables.', 'must-hotel-booking') . '</p></div>';
+    if (!$reservationsTableExists) {
+        echo '<div class="notice notice-warning"><p>' . \esc_html__('Reservations table was not found. Reactivate the plugin to create the operational booking tables.', 'must-hotel-booking') . '</p></div>';
     }
 
-    echo '<h2>' . \esc_html__('Booking Overview', 'must-hotel-booking') . '</h2>';
-    echo '<table class="widefat striped" style="max-width: 860px;">';
-    echo '<tbody>';
-    echo '<tr><th>' . \esc_html__('Bookings today', 'must-hotel-booking') . '</th><td><strong>' . \esc_html((string) $metrics['bookings_today']) . '</strong></td></tr>';
-    echo '<tr><th>' . \esc_html__('Upcoming check-ins', 'must-hotel-booking') . '</th><td><strong>' . \esc_html((string) $metrics['upcoming_checkins']) . '</strong></td></tr>';
-    echo '<tr><th>' . \esc_html__('Upcoming check-outs', 'must-hotel-booking') . '</th><td><strong>' . \esc_html((string) $metrics['upcoming_checkouts']) . '</strong></td></tr>';
-    echo '<tr><th>' . \esc_html__('Total bookings this month', 'must-hotel-booking') . '</th><td><strong>' . \esc_html((string) $metrics['total_bookings_this_month']) . '</strong></td></tr>';
-    echo '</tbody>';
-    echo '</table>';
+    render_dashboard_kpi_cards($kpis);
+
+    echo '<div class="must-dashboard-layout">';
+    echo '<div class="must-dashboard-main">';
+    render_dashboard_attention_panel($attentionItems);
+    render_dashboard_recent_reservations_panel($recentReservations);
+    render_dashboard_recent_activity_panel($recentActivity);
+    echo '</div>';
+    echo '<div class="must-dashboard-sidebar">';
+    render_dashboard_quick_actions_panel($quickActions);
+    render_dashboard_health_panel($healthItems);
+    echo '</div>';
+    echo '</div>';
 
     if (\function_exists(__NAMESPACE__ . '\render_admin_quick_booking_panel')) {
-        render_admin_quick_booking_panel($quick_booking_form, $quick_booking_errors);
+        echo '<div id="must-dashboard-quick-booking" style="margin-top:24px;">';
+        render_admin_quick_booking_panel($quickBookingForm, $quickBookingErrors);
+        echo '</div>';
     }
 
-    echo '<h2 style="margin-top: 24px;">' . \esc_html__('Next 10 Reservations', 'must-hotel-booking') . '</h2>';
+    echo '</div>';
+}
+
+/**
+ * @param array<int, array<string, string>> $kpis
+ */
+function render_dashboard_kpi_cards(array $kpis): void
+{
+    echo '<div class="must-dashboard-kpis">';
+
+    foreach ($kpis as $card) {
+        if (!\is_array($card)) {
+            continue;
+        }
+
+        $url = isset($card['url']) ? (string) $card['url'] : '';
+        $tag = $url !== '' ? 'a' : 'div';
+
+        echo '<' . $tag . ' class="must-dashboard-kpi-card"';
+
+        if ($url !== '') {
+            echo ' href="' . \esc_url($url) . '"';
+        }
+
+        echo '>';
+        echo '<span class="must-dashboard-kpi-label">' . \esc_html((string) ($card['label'] ?? '')) . '</span>';
+        echo '<strong class="must-dashboard-kpi-value">' . \esc_html((string) ($card['value'] ?? '0')) . '</strong>';
+
+        if (!empty($card['descriptor'])) {
+            echo '<span class="must-dashboard-kpi-descriptor">' . \esc_html((string) $card['descriptor']) . '</span>';
+        }
+
+        echo '</' . $tag . '>';
+    }
+
+    echo '</div>';
+}
+
+/**
+ * @param array<int, array<string, string>> $items
+ */
+function render_dashboard_attention_panel(array $items): void
+{
+    echo '<div class="postbox must-dashboard-panel">';
+    echo '<div class="must-dashboard-panel-inner">';
+    echo '<h2>' . \esc_html__('Needs Attention', 'must-hotel-booking') . '</h2>';
+
+    if (empty($items)) {
+        echo '<p class="must-dashboard-empty-state">' . \esc_html__('No urgent operational issues are currently detected.', 'must-hotel-booking') . '</p>';
+        echo '</div></div>';
+
+        return;
+    }
+
+    echo '<table class="widefat striped">';
+    echo '<thead><tr><th>' . \esc_html__('Severity', 'must-hotel-booking') . '</th><th>' . \esc_html__('Issue', 'must-hotel-booking') . '</th><th>' . \esc_html__('Reference', 'must-hotel-booking') . '</th><th>' . \esc_html__('Action', 'must-hotel-booking') . '</th></tr></thead>';
+    echo '<tbody>';
+
+    foreach ($items as $item) {
+        if (!\is_array($item)) {
+            continue;
+        }
+
+        echo '<tr>';
+        echo '<td>' . render_dashboard_status_badge((string) ($item['severity'] ?? 'info'), true) . '</td>';
+        echo '<td><strong>' . \esc_html((string) ($item['label'] ?? '')) . '</strong><br /><span class="description">' . \esc_html((string) ($item['message'] ?? '')) . '</span></td>';
+        echo '<td>' . \esc_html((string) ($item['reference'] ?? '-')) . '</td>';
+        echo '<td>';
+
+        if (!empty($item['action_url'])) {
+            echo '<a class="button button-small" href="' . \esc_url((string) $item['action_url']) . '">' . \esc_html__('Open', 'must-hotel-booking') . '</a>';
+        } else {
+            echo '&ndash;';
+        }
+
+        echo '</td>';
+        echo '</tr>';
+    }
+
+    echo '</tbody>';
+    echo '</table>';
+    echo '</div></div>';
+}
+
+/**
+ * @param array<int, array<string, string>> $items
+ */
+function render_dashboard_health_panel(array $items): void
+{
+    echo '<div class="postbox must-dashboard-panel">';
+    echo '<div class="must-dashboard-panel-inner">';
+    echo '<h2>' . \esc_html__('System Health', 'must-hotel-booking') . '</h2>';
+
+    if (empty($items)) {
+        echo '<p class="must-dashboard-empty-state">' . \esc_html__('No health data is available yet.', 'must-hotel-booking') . '</p>';
+        echo '</div></div>';
+
+        return;
+    }
+
+    echo '<div class="must-dashboard-health-list">';
+
+    foreach ($items as $item) {
+        if (!\is_array($item)) {
+            continue;
+        }
+
+        echo '<div class="must-dashboard-health-item">';
+        echo '<div class="must-dashboard-health-header">';
+        echo '<strong>' . \esc_html((string) ($item['label'] ?? '')) . '</strong>';
+        echo render_dashboard_status_badge((string) ($item['status'] ?? 'warning'));
+        echo '</div>';
+        echo '<p>' . \esc_html((string) ($item['message'] ?? '')) . '</p>';
+
+        if (!empty($item['action_url'])) {
+            echo '<p><a href="' . \esc_url((string) $item['action_url']) . '">' . \esc_html__('Open settings', 'must-hotel-booking') . '</a></p>';
+        }
+
+        echo '</div>';
+    }
+
+    echo '</div>';
+    echo '</div></div>';
+}
+
+/**
+ * @param array<int, array<string, string>> $rows
+ */
+function render_dashboard_recent_reservations_panel(array $rows): void
+{
+    echo '<div class="postbox must-dashboard-panel">';
+    echo '<div class="must-dashboard-panel-inner">';
+    echo '<h2>' . \esc_html__('Recent Reservations', 'must-hotel-booking') . '</h2>';
     echo '<table class="widefat striped">';
     echo '<thead><tr>';
     echo '<th>' . \esc_html__('Booking ID', 'must-hotel-booking') . '</th>';
-    echo '<th>' . \esc_html__('Room ID', 'must-hotel-booking') . '</th>';
+    echo '<th>' . \esc_html__('Guest', 'must-hotel-booking') . '</th>';
+    echo '<th>' . \esc_html__('Accommodation', 'must-hotel-booking') . '</th>';
     echo '<th>' . \esc_html__('Check-in', 'must-hotel-booking') . '</th>';
     echo '<th>' . \esc_html__('Check-out', 'must-hotel-booking') . '</th>';
-    echo '<th>' . \esc_html__('Guests', 'must-hotel-booking') . '</th>';
     echo '<th>' . \esc_html__('Status', 'must-hotel-booking') . '</th>';
+    echo '<th>' . \esc_html__('Payment', 'must-hotel-booking') . '</th>';
     echo '<th>' . \esc_html__('Total', 'must-hotel-booking') . '</th>';
+    echo '<th>' . \esc_html__('Actions', 'must-hotel-booking') . '</th>';
     echo '</tr></thead>';
     echo '<tbody>';
 
-    if (empty($next_reservations)) {
-        echo '<tr><td colspan="7">' . \esc_html__('No upcoming reservations found.', 'must-hotel-booking') . '</td></tr>';
-    } else {
-        foreach ($next_reservations as $reservation) {
-            if (!\is_array($reservation)) {
-                continue;
-            }
+    if (empty($rows)) {
+        echo '<tr><td colspan="9">' . \esc_html__('No recent reservations were found.', 'must-hotel-booking') . '</td></tr>';
+        echo '</tbody></table>';
+        echo '</div></div>';
 
-            $booking_id = format_dashboard_booking_id($reservation);
-            $room_id = isset($reservation['room_id']) ? (int) $reservation['room_id'] : 0;
-            $checkin = isset($reservation['checkin']) ? (string) $reservation['checkin'] : '';
-            $checkout = isset($reservation['checkout']) ? (string) $reservation['checkout'] : '';
-            $guests = isset($reservation['guests']) ? (int) $reservation['guests'] : 0;
-            $status = isset($reservation['status']) ? (string) $reservation['status'] : '';
-            $total = isset($reservation['total_price']) ? (float) $reservation['total_price'] : 0.0;
-
-            echo '<tr>';
-            echo '<td>' . \esc_html($booking_id) . '</td>';
-            echo '<td>' . \esc_html((string) $room_id) . '</td>';
-            echo '<td>' . \esc_html($checkin) . '</td>';
-            echo '<td>' . \esc_html($checkout) . '</td>';
-            echo '<td>' . \esc_html((string) $guests) . '</td>';
-            echo '<td>' . \esc_html($status) . '</td>';
-            echo '<td>' . \esc_html(\number_format_i18n($total, 2)) . '</td>';
-            echo '</tr>';
-        }
+        return;
     }
 
-    echo '</tbody>';
-    echo '</table>';
+    foreach ($rows as $row) {
+        if (!\is_array($row)) {
+            continue;
+        }
+
+        echo '<tr>';
+        echo '<td>' . \esc_html((string) ($row['booking_id'] ?? '')) . '</td>';
+        echo '<td>' . \esc_html((string) ($row['guest'] ?? '')) . '</td>';
+        echo '<td>' . \esc_html((string) ($row['accommodation'] ?? '')) . '</td>';
+        echo '<td>' . \esc_html((string) ($row['checkin'] ?? '')) . '</td>';
+        echo '<td>' . \esc_html((string) ($row['checkout'] ?? '')) . '</td>';
+        echo '<td>' . \esc_html((string) ($row['status'] ?? '')) . '</td>';
+        echo '<td>' . \esc_html((string) ($row['payment'] ?? '')) . '</td>';
+        echo '<td>' . \esc_html((string) ($row['total'] ?? '')) . '</td>';
+        echo '<td>';
+        echo '<a class="button button-small" href="' . \esc_url((string) ($row['view_url'] ?? '')) . '">' . \esc_html__('View', 'must-hotel-booking') . '</a> ';
+        echo '<a class="button button-small" href="' . \esc_url((string) ($row['edit_url'] ?? '')) . '">' . \esc_html__('Edit', 'must-hotel-booking') . '</a>';
+        echo '</td>';
+        echo '</tr>';
+    }
+
+    echo '</tbody></table>';
+    echo '</div></div>';
+}
+
+/**
+ * @param array<int, array<string, string>> $rows
+ */
+function render_dashboard_recent_activity_panel(array $rows): void
+{
+    echo '<div class="postbox must-dashboard-panel">';
+    echo '<div class="must-dashboard-panel-inner">';
+    echo '<h2>' . \esc_html__('Recent Activity', 'must-hotel-booking') . '</h2>';
+
+    if (empty($rows)) {
+        echo '<p class="must-dashboard-empty-state">' . \esc_html__('Activity logging is enabled. New reservation, payment, and email events will appear here as they happen.', 'must-hotel-booking') . '</p>';
+        echo '</div></div>';
+
+        return;
+    }
+
+    echo '<div class="must-dashboard-activity-list">';
+
+    foreach ($rows as $row) {
+        if (!\is_array($row)) {
+            continue;
+        }
+
+        echo '<div class="must-dashboard-activity-item">';
+        echo '<div class="must-dashboard-activity-meta">';
+        echo render_dashboard_status_badge((string) ($row['severity'] ?? 'info'), true);
+        echo '<span class="must-dashboard-activity-time">' . \esc_html((string) ($row['created_at'] ?? '')) . '</span>';
+        echo '</div>';
+        echo '<p>' . \esc_html((string) ($row['message'] ?? '')) . '</p>';
+
+        if (!empty($row['reference'])) {
+            echo '<p class="description">' . \esc_html((string) $row['reference']) . '</p>';
+        }
+
+        if (!empty($row['action_url'])) {
+            echo '<p><a href="' . \esc_url((string) $row['action_url']) . '">' . \esc_html__('Open record', 'must-hotel-booking') . '</a></p>';
+        }
+
+        echo '</div>';
+    }
+
     echo '</div>';
+    echo '</div></div>';
+}
+
+/**
+ * @param array<int, array<string, string>> $actions
+ */
+function render_dashboard_quick_actions_panel(array $actions): void
+{
+    echo '<div class="postbox must-dashboard-panel">';
+    echo '<div class="must-dashboard-panel-inner">';
+    echo '<h2>' . \esc_html__('Quick Actions', 'must-hotel-booking') . '</h2>';
+
+    if (empty($actions)) {
+        echo '<p class="must-dashboard-empty-state">' . \esc_html__('No quick actions are available.', 'must-hotel-booking') . '</p>';
+        echo '</div></div>';
+
+        return;
+    }
+
+    echo '<div class="must-dashboard-actions-grid">';
+
+    foreach ($actions as $action) {
+        if (!\is_array($action)) {
+            continue;
+        }
+
+        echo '<a class="button button-secondary must-dashboard-action-button" href="' . \esc_url((string) ($action['url'] ?? '')) . '">' . \esc_html((string) ($action['label'] ?? '')) . '</a>';
+    }
+
+    echo '</div>';
+    echo '</div></div>';
+}
+
+function render_dashboard_status_badge(string $status, bool $compact = false): string
+{
+    $status = \sanitize_key($status);
+    $map = [
+        'ok' => ['label' => \__('OK', 'must-hotel-booking'), 'class' => 'is-ok'],
+        'healthy' => ['label' => \__('OK', 'must-hotel-booking'), 'class' => 'is-ok'],
+        'warning' => ['label' => \__('Warning', 'must-hotel-booking'), 'class' => 'is-warning'],
+        'error' => ['label' => \__('Error', 'must-hotel-booking'), 'class' => 'is-error'],
+        'info' => ['label' => \__('Info', 'must-hotel-booking'), 'class' => 'is-info'],
+    ];
+    $resolved = isset($map[$status]) ? $map[$status] : $map['info'];
+
+    return '<span class="must-dashboard-status-badge ' . ($compact ? 'is-compact ' : '') . \esc_attr((string) $resolved['class']) . '">' . \esc_html((string) $resolved['label']) . '</span>';
 }
 
 /**

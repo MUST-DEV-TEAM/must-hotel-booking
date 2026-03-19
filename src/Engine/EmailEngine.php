@@ -280,15 +280,47 @@ final class EmailEngine
         self::sendNotificationForTemplate($templateKeys['admin'], $reservation, MustBookingConfig::get_booking_notification_email());
     }
 
+    public static function resendGuestReservationEmail(int $reservationId): bool
+    {
+        $reservation = self::getReservationForEmail($reservationId);
+        $templateKeys = \is_array($reservation) ? self::resolveManualTemplateKeys($reservation) : null;
+
+        if ($reservation === null || $templateKeys === null) {
+            return false;
+        }
+
+        return self::sendNotificationForTemplate(
+            $templateKeys['guest'],
+            $reservation,
+            (string) ($reservation['guest_email'] ?? '')
+        );
+    }
+
+    public static function resendAdminReservationEmail(int $reservationId): bool
+    {
+        $reservation = self::getReservationForEmail($reservationId);
+        $templateKeys = \is_array($reservation) ? self::resolveManualTemplateKeys($reservation) : null;
+
+        if ($reservation === null || $templateKeys === null) {
+            return false;
+        }
+
+        return self::sendNotificationForTemplate(
+            $templateKeys['admin'],
+            $reservation,
+            MustBookingConfig::get_booking_notification_email()
+        );
+    }
+
     /**
      * @param array<string, mixed> $reservation
      */
-    private static function sendNotificationForTemplate(string $templateKey, array $reservation, string $recipientEmail): void
+    private static function sendNotificationForTemplate(string $templateKey, array $reservation, string $recipientEmail): bool
     {
         $recipientEmail = \sanitize_email($recipientEmail);
 
         if (!\is_email($recipientEmail)) {
-            return;
+            return false;
         }
 
         $rendered = self::renderTemplateEmail(
@@ -300,7 +332,20 @@ final class EmailEngine
             ]
         );
 
-        self::dispatchEmail($recipientEmail, $rendered['subject'], $rendered['html']);
+        $sent = self::dispatchEmail($recipientEmail, $rendered['subject'], $rendered['html']);
+
+        \do_action(
+            'must_hotel_booking/email_dispatch_result',
+            [
+                'success' => $sent,
+                'template_key' => $templateKey,
+                'recipient_email' => $recipientEmail,
+                'reservation_id' => isset($reservation['id']) ? (int) $reservation['id'] : 0,
+                'booking_id' => (string) ($reservation['booking_id'] ?? ''),
+            ]
+        );
+
+        return $sent;
     }
 
     /**
@@ -323,6 +368,29 @@ final class EmailEngine
             'guest' => 'guest_booking_confirmed_pay_at_hotel',
             'admin' => 'admin_new_booking_pay_at_hotel',
         ];
+    }
+
+    /**
+     * @param array<string, mixed> $reservation
+     * @return array{guest: string, admin: string}|null
+     */
+    private static function resolveManualTemplateKeys(array $reservation): ?array
+    {
+        $status = \sanitize_key((string) ($reservation['status'] ?? ''));
+        $paymentStatus = \sanitize_key((string) ($reservation['payment_status'] ?? ''));
+
+        if ($status === 'cancelled') {
+            return [
+                'guest' => 'guest_booking_cancelled',
+                'admin' => 'admin_booking_cancelled',
+            ];
+        }
+
+        if ($status === 'confirmed' || $status === 'completed' || $paymentStatus === 'paid') {
+            return self::resolveConfirmedTemplateKeys($reservation);
+        }
+
+        return null;
     }
 
     /**
@@ -524,11 +592,13 @@ final class EmailEngine
         $reservationId = isset($meta['reservation_id']) ? (int) $meta['reservation_id'] : 0;
 
         if ($audience === 'admin') {
-            $url = \function_exists('MustHotelBooking\\Admin\\get_admin_reservations_page_url')
-                ? \MustHotelBooking\Admin\get_admin_reservations_page_url(
-                    $reservationId > 0 ? ['action' => 'view', 'reservation_id' => $reservationId] : []
-                )
-                : \admin_url('admin.php?page=must-hotel-booking-reservations');
+            if (\function_exists('MustHotelBooking\\Admin\\get_admin_reservation_detail_page_url') && $reservationId > 0) {
+                $url = \MustHotelBooking\Admin\get_admin_reservation_detail_page_url($reservationId);
+            } elseif (\function_exists('MustHotelBooking\\Admin\\get_admin_reservations_page_url')) {
+                $url = \MustHotelBooking\Admin\get_admin_reservations_page_url();
+            } else {
+                $url = \admin_url('admin.php?page=must-hotel-booking-reservations');
+            }
 
             return [
                 'label' => $label !== '' ? $label : \__('Open reservation', 'must-hotel-booking'),

@@ -758,7 +758,8 @@ function render_admin_rooms_page(): void
     $available_amenities = get_available_room_amenities();
 
     echo '<div class="wrap must-hotel-booking-rooms-admin">';
-    echo '<h1>' . \esc_html__('Rooms', 'must-hotel-booking') . '</h1>';
+    echo '<h1>' . \esc_html__('Accommodations', 'must-hotel-booking') . '</h1>';
+    echo '<p class="description">' . \esc_html__('Manage the accommodation catalog, guest capacity, base pricing, media, and front-end room content from one screen.', 'must-hotel-booking') . '</p>';
 
     render_rooms_admin_notice_from_query();
 
@@ -773,7 +774,7 @@ function render_admin_rooms_page(): void
     }
 
     echo '<div class="must-room-form-card">';
-    echo '<h2>' . \esc_html($is_edit_mode ? __('Edit Room', 'must-hotel-booking') : __('Create Room', 'must-hotel-booking')) . '</h2>';
+    echo '<h2>' . \esc_html($is_edit_mode ? __('Edit Accommodation', 'must-hotel-booking') : __('Create Accommodation', 'must-hotel-booking')) . '</h2>';
     echo '<form method="post" action="' . \esc_url(get_admin_rooms_page_url()) . '">';
     \wp_nonce_field('must_room_save', 'must_room_nonce');
 
@@ -869,17 +870,17 @@ function render_admin_rooms_page(): void
     echo '</tbody>';
     echo '</table>';
 
-    \submit_button($is_edit_mode ? __('Update Room', 'must-hotel-booking') : __('Create Room', 'must-hotel-booking'));
+    \submit_button($is_edit_mode ? __('Update Accommodation', 'must-hotel-booking') : __('Create Accommodation', 'must-hotel-booking'));
 
     if ($is_edit_mode) {
-        echo '<a class="button button-secondary" href="' . \esc_url(get_admin_rooms_page_url()) . '">' . \esc_html__('Add New Room', 'must-hotel-booking') . '</a>';
+        echo '<a class="button button-secondary" href="' . \esc_url(get_admin_rooms_page_url()) . '">' . \esc_html__('Add New Accommodation', 'must-hotel-booking') . '</a>';
     }
 
     echo '</form>';
     echo '</div>';
 
     echo '<hr />';
-    echo '<h2>' . \esc_html__('Rooms List', 'must-hotel-booking') . '</h2>';
+    echo '<h2>' . \esc_html__('Accommodation List', 'must-hotel-booking') . '</h2>';
     echo '<table class="widefat striped">';
     echo '<thead><tr>';
     echo '<th>' . \esc_html__('Room Name', 'must-hotel-booking') . '</th>';

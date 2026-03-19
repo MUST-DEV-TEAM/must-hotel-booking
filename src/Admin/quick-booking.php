@@ -326,11 +326,36 @@ function maybe_handle_admin_quick_booking_submission(): array
         ];
     }
 
-    $redirect_args = [
-        'notice' => 'quick_booking_created',
-        'reservation_id' => $reservation_id,
-    ];
-    $redirect_url = get_admin_dashboard_page_url($redirect_args);
+    $redirectTarget = isset($_POST['must_quick_booking_redirect_target'])
+        ? \sanitize_key((string) \wp_unslash($_POST['must_quick_booking_redirect_target']))
+        : 'dashboard';
+
+    if (
+        $redirectTarget === 'reservation_detail' &&
+        \function_exists(__NAMESPACE__ . '\get_admin_reservation_detail_page_url')
+    ) {
+        $redirect_url = get_admin_reservation_detail_page_url(
+            $reservation_id,
+            ['notice' => 'reservation_created']
+        );
+    } elseif (
+        $redirectTarget === 'reservations' &&
+        \function_exists(__NAMESPACE__ . '\get_admin_reservations_page_url')
+    ) {
+        $redirect_url = get_admin_reservations_page_url(
+            [
+                'notice' => 'reservation_created',
+                'reservation_id' => $reservation_id,
+            ]
+        );
+    } else {
+        $redirect_url = get_admin_dashboard_page_url(
+            [
+                'notice' => 'quick_booking_created',
+                'reservation_id' => $reservation_id,
+            ]
+        );
+    }
 
     \wp_safe_redirect($redirect_url);
     exit;
@@ -355,8 +380,9 @@ function render_dashboard_quick_booking_notice_from_query(): void
  *
  * @param array<string, mixed>|null $submitted_form
  * @param array<int, string> $errors
+ * @param array<string, string> $options
  */
-function render_admin_quick_booking_panel(?array $submitted_form = null, array $errors = []): void
+function render_admin_quick_booking_panel(?array $submitted_form = null, array $errors = [], array $options = []): void
 {
     $form = \array_merge(get_admin_quick_booking_form_defaults(), \is_array($submitted_form) ? $submitted_form : []);
     $rooms = get_admin_quick_booking_rooms();
@@ -364,8 +390,12 @@ function render_admin_quick_booking_panel(?array $submitted_form = null, array $
     $checkin = (string) ($form['checkin'] ?? '');
     $checkout = (string) ($form['checkout'] ?? '');
     $guests = \max(1, (int) ($form['guests'] ?? 1));
-
-    $action_url = get_admin_dashboard_page_url();
+    $actionUrl = isset($options['action_url']) && (string) $options['action_url'] !== ''
+        ? (string) $options['action_url']
+        : get_admin_dashboard_page_url();
+    $redirectTarget = isset($options['redirect_target']) && (string) $options['redirect_target'] !== ''
+        ? \sanitize_key((string) $options['redirect_target'])
+        : 'dashboard';
 
     echo '<div class="must-admin-quick-booking-panel postbox">';
     echo '<div class="must-admin-quick-booking-panel-inner">';
@@ -381,9 +411,10 @@ function render_admin_quick_booking_panel(?array $submitted_form = null, array $
         echo '</ul></div>';
     }
 
-    echo '<form method="post" action="' . \esc_url($action_url) . '" class="must-quick-booking-form">';
+    echo '<form method="post" action="' . \esc_url($actionUrl) . '" class="must-quick-booking-form">';
     \wp_nonce_field('must_quick_booking_save', 'must_quick_booking_nonce');
     echo '<input type="hidden" name="must_quick_booking_action" value="create_quick_booking" />';
+    echo '<input type="hidden" name="must_quick_booking_redirect_target" value="' . \esc_attr($redirectTarget) . '" />';
 
     echo '<label>';
     echo '<span>' . \esc_html__('Room', 'must-hotel-booking') . '</span>';

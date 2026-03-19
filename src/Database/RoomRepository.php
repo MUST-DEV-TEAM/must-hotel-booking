@@ -315,6 +315,44 @@ final class RoomRepository extends AbstractRepository
         );
     }
 
+    public function countRoomsMissingBasePrice(): int
+    {
+        if (!$this->roomsTableExists()) {
+            return 0;
+        }
+
+        return (int) $this->wpdb->get_var(
+            'SELECT COUNT(*)
+            FROM ' . $this->getRoomsTableName() . '
+            WHERE base_price <= 0'
+        );
+    }
+
+    /**
+     * @return array<int, array<string, mixed>>
+     */
+    public function getRoomsMissingBasePrice(int $limit = 5): array
+    {
+        if (!$this->roomsTableExists()) {
+            return [];
+        }
+
+        $limit = \max(1, \min(20, $limit));
+        $rows = $this->wpdb->get_results(
+            $this->wpdb->prepare(
+                'SELECT id, name, category, base_price
+                FROM ' . $this->getRoomsTableName() . '
+                WHERE base_price <= 0
+                ORDER BY created_at DESC, id DESC
+                LIMIT %d',
+                $limit
+            ),
+            ARRAY_A
+        );
+
+        return \is_array($rows) ? $rows : [];
+    }
+
     /**
      * @return array<int, array<string, mixed>>
      */

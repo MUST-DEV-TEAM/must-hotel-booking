@@ -378,6 +378,11 @@ function render_admin_pricing_page(): void
 
     echo '<div class="wrap">';
     echo '<h1>' . \esc_html__('Rates & Pricing', 'must-hotel-booking') . '</h1>';
+    echo '<p class="description">' . \esc_html__('Seasonal pricing rules live here. Rate plans and taxes remain available as dedicated admin screens and are linked below so pricing work stays grouped together operationally.', 'must-hotel-booking') . '</p>';
+    echo '<p>';
+    echo '<a class="button button-secondary" href="' . \esc_url(get_admin_rate_plans_page_url()) . '">' . \esc_html__('Open Rate Plans', 'must-hotel-booking') . '</a> ';
+    echo '<a class="button button-secondary" href="' . \esc_url(get_admin_taxes_page_url()) . '">' . \esc_html__('Open Taxes & Fees', 'must-hotel-booking') . '</a>';
+    echo '</p>';
 
     render_pricing_admin_notice_from_query();
 

@@ -2,34 +2,66 @@
 
 namespace MustHotelBooking\Admin;
 
-use MustHotelBooking\Core\ReservationStatus;
-use MustHotelBooking\Engine\AvailabilityEngine;
+use MustHotelBooking\Core\PaymentMethodRegistry;
 
 /**
- * Build reservations admin page URL.
+ * Build reservations list page URL.
  *
  * @param array<string, scalar> $args
  */
 function get_admin_reservations_page_url(array $args = []): string
 {
-    $base_url = \admin_url('admin.php?page=must-hotel-booking-reservations');
+    $baseUrl = \admin_url('admin.php?page=must-hotel-booking-reservations');
 
     if (empty($args)) {
-        return $base_url;
+        return $baseUrl;
     }
 
-    return \add_query_arg($args, $base_url);
+    return \add_query_arg($args, $baseUrl);
+}
+
+/**
+ * Build reservation detail page URL.
+ *
+ * @param array<string, scalar> $args
+ */
+function get_admin_reservation_detail_page_url(int $reservationId, array $args = []): string
+{
+    $baseArgs = [
+        'page' => 'must-hotel-booking-reservation',
+        'reservation_id' => $reservationId,
+    ];
+
+    return \add_query_arg(\array_merge($baseArgs, $args), \admin_url('admin.php'));
+}
+
+/**
+ * Build reservation create page URL.
+ *
+ * @param array<string, scalar> $args
+ */
+function get_admin_reservation_create_page_url(array $args = []): string
+{
+    $baseUrl = \admin_url('admin.php?page=must-hotel-booking-reservation-create');
+
+    if (empty($args)) {
+        return $baseUrl;
+    }
+
+    return \add_query_arg($args, $baseUrl);
 }
 
 /**
  * Format reservation booking ID for display.
+ *
+ * @param array<string, mixed> $reservation
  */
 function format_reservation_booking_id(array $reservation): string
 {
-    $booking_id = isset($reservation['booking_id']) ? \trim((string) $reservation['booking_id']) : '';
+    $bookingId = isset($reservation['booking_id']) ? \trim((string) $reservation['booking_id']) : '';
 
-    if ($booking_id !== '') {
-        return $booking_id;
+    if ($bookingId !== '') {
+        return $bookingId;
     }
 
     $id = isset($reservation['id']) ? (int) $reservation['id'] : 0;
@@ -75,43 +107,93 @@ function get_reservation_payment_status_options(): array
 }
 
 /**
- * Get reservations list rows.
+ * Get payment method options.
  *
- * @return array<int, array<string, mixed>>
+ * @return array<string, string>
  */
-function get_reservations_list_rows(): array
+function get_reservation_payment_method_options(): array
 {
-    return \MustHotelBooking\Engine\get_reservation_repository()->getAdminReservationListRows();
+    $catalog = PaymentMethodRegistry::getCatalog();
+    $options = [];
+
+    foreach ($catalog as $methodKey => $meta) {
+        $options[$methodKey] = isset($meta['label']) ? (string) $meta['label'] : $methodKey;
+    }
+
+    if (!isset($options['pay_at_hotel'])) {
+        $options['pay_at_hotel'] = \__('Pay at hotel', 'must-hotel-booking');
+    }
+
+    return $options;
 }
 
 /**
- * Get single reservation row.
- *
- * @return array<string, mixed>|null
+ * @param array<string, mixed> $filters
+ * @return array<string, scalar>
  */
-function get_reservation_row(int $reservation_id): ?array
+function get_admin_reservations_list_query_args(array $filters = []): array
 {
-    return \MustHotelBooking\Engine\get_reservation_repository()->getAdminReservationDetails($reservation_id);
+    $args = [];
+
+    if (!empty($filters['quick_filter'])) {
+        $args['quick_filter'] = (string) $filters['quick_filter'];
+    }
+
+    if (!empty($filters['search'])) {
+        $args['search'] = (string) $filters['search'];
+    }
+
+    if (!empty($filters['status'])) {
+        $args['status'] = (string) $filters['status'];
+    }
+
+    if (!empty($filters['payment_status'])) {
+        $args['payment_status'] = (string) $filters['payment_status'];
+    }
+
+    if (!empty($filters['payment_method'])) {
+        $args['payment_method'] = (string) $filters['payment_method'];
+    }
+
+    if (!empty($filters['room_id'])) {
+        $args['room_id'] = (int) $filters['room_id'];
+    }
+
+    if (!empty($filters['checkin_from'])) {
+        $args['checkin_from'] = (string) $filters['checkin_from'];
+    }
+
+    if (!empty($filters['checkin_to'])) {
+        $args['checkin_to'] = (string) $filters['checkin_to'];
+    }
+
+    if (!empty($filters['checkin_month'])) {
+        $args['checkin_month'] = (string) $filters['checkin_month'];
+    }
+
+    if (!empty($filters['per_page']) && (int) $filters['per_page'] !== 20) {
+        $args['per_page'] = (int) $filters['per_page'];
+    }
+
+    if (!empty($filters['paged']) && (int) $filters['paged'] > 1) {
+        $args['paged'] = (int) $filters['paged'];
+    }
+
+    return $args;
 }
 
 /**
- * Check overlap with other reservations for same room.
+ * @param array<string, mixed> $filters
  */
-function has_other_reservation_overlap(int $reservation_id, int $room_id, string $checkin, string $checkout): bool
+function get_admin_reservations_current_list_url(array $filters = []): string
 {
-    return \MustHotelBooking\Engine\get_reservation_repository()->hasReservationOverlapExcludingId(
-        $reservation_id,
-        $room_id,
-        $checkin,
-        $checkout,
-        ReservationStatus::getInventoryNonBlockingStatuses()
-    );
+    return get_admin_reservations_page_url(get_admin_reservations_list_query_args($filters));
 }
 
 /**
  * Render reservations admin notice from query.
  */
-function render_reservations_admin_notice_from_query(): void
+function render_admin_reservations_notice_from_query(): void
 {
     $notice = isset($_GET['notice']) ? \sanitize_key((string) \wp_unslash($_GET['notice'])) : '';
 
@@ -119,13 +201,44 @@ function render_reservations_admin_notice_from_query(): void
         return;
     }
 
+    if ($notice === 'bulk_action_completed') {
+        $updatedCount = isset($_GET['updated_count']) ? \absint(\wp_unslash($_GET['updated_count'])) : 0;
+        $failedCount = isset($_GET['failed_count']) ? \absint(\wp_unslash($_GET['failed_count'])) : 0;
+        $bulkAction = isset($_GET['bulk_action']) ? \sanitize_key((string) \wp_unslash($_GET['bulk_action'])) : '';
+        $actionLabels = [
+            'confirm' => \__('confirm', 'must-hotel-booking'),
+            'mark_paid' => \__('mark paid', 'must-hotel-booking'),
+            'cancel' => \__('cancel', 'must-hotel-booking'),
+        ];
+        $actionLabel = isset($actionLabels[$bulkAction]) ? $actionLabels[$bulkAction] : \__('update', 'must-hotel-booking');
+        $class = $failedCount > 0 ? 'notice notice-warning' : 'notice notice-success';
+        $message = \sprintf(
+            \__('Bulk %1$s completed. Updated %2$d reservations; %3$d failed.', 'must-hotel-booking'),
+            $actionLabel,
+            $updatedCount,
+            $failedCount
+        );
+
+        echo '<div class="' . \esc_attr($class) . '"><p>' . \esc_html($message) . '</p></div>';
+
+        return;
+    }
+
     $messages = [
-        'reservation_updated' => ['success', \__('Reservation updated successfully.', 'must-hotel-booking')],
-        'reservation_cancelled' => ['success', \__('Reservation cancelled successfully.', 'must-hotel-booking')],
-        'reservation_deleted' => ['success', \__('Reservation deleted successfully.', 'must-hotel-booking')],
-        'reservation_not_found' => ['error', \__('Reservation not found.', 'must-hotel-booking')],
+        'reservation_created' => ['success', \__('Reservation created successfully.', 'must-hotel-booking')],
+        'reservation_updated' => ['success', \__('Reservation details updated successfully.', 'must-hotel-booking')],
+        'reservation_guest_updated' => ['success', \__('Guest details updated successfully.', 'must-hotel-booking')],
+        'reservation_confirmed' => ['success', \__('Reservation confirmed.', 'must-hotel-booking')],
+        'reservation_marked_pending' => ['success', \__('Reservation moved back to pending.', 'must-hotel-booking')],
+        'reservation_marked_paid' => ['success', \__('Reservation marked as paid.', 'must-hotel-booking')],
+        'reservation_marked_unpaid' => ['success', \__('Reservation marked as unpaid.', 'must-hotel-booking')],
+        'reservation_cancelled' => ['success', \__('Reservation cancelled.', 'must-hotel-booking')],
+        'reservation_guest_email_resent' => ['success', \__('Guest reservation email resent.', 'must-hotel-booking')],
+        'reservation_admin_email_resent' => ['success', \__('Admin reservation email resent.', 'must-hotel-booking')],
         'invalid_nonce' => ['error', \__('Security check failed. Please try again.', 'must-hotel-booking')],
-        'action_failed' => ['error', \__('Unable to complete the requested action.', 'must-hotel-booking')],
+        'invalid_guest_email' => ['error', \__('Please enter a valid guest email address.', 'must-hotel-booking')],
+        'reservation_not_found' => ['error', \__('Reservation not found.', 'must-hotel-booking')],
+        'action_failed' => ['error', \__('Unable to complete the requested reservation action.', 'must-hotel-booking')],
     ];
 
     if (!isset($messages[$notice])) {
@@ -139,364 +252,789 @@ function render_reservations_admin_notice_from_query(): void
     echo '<div class="' . \esc_attr($class) . '"><p>' . \esc_html($message) . '</p></div>';
 }
 
-/**
- * Handle cancel reservation action.
- */
-function maybe_handle_cancel_reservation_request(): void
+function get_admin_reservation_badge_tone(string $key): string
 {
-    $action = isset($_GET['action']) ? \sanitize_key((string) \wp_unslash($_GET['action'])) : '';
+    $key = \sanitize_key($key);
 
-    if ($action !== 'cancel') {
-        return;
+    if (\in_array($key, ['ok', 'healthy', 'confirmed', 'completed', 'paid'], true)) {
+        return 'ok';
     }
 
-    $reservation_id = isset($_GET['reservation_id']) ? \absint(\wp_unslash($_GET['reservation_id'])) : 0;
-    $nonce = isset($_GET['_wpnonce']) ? (string) \wp_unslash($_GET['_wpnonce']) : '';
-
-    if ($reservation_id <= 0 || !\wp_verify_nonce($nonce, 'must_reservation_cancel_' . $reservation_id)) {
-        \wp_safe_redirect(get_admin_reservations_page_url(['notice' => 'invalid_nonce']));
-        exit;
+    if (\in_array($key, ['warning', 'pending', 'pending_payment', 'unpaid'], true)) {
+        return 'warning';
     }
 
-    $reservation = get_reservation_row($reservation_id);
-    $previous_status = \is_array($reservation) ? \sanitize_key((string) ($reservation['status'] ?? '')) : '';
-    $updated = \MustHotelBooking\Engine\get_reservation_repository()->updateReservation(
-        $reservation_id,
-        ['status' => 'cancelled']
-    );
-
-    if ($updated && $previous_status !== 'cancelled') {
-        \do_action('must_hotel_booking/reservation_cancelled', $reservation_id);
+    if (\in_array($key, ['error', 'failed', 'payment_failed', 'cancelled', 'blocked', 'expired'], true)) {
+        return 'error';
     }
 
-    \wp_safe_redirect(get_admin_reservations_page_url(['notice' => $updated ? 'reservation_cancelled' : 'action_failed']));
-    exit;
+    return 'info';
+}
+
+function render_admin_reservation_badge(string $label, string $tone): string
+{
+    $resolvedTone = get_admin_reservation_badge_tone($tone);
+    $normalizedLabel = $label;
+
+    if ($normalizedLabel === \sanitize_key($normalizedLabel)) {
+        $normalizedLabel = \ucwords(\str_replace('_', ' ', $normalizedLabel));
+    }
+
+    $classMap = [
+        'ok' => 'is-ok',
+        'warning' => 'is-warning',
+        'error' => 'is-error',
+        'info' => 'is-info',
+    ];
+    $className = isset($classMap[$resolvedTone]) ? $classMap[$resolvedTone] : $classMap['info'];
+
+    return '<span class="must-dashboard-status-badge is-compact must-reservation-badge ' . \esc_attr($className) . '">' . \esc_html($normalizedLabel) . '</span>';
+}
+
+function format_admin_reservation_method_label(string $method): string
+{
+    $method = \sanitize_key($method);
+    $options = get_reservation_payment_method_options();
+
+    if ($method === '') {
+        return \__('No payment recorded', 'must-hotel-booking');
+    }
+
+    return isset($options[$method]) ? (string) $options[$method] : $method;
 }
 
 /**
- * Handle delete reservation action.
+ * @param array<int, array<string, mixed>> $quickFilters
  */
-function maybe_handle_delete_reservation_request(): void
+function render_admin_reservations_quick_filters(array $quickFilters): void
 {
-    $action = isset($_GET['action']) ? \sanitize_key((string) \wp_unslash($_GET['action'])) : '';
-
-    if ($action !== 'delete') {
+    if (empty($quickFilters)) {
         return;
     }
 
-    $reservation_id = isset($_GET['reservation_id']) ? \absint(\wp_unslash($_GET['reservation_id'])) : 0;
-    $nonce = isset($_GET['_wpnonce']) ? (string) \wp_unslash($_GET['_wpnonce']) : '';
+    echo '<ul class="subsubsub must-reservations-quick-filters">';
 
-    if ($reservation_id <= 0 || !\wp_verify_nonce($nonce, 'must_reservation_delete_' . $reservation_id)) {
-        \wp_safe_redirect(get_admin_reservations_page_url(['notice' => 'invalid_nonce']));
-        exit;
+    foreach ($quickFilters as $index => $filter) {
+        if (!\is_array($filter)) {
+            continue;
+        }
+
+        $class = !empty($filter['current']) ? ' class="current"' : '';
+        echo '<li>';
+        echo '<a href="' . \esc_url((string) ($filter['url'] ?? '')) . '"' . $class . '>';
+        echo \esc_html((string) ($filter['label'] ?? ''));
+        echo ' <span class="count">(' . \esc_html((string) ((int) ($filter['count'] ?? 0))) . ')</span>';
+        echo '</a>';
+
+        if ($index < (\count($quickFilters) - 1)) {
+            echo ' | ';
+        }
+
+        echo '</li>';
     }
 
-    $deleted = \MustHotelBooking\Engine\get_reservation_repository()->deleteReservation($reservation_id);
-
-    \wp_safe_redirect(get_admin_reservations_page_url(['notice' => $deleted ? 'reservation_deleted' : 'action_failed']));
-    exit;
+    echo '</ul>';
 }
 
 /**
- * Handle reservation edit submission.
- *
- * @return array<int, string>
+ * @param array<string, mixed> $filters
+ * @param array<string, mixed> $pageData
  */
-function maybe_handle_edit_reservation_submission(): array
+function render_admin_reservations_filters(array $filters, array $pageData): void
 {
-    $request_method = isset($_SERVER['REQUEST_METHOD']) ? \strtoupper((string) $_SERVER['REQUEST_METHOD']) : 'GET';
+    $statusOptions = ['' => \__('All reservation statuses', 'must-hotel-booking')] + (isset($pageData['status_options']) && \is_array($pageData['status_options']) ? $pageData['status_options'] : []);
+    $paymentStatusOptions = ['' => \__('All payment statuses', 'must-hotel-booking')] + (isset($pageData['payment_status_options']) && \is_array($pageData['payment_status_options']) ? $pageData['payment_status_options'] : []);
+    $paymentMethodOptions = ['' => \__('All payment methods', 'must-hotel-booking')] + (isset($pageData['payment_method_options']) && \is_array($pageData['payment_method_options']) ? $pageData['payment_method_options'] : []);
+    $roomOptions = isset($pageData['room_options']) && \is_array($pageData['room_options']) ? $pageData['room_options'] : [];
 
-    if ($request_method !== 'POST') {
-        return [];
+    echo '<form method="get" action="' . \esc_url(get_admin_reservations_page_url()) . '" class="must-reservations-toolbar">';
+    echo '<input type="hidden" name="page" value="must-hotel-booking-reservations" />';
+
+    if (!empty($filters['quick_filter'])) {
+        echo '<input type="hidden" name="quick_filter" value="' . \esc_attr((string) $filters['quick_filter']) . '" />';
     }
 
-    $action = isset($_POST['must_reservation_action']) ? \sanitize_key((string) \wp_unslash($_POST['must_reservation_action'])) : '';
+    echo '<div class="must-reservations-toolbar-row">';
+    echo '<label class="screen-reader-text" for="must-reservations-search">' . \esc_html__('Search reservations', 'must-hotel-booking') . '</label>';
+    echo '<input id="must-reservations-search" type="search" name="search" value="' . \esc_attr((string) ($filters['search'] ?? '')) . '" placeholder="' . \esc_attr__('Booking ID, guest, email, phone, accommodation', 'must-hotel-booking') . '" class="regular-text" />';
+    \submit_button(\__('Search', 'must-hotel-booking'), 'secondary', '', false);
+    echo ' <a class="button button-secondary" href="' . \esc_url(get_admin_reservations_page_url()) . '">' . \esc_html__('Reset', 'must-hotel-booking') . '</a>';
+    echo '</div>';
 
-    if ($action !== 'save_reservation') {
-        return [];
+    echo '<div class="must-reservations-toolbar-row">';
+
+    echo '<label>';
+    echo '<span class="screen-reader-text">' . \esc_html__('Filter by reservation status', 'must-hotel-booking') . '</span>';
+    echo '<select name="status">';
+
+    foreach ($statusOptions as $value => $label) {
+        $selected = ((string) ($filters['status'] ?? '') === (string) $value) ? ' selected' : '';
+        echo '<option value="' . \esc_attr((string) $value) . '"' . $selected . '>' . \esc_html((string) $label) . '</option>';
     }
 
-    $nonce = isset($_POST['must_reservation_nonce']) ? (string) \wp_unslash($_POST['must_reservation_nonce']) : '';
+    echo '</select>';
+    echo '</label>';
 
-    if (!\wp_verify_nonce($nonce, 'must_reservation_save')) {
-        return [\__('Security check failed. Please try again.', 'must-hotel-booking')];
+    echo '<label>';
+    echo '<span class="screen-reader-text">' . \esc_html__('Filter by payment status', 'must-hotel-booking') . '</span>';
+    echo '<select name="payment_status">';
+
+    foreach ($paymentStatusOptions as $value => $label) {
+        $selected = ((string) ($filters['payment_status'] ?? '') === (string) $value) ? ' selected' : '';
+        echo '<option value="' . \esc_attr((string) $value) . '"' . $selected . '>' . \esc_html((string) $label) . '</option>';
     }
 
-    $reservation_id = isset($_POST['reservation_id']) ? \absint(\wp_unslash($_POST['reservation_id'])) : 0;
-    $checkin = isset($_POST['checkin']) ? \sanitize_text_field((string) \wp_unslash($_POST['checkin'])) : '';
-    $checkout = isset($_POST['checkout']) ? \sanitize_text_field((string) \wp_unslash($_POST['checkout'])) : '';
-    $guests = isset($_POST['guests']) ? \max(1, \absint(\wp_unslash($_POST['guests']))) : 1;
-    $status = isset($_POST['status']) ? \sanitize_key((string) \wp_unslash($_POST['status'])) : 'pending';
-    $payment_status = isset($_POST['payment_status']) ? \sanitize_key((string) \wp_unslash($_POST['payment_status'])) : 'unpaid';
-    $total_price = isset($_POST['total_price']) ? (float) \wp_unslash($_POST['total_price']) : 0.0;
-    $errors = [];
+    echo '</select>';
+    echo '</label>';
 
-    $reservation = get_reservation_row($reservation_id);
+    echo '<label>';
+    echo '<span class="screen-reader-text">' . \esc_html__('Filter by payment method', 'must-hotel-booking') . '</span>';
+    echo '<select name="payment_method">';
 
-    if (!\is_array($reservation)) {
-        return [\__('Reservation not found.', 'must-hotel-booking')];
+    foreach ($paymentMethodOptions as $value => $label) {
+        $selected = ((string) ($filters['payment_method'] ?? '') === (string) $value) ? ' selected' : '';
+        echo '<option value="' . \esc_attr((string) $value) . '"' . $selected . '>' . \esc_html((string) $label) . '</option>';
     }
 
-    $previous_status = \sanitize_key((string) ($reservation['status'] ?? ''));
+    echo '</select>';
+    echo '</label>';
 
-    if (
-        !\function_exists(__NAMESPACE__ . '\is_valid_booking_date') ||
-        !AvailabilityEngine::isValidBookingDate($checkin) ||
-        !AvailabilityEngine::isValidBookingDate($checkout)
-    ) {
-        $errors[] = \__('Please provide valid check-in and check-out dates.', 'must-hotel-booking');
-    } elseif ($checkin >= $checkout) {
-        $errors[] = \__('Checkout must be after check-in.', 'must-hotel-booking');
+    echo '<label>';
+    echo '<span class="screen-reader-text">' . \esc_html__('Filter by accommodation', 'must-hotel-booking') . '</span>';
+    echo '<select name="room_id">';
+    echo '<option value="">' . \esc_html__('All accommodations', 'must-hotel-booking') . '</option>';
+
+    foreach ($roomOptions as $roomOption) {
+        if (!\is_array($roomOption)) {
+            continue;
+        }
+
+        $roomId = isset($roomOption['id']) ? (int) $roomOption['id'] : 0;
+        $selected = $roomId === (int) ($filters['room_id'] ?? 0) ? ' selected' : '';
+        echo '<option value="' . \esc_attr((string) $roomId) . '"' . $selected . '>' . \esc_html((string) ($roomOption['name'] ?? '')) . '</option>';
     }
 
-    if ($total_price < 0) {
-        $total_price = 0;
+    echo '</select>';
+    echo '</label>';
+
+    echo '<label>';
+    echo '<span class="screen-reader-text">' . \esc_html__('Check-in month', 'must-hotel-booking') . '</span>';
+    echo '<input type="month" name="checkin_month" value="' . \esc_attr((string) ($filters['checkin_month'] ?? '')) . '" />';
+    echo '</label>';
+
+    echo '<label>';
+    echo '<span class="screen-reader-text">' . \esc_html__('Check-in from', 'must-hotel-booking') . '</span>';
+    echo '<input type="date" name="checkin_from" value="' . \esc_attr((string) ($filters['checkin_from'] ?? '')) . '" />';
+    echo '</label>';
+
+    echo '<label>';
+    echo '<span class="screen-reader-text">' . \esc_html__('Check-in to', 'must-hotel-booking') . '</span>';
+    echo '<input type="date" name="checkin_to" value="' . \esc_attr((string) ($filters['checkin_to'] ?? '')) . '" />';
+    echo '</label>';
+
+    \submit_button(\__('Apply Filters', 'must-hotel-booking'), 'secondary', '', false);
+    echo '</div>';
+    echo '</form>';
+}
+
+/**
+ * @param array<string, mixed> $pagination
+ * @param array<string, mixed> $filters
+ */
+function render_admin_reservations_pagination(array $pagination, array $filters): void
+{
+    $totalPages = isset($pagination['total_pages']) ? (int) $pagination['total_pages'] : 1;
+    $currentPage = isset($pagination['current_page']) ? (int) $pagination['current_page'] : 1;
+    $totalItems = isset($pagination['total_items']) ? (int) $pagination['total_items'] : 0;
+
+    if ($totalItems <= 0) {
+        return;
     }
 
-    $status_options = get_reservation_status_options();
-    $payment_status_options = get_reservation_payment_status_options();
+    echo '<div class="must-reservations-pagination">';
+    echo '<span class="displaying-num">' . \esc_html(\sprintf(\_n('%d reservation', '%d reservations', $totalItems, 'must-hotel-booking'), $totalItems)) . '</span>';
 
-    if (!isset($status_options[$status])) {
-        $errors[] = \__('Invalid reservation status.', 'must-hotel-booking');
+    if ($totalPages > 1) {
+        $baseArgs = get_admin_reservations_list_query_args($filters);
+        unset($baseArgs['paged']);
+
+        $links = \paginate_links(
+            [
+                'base' => \add_query_arg('paged', '%#%', get_admin_reservations_page_url($baseArgs)),
+                'format' => '',
+                'current' => \max(1, $currentPage),
+                'total' => $totalPages,
+                'type' => 'plain',
+                'prev_text' => \__('Previous', 'must-hotel-booking'),
+                'next_text' => \__('Next', 'must-hotel-booking'),
+            ]
+        );
+
+        if (\is_string($links) && $links !== '') {
+            echo '<div class="tablenav-pages">' . $links . '</div>';
+        }
     }
 
-    if (!isset($payment_status_options[$payment_status])) {
-        $errors[] = \__('Invalid payment status.', 'must-hotel-booking');
+    echo '</div>';
+}
+
+/**
+ * @param array<string, mixed> $row
+ */
+function get_admin_reservation_row_action_url(string $action, array $row, string $returnUrl): string
+{
+    $reservationId = isset($row['id']) ? (int) $row['id'] : 0;
+
+    if ($reservationId <= 0) {
+        return '';
     }
 
-    $room_id = isset($reservation['room_id']) ? (int) $reservation['room_id'] : 0;
-
-    if (empty($errors) && has_other_reservation_overlap($reservation_id, $room_id, $checkin, $checkout)) {
-        $errors[] = \__('The selected dates overlap with another reservation.', 'must-hotel-booking');
+    if ($action === 'view') {
+        return get_admin_reservation_detail_page_url($reservationId);
     }
 
-    if (!empty($errors)) {
-        return $errors;
+    if ($action === 'edit') {
+        return get_admin_reservation_detail_page_url($reservationId, ['mode' => 'edit']);
     }
 
-    $updated = \MustHotelBooking\Engine\get_reservation_repository()->updateReservation(
-        $reservation_id,
+    $baseUrl = get_admin_reservations_page_url(
         [
-            'checkin' => $checkin,
-            'checkout' => $checkout,
-            'guests' => $guests,
-            'status' => $status,
-            'payment_status' => $payment_status,
-            'total_price' => \round($total_price, 2),
+            'reservation_action' => $action,
+            'reservation_id' => $reservationId,
+            'return_url' => $returnUrl,
         ]
     );
 
-    if (!$updated) {
-        return [\__('Unable to update reservation.', 'must-hotel-booking')];
-    }
-
-    if ($previous_status !== 'cancelled' && $status === 'cancelled') {
-        \do_action('must_hotel_booking/reservation_cancelled', $reservation_id);
-    }
-
-    \wp_safe_redirect(
-        get_admin_reservations_page_url(
-            [
-                'notice' => 'reservation_updated',
-                'action' => 'view',
-                'reservation_id' => $reservation_id,
-            ]
-        )
-    );
-    exit;
+    return \wp_nonce_url($baseUrl, 'must_reservation_action_' . $action . '_' . $reservationId);
 }
 
 /**
- * Render reservation details panel.
+ * @param array<string, mixed> $row
  */
-function render_admin_reservation_view_panel(array $reservation): void
+function can_confirm_reservation_row(array $row): bool
 {
-    $guest_name = \trim((string) ($reservation['first_name'] ?? '') . ' ' . (string) ($reservation['last_name'] ?? ''));
+    $status = \sanitize_key((string) ($row['reservation_status_key'] ?? ''));
 
-    echo '<div class="postbox" style="padding:16px;margin-top:16px;">';
-    echo '<h2 style="margin-top:0;">' . \esc_html__('View Reservation', 'must-hotel-booking') . '</h2>';
-    echo '<table class="widefat striped"><tbody>';
-    echo '<tr><th>' . \esc_html__('Booking ID', 'must-hotel-booking') . '</th><td>' . \esc_html(format_reservation_booking_id($reservation)) . '</td></tr>';
-    echo '<tr><th>' . \esc_html__('Room', 'must-hotel-booking') . '</th><td>' . \esc_html((string) ($reservation['room_name'] ?? '')) . '</td></tr>';
-    echo '<tr><th>' . \esc_html__('Guest Name', 'must-hotel-booking') . '</th><td>' . \esc_html($guest_name) . '</td></tr>';
-    echo '<tr><th>' . \esc_html__('Guest Email', 'must-hotel-booking') . '</th><td>' . \esc_html((string) ($reservation['email'] ?? '')) . '</td></tr>';
-    echo '<tr><th>' . \esc_html__('Guest Phone', 'must-hotel-booking') . '</th><td>' . \esc_html((string) ($reservation['phone'] ?? '')) . '</td></tr>';
-    echo '<tr><th>' . \esc_html__('Check-in', 'must-hotel-booking') . '</th><td>' . \esc_html((string) ($reservation['checkin'] ?? '')) . '</td></tr>';
-    echo '<tr><th>' . \esc_html__('Check-out', 'must-hotel-booking') . '</th><td>' . \esc_html((string) ($reservation['checkout'] ?? '')) . '</td></tr>';
-    echo '<tr><th>' . \esc_html__('Guests', 'must-hotel-booking') . '</th><td>' . \esc_html((string) ((int) ($reservation['guests'] ?? 0))) . '</td></tr>';
-    echo '<tr><th>' . \esc_html__('Status', 'must-hotel-booking') . '</th><td>' . \esc_html((string) ($reservation['status'] ?? '')) . '</td></tr>';
-    echo '<tr><th>' . \esc_html__('Payment Status', 'must-hotel-booking') . '</th><td>' . \esc_html((string) ($reservation['payment_status'] ?? '')) . '</td></tr>';
-    echo '<tr><th>' . \esc_html__('Total price', 'must-hotel-booking') . '</th><td>' . \esc_html(\number_format_i18n((float) ($reservation['total_price'] ?? 0), 2)) . '</td></tr>';
-    echo '<tr><th>' . \esc_html__('Created At', 'must-hotel-booking') . '</th><td>' . \esc_html((string) ($reservation['created_at'] ?? '')) . '</td></tr>';
-    echo '</tbody></table>';
-    echo '</div>';
+    return !\in_array($status, ['confirmed', 'completed', 'cancelled', 'blocked'], true);
 }
 
 /**
- * Render reservation edit form panel.
+ * @param array<string, mixed> $row
  */
-function render_admin_reservation_edit_panel(array $reservation): void
+function can_mark_reservation_paid_row(array $row): bool
 {
-    $status_options = get_reservation_status_options();
-    $payment_status_options = get_reservation_payment_status_options();
-    $reservation_id = (int) ($reservation['id'] ?? 0);
+    $status = \sanitize_key((string) ($row['reservation_status_key'] ?? ''));
+    $paymentStatus = \sanitize_key((string) ($row['payment_status_key'] ?? ''));
 
-    echo '<div class="postbox" style="padding:16px;margin-top:16px;">';
-    echo '<h2 style="margin-top:0;">' . \esc_html__('Edit Reservation', 'must-hotel-booking') . '</h2>';
+    return !\in_array($status, ['cancelled', 'blocked'], true) && $paymentStatus !== 'paid';
+}
+
+/**
+ * @param array<string, mixed> $row
+ */
+function can_cancel_reservation_row(array $row): bool
+{
+    $status = \sanitize_key((string) ($row['reservation_status_key'] ?? ''));
+
+    return !\in_array($status, ['cancelled', 'completed', 'blocked'], true);
+}
+
+/**
+ * @param array<string, mixed> $row
+ */
+function can_resend_reservation_email_row(array $row): bool
+{
+    return isset($row['guest_email']) && \is_email((string) $row['guest_email']);
+}
+
+/**
+ * @param array<string, mixed> $pageData
+ */
+function render_admin_reservations_table(array $pageData): void
+{
+    $rows = isset($pageData['rows']) && \is_array($pageData['rows']) ? $pageData['rows'] : [];
+    $filters = isset($pageData['filters']) && \is_array($pageData['filters']) ? $pageData['filters'] : [];
+    $bulkActions = isset($pageData['bulk_actions']) && \is_array($pageData['bulk_actions']) ? $pageData['bulk_actions'] : [];
+    $returnUrl = get_admin_reservations_current_list_url($filters);
+
     echo '<form method="post" action="' . \esc_url(get_admin_reservations_page_url()) . '">';
-    \wp_nonce_field('must_reservation_save', 'must_reservation_nonce');
+    \wp_nonce_field('must_reservation_admin_action', 'must_reservation_admin_nonce');
+    echo '<input type="hidden" name="must_reservation_admin_action" value="bulk_apply" />';
+    echo '<input type="hidden" name="return_url" value="' . \esc_attr($returnUrl) . '" />';
 
-    echo '<input type="hidden" name="must_reservation_action" value="save_reservation" />';
-    echo '<input type="hidden" name="reservation_id" value="' . \esc_attr((string) $reservation_id) . '" />';
+    echo '<div class="must-reservations-bulk-bar">';
+    echo '<label class="screen-reader-text" for="must-reservations-bulk-action">' . \esc_html__('Bulk action', 'must-hotel-booking') . '</label>';
+    echo '<select id="must-reservations-bulk-action" name="bulk_action">';
+    echo '<option value="">' . \esc_html__('Bulk actions', 'must-hotel-booking') . '</option>';
 
-    echo '<table class="form-table" role="presentation"><tbody>';
-    echo '<tr><th>' . \esc_html__('Booking ID', 'must-hotel-booking') . '</th><td><strong>' . \esc_html(format_reservation_booking_id($reservation)) . '</strong></td></tr>';
-    echo '<tr><th><label for="must-reservation-checkin">' . \esc_html__('Check-in', 'must-hotel-booking') . '</label></th><td><input id="must-reservation-checkin" type="date" name="checkin" value="' . \esc_attr((string) ($reservation['checkin'] ?? '')) . '" required /></td></tr>';
-    echo '<tr><th><label for="must-reservation-checkout">' . \esc_html__('Check-out', 'must-hotel-booking') . '</label></th><td><input id="must-reservation-checkout" type="date" name="checkout" value="' . \esc_attr((string) ($reservation['checkout'] ?? '')) . '" required /></td></tr>';
-    echo '<tr><th><label for="must-reservation-guests">' . \esc_html__('Guests', 'must-hotel-booking') . '</label></th><td><input id="must-reservation-guests" type="number" name="guests" min="1" value="' . \esc_attr((string) ((int) ($reservation['guests'] ?? 1))) . '" required /></td></tr>';
-    echo '<tr><th><label for="must-reservation-status">' . \esc_html__('Status', 'must-hotel-booking') . '</label></th><td><select id="must-reservation-status" name="status">';
-
-    foreach ($status_options as $value => $label) {
-        $selected = ((string) ($reservation['status'] ?? '') === $value) ? ' selected' : '';
-        echo '<option value="' . \esc_attr($value) . '"' . $selected . '>' . \esc_html($label) . '</option>';
+    foreach ($bulkActions as $value => $label) {
+        echo '<option value="' . \esc_attr((string) $value) . '">' . \esc_html((string) $label) . '</option>';
     }
 
-    echo '</select></td></tr>';
-    echo '<tr><th><label for="must-reservation-payment-status">' . \esc_html__('Payment Status', 'must-hotel-booking') . '</label></th><td><select id="must-reservation-payment-status" name="payment_status">';
-
-    foreach ($payment_status_options as $value => $label) {
-        $selected = ((string) ($reservation['payment_status'] ?? '') === $value) ? ' selected' : '';
-        echo '<option value="' . \esc_attr($value) . '"' . $selected . '>' . \esc_html($label) . '</option>';
-    }
-
-    echo '</select></td></tr>';
-    echo '<tr><th><label for="must-reservation-total">' . \esc_html__('Total price', 'must-hotel-booking') . '</label></th><td><input id="must-reservation-total" type="number" name="total_price" min="0" step="0.01" value="' . \esc_attr((string) ((float) ($reservation['total_price'] ?? 0))) . '" required /></td></tr>';
-    echo '</tbody></table>';
-
-    \submit_button(\__('Save Reservation', 'must-hotel-booking'));
-
-    echo '</form>';
+    echo '</select> ';
+    \submit_button(\__('Apply', 'must-hotel-booking'), 'secondary', '', false);
     echo '</div>';
-}
 
-/**
- * Render reservations table.
- *
- * @param array<int, array<string, mixed>> $reservations
- */
-function render_admin_reservations_table(array $reservations): void
-{
-    echo '<h2>' . \esc_html__('Reservations', 'must-hotel-booking') . '</h2>';
-    echo '<table class="widefat striped">';
+    echo '<table class="widefat striped must-reservations-table">';
     echo '<thead><tr>';
+    echo '<td class="check-column"><label class="screen-reader-text" for="must-reservations-toggle-all">' . \esc_html__('Select all reservations', 'must-hotel-booking') . '</label><input type="checkbox" id="must-reservations-toggle-all" /></td>';
     echo '<th>' . \esc_html__('Booking ID', 'must-hotel-booking') . '</th>';
-    echo '<th>' . \esc_html__('Guest Name', 'must-hotel-booking') . '</th>';
-    echo '<th>' . \esc_html__('Room', 'must-hotel-booking') . '</th>';
+    echo '<th>' . \esc_html__('Guest', 'must-hotel-booking') . '</th>';
+    echo '<th>' . \esc_html__('Accommodation', 'must-hotel-booking') . '</th>';
     echo '<th>' . \esc_html__('Check-in', 'must-hotel-booking') . '</th>';
     echo '<th>' . \esc_html__('Check-out', 'must-hotel-booking') . '</th>';
+    echo '<th>' . \esc_html__('Nights', 'must-hotel-booking') . '</th>';
     echo '<th>' . \esc_html__('Guests', 'must-hotel-booking') . '</th>';
-    echo '<th>' . \esc_html__('Status', 'must-hotel-booking') . '</th>';
-    echo '<th>' . \esc_html__('Total price', 'must-hotel-booking') . '</th>';
+    echo '<th>' . \esc_html__('Reservation Status', 'must-hotel-booking') . '</th>';
+    echo '<th>' . \esc_html__('Payment Status', 'must-hotel-booking') . '</th>';
+    echo '<th>' . \esc_html__('Payment Method', 'must-hotel-booking') . '</th>';
+    echo '<th>' . \esc_html__('Total', 'must-hotel-booking') . '</th>';
+    echo '<th>' . \esc_html__('Created', 'must-hotel-booking') . '</th>';
     echo '<th>' . \esc_html__('Actions', 'must-hotel-booking') . '</th>';
     echo '</tr></thead><tbody>';
 
-    if (empty($reservations)) {
-        echo '<tr><td colspan="9">' . \esc_html__('No reservations found.', 'must-hotel-booking') . '</td></tr>';
+    if (empty($rows)) {
+        echo '<tr><td colspan="13">' . \esc_html__('No reservations matched the current filters.', 'must-hotel-booking') . '</td></tr>';
         echo '</tbody></table>';
+        echo '</form>';
 
         return;
     }
 
-    foreach ($reservations as $reservation) {
-        $reservation_id = isset($reservation['id']) ? (int) $reservation['id'] : 0;
-        $view_url = get_admin_reservations_page_url(['action' => 'view', 'reservation_id' => $reservation_id]);
-        $edit_url = get_admin_reservations_page_url(['action' => 'edit', 'reservation_id' => $reservation_id]);
-        $cancel_url = \wp_nonce_url(
-            get_admin_reservations_page_url(['action' => 'cancel', 'reservation_id' => $reservation_id]),
-            'must_reservation_cancel_' . $reservation_id
-        );
-        $delete_url = \wp_nonce_url(
-            get_admin_reservations_page_url(['action' => 'delete', 'reservation_id' => $reservation_id]),
-            'must_reservation_delete_' . $reservation_id
-        );
-        $guest_name = \trim((string) ($reservation['guest_name'] ?? ''));
+    foreach ($rows as $row) {
+        if (!\is_array($row)) {
+            continue;
+        }
 
-        if ($guest_name === '') {
-            $guest_name = \__('N/A', 'must-hotel-booking');
+        $reservationId = isset($row['id']) ? (int) $row['id'] : 0;
+        $viewUrl = get_admin_reservation_row_action_url('view', $row, $returnUrl);
+        $editUrl = get_admin_reservation_row_action_url('edit', $row, $returnUrl);
+        $guestMeta = [];
+
+        if (!empty($row['guest_email'])) {
+            $guestMeta[] = (string) $row['guest_email'];
+        }
+
+        if (!empty($row['guest_phone'])) {
+            $guestMeta[] = (string) $row['guest_phone'];
         }
 
         echo '<tr>';
-        echo '<td>' . \esc_html(format_reservation_booking_id($reservation)) . '</td>';
-        echo '<td>' . \esc_html($guest_name) . '</td>';
-        echo '<td>' . \esc_html((string) ($reservation['room_name'] ?? '')) . '</td>';
-        echo '<td>' . \esc_html((string) ($reservation['checkin'] ?? '')) . '</td>';
-        echo '<td>' . \esc_html((string) ($reservation['checkout'] ?? '')) . '</td>';
-        echo '<td>' . \esc_html((string) ((int) ($reservation['guests'] ?? 0))) . '</td>';
-        echo '<td>' . \esc_html((string) ($reservation['status'] ?? '')) . '</td>';
-        echo '<td>' . \esc_html(\number_format_i18n((float) ($reservation['total_price'] ?? 0), 2)) . '</td>';
-        echo '<td>';
-        echo '<a class="button button-small" href="' . \esc_url($view_url) . '">' . \esc_html__('View reservation', 'must-hotel-booking') . '</a> ';
-        echo '<a class="button button-small" href="' . \esc_url($edit_url) . '">' . \esc_html__('Edit reservation', 'must-hotel-booking') . '</a> ';
-        echo '<a class="button button-small" href="' . \esc_url($cancel_url) . '">' . \esc_html__('Cancel reservation', 'must-hotel-booking') . '</a> ';
-        echo '<a class="button button-small button-link-delete" href="' . \esc_url($delete_url) . '" onclick="return confirm(\'' . \esc_js(__('Delete this reservation?', 'must-hotel-booking')) . '\');">' . \esc_html__('Delete reservation', 'must-hotel-booking') . '</a>';
+        echo '<th scope="row" class="check-column"><input type="checkbox" class="must-reservation-select" name="reservation_ids[]" value="' . \esc_attr((string) $reservationId) . '" /></th>';
+        echo '<td><strong><a href="' . \esc_url($viewUrl) . '">' . \esc_html((string) ($row['booking_id'] ?? '')) . '</a></strong></td>';
+        echo '<td><strong>' . \esc_html((string) ($row['guest'] ?? '')) . '</strong>';
+
+        if (!empty($guestMeta)) {
+            echo '<div class="description">' . \esc_html(\implode(' | ', $guestMeta)) . '</div>';
+        }
+
         echo '</td>';
+        echo '<td>' . \esc_html((string) ($row['accommodation'] ?? '')) . '</td>';
+        echo '<td>' . \esc_html((string) ($row['checkin'] ?? '')) . '</td>';
+        echo '<td>' . \esc_html((string) ($row['checkout'] ?? '')) . '</td>';
+        echo '<td>' . \esc_html((string) ((int) ($row['nights'] ?? 0))) . '</td>';
+        echo '<td>' . \esc_html((string) ((int) ($row['guests'] ?? 0))) . '</td>';
+        echo '<td>' . render_admin_reservation_badge((string) ($row['reservation_status'] ?? ''), (string) ($row['reservation_status_key'] ?? '')) . '</td>';
+        echo '<td>' . render_admin_reservation_badge((string) ($row['payment_status'] ?? ''), (string) ($row['payment_status_key'] ?? '')) . '</td>';
+        echo '<td>' . \esc_html(format_admin_reservation_method_label((string) ($row['payment_method_key'] ?? ''))) . '</td>';
+        echo '<td>' . \esc_html((string) ($row['total'] ?? '')) . '</td>';
+        echo '<td>' . \esc_html((string) ($row['created'] ?? '')) . '</td>';
+        echo '<td><div class="must-reservations-row-actions">';
+        echo '<a class="button button-small" href="' . \esc_url($viewUrl) . '">' . \esc_html__('View', 'must-hotel-booking') . '</a>';
+        echo '<a class="button button-small" href="' . \esc_url($editUrl) . '">' . \esc_html__('Edit', 'must-hotel-booking') . '</a>';
+
+        if (can_confirm_reservation_row($row)) {
+            echo '<a class="button button-small" href="' . \esc_url(get_admin_reservation_row_action_url('confirm', $row, $returnUrl)) . '">' . \esc_html__('Confirm', 'must-hotel-booking') . '</a>';
+        }
+
+        if (can_mark_reservation_paid_row($row)) {
+            echo '<a class="button button-small" href="' . \esc_url(get_admin_reservation_row_action_url('mark_paid', $row, $returnUrl)) . '">' . \esc_html__('Mark Paid', 'must-hotel-booking') . '</a>';
+        }
+
+        if (can_resend_reservation_email_row($row)) {
+            echo '<a class="button button-small" href="' . \esc_url(get_admin_reservation_row_action_url('resend_guest_email', $row, $returnUrl)) . '">' . \esc_html__('Resend Email', 'must-hotel-booking') . '</a>';
+        }
+
+        if (can_cancel_reservation_row($row)) {
+            echo '<a class="button button-small button-link-delete" href="' . \esc_url(get_admin_reservation_row_action_url('cancel', $row, $returnUrl)) . '" onclick="return confirm(\'' . \esc_js(__('Cancel this reservation?', 'must-hotel-booking')) . '\');">' . \esc_html__('Cancel', 'must-hotel-booking') . '</a>';
+        }
+
+        echo '</div></td>';
         echo '</tr>';
     }
 
     echo '</tbody></table>';
+    echo '</form>';
+}
+
+function render_admin_reservation_detail_action_form(
+    string $action,
+    string $label,
+    string $actionUrl,
+    int $reservationId,
+    string $returnUrl,
+    string $buttonClass = 'button button-secondary',
+    string $confirmMessage = ''
+): void {
+    $onsubmit = $confirmMessage !== ''
+        ? ' onsubmit="return confirm(\'' . \esc_js($confirmMessage) . '\');"'
+        : '';
+
+    echo '<form method="post" action="' . \esc_url($actionUrl) . '" class="must-reservation-inline-form"' . $onsubmit . '>';
+    \wp_nonce_field('must_reservation_admin_action', 'must_reservation_admin_nonce');
+    echo '<input type="hidden" name="must_reservation_admin_action" value="' . \esc_attr($action) . '" />';
+    echo '<input type="hidden" name="reservation_id" value="' . \esc_attr((string) $reservationId) . '" />';
+    echo '<input type="hidden" name="return_url" value="' . \esc_attr($returnUrl) . '" />';
+    echo '<button type="submit" class="' . \esc_attr($buttonClass) . '">' . \esc_html($label) . '</button>';
+    echo '</form>';
 }
 
 /**
- * Render reservations admin page.
+ * @param array<string, mixed> $detailData
  */
+function render_admin_reservation_detail_page_content(array $detailData): void
+{
+    $reservationId = isset($detailData['id']) ? (int) $detailData['id'] : 0;
+    $mode = isset($detailData['mode']) ? (string) $detailData['mode'] : 'view';
+    $bookingId = isset($detailData['booking_id']) ? (string) $detailData['booking_id'] : '';
+    $summary = isset($detailData['summary']) && \is_array($detailData['summary']) ? $detailData['summary'] : [];
+    $guest = isset($detailData['guest']) && \is_array($detailData['guest']) ? $detailData['guest'] : [];
+    $stay = isset($detailData['stay']) && \is_array($detailData['stay']) ? $detailData['stay'] : [];
+    $pricing = isset($detailData['pricing']) && \is_array($detailData['pricing']) ? $detailData['pricing'] : [];
+    $payments = isset($detailData['payments']) && \is_array($detailData['payments']) ? $detailData['payments'] : [];
+    $emails = isset($detailData['emails']) && \is_array($detailData['emails']) ? $detailData['emails'] : [];
+    $timeline = isset($detailData['timeline']) && \is_array($detailData['timeline']) ? $detailData['timeline'] : [];
+    $statusKey = isset($summary['reservation_status_key']) ? (string) $summary['reservation_status_key'] : '';
+    $paymentStatusKey = isset($summary['payment_status_key']) ? (string) $summary['payment_status_key'] : '';
+    $currentUrl = $mode === 'edit'
+        ? get_admin_reservation_detail_page_url($reservationId, ['mode' => 'edit'])
+        : get_admin_reservation_detail_page_url($reservationId);
+
+    echo '<div class="must-reservation-detail-header">';
+    echo '<div>';
+    echo '<h1>' . \esc_html($bookingId !== '' ? $bookingId : \__('Reservation', 'must-hotel-booking')) . '</h1>';
+    echo '<p class="description">' . \esc_html__('View guest, stay, payment, and communication context in one place, with safe admin actions for day-to-day reservation handling.', 'must-hotel-booking') . '</p>';
+    echo '</div>';
+    echo '<div class="must-reservation-header-actions">';
+    echo '<a class="button button-secondary" href="' . \esc_url(get_admin_reservations_page_url()) . '">' . \esc_html__('Back to Reservations', 'must-hotel-booking') . '</a>';
+
+    if ($mode === 'edit') {
+        echo '<a class="button button-secondary" href="' . \esc_url(get_admin_reservation_detail_page_url($reservationId)) . '">' . \esc_html__('View Mode', 'must-hotel-booking') . '</a>';
+    } else {
+        echo '<a class="button button-primary" href="' . \esc_url(get_admin_reservation_detail_page_url($reservationId, ['mode' => 'edit'])) . '">' . \esc_html__('Edit Guest & Notes', 'must-hotel-booking') . '</a>';
+    }
+
+    echo '<a class="button button-secondary" href="' . \esc_url(get_admin_reservation_create_page_url()) . '">' . \esc_html__('Add Reservation', 'must-hotel-booking') . '</a>';
+    echo '</div>';
+    echo '</div>';
+
+    echo '<div class="must-reservation-action-bar">';
+
+    if (!\in_array($statusKey, ['confirmed', 'completed', 'cancelled', 'blocked'], true)) {
+        render_admin_reservation_detail_action_form('confirm', \__('Confirm Reservation', 'must-hotel-booking'), $currentUrl, $reservationId, $currentUrl);
+    }
+
+    if (!\in_array($statusKey, ['pending', 'pending_payment', 'cancelled', 'blocked'], true)) {
+        render_admin_reservation_detail_action_form('mark_pending', \__('Mark Pending', 'must-hotel-booking'), $currentUrl, $reservationId, $currentUrl);
+    }
+
+    if (!\in_array($statusKey, ['cancelled', 'blocked'], true) && $paymentStatusKey !== 'paid') {
+        render_admin_reservation_detail_action_form('mark_paid', \__('Mark Paid', 'must-hotel-booking'), $currentUrl, $reservationId, $currentUrl);
+    }
+
+    if ($paymentStatusKey !== 'unpaid' && !\in_array($statusKey, ['cancelled', 'blocked'], true)) {
+        render_admin_reservation_detail_action_form('mark_unpaid', \__('Mark Unpaid', 'must-hotel-booking'), $currentUrl, $reservationId, $currentUrl);
+    }
+
+    if (\is_email((string) ($guest['email'] ?? ''))) {
+        render_admin_reservation_detail_action_form('resend_guest_email', \__('Resend Guest Confirmation', 'must-hotel-booking'), $currentUrl, $reservationId, $currentUrl);
+    }
+
+    render_admin_reservation_detail_action_form('resend_admin_email', \__('Resend Admin Email', 'must-hotel-booking'), $currentUrl, $reservationId, $currentUrl);
+
+    if (!\in_array($statusKey, ['cancelled', 'completed', 'blocked'], true)) {
+        render_admin_reservation_detail_action_form(
+            'cancel',
+            \__('Cancel Reservation', 'must-hotel-booking'),
+            $currentUrl,
+            $reservationId,
+            $currentUrl,
+            'button button-secondary',
+            \__('Cancel this reservation?', 'must-hotel-booking')
+        );
+    }
+
+    echo '<a class="button button-secondary" href="' . \esc_url(get_admin_emails_page_url()) . '">' . \esc_html__('Open Email Templates', 'must-hotel-booking') . '</a>';
+    echo '</div>';
+
+    echo '<div class="must-reservation-detail-layout">';
+    echo '<div class="must-reservation-detail-main">';
+
+    echo '<div class="postbox must-dashboard-panel"><div class="must-dashboard-panel-inner">';
+    echo '<h2>' . \esc_html__('Guest Details', 'must-hotel-booking') . '</h2>';
+
+    if ($mode === 'edit') {
+        echo '<form method="post" action="' . \esc_url($currentUrl) . '">';
+        \wp_nonce_field('must_reservation_admin_action', 'must_reservation_admin_nonce');
+        echo '<input type="hidden" name="must_reservation_admin_action" value="save_guest" />';
+        echo '<input type="hidden" name="reservation_id" value="' . \esc_attr((string) $reservationId) . '" />';
+        echo '<input type="hidden" name="return_url" value="' . \esc_attr($currentUrl) . '" />';
+        echo '<table class="form-table" role="presentation"><tbody>';
+        echo '<tr><th><label for="must-guest-first-name">' . \esc_html__('First name', 'must-hotel-booking') . '</label></th><td><input id="must-guest-first-name" type="text" name="guest_first_name" value="' . \esc_attr((string) ($guest['first_name'] ?? '')) . '" class="regular-text" /></td></tr>';
+        echo '<tr><th><label for="must-guest-last-name">' . \esc_html__('Last name', 'must-hotel-booking') . '</label></th><td><input id="must-guest-last-name" type="text" name="guest_last_name" value="' . \esc_attr((string) ($guest['last_name'] ?? '')) . '" class="regular-text" /></td></tr>';
+        echo '<tr><th><label for="must-guest-email">' . \esc_html__('Email', 'must-hotel-booking') . '</label></th><td><input id="must-guest-email" type="email" name="guest_email" value="' . \esc_attr((string) ($guest['email'] ?? '')) . '" class="regular-text" /></td></tr>';
+        echo '<tr><th><label for="must-guest-phone">' . \esc_html__('Phone', 'must-hotel-booking') . '</label></th><td><input id="must-guest-phone" type="text" name="guest_phone" value="' . \esc_attr((string) ($guest['phone'] ?? '')) . '" class="regular-text" /></td></tr>';
+        echo '<tr><th><label for="must-guest-country">' . \esc_html__('Country / Residence', 'must-hotel-booking') . '</label></th><td><input id="must-guest-country" type="text" name="guest_country" value="' . \esc_attr((string) ($guest['country'] ?? '')) . '" class="regular-text" /></td></tr>';
+        echo '</tbody></table>';
+        \submit_button(\__('Save Guest Details', 'must-hotel-booking'));
+        echo '</form>';
+    } else {
+        echo '<table class="widefat striped"><tbody>';
+        echo '<tr><th>' . \esc_html__('Guest', 'must-hotel-booking') . '</th><td>' . \esc_html((string) ($guest['full_name'] ?? \__('Guest details missing', 'must-hotel-booking'))) . '</td></tr>';
+        echo '<tr><th>' . \esc_html__('Email', 'must-hotel-booking') . '</th><td>' . \esc_html((string) ($guest['email'] ?? '')) . '</td></tr>';
+        echo '<tr><th>' . \esc_html__('Phone', 'must-hotel-booking') . '</th><td>' . \esc_html((string) ($guest['phone'] ?? '')) . '</td></tr>';
+        echo '<tr><th>' . \esc_html__('Country / Residence', 'must-hotel-booking') . '</th><td>' . \esc_html((string) ($guest['country'] ?? '')) . '</td></tr>';
+        echo '</tbody></table>';
+    }
+
+    echo '</div></div>';
+
+    echo '<div class="postbox must-dashboard-panel"><div class="must-dashboard-panel-inner">';
+    echo '<h2>' . \esc_html__('Pricing / Totals', 'must-hotel-booking') . '</h2>';
+    echo '<table class="widefat striped"><tbody>';
+    echo '<tr><th>' . \esc_html__('Base amount', 'must-hotel-booking') . '</th><td>&ndash;</td></tr>';
+    echo '<tr><th>' . \esc_html__('Discounts', 'must-hotel-booking') . '</th><td>&ndash;</td></tr>';
+    echo '<tr><th>' . \esc_html__('Taxes / Fees', 'must-hotel-booking') . '</th><td>&ndash;</td></tr>';
+    echo '<tr><th>' . \esc_html__('Final total', 'must-hotel-booking') . '</th><td>' . \esc_html(\number_format_i18n((float) ($pricing['stored_total'] ?? 0), 2) . ' ' . (string) ($pricing['currency'] ?? '')) . '</td></tr>';
+    echo '<tr><th>' . \esc_html__('Amount paid', 'must-hotel-booking') . '</th><td>' . \esc_html(\number_format_i18n((float) ($pricing['amount_paid'] ?? 0), 2) . ' ' . (string) ($pricing['currency'] ?? '')) . '</td></tr>';
+    echo '<tr><th>' . \esc_html__('Amount due', 'must-hotel-booking') . '</th><td>' . \esc_html(\number_format_i18n((float) ($pricing['amount_due'] ?? 0), 2) . ' ' . (string) ($pricing['currency'] ?? '')) . '</td></tr>';
+    echo '</tbody></table>';
+    echo '</div></div>';
+
+    echo '<div class="postbox must-dashboard-panel"><div class="must-dashboard-panel-inner">';
+    echo '<h2>' . \esc_html__('Payments', 'must-hotel-booking') . '</h2>';
+
+    if (empty($payments)) {
+        echo '<p class="must-dashboard-empty-state">' . \esc_html__('No payment ledger rows are linked to this reservation yet.', 'must-hotel-booking') . '</p>';
+    } else {
+        echo '<table class="widefat striped"><thead><tr>';
+        echo '<th>' . \esc_html__('Amount', 'must-hotel-booking') . '</th>';
+        echo '<th>' . \esc_html__('Method', 'must-hotel-booking') . '</th>';
+        echo '<th>' . \esc_html__('Status', 'must-hotel-booking') . '</th>';
+        echo '<th>' . \esc_html__('Reference', 'must-hotel-booking') . '</th>';
+        echo '<th>' . \esc_html__('Paid At', 'must-hotel-booking') . '</th>';
+        echo '<th>' . \esc_html__('Created', 'must-hotel-booking') . '</th>';
+        echo '</tr></thead><tbody>';
+
+        foreach ($payments as $paymentRow) {
+            if (!\is_array($paymentRow)) {
+                continue;
+            }
+
+            echo '<tr>';
+            echo '<td>' . \esc_html((string) ($paymentRow['amount'] ?? '')) . '</td>';
+            echo '<td>' . \esc_html((string) ($paymentRow['method'] ?? '')) . '</td>';
+            echo '<td>' . render_admin_reservation_badge((string) ($paymentRow['status'] ?? ''), (string) ($paymentRow['status_key'] ?? '')) . '</td>';
+            echo '<td>' . \esc_html((string) ($paymentRow['transaction_id'] ?? '')) . '</td>';
+            echo '<td>' . \esc_html((string) ($paymentRow['paid_at'] ?? '')) . '</td>';
+            echo '<td>' . \esc_html((string) ($paymentRow['created_at'] ?? '')) . '</td>';
+            echo '</tr>';
+        }
+
+        echo '</tbody></table>';
+    }
+
+    echo '</div></div>';
+
+    echo '<div class="postbox must-dashboard-panel"><div class="must-dashboard-panel-inner">';
+    echo '<h2>' . \esc_html__('Timeline / Activity', 'must-hotel-booking') . '</h2>';
+
+    if (empty($timeline)) {
+        echo '<p class="must-dashboard-empty-state">' . \esc_html__('No activity is recorded for this reservation yet.', 'must-hotel-booking') . '</p>';
+    } else {
+        echo '<div class="must-reservation-timeline">';
+
+        foreach ($timeline as $timelineRow) {
+            if (!\is_array($timelineRow)) {
+                continue;
+            }
+
+            echo '<div class="must-reservation-timeline-item">';
+            echo '<div class="must-reservation-timeline-meta">';
+            echo render_admin_reservation_badge((string) ($timelineRow['severity'] ?? ''), (string) ($timelineRow['severity'] ?? ''));
+            echo '<span>' . \esc_html((string) ($timelineRow['created_at'] ?? '')) . '</span>';
+            echo '</div>';
+            echo '<p>' . \esc_html((string) ($timelineRow['message'] ?? '')) . '</p>';
+
+            if (!empty($timelineRow['reference'])) {
+                echo '<p class="description">' . \esc_html((string) $timelineRow['reference']) . '</p>';
+            }
+
+            echo '</div>';
+        }
+
+        echo '</div>';
+    }
+
+    echo '</div></div>';
+
+    echo '</div>';
+    echo '<div class="must-reservation-detail-sidebar">';
+
+    echo '<div class="postbox must-dashboard-panel"><div class="must-dashboard-panel-inner">';
+    echo '<h2>' . \esc_html__('Summary', 'must-hotel-booking') . '</h2>';
+    echo '<table class="widefat striped"><tbody>';
+    echo '<tr><th>' . \esc_html__('Booking ID', 'must-hotel-booking') . '</th><td>' . \esc_html($bookingId) . '</td></tr>';
+    echo '<tr><th>' . \esc_html__('Reservation status', 'must-hotel-booking') . '</th><td>' . render_admin_reservation_badge((string) ($summary['reservation_status'] ?? ''), $statusKey) . '</td></tr>';
+    echo '<tr><th>' . \esc_html__('Payment status', 'must-hotel-booking') . '</th><td>' . render_admin_reservation_badge((string) ($summary['payment_status'] ?? ''), $paymentStatusKey) . '</td></tr>';
+    echo '<tr><th>' . \esc_html__('Payment method', 'must-hotel-booking') . '</th><td>' . \esc_html((string) ($summary['payment_method'] ?? '')) . '</td></tr>';
+    echo '<tr><th>' . \esc_html__('Created date', 'must-hotel-booking') . '</th><td>' . \esc_html((string) ($summary['created_at'] ?? '')) . '</td></tr>';
+    echo '<tr><th>' . \esc_html__('Last updated', 'must-hotel-booking') . '</th><td>&ndash;</td></tr>';
+    echo '<tr><th>' . \esc_html__('Source / Channel', 'must-hotel-booking') . '</th><td>' . \esc_html((string) ($summary['source'] ?? '')) . '</td></tr>';
+    echo '</tbody></table>';
+    echo '</div></div>';
+
+    echo '<div class="postbox must-dashboard-panel"><div class="must-dashboard-panel-inner">';
+    echo '<h2>' . \esc_html__('Emails / Communication', 'must-hotel-booking') . '</h2>';
+
+    if (empty($emails)) {
+        echo '<p class="must-dashboard-empty-state">' . \esc_html__('No email events are recorded for this reservation yet.', 'must-hotel-booking') . '</p>';
+    } else {
+        echo '<table class="widefat striped"><thead><tr>';
+        echo '<th>' . \esc_html__('When', 'must-hotel-booking') . '</th>';
+        echo '<th>' . \esc_html__('Status', 'must-hotel-booking') . '</th>';
+        echo '<th>' . \esc_html__('Message', 'must-hotel-booking') . '</th>';
+        echo '</tr></thead><tbody>';
+
+        foreach ($emails as $emailRow) {
+            if (!\is_array($emailRow)) {
+                continue;
+            }
+
+            echo '<tr>';
+            echo '<td>' . \esc_html((string) ($emailRow['created_at'] ?? '')) . '</td>';
+            echo '<td>' . render_admin_reservation_badge((string) ($emailRow['event_type'] ?? ''), (string) ($emailRow['severity'] ?? '')) . '</td>';
+            echo '<td>' . \esc_html((string) ($emailRow['message'] ?? '')) . '</td>';
+            echo '</tr>';
+        }
+
+        echo '</tbody></table>';
+    }
+
+    echo '</div></div>';
+
+    echo '</div>';
+    echo '</div>';
+}
+
 function render_admin_reservations_page(): void
 {
     ensure_admin_capability();
 
-    maybe_handle_cancel_reservation_request();
-    maybe_handle_delete_reservation_request();
-
-    $submit_errors = maybe_handle_edit_reservation_submission();
-    $action = isset($_GET['action']) ? \sanitize_key((string) \wp_unslash($_GET['action'])) : '';
-    $reservation_id = isset($_GET['reservation_id']) ? \absint(\wp_unslash($_GET['reservation_id'])) : 0;
-    $selected_reservation = $reservation_id > 0 ? get_reservation_row($reservation_id) : null;
-    $reservations = get_reservations_list_rows();
+    $provider = new ReservationAdminDataProvider();
+    /** @var array<string, mixed> $request */
+    $request = \is_array($_GET) ? \wp_unslash($_GET) : [];
+    $pageData = $provider->getListPageData($request);
+    $filters = isset($pageData['filters']) && \is_array($pageData['filters']) ? $pageData['filters'] : [];
+    $pagination = isset($pageData['pagination']) && \is_array($pageData['pagination']) ? $pageData['pagination'] : [];
+    $quickFilters = isset($pageData['quick_filters']) && \is_array($pageData['quick_filters']) ? $pageData['quick_filters'] : [];
 
     echo '<div class="wrap">';
+    echo '<div class="must-reservations-header">';
+    echo '<div>';
     echo '<h1>' . \esc_html__('Reservations', 'must-hotel-booking') . '</h1>';
+    echo '<p class="description">' . \esc_html__('Search, filter, and act on reservations quickly, then open a single reservation detail page for guest, stay, payment, email, and activity context.', 'must-hotel-booking') . '</p>';
+    echo '</div>';
+    echo '<div class="must-reservations-header-actions">';
+    echo '<a class="button button-primary" href="' . \esc_url(get_admin_reservation_create_page_url()) . '">' . \esc_html__('Add Reservation', 'must-hotel-booking') . '</a>';
+    echo '</div>';
+    echo '</div>';
 
-    render_reservations_admin_notice_from_query();
+    render_admin_reservations_notice_from_query();
+    render_admin_reservations_quick_filters($quickFilters);
+    render_admin_reservations_filters($filters, $pageData);
+    render_admin_reservations_pagination($pagination, $filters);
+    render_admin_reservations_table($pageData);
+    render_admin_reservations_pagination($pagination, $filters);
 
-    if (!empty($submit_errors)) {
-        echo '<div class="notice notice-error"><ul>';
-
-        foreach ($submit_errors as $error) {
-            echo '<li>' . \esc_html((string) $error) . '</li>';
-        }
-
-        echo '</ul></div>';
-    }
-
-    if (($action === 'view' || $action === 'edit') && $reservation_id > 0) {
-        if (\is_array($selected_reservation)) {
-            if ($action === 'view') {
-                render_admin_reservation_view_panel($selected_reservation);
-            } else {
-                render_admin_reservation_edit_panel($selected_reservation);
-            }
-        } else {
-            echo '<div class="notice notice-error"><p>' . \esc_html__('Reservation not found.', 'must-hotel-booking') . '</p></div>';
-        }
-    }
-
-    render_admin_reservations_table($reservations);
+    echo '<script>';
+    echo 'document.addEventListener("DOMContentLoaded",function(){var toggle=document.getElementById("must-reservations-toggle-all");if(!toggle){return;}toggle.addEventListener("change",function(){document.querySelectorAll(".must-reservation-select").forEach(function(box){box.checked=toggle.checked;});});});';
+    echo '</script>';
     echo '</div>';
 }
 
-/**
- * Handle reservation admin actions before page output starts.
- */
+function render_admin_reservation_detail_page(): void
+{
+    ensure_admin_capability();
+
+    $reservationId = isset($_GET['reservation_id']) ? \absint(\wp_unslash($_GET['reservation_id'])) : 0;
+    $mode = isset($_GET['mode']) ? \sanitize_key((string) \wp_unslash($_GET['mode'])) : 'view';
+    $provider = new ReservationAdminDataProvider();
+    $detailData = $provider->getDetailPageData($reservationId, $mode);
+
+    echo '<div class="wrap">';
+    render_admin_reservations_notice_from_query();
+
+    if (!\is_array($detailData)) {
+        echo '<h1>' . \esc_html__('Reservation not found', 'must-hotel-booking') . '</h1>';
+        echo '<div class="notice notice-error"><p>' . \esc_html__('The selected reservation could not be loaded.', 'must-hotel-booking') . '</p></div>';
+        echo '<p><a class="button button-secondary" href="' . \esc_url(get_admin_reservations_page_url()) . '">' . \esc_html__('Back to Reservations', 'must-hotel-booking') . '</a></p>';
+        echo '</div>';
+
+        return;
+    }
+
+    render_admin_reservation_detail_page_content($detailData);
+    echo '</div>';
+}
+
+function render_admin_reservation_create_page(): void
+{
+    ensure_admin_capability();
+
+    $quickBookingState = [
+        'errors' => [],
+        'form' => null,
+    ];
+
+    if (\function_exists(__NAMESPACE__ . '\maybe_handle_admin_quick_booking_submission')) {
+        $quickBookingState = maybe_handle_admin_quick_booking_submission();
+    }
+
+    $quickBookingErrors = isset($quickBookingState['errors']) && \is_array($quickBookingState['errors'])
+        ? $quickBookingState['errors']
+        : [];
+    $quickBookingForm = isset($quickBookingState['form']) && \is_array($quickBookingState['form'])
+        ? $quickBookingState['form']
+        : null;
+
+    echo '<div class="wrap">';
+    echo '<div class="must-reservations-header">';
+    echo '<div>';
+    echo '<h1>' . \esc_html__('Add Reservation', 'must-hotel-booking') . '</h1>';
+    echo '<p class="description">' . \esc_html__('Use the validated quick-booking flow here to create a manual reservation and land directly on its reservation detail screen.', 'must-hotel-booking') . '</p>';
+    echo '</div>';
+    echo '<div class="must-reservations-header-actions">';
+    echo '<a class="button button-secondary" href="' . \esc_url(get_admin_reservations_page_url()) . '">' . \esc_html__('Back to Reservations', 'must-hotel-booking') . '</a>';
+    echo '</div>';
+    echo '</div>';
+
+    render_admin_reservations_notice_from_query();
+
+    if (\function_exists(__NAMESPACE__ . '\render_admin_quick_booking_panel')) {
+        render_admin_quick_booking_panel(
+            $quickBookingForm,
+            $quickBookingErrors,
+            [
+                'action_url' => get_admin_reservation_create_page_url(),
+                'redirect_target' => 'reservation_detail',
+            ]
+        );
+    }
+
+    echo '</div>';
+}
+
 function maybe_handle_admin_reservations_actions_early(): void
 {
     if (!isset($_GET['page'])) {
@@ -505,15 +1043,21 @@ function maybe_handle_admin_reservations_actions_early(): void
 
     $page = \sanitize_key((string) \wp_unslash($_GET['page']));
 
-    if ($page !== 'must-hotel-booking-reservations') {
+    if (\in_array($page, ['must-hotel-booking-reservations', 'must-hotel-booking-reservation'], true)) {
+        (new ReservationAdminActions())->handleRequest();
+
+        return;
+    }
+
+    if ($page !== 'must-hotel-booking-reservation-create') {
         return;
     }
 
     ensure_admin_capability();
 
-    maybe_handle_cancel_reservation_request();
-    maybe_handle_delete_reservation_request();
-    maybe_handle_edit_reservation_submission();
+    if (\function_exists(__NAMESPACE__ . '\maybe_handle_admin_quick_booking_submission')) {
+        maybe_handle_admin_quick_booking_submission();
+    }
 }
 
 \add_action('admin_init', __NAMESPACE__ . '\maybe_handle_admin_reservations_actions_early', 1);

@@ -2,7 +2,7 @@
 /**
  * Plugin Name: MUST Hotel Booking
  * Description: Hotel booking management for room availability, reservations, and checkout workflows.
- * Version: 0.3.18
+ * Version: 0.3.19
  * Author: MUST
  * Requires at least: 5.0
  * Requires PHP: 7.4
@@ -15,7 +15,7 @@ if (!\defined('ABSPATH')) {
     exit;
 }
 
-\define('MUST_HOTEL_BOOKING_VERSION', '0.3.18');
+\define('MUST_HOTEL_BOOKING_VERSION', '0.3.19');
 \define('MUST_HOTEL_BOOKING_FILE', __FILE__);
 \define('MUST_HOTEL_BOOKING_PATH', \plugin_dir_path(__FILE__));
 \define('MUST_HOTEL_BOOKING_URL', \plugin_dir_url(__FILE__));

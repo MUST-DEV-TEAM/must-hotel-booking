@@ -35,6 +35,7 @@ final class Plugin
     {
         \MustHotelBooking\Core\ManagedPages::sync();
 
+        \MustHotelBooking\Core\ActivityLogger::registerHooks();
         \MustHotelBooking\Engine\LockEngine::registerHooks();
         \MustHotelBooking\Engine\PaymentEngine::registerHooks();
         \MustHotelBooking\Engine\AvailabilityAjaxController::registerHooks();
