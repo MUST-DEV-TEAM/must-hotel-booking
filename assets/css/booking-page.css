@@ -1963,6 +1963,7 @@ body .must-booking-room-modal .must-booking-room-modal-close:active {
 .must-hotel-booking-page-checkout .must-checkout-field textarea:focus-visible,
 .must-hotel-booking-page-checkout .must-checkout-field textarea:active {
     border-color: #141414;
+    border: 1px solid #141414 ;
     background: transparent;
     color: #141414;
     box-shadow: none;
@@ -1981,6 +1982,10 @@ body .must-booking-room-modal .must-booking-room-modal-close:active {
     color: #141414;
     box-shadow: none;
     outline: none;
+}
+
+.must-checkout-phone-shell input:focus{
+    border: none;
 }
 
 .must-hotel-booking-page-checkout .must-checkout-coupon-control input::placeholder {

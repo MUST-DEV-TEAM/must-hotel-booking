@@ -9,6 +9,7 @@ use MustHotelBooking\Database\CouponRepository;
 use MustHotelBooking\Database\GuestRepository;
 use MustHotelBooking\Database\InventoryRepository;
 use MustHotelBooking\Database\PaymentRepository;
+use MustHotelBooking\Database\ReportRepository;
 use MustHotelBooking\Database\RatePlanRepository;
 use MustHotelBooking\Database\ReservationRepository;
 use MustHotelBooking\Database\RoomRepository;
@@ -52,6 +53,17 @@ function get_inventory_repository(): InventoryRepository
 
     if (!$repository instanceof InventoryRepository) {
         $repository = new InventoryRepository();
+    }
+
+    return $repository;
+}
+
+function get_report_repository(): ReportRepository
+{
+    static $repository = null;
+
+    if (!$repository instanceof ReportRepository) {
+        $repository = new ReportRepository();
     }
 
     return $repository;
