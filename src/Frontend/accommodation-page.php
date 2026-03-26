@@ -420,11 +420,11 @@ function enqueue_booking_accommodation_page_assets(): void
                 'lightboxNext' => MUST_HOTEL_BOOKING_URL . 'assets/img/lightboxright.svg',
             ],
             'labels' => [
-                'addRoom' => \__('Book Now', 'must-hotel-booking'),
+                'addRoom' => \__('Select', 'must-hotel-booking'),
                 'removeRoom' => \__('Remove Room', 'must-hotel-booking'),
                 'removeSelection' => \__('Remove Selection', 'must-hotel-booking'),
                 'chooseRate' => \__('Choose This Rate', 'must-hotel-booking'),
-                'bookNow' => \__('Book Now', 'must-hotel-booking'),
+                'bookNow' => \__('Select', 'must-hotel-booking'),
                 'selectionFull' => \__('Selection Full', 'must-hotel-booking'),
                 'requestFailed' => \__('Unable to update your room selection right now. Please try again.', 'must-hotel-booking'),
             ],

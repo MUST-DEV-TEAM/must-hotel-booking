@@ -44,6 +44,16 @@ final class AccommodationAdminActions
     {
         $action = $query->getAction();
 
+        if ($action === AccommodationImportExportService::ACTION_EXPORT_WORKBOOK) {
+            $this->handleWorkbookDownload(false);
+            return;
+        }
+
+        if ($action === AccommodationImportExportService::ACTION_DOWNLOAD_TEMPLATE) {
+            $this->handleWorkbookDownload(true);
+            return;
+        }
+
         if ($action === 'toggle_type_status') {
             $this->toggleTypeStatus($query);
             return;
@@ -85,7 +95,28 @@ final class AccommodationAdminActions
             return $this->saveUnit();
         }
 
+        if ($action === AccommodationImportExportService::ACTION_IMPORT_WORKBOOK) {
+            (new AccommodationImportExportService())->handleImportUpload($query);
+        }
+
         return $this->blankState();
+    }
+
+    private function handleWorkbookDownload(bool $template): void
+    {
+        $nonce = isset($_GET['_wpnonce']) ? (string) \wp_unslash($_GET['_wpnonce']) : '';
+        $action = $template
+            ? AccommodationImportExportService::ACTION_DOWNLOAD_TEMPLATE
+            : AccommodationImportExportService::ACTION_EXPORT_WORKBOOK;
+
+        if (!\wp_verify_nonce($nonce, $action)) {
+            $this->redirectToRoomsPage([
+                'tab' => 'types',
+                'notice' => 'invalid_nonce',
+            ]);
+        }
+
+        (new AccommodationImportExportService())->handleExportDownload($template);
     }
 
     /**
@@ -365,6 +396,7 @@ final class AccommodationAdminActions
     private function sanitizeTypeValues(array $source): array
     {
         $typeId = isset($source['type_id']) ? \absint(\wp_unslash($source['type_id'])) : 0;
+        $existingType = $typeId > 0 ? $this->roomRepository->getRoomById($typeId) : null;
         $name = isset($source['name']) ? \sanitize_text_field((string) \wp_unslash($source['name'])) : '';
         $slugInput = isset($source['slug']) ? \sanitize_title((string) \wp_unslash($source['slug'])) : '';
         $category = isset($source['category']) ? RoomCatalog::normalizeCategory((string) \wp_unslash($source['category'])) : 'standard-rooms';
@@ -376,6 +408,9 @@ final class AccommodationAdminActions
         $maxGuests = isset($source['max_guests']) ? \max(1, \absint(\wp_unslash($source['max_guests']))) : 1;
         $defaultOccupancy = isset($source['default_occupancy']) ? \max(1, \absint(\wp_unslash($source['default_occupancy']))) : 1;
         $basePrice = isset($source['base_price']) ? \round(\max(0.0, (float) \wp_unslash($source['base_price'])), 2) : 0.0;
+        $extraGuestPrice = \array_key_exists('extra_guest_price', $source)
+            ? \round(\max(0.0, (float) \wp_unslash($source['extra_guest_price'])), 2)
+            : (\is_array($existingType) ? \round(\max(0.0, (float) ($existingType['extra_guest_price'] ?? 0.0)), 2) : 0.0);
         $roomSize = isset($source['room_size']) ? \sanitize_text_field((string) \wp_unslash($source['room_size'])) : '';
         $beds = isset($source['beds']) ? \sanitize_text_field((string) \wp_unslash($source['beds'])) : '';
         $roomRules = isset($source['room_rules']) ? \sanitize_textarea_field((string) \wp_unslash($source['room_rules'])) : '';
@@ -421,7 +456,7 @@ final class AccommodationAdminActions
             'max_guests' => $maxGuests,
             'default_occupancy' => $defaultOccupancy,
             'base_price' => $basePrice,
-            'extra_guest_price' => 0.0,
+            'extra_guest_price' => $extraGuestPrice,
             'room_size' => $roomSize,
             'beds' => $beds,
             'room_rules' => $roomRules,

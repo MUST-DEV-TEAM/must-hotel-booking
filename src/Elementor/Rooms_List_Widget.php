@@ -201,6 +201,7 @@ class Rooms_List_Widget extends \Elementor\Widget_Base
 
             echo '</div>';
             echo '<div class="must-hotel-booking-rooms-list-content">';
+            echo '<div class="must-hotel-booking-rooms-list-section must-hotel-booking-rooms-list-section-copy">';
             echo '<div class="must-hotel-booking-rooms-list-header">';
             echo '<h3>' . \esc_html($room_name) . '</h3>';
 
@@ -209,6 +210,8 @@ class Rooms_List_Widget extends \Elementor\Widget_Base
             }
 
             echo '</div>';
+            echo '</div>';
+            echo '<div class="must-hotel-booking-rooms-list-section must-hotel-booking-rooms-list-section-media">';
             echo '<div class="must-hotel-booking-rooms-list-thumbs">';
 
             if (!empty($thumbnail_urls)) {
@@ -226,6 +229,8 @@ class Rooms_List_Widget extends \Elementor\Widget_Base
             }
 
             echo '</div>';
+            echo '</div>';
+            echo '<div class="must-hotel-booking-rooms-list-section must-hotel-booking-rooms-list-section-actions">';
             echo '<div class="must-hotel-booking-rooms-list-actions">';
             echo '<a class="must-hotel-booking-rooms-list-book" href="' . \esc_url($book_url) . '">';
             echo '<span class="must-hotel-booking-rooms-list-book-text">' . \esc_html__('Book Now', 'must-hotel-booking') . '</span>';
@@ -235,6 +240,7 @@ class Rooms_List_Widget extends \Elementor\Widget_Base
             echo '<span class="must-hotel-booking-rooms-list-details-text">' . \esc_html__('Additional Details', 'must-hotel-booking') . '</span>';
             echo '<img class="must-hotel-booking-rooms-list-details-icon" src="' . \esc_url($bed_icon_url) . '" alt="" aria-hidden="true" />';
             echo '</a>';
+            echo '</div>';
             echo '</div>';
             echo '</div>';
             echo '</article>';

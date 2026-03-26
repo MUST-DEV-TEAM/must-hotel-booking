@@ -85,14 +85,7 @@ function get_single_room_url(string $slug): string
  */
 function get_single_room_inquiry_url(array $room): string
 {
-    $room_name = isset($room['name']) ? (string) $room['name'] : \__('Room Inquiry', 'must-hotel-booking');
-    $subject = \sprintf(
-        /* translators: %s is room name. */
-        \__('Inquiry about %s', 'must-hotel-booking'),
-        $room_name
-    );
-
-    return 'mailto:' . \antispambot((string) \get_option('admin_email')) . '?subject=' . \rawurlencode($subject);
+    return \home_url('/contact/');
 }
 
 /**
@@ -182,7 +175,7 @@ function get_single_room_page_view_data(): array
             'room' => null,
             'booking_url' => ManagedPages::getBookingPageUrl(),
             'rooms_url' => ManagedPages::getRoomsPageUrl(),
-            'terms_url' => \home_url('/terms-and-conditions'),
+            'terms_url' => \home_url('/terms-conditions/'),
         ];
     }
 
@@ -223,7 +216,7 @@ function get_single_room_page_view_data(): array
         'booking_url' => $booking_url,
         'inquiry_url' => get_single_room_inquiry_url($room),
         'rooms_url' => ManagedPages::getRoomsPageUrl(),
-        'terms_url' => \home_url('/terms-and-conditions'),
+        'terms_url' => \home_url('/terms-conditions/'),
         'people_icon_url' => MUST_HOTEL_BOOKING_URL . 'assets/img/PeopleFill.svg',
         'surface_icon_url' => MUST_HOTEL_BOOKING_URL . 'assets/img/Surface.svg',
         'arrow_icon_url' => MUST_HOTEL_BOOKING_URL . 'assets/img/ArrowRight.svg',

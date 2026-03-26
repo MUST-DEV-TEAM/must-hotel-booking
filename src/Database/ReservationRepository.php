@@ -317,7 +317,7 @@ final class ReservationRepository extends AbstractRepository
         if ($filters['limit'] > 0) {
             $sql .= ' LIMIT %d';
             $params[] = $filters['limit'];
-        } else {
+        } elseif (!empty($filters['paginate'])) {
             $sql .= ' LIMIT %d OFFSET %d';
             $params[] = $filters['per_page'];
             $params[] = $filters['offset'];
@@ -467,6 +467,31 @@ final class ReservationRepository extends AbstractRepository
         $counts['failed_payment'] = isset($row['failed_payment']) ? (int) $row['failed_payment'] : 0;
 
         return $counts;
+    }
+
+    /**
+     * @return array<int, array<string, mixed>>
+     */
+    public function getAdminReservationQuickFilterRows(): array
+    {
+        if (!$this->reservationsTableExists()) {
+            return [];
+        }
+
+        $rows = $this->wpdb->get_results(
+            'SELECT
+                id,
+                checkin,
+                checkout,
+                status,
+                total_price,
+                payment_status
+            FROM ' . $this->table('reservations') . '
+            ORDER BY id ASC',
+            ARRAY_A
+        );
+
+        return \is_array($rows) ? $rows : [];
     }
 
     /**
@@ -1639,6 +1664,7 @@ final class ReservationRepository extends AbstractRepository
         $paged = \max(1, $paged);
 
         return [
+            'paginate' => !isset($filters['paginate']) || (bool) $filters['paginate'],
             'limit' => $limit > 0 ? \min(200, $limit) : 0,
             'offset' => $limit > 0 ? 0 : (($paged - 1) * $perPage),
             'per_page' => $perPage,

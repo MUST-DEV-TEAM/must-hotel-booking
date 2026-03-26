@@ -70,6 +70,7 @@ final class ReportAdminDataProvider
                 \__('Reservation and revenue sections are based on reservations created in the selected date range.', 'must-hotel-booking'),
                 \__('Stay and occupancy sections are based on reservations whose stay overlaps the selected date range.', 'must-hotel-booking'),
                 \__('Booked revenue uses reservation totals. Amount paid and amount due use the payment ledger and normalized payment state.', 'must-hotel-booking'),
+                \__('Available nights exclude inactive or non-bookable inventory, units marked unavailable, and maintenance-blocked dates. Closed-arrival and closed-departure rules are not removed from occupancy capacity.', 'must-hotel-booking'),
                 \__('Coupon discounts are applied after nightly pricing and fees, before taxes.', 'must-hotel-booking'),
             ],
             'kpis' => [
@@ -112,7 +113,7 @@ final class ReportAdminDataProvider
                             \number_format_i18n((int) $summary['occupied_nights']),
                             \number_format_i18n((int) $summary['available_nights'])
                         )
-                        : \__('Occupancy requires active inventory units.', 'must-hotel-booking'),
+                        : \__('Occupancy requires sellable inventory units in the current inventory model.', 'must-hotel-booking'),
                 ],
                 [
                     'label' => \__('Average Booking Value', 'must-hotel-booking'),
@@ -238,11 +239,13 @@ final class ReportAdminDataProvider
             : 0.0;
         $summary['average_length_of_stay'] = $losCount > 0 ? \round($losTotal / $losCount, 1) : 0.0;
 
-        $inventoryUnits = $this->reportRepository->countAvailableInventoryUnits($query->getRoomId());
-        $days = $this->countDaysInclusive($query->getDateFrom(), $query->getDateTo());
+        $summary['available_nights'] = $this->reportRepository->calculateAvailableInventoryNights(
+            $query->getDateFrom(),
+            $query->getDateTo(),
+            $query->getRoomId()
+        );
 
-        if ($inventoryUnits > 0 && $days > 0) {
-            $summary['available_nights'] = $inventoryUnits * $days;
+        if ((int) $summary['available_nights'] > 0) {
             $summary['occupancy_percent'] = $summary['available_nights'] > 0
                 ? \round(((int) $summary['occupied_nights'] / (int) $summary['available_nights']) * 100, 1)
                 : 0.0;
@@ -620,18 +623,6 @@ final class ReportAdminDataProvider
         $paymentState = isset($row['payment_state']) && \is_array($row['payment_state']) ? $row['payment_state'] : [];
 
         return (string) ($paymentState['method'] ?? '') === $method;
-    }
-
-    private function countDaysInclusive(string $dateFrom, string $dateTo): int
-    {
-        if ($dateFrom === '' || $dateTo === '') {
-            return 0;
-        }
-
-        $from = new \DateTimeImmutable($dateFrom);
-        $to = new \DateTimeImmutable($dateTo);
-
-        return (int) $from->diff($to)->format('%a') + 1;
     }
 
     private function calculateNights(string $checkin, string $checkout): int

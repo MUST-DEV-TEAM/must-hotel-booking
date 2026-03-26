@@ -2,6 +2,8 @@
 
 namespace MustHotelBooking\Admin;
 
+use MustHotelBooking\Core\StaffAccess;
+
 if (!\function_exists(__NAMESPACE__ . '\render_admin_rooms_page')) {
     require_once __DIR__ . '/rooms.php';
 }
@@ -9,17 +11,27 @@ if (!\function_exists(__NAMESPACE__ . '\render_admin_rooms_page')) {
 /**
  * Get capability required for plugin admin pages.
  */
-function get_admin_capability(): string
+function get_admin_capability(string $pageSlug = ''): string
 {
+    $pageSlug = $pageSlug !== ''
+        ? \sanitize_key($pageSlug)
+        : (isset($_REQUEST['page']) ? \sanitize_key((string) \wp_unslash($_REQUEST['page'])) : '');
+
+    if ($pageSlug === 'must-hotel-booking-settings') {
+        return StaffAccess::getSettingsCapability();
+    }
+
     return 'manage_options';
 }
 
 /**
  * Ensure the current user can access plugin admin pages.
  */
-function ensure_admin_capability(): void
+function ensure_admin_capability(string $pageSlug = ''): void
 {
-    if (!\current_user_can(get_admin_capability())) {
+    $capability = get_admin_capability($pageSlug);
+
+    if (!\current_user_can($capability) && !\current_user_can('manage_options')) {
         \wp_die(\esc_html__('You do not have permission to access this page.', 'must-hotel-booking'));
     }
 }
@@ -29,13 +41,12 @@ function ensure_admin_capability(): void
  */
 function register_admin_menu(): void
 {
-    $capability = get_admin_capability();
     $parentSlug = 'must-hotel-booking';
 
     \add_menu_page(
         'MUST Hotel Booking',
         'MUST Hotel Booking',
-        $capability,
+        'manage_options',
         $parentSlug,
         __NAMESPACE__ . '\render_admin_dashboard_page',
         'dashicons-calendar',
@@ -47,7 +58,7 @@ function register_admin_menu(): void
             $parentSlug,
             (string) $page['title'],
             (string) $page['menu_title'],
-            $capability,
+            get_admin_capability((string) $page['slug']),
             (string) $page['slug'],
             (string) $page['callback']
         );
@@ -58,7 +69,7 @@ function register_admin_menu(): void
             null,
             (string) $page['title'],
             (string) $page['menu_title'],
-            $capability,
+            get_admin_capability((string) $page['slug']),
             (string) $page['slug'],
             (string) $page['callback']
         );

@@ -8,7 +8,9 @@ final class Plugin
     {
         \MustHotelBooking\Database\install_tables();
         \MustHotelBooking\Core\ManagedPages::install();
+        \MustHotelBooking\Core\StaffAccess::syncRoleCapabilities();
         \MustHotelBooking\Engine\LockEngine::scheduleCleanupCron();
+        \MustHotelBooking\Portal\PortalBootstrap::registerRewriteRules();
 
         \flush_rewrite_rules();
     }
@@ -34,12 +36,15 @@ final class Plugin
     public static function initPlugin(): void
     {
         \MustHotelBooking\Core\ManagedPages::sync();
+        \MustHotelBooking\Core\StaffAccess::syncRoleCapabilities();
+        \MustHotelBooking\Core\Updater::boot();
 
         \MustHotelBooking\Core\ActivityLogger::registerHooks();
         \MustHotelBooking\Engine\LockEngine::registerHooks();
         \MustHotelBooking\Engine\PaymentEngine::registerHooks();
         \MustHotelBooking\Engine\AvailabilityAjaxController::registerHooks();
         \MustHotelBooking\Engine\EmailEngine::registerHooks();
+        \MustHotelBooking\Portal\PortalBootstrap::registerHooks();
 
         \do_action('must_hotel_booking/init');
     }

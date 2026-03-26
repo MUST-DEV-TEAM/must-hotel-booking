@@ -61,6 +61,68 @@ $country_picker_has_selection = \is_array($selected_country_option) && $selected
 $phone_picker_search_placeholder = \__('Search code or country', 'must-hotel-booking');
 $country_picker_search_placeholder = \__('Search country', 'must-hotel-booking');
 $picker_no_results_label = \__('No matches found.', 'must-hotel-booking');
+$success_icon_url = \defined('MUST_HOTEL_BOOKING_URL') ? MUST_HOTEL_BOOKING_URL . 'assets/img/PatchCheckFill.svg' : '';
+$success_offer_image_url = \defined('MUST_HOTEL_BOOKING_URL') ? MUST_HOTEL_BOOKING_URL . 'assets/img/imgoffer.jpg' : '';
+$paid_success_heading = \__('Thank You!', 'must-hotel-booking');
+$paid_success_title = \__('Your payment has been successful', 'must-hotel-booking');
+$paid_success_message = \__('Your booking confirmation has been sent to your email.', 'must-hotel-booking');
+$confirmed_success_title = \__('Your booking has been successful', 'must-hotel-booking');
+$confirmed_success_message = \__('Your booking confirmation has been sent to your email.', 'must-hotel-booking');
+$hotel_payment_success_message = \__('Your booking confirmation has been sent to your email. Payment will be collected at the hotel.', 'must-hotel-booking');
+$paid_success_cta_label = \__('Book Other', 'must-hotel-booking');
+$is_confirmation_success_layout = false;
+$confirmation_success_title = $paid_success_title;
+$confirmation_success_message = $paid_success_message;
+
+if ($success && !empty($reservations)) {
+    $statuses = [];
+    $payment_statuses = [];
+
+    foreach ($reservations as $reservation) {
+        if (!\is_array($reservation)) {
+            continue;
+        }
+
+        $statuses[] = \sanitize_key((string) ($reservation['status'] ?? ''));
+        $payment_statuses[] = \sanitize_key((string) ($reservation['payment_status'] ?? ''));
+    }
+
+    $statuses = \array_values(\array_unique(\array_filter(
+        $statuses,
+        static function ($status): bool {
+            return $status !== '';
+        }
+    )));
+    $payment_statuses = \array_values(\array_unique(\array_filter(
+        $payment_statuses,
+        static function ($status): bool {
+            return $status !== '';
+        }
+    )));
+
+    $has_paid_payment_status = \count($payment_statuses) === 1 && $payment_statuses[0] === 'paid';
+    $has_confirmed_reservations = !empty($statuses);
+
+    foreach ($statuses as $status) {
+        if (!\MustHotelBooking\Core\ReservationStatus::isConfirmed((string) $status)) {
+            $has_confirmed_reservations = false;
+            break;
+        }
+    }
+
+    $is_confirmation_success_layout = $has_confirmed_reservations;
+
+    if ($has_paid_payment_status) {
+        $confirmation_success_title = $paid_success_title;
+        $confirmation_success_message = $paid_success_message;
+    } elseif (\sanitize_key($payment_method) === 'pay_at_hotel') {
+        $confirmation_success_title = $confirmed_success_title;
+        $confirmation_success_message = $hotel_payment_success_message;
+    } else {
+        $confirmation_success_title = $confirmed_success_title;
+        $confirmation_success_message = $confirmed_success_message;
+    }
+}
 
 if (!empty($selected_rooms[0]['room']) && \is_array($selected_rooms[0]['room']) && !empty($selected_rooms[0]['room']['currency'])) {
     $summary_currency = (string) $selected_rooms[0]['room']['currency'];
@@ -90,32 +152,34 @@ $render_payment_method_icon = static function (string $payment_method_key): stri
 <?php \get_header(); ?>
 <main class="must-hotel-booking-page must-hotel-booking-page-booking-confirmation must-booking-process-page">
     <div class="must-hotel-booking-container">
-        <section class="must-booking-step-header">
-            <h1><?php echo \esc_html__('Review & Payment', 'must-hotel-booking'); ?></h1>
+        <?php if (!$is_confirmation_success_layout) : ?>
+            <section class="must-booking-step-header">
+                <h1><?php echo \esc_html__('Review & Payment', 'must-hotel-booking'); ?></h1>
 
-            <div class="must-booking-stepper-wrap" aria-label="<?php echo \esc_attr__('Booking steps', 'must-hotel-booking'); ?>">
-                <div class="must-booking-stepper">
-                    <a href="<?php echo \esc_url($checkout_url); ?>" class="must-booking-stepper-nav is-back">
-                        <?php if ($back_arrow_icon_url !== '') : ?>
-                            <img src="<?php echo \esc_url($back_arrow_icon_url); ?>" alt="" aria-hidden="true" />
+                <div class="must-booking-stepper-wrap" aria-label="<?php echo \esc_attr__('Booking steps', 'must-hotel-booking'); ?>">
+                    <div class="must-booking-stepper">
+                        <a href="<?php echo \esc_url($checkout_url); ?>" class="must-booking-stepper-nav is-back">
+                            <?php if ($back_arrow_icon_url !== '') : ?>
+                                <img src="<?php echo \esc_url($back_arrow_icon_url); ?>" alt="" aria-hidden="true" />
+                            <?php endif; ?>
+                            <span><?php echo \esc_html__('Back', 'must-hotel-booking'); ?></span>
+                        </a>
+                        <a href="<?php echo \esc_url($booking_url); ?>" class="must-booking-stepper-step is-link" data-step="1"><?php echo \esc_html__('Calendar', 'must-hotel-booking'); ?></a>
+                        <?php if (!$fixed_room_mode) : ?>
+                            <a href="<?php echo \esc_url($accommodation_url); ?>" class="must-booking-stepper-step is-link" data-step="2"><?php echo \esc_html__('Select Accommodation', 'must-hotel-booking'); ?></a>
                         <?php endif; ?>
-                        <span><?php echo \esc_html__('Back', 'must-hotel-booking'); ?></span>
-                    </a>
-                    <a href="<?php echo \esc_url($booking_url); ?>" class="must-booking-stepper-step is-link" data-step="1"><?php echo \esc_html__('Calendar', 'must-hotel-booking'); ?></a>
-                    <?php if (!$fixed_room_mode) : ?>
-                        <a href="<?php echo \esc_url($accommodation_url); ?>" class="must-booking-stepper-step is-link" data-step="2"><?php echo \esc_html__('Select Accommodation', 'must-hotel-booking'); ?></a>
-                    <?php endif; ?>
-                    <a href="<?php echo \esc_url($checkout_url); ?>" class="must-booking-stepper-step is-link" data-step="3"><?php echo \esc_html__('Guest Information', 'must-hotel-booking'); ?></a>
-                    <span class="must-booking-stepper-step is-active" data-step="4"><?php echo \esc_html__('Review & Payment', 'must-hotel-booking'); ?></span>
-                    <span class="must-booking-stepper-nav is-next" aria-disabled="true">
-                        <span><?php echo \esc_html__('Next', 'must-hotel-booking'); ?></span>
-                        <?php if ($arrow_icon_url !== '') : ?>
-                            <img src="<?php echo \esc_url($arrow_icon_url); ?>" alt="" aria-hidden="true" />
-                        <?php endif; ?>
-                    </span>
+                        <a href="<?php echo \esc_url($checkout_url); ?>" class="must-booking-stepper-step is-link" data-step="3"><?php echo \esc_html__('Guest Information', 'must-hotel-booking'); ?></a>
+                        <span class="must-booking-stepper-step is-active" data-step="4"><?php echo \esc_html__('Review & Payment', 'must-hotel-booking'); ?></span>
+                        <span class="must-booking-stepper-nav is-next" aria-disabled="true">
+                            <span><?php echo \esc_html__('Next', 'must-hotel-booking'); ?></span>
+                            <?php if ($arrow_icon_url !== '') : ?>
+                                <img src="<?php echo \esc_url($arrow_icon_url); ?>" alt="" aria-hidden="true" />
+                            <?php endif; ?>
+                        </span>
+                    </div>
                 </div>
-            </div>
-        </section>
+            </section>
+        <?php endif; ?>
 
         <?php if (!empty($messages)) : ?>
             <div class="must-hotel-booking-messages">
@@ -126,44 +190,77 @@ $render_payment_method_icon = static function (string $payment_method_key): stri
         <?php endif; ?>
 
         <?php if ($success && !empty($reservations)) : ?>
-            <section class="must-confirmation-success">
-                <div class="must-confirmation-success-head">
-                    <h2><?php echo \esc_html($status_heading); ?></h2>
-                    <strong><?php echo \esc_html($format_money($total_price, $summary_currency)); ?></strong>
-                </div>
+            <?php if ($is_confirmation_success_layout) : ?>
+                <section class="must-confirmation-paid-success" aria-labelledby="must-confirmation-paid-success-heading">
+                    <div class="must-confirmation-paid-success-copy">
+                        <div class="must-confirmation-paid-success-text">
+                            <h1 id="must-confirmation-paid-success-heading" class="must-confirmation-paid-success-heading"><?php echo \esc_html($paid_success_heading); ?></h1>
+                            <p class="must-confirmation-paid-success-title"><?php echo \esc_html($confirmation_success_title); ?></p>
+                            <p class="must-confirmation-paid-success-message"><?php echo \esc_html($confirmation_success_message); ?></p>
+                        </div>
 
-                <?php if ($status_message !== '') : ?>
-                    <p class="must-confirmation-success-message"><?php echo \esc_html($status_message); ?></p>
-                <?php endif; ?>
+                        <?php if ($success_icon_url !== '') : ?>
+                            <div class="must-confirmation-paid-success-icon-wrap" aria-hidden="true">
+                                <img class="must-confirmation-paid-success-icon" src="<?php echo \esc_url($success_icon_url); ?>" alt="" />
+                            </div>
+                        <?php endif; ?>
 
-                <?php foreach ($reservations as $reservation) : ?>
-                    <div class="must-confirmation-success-card">
-                        <p><strong><?php echo \esc_html((string) ($reservation['room_name'] ?? __('Room', 'must-hotel-booking'))); ?></strong></p>
-                        <?php if (!empty($reservation['assigned_room_number'])) : ?>
-                            <p><?php echo \esc_html(\sprintf(__('Assigned Room: %s', 'must-hotel-booking'), (string) $reservation['assigned_room_number'])); ?></p>
-                        <?php endif; ?>
-                        <?php if (!empty($reservation['rate_plan_name'])) : ?>
-                            <p><?php echo \esc_html(\sprintf(__('Rate Plan: %s', 'must-hotel-booking'), (string) $reservation['rate_plan_name'])); ?></p>
-                        <?php endif; ?>
-                        <?php if (!empty($reservation['booking_id'])) : ?>
-                            <p><?php echo \esc_html(\sprintf(__('Booking ID: %s', 'must-hotel-booking'), (string) $reservation['booking_id'])); ?></p>
-                        <?php endif; ?>
-                        <p><?php echo \esc_html(\sprintf(__('Stay: %1$s to %2$s', 'must-hotel-booking'), (string) $reservation['checkin'], (string) $reservation['checkout'])); ?></p>
-                        <p><?php echo \esc_html(\sprintf(__('Guests: %d', 'must-hotel-booking'), (int) $reservation['guests'])); ?></p>
-                        <p><?php echo \esc_html(\sprintf(__('Room Total: %s', 'must-hotel-booking'), $format_money((float) $reservation['total_price'], $summary_currency))); ?></p>
+                        <div class="must-confirmation-paid-success-actions">
+                            <a href="<?php echo \esc_url($booking_url); ?>" class="must-confirmation-paid-success-link">
+                                <span><?php echo \esc_html($paid_success_cta_label); ?></span>
+                                <?php if ($arrow_icon_url !== '') : ?>
+                                    <img src="<?php echo \esc_url($arrow_icon_url); ?>" alt="" aria-hidden="true" />
+                                <?php endif; ?>
+                            </a>
+                        </div>
                     </div>
-                <?php endforeach; ?>
 
-                <?php if (\is_array($primary_guest)) : ?>
-                    <div class="must-confirmation-success-guest">
-                        <h3><?php echo \esc_html__('Guest Details', 'must-hotel-booking'); ?></h3>
-                        <p><?php echo \esc_html(\trim((string) $primary_guest['first_name'] . ' ' . (string) $primary_guest['last_name'])); ?></p>
-                        <p><?php echo \esc_html((string) $primary_guest['email']); ?></p>
-                        <p><?php echo \esc_html((string) $primary_guest['phone']); ?></p>
-                        <p><?php echo \esc_html((string) $primary_guest['country']); ?></p>
+                    <?php if ($success_offer_image_url !== '') : ?>
+                        <div class="must-confirmation-paid-success-media">
+                            <img src="<?php echo \esc_url($success_offer_image_url); ?>" alt="<?php echo \esc_attr__('Hotel terrace view', 'must-hotel-booking'); ?>" />
+                        </div>
+                    <?php endif; ?>
+                </section>
+            <?php else : ?>
+                <section class="must-confirmation-success">
+                    <div class="must-confirmation-success-head">
+                        <h2><?php echo \esc_html($status_heading); ?></h2>
+                        <strong><?php echo \esc_html($format_money($total_price, $summary_currency)); ?></strong>
                     </div>
-                <?php endif; ?>
-            </section>
+
+                    <?php if ($status_message !== '') : ?>
+                        <p class="must-confirmation-success-message"><?php echo \esc_html($status_message); ?></p>
+                    <?php endif; ?>
+
+                    <?php foreach ($reservations as $reservation) : ?>
+                        <div class="must-confirmation-success-card">
+                            <p><strong><?php echo \esc_html((string) ($reservation['room_name'] ?? __('Room', 'must-hotel-booking'))); ?></strong></p>
+                            <?php if (!empty($reservation['assigned_room_number'])) : ?>
+                                <p><?php echo \esc_html(\sprintf(__('Assigned Room: %s', 'must-hotel-booking'), (string) $reservation['assigned_room_number'])); ?></p>
+                            <?php endif; ?>
+                            <?php if (!empty($reservation['rate_plan_name'])) : ?>
+                                <p><?php echo \esc_html(\sprintf(__('Rate Plan: %s', 'must-hotel-booking'), (string) $reservation['rate_plan_name'])); ?></p>
+                            <?php endif; ?>
+                            <?php if (!empty($reservation['booking_id'])) : ?>
+                                <p><?php echo \esc_html(\sprintf(__('Booking ID: %s', 'must-hotel-booking'), (string) $reservation['booking_id'])); ?></p>
+                            <?php endif; ?>
+                            <p><?php echo \esc_html(\sprintf(__('Stay: %1$s to %2$s', 'must-hotel-booking'), (string) $reservation['checkin'], (string) $reservation['checkout'])); ?></p>
+                            <p><?php echo \esc_html(\sprintf(__('Guests: %d', 'must-hotel-booking'), (int) $reservation['guests'])); ?></p>
+                            <p><?php echo \esc_html(\sprintf(__('Room Total: %s', 'must-hotel-booking'), $format_money((float) $reservation['total_price'], $summary_currency))); ?></p>
+                        </div>
+                    <?php endforeach; ?>
+
+                    <?php if (\is_array($primary_guest)) : ?>
+                        <div class="must-confirmation-success-guest">
+                            <h3><?php echo \esc_html__('Guest Details', 'must-hotel-booking'); ?></h3>
+                            <p><?php echo \esc_html(\trim((string) $primary_guest['first_name'] . ' ' . (string) $primary_guest['last_name'])); ?></p>
+                            <p><?php echo \esc_html((string) $primary_guest['email']); ?></p>
+                            <p><?php echo \esc_html((string) $primary_guest['phone']); ?></p>
+                            <p><?php echo \esc_html((string) $primary_guest['country']); ?></p>
+                        </div>
+                    <?php endif; ?>
+                </section>
+            <?php endif; ?>
         <?php elseif ($is_form_mode) : ?>
             <form method="post" action="<?php echo \esc_url($confirmation_url); ?>" class="must-confirmation-form">
                 <?php \wp_nonce_field('must_confirm_booking', 'must_confirmation_nonce'); ?>

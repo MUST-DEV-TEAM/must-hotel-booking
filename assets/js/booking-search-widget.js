@@ -110,7 +110,7 @@
         });
 
         input.addEventListener('blur', function () {
-            sanitizeGuestsValue(input, false);
+            sanitizeGuestsValue(input, true);
         });
     }
 
@@ -287,7 +287,7 @@
 
             syncLinkedAccommodationTypeInput(form);
             attachNumericGuestsGuard(guestsInput);
-            sanitizeGuestsValue(guestsInput, false);
+            sanitizeGuestsValue(guestsInput, true);
 
             form.addEventListener('submit', function () {
                 syncLinkedAccommodationTypeInput(form);

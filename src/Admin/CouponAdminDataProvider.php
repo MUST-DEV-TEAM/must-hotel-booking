@@ -4,14 +4,17 @@ namespace MustHotelBooking\Admin;
 
 use MustHotelBooking\Core\MustBookingConfig;
 use MustHotelBooking\Engine\CouponService;
+use MustHotelBooking\Engine\PaymentStatusService;
 
 final class CouponAdminDataProvider
 {
     private \MustHotelBooking\Database\CouponRepository $couponRepository;
+    private \MustHotelBooking\Database\PaymentRepository $paymentRepository;
 
     public function __construct()
     {
         $this->couponRepository = \MustHotelBooking\Engine\get_coupon_repository();
+        $this->paymentRepository = \MustHotelBooking\Engine\get_payment_repository();
     }
 
     /**
@@ -214,20 +217,36 @@ final class CouponAdminDataProvider
 
         $state = CouponService::buildCouponState($coupon);
         $usageRows = $this->couponRepository->getReservationsUsingCoupon($couponId, 50);
+        $reservationIds = [];
+
+        foreach ($usageRows as $usageRow) {
+            if (!\is_array($usageRow) || !isset($usageRow['id'])) {
+                continue;
+            }
+
+            $reservationId = (int) $usageRow['id'];
+
+            if ($reservationId > 0) {
+                $reservationIds[$reservationId] = $reservationId;
+            }
+        }
+
+        $paymentsByReservation = $this->paymentRepository->getPaymentsForReservationIds(\array_values($reservationIds));
 
         return [
             'coupon' => $coupon,
             'state' => $state,
             'warnings' => CouponService::buildAdminWarnings($coupon),
-            'usage_rows' => $this->formatUsageRows($usageRows),
+            'usage_rows' => $this->formatUsageRows($usageRows, $paymentsByReservation),
         ];
     }
 
     /**
      * @param array<int, array<string, mixed>> $rows
+     * @param array<int, array<int, array<string, mixed>>> $paymentsByReservation
      * @return array<int, array<string, mixed>>
      */
-    private function formatUsageRows(array $rows): array
+    private function formatUsageRows(array $rows, array $paymentsByReservation): array
     {
         $formatted = [];
 
@@ -235,6 +254,12 @@ final class CouponAdminDataProvider
             if (!\is_array($row)) {
                 continue;
             }
+
+            $reservationId = isset($row['id']) ? (int) $row['id'] : 0;
+            $paymentRows = isset($paymentsByReservation[$reservationId]) && \is_array($paymentsByReservation[$reservationId])
+                ? $paymentsByReservation[$reservationId]
+                : [];
+            $paymentState = PaymentStatusService::buildReservationPaymentState($row, $paymentRows);
 
             $formatted[] = [
                 'booking_id' => format_reservation_booking_id($row),
@@ -244,7 +269,7 @@ final class CouponAdminDataProvider
                 'checkin' => (string) ($row['checkin'] ?? ''),
                 'checkout' => (string) ($row['checkout'] ?? ''),
                 'status' => get_reservation_status_options()[(string) ($row['status'] ?? '')] ?? (string) ($row['status'] ?? ''),
-                'payment_status' => get_reservation_payment_status_options()[(string) ($row['payment_status'] ?? '')] ?? (string) ($row['payment_status'] ?? ''),
+                'payment_status' => get_reservation_payment_status_options()[(string) ($paymentState['derived_status'] ?? '')] ?? (string) ($paymentState['derived_status'] ?? ''),
                 'discount_total' => \number_format_i18n((float) ($row['coupon_discount_total'] ?? 0.0), 2) . ' ' . MustBookingConfig::get_currency(),
                 'detail_url' => isset($row['id']) ? get_admin_reservation_detail_page_url((int) $row['id']) : '',
             ];

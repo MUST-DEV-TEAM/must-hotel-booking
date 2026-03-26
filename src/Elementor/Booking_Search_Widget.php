@@ -149,7 +149,6 @@ class Booking_Search_Widget extends \Elementor\Widget_Base
                             min="1"
                             max="<?php echo \esc_attr((string) $max_booking_guests); ?>"
                             step="1"
-                            value="1"
                             inputmode="numeric"
                             pattern="[0-9]*"
                             placeholder="<?php echo \esc_attr__('Guests Number', 'must-hotel-booking'); ?>"

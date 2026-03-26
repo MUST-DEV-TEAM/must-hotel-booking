@@ -450,6 +450,7 @@ final class RoomRepository extends AbstractRepository
                 max_guests,
                 default_occupancy,
                 base_price,
+                extra_guest_price,
                 room_size,
                 beds,
                 admin_notes,

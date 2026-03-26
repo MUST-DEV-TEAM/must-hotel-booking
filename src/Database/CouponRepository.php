@@ -398,13 +398,17 @@ final class CouponRepository extends AbstractRepository
         }
 
         $today = \current_time('Y-m-d');
+        $consumingStatuses = [
+            'confirmed',
+            'completed',
+        ];
 
         return ' LEFT JOIN (
                 SELECT
                     r.coupon_id,
-                    COUNT(*) AS used_count,
-                    MAX(r.created_at) AS last_used_at,
-                    SUM(CASE WHEN r.checkin >= \'' . \esc_sql($today) . '\' AND r.status IN (\'pending\', \'pending_payment\', \'confirmed\') THEN 1 ELSE 0 END) AS future_reservation_count
+                    SUM(CASE WHEN r.status IN (\'' . \esc_sql($consumingStatuses[0]) . '\', \'' . \esc_sql($consumingStatuses[1]) . '\') THEN 1 ELSE 0 END) AS used_count,
+                    MAX(CASE WHEN r.status IN (\'' . \esc_sql($consumingStatuses[0]) . '\', \'' . \esc_sql($consumingStatuses[1]) . '\') THEN r.created_at ELSE NULL END) AS last_used_at,
+                    SUM(CASE WHEN r.checkin >= \'' . \esc_sql($today) . '\' AND r.status IN (\'' . \esc_sql($consumingStatuses[0]) . '\', \'' . \esc_sql($consumingStatuses[1]) . '\') THEN 1 ELSE 0 END) AS future_reservation_count
                 FROM ' . $this->table('reservations') . ' r
                 WHERE r.coupon_id > 0
                 GROUP BY r.coupon_id

@@ -1,0 +1,103 @@
+name: Build Plugin Release Package
+
+on:
+  release:
+    types:
+      - published
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: Git ref to package. Defaults to the latest checked out ref.
+        required: false
+        type: string
+
+permissions:
+  contents: write
+
+jobs:
+  package-plugin:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Resolve packaging ref
+        id: ref
+        run: |
+          if [[ "${GITHUB_EVENT_NAME}" == "release" ]]; then
+            echo "ref=${GITHUB_EVENT_RELEASE_TAG_NAME}" >> "$GITHUB_OUTPUT"
+          elif [[ -n "${{ inputs.ref }}" ]]; then
+            echo "ref=${{ inputs.ref }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "ref=${GITHUB_SHA}" >> "$GITHUB_OUTPUT"
+          fi
+        env:
+          GITHUB_EVENT_RELEASE_TAG_NAME: ${{ github.event.release.tag_name }}
+
+      - name: Check out source
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ steps.ref.outputs.ref }}
+          fetch-depth: 0
+
+      - name: Determine asset name
+        id: meta
+        shell: bash
+        run: |
+          if [[ "${GITHUB_EVENT_NAME}" == "release" ]]; then
+            tag="${GITHUB_EVENT_RELEASE_TAG_NAME}"
+          elif [[ "${REF_NAME}" =~ ^refs/tags/ ]]; then
+            tag="${REF_NAME#refs/tags/}"
+          else
+            tag="$(git describe --tags --abbrev=0 2>/dev/null || true)"
+          fi
+
+          if [[ -z "$tag" ]]; then
+            version="$(php -r "preg_match(\"/Version:\\s*([0-9A-Za-z._-]+)/\", file_get_contents('must-hotel-booking.php'), \$m); echo \$m[1] ?? 'dev';")"
+            asset="must-hotel-booking-${version}-manual.zip"
+          else
+            version="${tag#v}"
+            asset="must-hotel-booking-${version}.zip"
+          fi
+
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "asset=$asset" >> "$GITHUB_OUTPUT"
+        env:
+          GITHUB_EVENT_RELEASE_TAG_NAME: ${{ github.event.release.tag_name }}
+          REF_NAME: ${{ github.ref }}
+
+      - name: Build plugin ZIP
+        shell: bash
+        run: |
+          rm -rf dist
+          mkdir -p dist/must-hotel-booking
+
+          rsync -a ./ dist/must-hotel-booking/ \
+            --exclude '.git/' \
+            --exclude '.github/' \
+            --exclude '_puc_tmp/' \
+            --exclude 'dist/' \
+            --exclude 'node_modules/' \
+            --exclude 'tests/' \
+            --exclude 'Test/' \
+            --exclude '.DS_Store' \
+            --exclude 'Thumbs.db' \
+            --exclude '*.zip'
+
+          (
+            cd dist
+            zip -r "../${{ steps.meta.outputs.asset }}" must-hotel-booking
+          )
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.meta.outputs.asset }}
+          path: ${{ steps.meta.outputs.asset }}
+
+      - name: Attach ZIP to release
+        if: github.event_name == 'release'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.event.release.tag_name }}
+          files: ${{ steps.meta.outputs.asset }}
+          overwrite_files: true

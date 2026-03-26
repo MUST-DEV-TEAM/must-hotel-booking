@@ -43,10 +43,32 @@ final class ReservationAdminDataProvider
     public function getListPageData(array $request): array
     {
         $filters = $this->normalizeListFilters($request);
-        $totalItems = $this->reservationRepository->countAdminReservationListRows($filters);
+        $rows = [];
+        $totalItems = 0;
+
+        if ($this->shouldFilterListRowsByDerivedPaymentState($filters)) {
+            $candidateFilters = $this->stripDerivedPaymentFilters($filters);
+            $candidateFilters['paginate'] = false;
+            $candidateRows = $this->reservationRepository->getAdminReservationListRows($candidateFilters);
+            $filteredRows = $this->applyDerivedPaymentFilters(
+                $this->decorateRowsWithPaymentState($candidateRows),
+                $filters
+            );
+            $totalItems = \count($filteredRows);
+            $totalPages = (int) \max(1, \ceil($totalItems / $filters['per_page']));
+            $filters['paged'] = \max(1, \min($filters['paged'], $totalPages));
+            $offset = ($filters['paged'] - 1) * $filters['per_page'];
+            $rows = \array_slice($filteredRows, $offset, $filters['per_page']);
+        } else {
+            $totalItems = $this->reservationRepository->countAdminReservationListRows($filters);
+            $totalPages = (int) \max(1, \ceil($totalItems / $filters['per_page']));
+            $filters['paged'] = \max(1, \min($filters['paged'], $totalPages));
+            $rows = $this->decorateRowsWithPaymentState(
+                $this->reservationRepository->getAdminReservationListRows($filters)
+            );
+        }
+
         $totalPages = (int) \max(1, \ceil($totalItems / $filters['per_page']));
-        $filters['paged'] = \max(1, \min($filters['paged'], $totalPages));
-        $rows = $this->reservationRepository->getAdminReservationListRows($filters);
 
         return [
             'filters' => $filters,
@@ -242,7 +264,7 @@ final class ReservationAdminDataProvider
      */
     private function buildQuickFilters(array $filters): array
     {
-        $counts = $this->reservationRepository->getAdminReservationQuickFilterCounts((string) $filters['today']);
+        $counts = $this->buildQuickFilterCounts((string) $filters['today']);
         $current = (string) ($filters['quick_filter'] !== '' ? $filters['quick_filter'] : 'all');
         $tabs = [
             'all' => \__('All', 'must-hotel-booking'),
@@ -307,6 +329,208 @@ final class ReservationAdminDataProvider
      * @param array<int, array<string, mixed>> $rows
      * @return array<int, array<string, mixed>>
      */
+    private function decorateRowsWithPaymentState(array $rows): array
+    {
+        $reservationIds = $this->collectReservationIds($rows);
+        $paymentsByReservation = $this->paymentRepository->getPaymentsForReservationIds($reservationIds);
+
+        foreach ($rows as $index => $row) {
+            if (!\is_array($row)) {
+                continue;
+            }
+
+            $reservationId = isset($row['id']) ? (int) $row['id'] : 0;
+            $paymentRows = isset($paymentsByReservation[$reservationId]) && \is_array($paymentsByReservation[$reservationId])
+                ? $paymentsByReservation[$reservationId]
+                : [];
+            $rows[$index]['payment_state'] = PaymentStatusService::buildReservationPaymentState($row, $paymentRows);
+        }
+
+        return $rows;
+    }
+
+    /**
+     * @param array<int, array<string, mixed>> $rows
+     * @return array<int, int>
+     */
+    private function collectReservationIds(array $rows): array
+    {
+        $ids = [];
+
+        foreach ($rows as $row) {
+            if (!\is_array($row) || !isset($row['id'])) {
+                continue;
+            }
+
+            $reservationId = (int) $row['id'];
+
+            if ($reservationId > 0) {
+                $ids[$reservationId] = $reservationId;
+            }
+        }
+
+        return \array_values($ids);
+    }
+
+    /**
+     * @param array<string, mixed> $filters
+     */
+    private function shouldFilterListRowsByDerivedPaymentState(array $filters): bool
+    {
+        if ((string) ($filters['payment_status'] ?? '') !== '' || (string) ($filters['payment_method'] ?? '') !== '') {
+            return true;
+        }
+
+        return \in_array((string) ($filters['quick_filter'] ?? ''), ['unpaid', 'paid', 'failed_payment'], true);
+    }
+
+    /**
+     * @param array<string, mixed> $filters
+     * @return array<string, mixed>
+     */
+    private function stripDerivedPaymentFilters(array $filters): array
+    {
+        $filters['payment_status'] = '';
+        $filters['payment_method'] = '';
+
+        if (\in_array((string) ($filters['quick_filter'] ?? ''), ['unpaid', 'paid', 'failed_payment'], true)) {
+            $filters['quick_filter'] = '';
+        }
+
+        return $filters;
+    }
+
+    /**
+     * @param array<int, array<string, mixed>> $rows
+     * @param array<string, mixed> $filters
+     * @return array<int, array<string, mixed>>
+     */
+    private function applyDerivedPaymentFilters(array $rows, array $filters): array
+    {
+        return \array_values(\array_filter($rows, function (array $row) use ($filters): bool {
+            if ((string) ($filters['payment_status'] ?? '') !== '' && !$this->matchesPaymentStatusFilter($row, (string) $filters['payment_status'])) {
+                return false;
+            }
+
+            if ((string) ($filters['payment_method'] ?? '') !== '' && !$this->matchesPaymentMethodFilter($row, (string) $filters['payment_method'])) {
+                return false;
+            }
+
+            $quickFilter = (string) ($filters['quick_filter'] ?? '');
+
+            if (\in_array($quickFilter, ['unpaid', 'paid', 'failed_payment'], true) && !$this->matchesDerivedQuickFilter($row, $quickFilter)) {
+                return false;
+            }
+
+            return true;
+        }));
+    }
+
+    /**
+     * @param array<string, mixed> $row
+     */
+    private function matchesPaymentStatusFilter(array $row, string $paymentStatus): bool
+    {
+        $paymentState = isset($row['payment_state']) && \is_array($row['payment_state']) ? $row['payment_state'] : [];
+
+        return (string) ($paymentState['derived_status'] ?? '') === $paymentStatus;
+    }
+
+    /**
+     * @param array<string, mixed> $row
+     */
+    private function matchesPaymentMethodFilter(array $row, string $method): bool
+    {
+        $paymentState = isset($row['payment_state']) && \is_array($row['payment_state']) ? $row['payment_state'] : [];
+
+        return (string) ($paymentState['method'] ?? '') === $method;
+    }
+
+    /**
+     * @param array<string, mixed> $row
+     */
+    private function matchesDerivedQuickFilter(array $row, string $quickFilter): bool
+    {
+        $status = (string) ($row['status'] ?? '');
+        $paymentState = isset($row['payment_state']) && \is_array($row['payment_state']) ? $row['payment_state'] : [];
+        $derivedStatus = (string) ($paymentState['derived_status'] ?? '');
+
+        if ($quickFilter === 'paid') {
+            return $derivedStatus === 'paid';
+        }
+
+        if ($quickFilter === 'failed_payment') {
+            return $status === 'payment_failed' || $derivedStatus === 'failed';
+        }
+
+        if ($quickFilter === 'unpaid') {
+            return !\in_array($status, ['cancelled', 'blocked', 'expired'], true)
+                && $this->hasOutstandingBalance($row, $paymentState);
+        }
+
+        return true;
+    }
+
+    /**
+     * @param array<string, mixed> $row
+     * @param array<string, mixed> $paymentState
+     */
+    private function hasOutstandingBalance(array $row, array $paymentState): bool
+    {
+        $total = isset($row['total_price']) ? (float) $row['total_price'] : 0.0;
+        $amountDue = isset($paymentState['amount_due'])
+            ? (float) $paymentState['amount_due']
+            : \max(0.0, $total - (float) ($paymentState['amount_paid'] ?? 0.0));
+
+        if ($total <= 0.0 || $amountDue <= 0.0) {
+            return false;
+        }
+
+        return \in_array(
+            (string) ($paymentState['derived_status'] ?? ''),
+            ['unpaid', 'pending', 'partially_paid', 'pay_at_hotel', 'failed'],
+            true
+        );
+    }
+
+    /**
+     * @return array<string, int>
+     */
+    private function buildQuickFilterCounts(string $today): array
+    {
+        $counts = $this->reservationRepository->getAdminReservationQuickFilterCounts($today);
+        $rows = $this->decorateRowsWithPaymentState(
+            $this->reservationRepository->getAdminReservationQuickFilterRows()
+        );
+        $counts['unpaid'] = 0;
+        $counts['paid'] = 0;
+        $counts['failed_payment'] = 0;
+
+        foreach ($rows as $row) {
+            if (!\is_array($row)) {
+                continue;
+            }
+
+            if ($this->matchesDerivedQuickFilter($row, 'unpaid')) {
+                $counts['unpaid']++;
+            }
+
+            if ($this->matchesDerivedQuickFilter($row, 'paid')) {
+                $counts['paid']++;
+            }
+
+            if ($this->matchesDerivedQuickFilter($row, 'failed_payment')) {
+                $counts['failed_payment']++;
+            }
+        }
+
+        return $counts;
+    }
+
+    /**
+     * @param array<int, array<string, mixed>> $rows
+     * @return array<int, array<string, mixed>>
+     */
     private function formatListRows(array $rows): array
     {
         $formatted = [];
@@ -317,6 +541,9 @@ final class ReservationAdminDataProvider
             }
 
             $reservationId = isset($row['id']) ? (int) $row['id'] : 0;
+            $paymentState = isset($row['payment_state']) && \is_array($row['payment_state']) ? $row['payment_state'] : [];
+            $paymentStatusKey = (string) ($paymentState['derived_status'] ?? (string) ($row['payment_status'] ?? ''));
+            $paymentMethodKey = (string) ($paymentState['method'] ?? (string) ($row['payment_method'] ?? ''));
             $formatted[] = [
                 'id' => $reservationId,
                 'booking_id' => $this->formatReservationReference($row),
@@ -336,10 +563,10 @@ final class ReservationAdminDataProvider
                 'guests' => isset($row['guests']) ? (int) $row['guests'] : 0,
                 'reservation_status' => $this->formatReservationStatusLabel((string) ($row['status'] ?? '')),
                 'reservation_status_key' => (string) ($row['status'] ?? ''),
-                'payment_status' => $this->formatPaymentStatusLabel((string) ($row['payment_status'] ?? '')),
-                'payment_status_key' => (string) ($row['payment_status'] ?? ''),
-                'payment_method' => $this->formatPaymentMethodLabel((string) ($row['payment_method'] ?? '')),
-                'payment_method_key' => (string) ($row['payment_method'] ?? ''),
+                'payment_status' => $this->formatPaymentStatusLabel($paymentStatusKey),
+                'payment_status_key' => $paymentStatusKey,
+                'payment_method' => $this->formatPaymentMethodLabel($paymentMethodKey),
+                'payment_method_key' => $paymentMethodKey,
                 'total' => $this->formatMoney((float) ($row['total_price'] ?? 0)),
                 'created' => $this->formatDateTime((string) ($row['created_at'] ?? '')),
             ];

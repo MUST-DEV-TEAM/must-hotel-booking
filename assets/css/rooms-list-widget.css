@@ -108,6 +108,7 @@
     line-height: 1.1;
     font-weight: 500;
     color: #141414;
+    font-family: 'PP Neue Montreal';
 }
 
 .must-hotel-booking-rooms-list-widget .must-hotel-booking-rooms-list-description {
@@ -116,6 +117,7 @@
     font-size: 16px;
     line-height: 1.5;
     font-weight: 500;
+    font-family: 'PP Neue Montreal';
 }
 
 .must-hotel-booking-rooms-list-widget .must-hotel-booking-rooms-list-thumbs {
@@ -165,11 +167,12 @@
     border-bottom: 1.5px solid #141414;
     font-size: 20px;
     line-height: 1.2;
-    font-weight: 500;
+    font-weight: 400;
     letter-spacing: -0.011em;
     padding-bottom: 2px;
     min-height: 29px;
     transition: opacity 0.2s ease;
+    font-family: 'PP Neue Montreal';
 }
 
 .must-hotel-booking-rooms-list-widget .must-hotel-booking-rooms-list-book:hover,
@@ -207,6 +210,7 @@
     letter-spacing: -0.011em;
     background: transparent;
     transition: opacity 0.2s ease;
+    font-family: 'PP Neue Montreal';
 }
 
 .must-hotel-booking-rooms-list-widget .must-hotel-booking-rooms-list-book:focus-visible,
@@ -564,6 +568,7 @@ body.must-hotel-booking-lightbox-open {
 }
 
 @media (max-width: 420px) {
+
     .must-hotel-booking-rooms-list-widget .must-hotel-booking-rooms-list-media,
     .must-hotel-booking-rooms-list-widget .must-hotel-booking-rooms-list-placeholder {
         min-height: 200px;
@@ -586,4 +591,26 @@ body.must-hotel-booking-lightbox-open {
         padding: 10px 12px;
         font-size: 16px;
     }
+}
+
+.must-hotel-booking-rooms-list-widget .must-hotel-booking-rooms-list-section {
+    width: 100%;
+    min-width: 0;
+}
+
+.must-hotel-booking-rooms-list-widget .must-hotel-booking-rooms-list-section-media {
+    margin-top: 45px;
+}
+
+.must-hotel-booking-rooms-list-widget .must-hotel-booking-rooms-list-section-actions {
+    margin-top: 100px;
+}
+
+.must-hotel-booking-rooms-list-widget .must-hotel-booking-rooms-list-header,
+.must-hotel-booking-rooms-list-widget .must-hotel-booking-rooms-list-thumbs {
+    margin-bottom: 0;
+}
+
+.must-hotel-booking-rooms-list-widget .must-hotel-booking-rooms-list-actions {
+    margin-top: 0;
 }

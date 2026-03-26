@@ -543,6 +543,8 @@ function render_rooms_admin_notice_from_query(): void
         'unit_has_reservations' => ['error', \__('This unit has reservation history and cannot be deleted. Deactivate it instead.', 'must-hotel-booking')],
         'unit_missing' => ['error', \__('Accommodation unit not found.', 'must-hotel-booking')],
         'invalid_nonce' => ['error', \__('Security check failed. Please try again.', 'must-hotel-booking')],
+        'workbook_export_failed' => ['error', \__('Unable to generate the accommodation workbook export.', 'must-hotel-booking')],
+        'workbook_template_failed' => ['error', \__('Unable to generate the accommodation workbook template.', 'must-hotel-booking')],
     ];
 
     if (!isset($messages[$notice])) {
@@ -587,6 +589,133 @@ function render_rooms_summary_cards(array $cards): void
         echo '<strong class="must-accommodation-summary-value">' . \esc_html((string) ($card['value'] ?? '0')) . '</strong>';
         echo '<span class="must-accommodation-summary-meta">' . \esc_html((string) ($card['meta'] ?? '')) . '</span>';
         echo '</article>';
+    }
+
+    echo '</section>';
+}
+
+function render_accommodation_import_export_panel(AccommodationAdminQuery $query): void
+{
+    $baseArgs = ['tab' => $query->getTab()];
+    $exportUrl = \wp_nonce_url(
+        get_admin_rooms_page_url($baseArgs + ['action' => AccommodationImportExportService::ACTION_EXPORT_WORKBOOK]),
+        AccommodationImportExportService::ACTION_EXPORT_WORKBOOK
+    );
+    $templateUrl = \wp_nonce_url(
+        get_admin_rooms_page_url($baseArgs + ['action' => AccommodationImportExportService::ACTION_DOWNLOAD_TEMPLATE]),
+        AccommodationImportExportService::ACTION_DOWNLOAD_TEMPLATE
+    );
+
+    echo '<section class="must-accommodation-panel must-accommodation-import-tools-panel">';
+    echo '<div class="must-accommodation-panel-head">';
+    echo '<div><h2>' . \esc_html__('Excel Import & Export', 'must-hotel-booking') . '</h2><p>' . \esc_html__('Download the live workbook, start from a clean template, or import bulk accommodation changes with row-level validation.', 'must-hotel-booking') . '</p></div>';
+    echo '<div class="must-accommodation-panel-actions">';
+    echo '<a class="button button-secondary" href="' . \esc_url($exportUrl) . '">' . \esc_html__('Export Current Data', 'must-hotel-booking') . '</a>';
+    echo '<a class="button button-secondary" href="' . \esc_url($templateUrl) . '">' . \esc_html__('Download Empty Template', 'must-hotel-booking') . '</a>';
+    echo '</div></div>';
+    echo '<div class="must-accommodation-import-tools-grid">';
+    echo '<div class="must-accommodation-import-tools-copy">';
+    echo '<span class="must-accommodation-kicker">' . \esc_html__('Workbook Structure', 'must-hotel-booking') . '</span>';
+    echo '<h3>' . \esc_html__('Two sheets. Real schema. No image fields.', 'must-hotel-booking') . '</h3>';
+    echo '<p>' . \esc_html__('The workbook includes the accommodation_types and accommodation_units sheets. Amenity values use dedicated 1/0 columns, while image IDs stay untouched during import.', 'must-hotel-booking') . '</p>';
+    echo '<ul class="must-accommodation-import-facts">';
+    echo '<li>' . \esc_html__('Use the id column to update existing records. Leave id empty to create new ones.', 'must-hotel-booking') . '</li>';
+    echo '<li>' . \esc_html__('Units should use room_type_id; room_type_name is only used as a safe fallback when it resolves to exactly one type.', 'must-hotel-booking') . '</li>';
+    echo '<li>' . \esc_html__('Only .xlsx is supported for import in this release.', 'must-hotel-booking') . '</li>';
+    echo '</ul>';
+    echo '</div>';
+    echo '<form method="post" enctype="multipart/form-data" class="must-accommodation-import-form">';
+    \wp_nonce_field('must_accommodation_import_workbook', 'must_accommodation_import_nonce');
+    echo '<input type="hidden" name="must_accommodation_action" value="' . \esc_attr(AccommodationImportExportService::ACTION_IMPORT_WORKBOOK) . '" />';
+    echo '<input type="hidden" name="tab" value="' . \esc_attr($query->getTab()) . '" />';
+    echo '<label><span>' . \esc_html__('Workbook File', 'must-hotel-booking') . '</span><input type="file" name="accommodation_workbook" accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" required /></label>';
+    echo '<p class="description">' . \esc_html__('Importing updates accommodation types first, then units. Row-level errors are shown after the run so you can fix only what failed.', 'must-hotel-booking') . '</p>';
+    echo '<div class="must-accommodation-panel-actions">';
+    echo '<button type="submit" class="button button-primary">' . \esc_html__('Import Excel Workbook', 'must-hotel-booking') . '</button>';
+    echo '</div>';
+    echo '</form>';
+    echo '</div>';
+    echo '</section>';
+}
+
+/**
+ * @param array<string, mixed>|null $report
+ */
+function render_accommodation_import_report(?array $report): void
+{
+    if (!\is_array($report)) {
+        return;
+    }
+
+    $status = isset($report['status']) ? \sanitize_key((string) $report['status']) : 'success';
+    $errors = isset($report['errors']) && \is_array($report['errors']) ? $report['errors'] : [];
+    $fileName = isset($report['file_name']) ? (string) $report['file_name'] : '';
+    $importedAt = isset($report['imported_at']) ? (string) $report['imported_at'] : '';
+    $statusLabel = $status === 'error'
+        ? \__('Import Failed', 'must-hotel-booking')
+        : ($status === 'warning' ? \__('Import Completed With Issues', 'must-hotel-booking') : \__('Import Completed', 'must-hotel-booking'));
+
+    echo '<section class="must-accommodation-import-report is-' . \esc_attr($status) . '">';
+    echo '<div class="must-accommodation-import-report-head">';
+    echo '<div><span class="must-accommodation-kicker">' . \esc_html__('Workbook Import', 'must-hotel-booking') . '</span><h2>' . \esc_html($statusLabel) . '</h2>';
+
+    if ($fileName !== '' || $importedAt !== '') {
+        $metaParts = [];
+
+        if ($fileName !== '') {
+            $metaParts[] = \sprintf(\__('File: %s', 'must-hotel-booking'), $fileName);
+        }
+
+        if ($importedAt !== '') {
+            $metaParts[] = \sprintf(\__('Run: %s', 'must-hotel-booking'), $importedAt);
+        }
+
+        echo '<p>' . \esc_html(\implode(' | ', $metaParts)) . '</p>';
+    }
+
+    echo '</div>';
+    echo '<span class="must-accommodation-badge is-' . \esc_attr($status === 'warning' ? 'warning' : ($status === 'error' ? 'danger' : 'success')) . '">' . \esc_html($statusLabel) . '</span>';
+    echo '</div>';
+
+    $summaryCards = [
+        ['label' => \__('Types Created', 'must-hotel-booking'), 'value' => (string) ((int) ($report['types_created'] ?? 0))],
+        ['label' => \__('Types Updated', 'must-hotel-booking'), 'value' => (string) ((int) ($report['types_updated'] ?? 0))],
+        ['label' => \__('Units Created', 'must-hotel-booking'), 'value' => (string) ((int) ($report['units_created'] ?? 0))],
+        ['label' => \__('Units Updated', 'must-hotel-booking'), 'value' => (string) ((int) ($report['units_updated'] ?? 0))],
+        ['label' => \__('Rows Skipped', 'must-hotel-booking'), 'value' => (string) ((int) ($report['rows_skipped'] ?? 0))],
+        ['label' => \__('Rows Failed', 'must-hotel-booking'), 'value' => (string) ((int) ($report['rows_failed'] ?? 0))],
+    ];
+
+    echo '<div class="must-accommodation-import-summary-grid">';
+
+    foreach ($summaryCards as $card) {
+        echo '<article class="must-accommodation-import-summary-card">';
+        echo '<span>' . \esc_html((string) $card['label']) . '</span>';
+        echo '<strong>' . \esc_html((string) $card['value']) . '</strong>';
+        echo '</article>';
+    }
+
+    echo '</div>';
+
+    if (!empty($errors)) {
+        echo '<div class="must-accommodation-import-errors">';
+        echo '<h3>' . \esc_html__('Failed Rows', 'must-hotel-booking') . '</h3>';
+        echo '<div class="must-accommodation-import-errors-table-wrap"><table class="must-accommodation-import-errors-table"><thead><tr><th>' . \esc_html__('Sheet', 'must-hotel-booking') . '</th><th>' . \esc_html__('Row', 'must-hotel-booking') . '</th><th>' . \esc_html__('Field', 'must-hotel-booking') . '</th><th>' . \esc_html__('Reason', 'must-hotel-booking') . '</th></tr></thead><tbody>';
+
+        foreach ($errors as $error) {
+            if (!\is_array($error)) {
+                continue;
+            }
+
+            echo '<tr>';
+            echo '<td>' . \esc_html((string) ($error['sheet'] ?? '-')) . '</td>';
+            echo '<td>' . \esc_html((string) ((int) ($error['row'] ?? 0) > 0 ? (int) ($error['row'] ?? 0) : '-')) . '</td>';
+            echo '<td>' . \esc_html((string) ($error['field'] ?? '-')) . '</td>';
+            echo '<td>' . \esc_html((string) ($error['message'] ?? '')) . '</td>';
+            echo '</tr>';
+        }
+
+        echo '</tbody></table></div></div>';
     }
 
     echo '</section>';
@@ -970,6 +1099,7 @@ function render_accommodation_type_form(array $form, array $categoryOptions, str
     echo '<label><span>' . \esc_html__('Max Total Guests', 'must-hotel-booking') . '</span><input type="number" min="1" name="max_guests" value="' . \esc_attr((string) ((int) ($form['max_guests'] ?? 1))) . '" /></label>';
     echo '<label><span>' . \esc_html__('Default Occupancy', 'must-hotel-booking') . '</span><input type="number" min="1" name="default_occupancy" value="' . \esc_attr((string) ((int) ($form['default_occupancy'] ?? 1))) . '" /></label>';
     echo '<label><span>' . \esc_html__('Base Price', 'must-hotel-booking') . '</span><input type="number" min="0" step="0.01" name="base_price" value="' . \esc_attr(\number_format((float) ($form['base_price'] ?? 0.0), 2, '.', '')) . '" /><small>' . \esc_html(\sprintf(__('Fallback nightly base price in %s.', 'must-hotel-booking'), $currencyCode)) . '</small></label>';
+    echo '<label><span>' . \esc_html__('Extra Guest Price', 'must-hotel-booking') . '</span><input type="number" min="0" step="0.01" name="extra_guest_price" value="' . \esc_attr(\number_format((float) ($form['extra_guest_price'] ?? 0.0), 2, '.', '')) . '" /><small>' . \esc_html(\sprintf(__('Additional nightly amount per guest in %s.', 'must-hotel-booking'), $currencyCode)) . '</small></label>';
     echo '<label><span>' . \esc_html__('Room Size', 'must-hotel-booking') . '</span><input type="text" name="room_size" value="' . \esc_attr((string) ($form['room_size'] ?? '')) . '" placeholder="' . \esc_attr__('e.g. 28 m2', 'must-hotel-booking') . '" /></label>';
     echo '<label class="must-accommodation-field-span-2"><span>' . \esc_html__('Beds', 'must-hotel-booking') . '</span><input type="text" name="beds" value="' . \esc_attr((string) ($form['beds'] ?? '')) . '" placeholder="' . \esc_attr__('e.g. 1 king bed + sofa bed', 'must-hotel-booking') . '" /></label>';
     echo '</div>';
@@ -1418,6 +1548,7 @@ function render_admin_rooms_page(): void
     $ratePlansUrl = \function_exists(__NAMESPACE__ . '\get_admin_rate_plans_page_url')
         ? get_admin_rate_plans_page_url()
         : '';
+    $importReport = AccommodationImportExportService::consumeImportReport();
     $typeCloseUrl = get_admin_rooms_page_url($query->buildUrlArgs(['tab' => 'types']));
     $unitCloseUrl = get_admin_rooms_page_url($query->buildUrlArgs(['tab' => 'units']));
     $shouldOpenTypeEditor = $query->getAction() === 'edit_type' || !empty($typeErrors);
@@ -1437,7 +1568,9 @@ function render_admin_rooms_page(): void
     echo '</div></header>';
 
     render_rooms_admin_notice_from_query();
+    render_accommodation_import_report($importReport);
     render_rooms_summary_cards(isset($pageData['summary_cards']) && \is_array($pageData['summary_cards']) ? $pageData['summary_cards'] : []);
+    render_accommodation_import_export_panel($query);
     render_rooms_tabs($query);
 
     if ($query->isTypesTab()) {

@@ -4,7 +4,7 @@ Tags: hotel, booking, reservation, accommodation
 Requires at least: 5.0
 Tested up to: 6.0
 Requires PHP: 7.4
-Stable tag: 0.3.18
+Stable tag: 0.3.26
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -26,6 +26,10 @@ MUST Hotel Booking helps hotel and accommodation websites:
 3. Configure rooms, availability, and booking options in the plugin admin screens.
 
 == Changelog ==
+
+= 0.3.26 =
+* Added GitHub Releases update infrastructure using Plugin Update Checker v5.6.
+* Added release packaging workflow for WordPress-ready plugin ZIP assets.
 
 = 0.3.18 =
 * Maintenance release and plugin structure cleanup for WordPress conventions.
