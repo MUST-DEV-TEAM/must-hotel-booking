@@ -2,7 +2,7 @@
 /**
  * Plugin Name: MUST Hotel Booking
  * Description: Manage hotel accommodations, rooms, availability, reservations, pricing, checkout, and daily operations directly in WordPress.
- * Version: 0.3.29
+ * Version: 0.3.30
  * Author: MUST
  * Author URI: https://must.al/
  * Requires at least: 5.0
@@ -17,7 +17,7 @@ if (!\defined('ABSPATH')) {
     exit;
 }
 
-\define('MUST_HOTEL_BOOKING_VERSION', '0.3.29');
+\define('MUST_HOTEL_BOOKING_VERSION', '0.3.30');
 \define('MUST_HOTEL_BOOKING_FILE', __FILE__);
 \define('MUST_HOTEL_BOOKING_PATH', \plugin_dir_path(__FILE__));
 \define('MUST_HOTEL_BOOKING_URL', \plugin_dir_url(__FILE__));
@@ -49,11 +49,6 @@ if (!\defined('MUST_HOTEL_BOOKING_GITHUB_RELEASE_ASSET_PATTERN')) {
 if (!\defined('MUST_HOTEL_BOOKING_GITHUB_TOKEN')) {
     // Define this in wp-config.php when using private repositories or releases.
     \define('MUST_HOTEL_BOOKING_GITHUB_TOKEN', '');
-}
-
-if (!\defined('MUST_HOTEL_BOOKING_ENABLE_DANGEROUS_RESET')) {
-    // Destructive reset tools stay opt-in and disabled unless explicitly enabled.
-    \define('MUST_HOTEL_BOOKING_ENABLE_DANGEROUS_RESET', false);
 }
 
 require_once MUST_HOTEL_BOOKING_PATH . 'includes/autoloader.php';

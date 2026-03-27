@@ -2160,14 +2160,21 @@ final class SettingsPage
     {
         $values = isset($form['values'][$target]) && \is_array($form['values'][$target]) ? $form['values'][$target] : [];
         $isOpen = (string) ($form['active_target'] ?? '') === $target;
-        $toneClass = $target === DangerousResetService::TARGET_FACTORY
+        $isFactory = $target === DangerousResetService::TARGET_FACTORY;
+        $toneClass = $isFactory
             ? 'must-danger-zone-card--factory'
             : 'must-danger-zone-card--operational';
+        $submitClass = $isFactory
+            ? 'button must-danger-zone-submit must-danger-zone-submit--factory'
+            : 'button must-danger-zone-submit must-danger-zone-submit--operational';
 
         echo '<details class="must-danger-zone-card ' . \esc_attr($toneClass) . '"' . ($isOpen ? ' open' : '') . '>';
         echo '<summary class="must-danger-zone-summary">';
         echo '<div class="must-danger-zone-summary-copy">';
         echo '<strong>' . \esc_html((string) ($definition['label'] ?? $target)) . '</strong>';
+        if ($isFactory) {
+            echo '<span class="must-danger-zone-risk">' . \esc_html__('Highest risk', 'must-hotel-booking') . '</span>';
+        }
         echo '<span>' . \esc_html((string) ($definition['summary'] ?? '')) . '</span>';
         echo '</div>';
         echo '<span class="must-danger-zone-summary-toggle">' . \esc_html__('Review confirmation', 'must-hotel-booking') . '</span>';
@@ -2191,7 +2198,7 @@ final class SettingsPage
         echo '<label for="must-danger-password-' . \esc_attr($target) . '"><span>' . \esc_html__('Current WordPress password', 'must-hotel-booking') . '</span>';
         echo '<input id="must-danger-password-' . \esc_attr($target) . '" type="password" name="dangerous_reset_password" value="" autocomplete="current-password" required /></label>';
         echo '<label class="must-danger-zone-checkbox"><input type="checkbox" name="dangerous_reset_acknowledge" value="1"' . \checked(!empty($values['acknowledged']), true, false) . ' required /> <span>' . \esc_html__('I understand this action cannot be undone.', 'must-hotel-booking') . '</span></label>';
-        echo '<button type="submit" class="button must-danger-zone-submit">' . \esc_html((string) ($definition['submit_label'] ?? \__('Run reset', 'must-hotel-booking'))) . '</button>';
+        echo '<button type="submit" class="' . \esc_attr($submitClass) . '">' . \esc_html((string) ($definition['submit_label'] ?? \__('Run reset', 'must-hotel-booking'))) . '</button>';
         echo '</form>';
         echo '</div>';
         echo '</details>';

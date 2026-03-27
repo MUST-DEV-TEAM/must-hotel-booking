@@ -4,7 +4,7 @@ Tags: hotel, booking, reservation, accommodation
 Requires at least: 5.0
 Tested up to: 6.0
 Requires PHP: 7.4
-Stable tag: 0.3.29
+Stable tag: 0.3.30
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -31,6 +31,12 @@ Main features include:
 5. When updating, upload the new release ZIP or use the configured updater, then review **Diagnostics & Maintenance** after the update completes.
 
 == Changelog ==
+
+= 0.3.30 =
+* The Danger Zone reset tools in Diagnostics & Maintenance are now visible by default for full administrators in wp-admin.
+* Removed the wp-config feature-flag requirement for dangerous resets, while keeping the reset UI limited to `manage_options` users only.
+* Existing destructive-action protections remain in place: server-side capability checks, nonces, explicit target selection, exact confirmation phrases, current WordPress password verification, and the final irreversible-action acknowledgment.
+* Strengthened the Factory Reset card styling so the nuclear option reads as more dangerous than the operational reset.
 
 = 0.3.29 =
 * Added an admin-only Danger Zone in Diagnostics & Maintenance for destructive reset actions.

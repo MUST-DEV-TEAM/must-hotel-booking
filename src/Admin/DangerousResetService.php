@@ -58,14 +58,9 @@ final class DangerousResetService
         ];
     }
 
-    public static function isEnabled(): bool
-    {
-        return \defined('MUST_HOTEL_BOOKING_ENABLE_DANGEROUS_RESET') && MUST_HOTEL_BOOKING_ENABLE_DANGEROUS_RESET;
-    }
-
     public static function canCurrentUserAccess(): bool
     {
-        return \is_admin() && self::isEnabled() && \current_user_can('manage_options');
+        return \is_admin() && \current_user_can('manage_options');
     }
 
     /**
@@ -139,14 +134,6 @@ final class DangerousResetService
         if (!\is_admin()) {
             return self::buildFailureResult(
                 \__('Dangerous reset actions are only available inside wp-admin.', 'must-hotel-booking'),
-                $form,
-                $target
-            );
-        }
-
-        if (!self::isEnabled()) {
-            return self::buildFailureResult(
-                \__('Dangerous reset tools are disabled. Enable MUST_HOTEL_BOOKING_ENABLE_DANGEROUS_RESET first.', 'must-hotel-booking'),
                 $form,
                 $target
             );
