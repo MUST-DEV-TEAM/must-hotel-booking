@@ -62,7 +62,7 @@ final class AccommodationCategoryUpgradeService
 
     private function ensureCategoriesExist(): void
     {
-        if (!$this->categoryRepository->tableExists()) {
+        if (!$this->categoryRepository->categoriesTableExists()) {
             return;
         }
 

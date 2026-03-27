@@ -4,7 +4,7 @@ Tags: hotel, booking, reservation, accommodation
 Requires at least: 5.0
 Tested up to: 6.0
 Requires PHP: 7.4
-Stable tag: 0.3.32
+Stable tag: 0.3.33
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -31,6 +31,10 @@ Main features include:
 5. When updating, upload the new release ZIP or use the configured updater, then review **Diagnostics & Maintenance** after the update completes.
 
 == Changelog ==
+
+= 0.3.33 =
+* Fixed a fatal admin/runtime load error caused by the new accommodation category repository declaring an incompatible `tableExists()` method signature.
+* Corrected the category table availability checks so the accommodation category/listing split loads cleanly in WordPress.
 
 = 0.3.32 =
 * Split accommodations into admin-managed top-level categories and separate sellable room/listing records.

@@ -9,9 +9,9 @@ final class RoomCategoryRepository extends AbstractRepository
         return $this->table('room_categories');
     }
 
-    public function tableExists(): bool
+    public function categoriesTableExists(): bool
     {
-        return $this->tableExists('room_categories');
+        return parent::tableExists('room_categories');
     }
 
     /**
@@ -19,7 +19,7 @@ final class RoomCategoryRepository extends AbstractRepository
      */
     public function getCategories(): array
     {
-        if (!$this->tableExists()) {
+        if (!$this->categoriesTableExists()) {
             return [];
         }
 
@@ -63,7 +63,7 @@ final class RoomCategoryRepository extends AbstractRepository
      */
     public function getCategoryById(int $categoryId): ?array
     {
-        if ($categoryId <= 0 || !$this->tableExists()) {
+        if ($categoryId <= 0 || !$this->categoriesTableExists()) {
             return null;
         }
 
@@ -88,7 +88,7 @@ final class RoomCategoryRepository extends AbstractRepository
     {
         $slug = \sanitize_key($slug);
 
-        if ($slug === '' || !$this->tableExists()) {
+        if ($slug === '' || !$this->categoriesTableExists()) {
             return null;
         }
 
@@ -110,7 +110,7 @@ final class RoomCategoryRepository extends AbstractRepository
     {
         $slug = \sanitize_key($slug);
 
-        if ($slug === '' || !$this->tableExists()) {
+        if ($slug === '' || !$this->categoriesTableExists()) {
             return false;
         }
 
@@ -136,7 +136,7 @@ final class RoomCategoryRepository extends AbstractRepository
      */
     public function createCategory(array $data): int
     {
-        if (!$this->tableExists()) {
+        if (!$this->categoriesTableExists()) {
             return 0;
         }
 
@@ -164,7 +164,7 @@ final class RoomCategoryRepository extends AbstractRepository
      */
     public function updateCategory(int $categoryId, array $data): bool
     {
-        if ($categoryId <= 0 || !$this->tableExists()) {
+        if ($categoryId <= 0 || !$this->categoriesTableExists()) {
             return false;
         }
 
@@ -186,7 +186,7 @@ final class RoomCategoryRepository extends AbstractRepository
 
     public function deleteCategory(int $categoryId): bool
     {
-        if ($categoryId <= 0 || !$this->tableExists()) {
+        if ($categoryId <= 0 || !$this->categoriesTableExists()) {
             return false;
         }
 
@@ -201,7 +201,7 @@ final class RoomCategoryRepository extends AbstractRepository
 
     public function countCategories(): int
     {
-        if (!$this->tableExists()) {
+        if (!$this->categoriesTableExists()) {
             return 0;
         }
 
