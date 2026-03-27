@@ -94,8 +94,8 @@ final class PricingAdminActions
 
         if (!\is_array($room) || $roomId <= 0) {
             return [
-                'errors' => [\__('Accommodation type not found.', 'must-hotel-booking')],
-                'base_price_errors' => [\__('Accommodation type not found.', 'must-hotel-booking')],
+                'errors' => [\__('Room listing not found.', 'must-hotel-booking')],
+                'base_price_errors' => [\__('Room listing not found.', 'must-hotel-booking')],
                 'rule_errors' => [],
                 'rule_form' => null,
             ];
@@ -269,7 +269,7 @@ final class PricingAdminActions
         }
 
         if ((int) $values['room_id'] > 0 && !$this->roomRepository->getRoomById((int) $values['room_id'])) {
-            $values['errors'][] = \__('Selected accommodation type could not be found.', 'must-hotel-booking');
+            $values['errors'][] = \__('Selected room listing could not be found.', 'must-hotel-booking');
         }
 
         return $values;

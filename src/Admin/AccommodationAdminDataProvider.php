@@ -6,14 +6,17 @@ use MustHotelBooking\Core\RoomCatalog;
 use MustHotelBooking\Core\RoomData;
 
 /**
- * Builds rooms admin data from the authoritative must_rooms table.
+ * Builds accommodation admin data from the authoritative must_rooms table.
  *
- * Accommodation types remain authoritative in must_rooms for this plugin
- * version. mhb_room_types stays as an internal mirror only, and mhb_rooms
- * units continue to reference those legacy type IDs.
+ * Sellable room/listing records remain authoritative in must_rooms.
+ * mhb_room_types stays as an internal mirror only, and mhb_rooms units
+ * continue to reference those legacy IDs.
  */
 final class AccommodationAdminDataProvider
 {
+    /** @var \MustHotelBooking\Database\RoomCategoryRepository */
+    private $roomCategoryRepository;
+
     /** @var \MustHotelBooking\Database\RoomRepository */
     private $roomRepository;
 
@@ -31,6 +34,7 @@ final class AccommodationAdminDataProvider
 
     public function __construct()
     {
+        $this->roomCategoryRepository = \MustHotelBooking\Engine\get_room_category_repository();
         $this->roomRepository = \MustHotelBooking\Engine\get_room_repository();
         $this->inventoryRepository = \MustHotelBooking\Engine\get_inventory_repository();
         $this->reservationRepository = \MustHotelBooking\Engine\get_reservation_repository();
@@ -45,34 +49,38 @@ final class AccommodationAdminDataProvider
     public function getPageData(AccommodationAdminQuery $query, array $state = []): array
     {
         $today = \current_time('Y-m-d');
+        $categoryRows = $this->buildCategoryRows();
         $rawTypes = $this->roomRepository->getAccommodationAdminRows();
         $types = $this->buildAccommodationTypeRows($rawTypes, $today);
         $typeIndex = $this->indexRowsById($types);
         $rawUnits = $this->inventoryRepository->getInventoryUnitAdminRows();
         $units = $this->buildUnitRows($rawUnits, $typeIndex, $today);
-        $authorityAudit = (new AccommodationAuthorityAudit())->getAuditData($rawTypes);
-        $adminWarnings = $this->buildAdminWarnings($types);
+        $adminWarnings = $this->buildAdminWarnings($categoryRows, $types);
         $filteredTypes = $this->filterAccommodationTypes($types, $query);
         $filteredUnits = $this->filterUnits($units, $query);
         $paginatedTypes = $this->paginateRows($filteredTypes, $query->getPaged(), $query->getPerPage());
         $paginatedUnits = $this->paginateRows($filteredUnits, $query->getPaged(), $query->getPerPage());
+        $categoryErrors = isset($state['category_errors']) && \is_array($state['category_errors']) ? $state['category_errors'] : [];
         $typeErrors = isset($state['type_errors']) && \is_array($state['type_errors']) ? $state['type_errors'] : [];
         $unitErrors = isset($state['unit_errors']) && \is_array($state['unit_errors']) ? $state['unit_errors'] : [];
+        $categoryForm = $this->getCategoryFormData($query, isset($state['category_form']) && \is_array($state['category_form']) ? $state['category_form'] : null);
         $typeForm = $this->getTypeFormData($query, isset($state['type_form']) && \is_array($state['type_form']) ? $state['type_form'] : null);
         $unitForm = $this->getUnitFormData($query, isset($state['unit_form']) && \is_array($state['unit_form']) ? $state['unit_form'] : null);
 
         return [
             'tab' => $query->getTab(),
             'notice' => $query->getNotice(),
-            'summary_cards' => $this->buildSummaryCards($types, $units),
-            'authority_audit' => $authorityAudit,
+            'summary_cards' => $this->buildSummaryCards($categoryRows, $types, $units),
             'admin_warnings' => $adminWarnings,
+            'category_rows' => $categoryRows,
             'type_rows' => $paginatedTypes['rows'],
             'unit_rows' => $paginatedUnits['rows'],
             'type_pagination' => $paginatedTypes['pagination'],
             'unit_pagination' => $paginatedUnits['pagination'],
+            'category_form' => $categoryForm,
             'type_form' => $typeForm,
             'unit_form' => $unitForm,
+            'category_errors' => $categoryErrors,
             'type_errors' => $typeErrors,
             'unit_errors' => $unitErrors,
             'category_options' => RoomCatalog::getCategories(),
@@ -90,11 +98,17 @@ final class AccommodationAdminDataProvider
      * @param array<int, array<string, mixed>> $types
      * @return array<int, string>
      */
-    private function buildAdminWarnings(array $types): array
+    private function buildAdminWarnings(array $categories, array $types): array
     {
+        if (empty($categories)) {
+            return [
+                \__('No accommodation categories exist yet. Create at least one category before importing or assigning room listings.', 'must-hotel-booking'),
+            ];
+        }
+
         if (empty($types)) {
             return [
-                \__('No accommodation types exist yet. Create at least one type before configuring units, pricing, availability, or rate plans.', 'must-hotel-booking'),
+                \__('No room listings exist yet. Create at least one room/listing before configuring units, pricing, availability, or rate plans.', 'must-hotel-booking'),
             ];
         }
 
@@ -105,8 +119,55 @@ final class AccommodationAdminDataProvider
         }
 
         return [
-            \__('All accommodation types are currently incomplete for pricing. Add a base price or an active rate-plan assignment before selling rooms.', 'must-hotel-booking'),
+            \__('All room listings are currently incomplete for pricing. Add a base price or an active rate-plan assignment before selling rooms.', 'must-hotel-booking'),
         ];
+    }
+
+    /**
+     * @return array<int, array<string, mixed>>
+     */
+    private function buildCategoryRows(): array
+    {
+        $rows = $this->roomCategoryRepository->getCategories();
+        $usageSummary = $this->roomRepository->getCategoryUsageSummaryMap();
+        $categoryRows = [];
+
+        foreach ($rows as $row) {
+            if (!\is_array($row)) {
+                continue;
+            }
+
+            $categoryId = isset($row['id']) ? (int) $row['id'] : 0;
+            $slug = \sanitize_key((string) ($row['slug'] ?? ''));
+
+            if ($categoryId <= 0 || $slug === '') {
+                continue;
+            }
+
+            $usage = isset($usageSummary[$slug]) && \is_array($usageSummary[$slug]) ? $usageSummary[$slug] : [];
+            $roomCount = isset($usage['room_count']) ? (int) $usage['room_count'] : 0;
+            $activeRoomCount = isset($usage['active_room_count']) ? (int) $usage['active_room_count'] : 0;
+            $bookableRoomCount = isset($usage['bookable_room_count']) ? (int) $usage['bookable_room_count'] : 0;
+
+            $categoryRows[] = [
+                'id' => $categoryId,
+                'name' => (string) ($row['name'] ?? ''),
+                'slug' => $slug,
+                'description' => (string) ($row['description'] ?? ''),
+                'sort_order' => (int) ($row['sort_order'] ?? 0),
+                'room_count' => $roomCount,
+                'active_room_count' => $activeRoomCount,
+                'bookable_room_count' => $bookableRoomCount,
+                'delete_blocked' => $roomCount > 0,
+                'edit_url' => get_admin_rooms_page_url(['tab' => 'categories', 'action' => 'edit_category', 'category_id' => $categoryId]),
+                'delete_url' => \wp_nonce_url(
+                    get_admin_rooms_page_url(['tab' => 'categories', 'action' => 'delete_category', 'category_id' => $categoryId]),
+                    'must_accommodation_delete_category_' . $categoryId
+                ),
+            ];
+        }
+
+        return $categoryRows;
     }
 
     /**
@@ -184,7 +245,7 @@ final class AccommodationAdminDataProvider
                 'name' => (string) ($row['name'] ?? ''),
                 'slug' => (string) ($row['slug'] ?? ''),
                 'category' => (string) ($row['category'] ?? ''),
-                'category_label' => RoomCatalog::getCategoryLabel((string) ($row['category'] ?? 'standard-rooms')),
+                'category_label' => RoomCatalog::getCategoryLabel((string) ($row['category'] ?? RoomCatalog::getDefaultCategory())),
                 'description' => (string) ($row['description'] ?? ''),
                 'internal_code' => (string) ($row['internal_code'] ?? ''),
                 'is_active' => $isActive,
@@ -217,14 +278,14 @@ final class AccommodationAdminDataProvider
                 'maintenance_block_count' => (int) ($availabilityData['maintenance_block_count'] ?? 0),
                 'warnings' => $warnings,
                 'capacity_summary' => $this->formatCapacitySummary($row),
-                'edit_url' => get_admin_rooms_page_url(['tab' => 'types', 'action' => 'edit_type', 'type_id' => $typeId]),
+                'edit_url' => get_admin_rooms_page_url(['tab' => 'rooms', 'action' => 'edit_room', 'type_id' => $typeId]),
                 'duplicate_url' => \wp_nonce_url(
-                    get_admin_rooms_page_url(['tab' => 'types', 'action' => 'duplicate_type', 'type_id' => $typeId]),
+                    get_admin_rooms_page_url(['tab' => 'rooms', 'action' => 'duplicate_type', 'type_id' => $typeId]),
                     'must_accommodation_duplicate_type_' . $typeId
                 ),
                 'toggle_url' => \wp_nonce_url(
                     get_admin_rooms_page_url([
-                        'tab' => 'types',
+                        'tab' => 'rooms',
                         'action' => 'toggle_type_status',
                         'type_id' => $typeId,
                         'target' => $isActive ? 'inactive' : 'active',
@@ -354,7 +415,7 @@ final class AccommodationAdminDataProvider
                     'must_accommodation_toggle_unit_' . $unitId
                 ),
                 'delete_url' => $deleteUrl,
-                'type_edit_url' => get_admin_rooms_page_url(['tab' => 'types', 'action' => 'edit_type', 'type_id' => $typeId]),
+                'type_edit_url' => get_admin_rooms_page_url(['tab' => 'rooms', 'action' => 'edit_room', 'type_id' => $typeId]),
                 'calendar_url' => \function_exists(__NAMESPACE__ . '\get_admin_calendar_page_url')
                     ? get_admin_calendar_page_url(['room_id' => $typeId, 'focus_room_id' => $typeId, 'start_date' => $today, 'weeks' => 2])
                     : '',
@@ -542,7 +603,7 @@ final class AccommodationAdminDataProvider
             'type_id' => 0,
             'name' => '',
             'slug' => '',
-            'category' => 'standard-rooms',
+            'category' => RoomCatalog::getDefaultCategory(),
             'description' => '',
             'internal_code' => '',
             'is_active' => 1,
@@ -575,7 +636,7 @@ final class AccommodationAdminDataProvider
             return \array_merge($defaults, $submittedForm);
         }
 
-        if ($query->getAction() !== 'edit_type' || $query->getTypeId() <= 0) {
+        if ($query->getAction() !== 'edit_room' || $query->getTypeId() <= 0) {
             return $defaults;
         }
 
@@ -594,7 +655,7 @@ final class AccommodationAdminDataProvider
             'type_id' => $roomId,
             'name' => (string) ($room['name'] ?? ''),
             'slug' => (string) ($room['slug'] ?? ''),
-            'category' => (string) ($room['category'] ?? 'standard-rooms'),
+            'category' => (string) ($room['category'] ?? RoomCatalog::getDefaultCategory()),
             'description' => (string) ($room['description'] ?? ''),
             'internal_code' => (string) ($room['internal_code'] ?? ''),
             'is_active' => !empty($room['is_active']) ? 1 : 0,
@@ -706,8 +767,9 @@ final class AccommodationAdminDataProvider
      * @param array<int, array<string, mixed>> $units
      * @return array<int, array<string, string>>
      */
-    private function buildSummaryCards(array $types, array $units): array
+    private function buildSummaryCards(array $categories, array $types, array $units): array
     {
+        $categoryCount = \count($categories);
         $activeTypes = 0;
         $activeUnits = 0;
         $missingPricing = 0;
@@ -738,9 +800,14 @@ final class AccommodationAdminDataProvider
 
         return [
             [
-                'label' => \__('Accommodation Types', 'must-hotel-booking'),
+                'label' => \__('Categories', 'must-hotel-booking'),
+                'value' => (string) $categoryCount,
+                'meta' => \__('Admin-managed top-level accommodation groupings.', 'must-hotel-booking'),
+            ],
+            [
+                'label' => \__('Rooms / Listings', 'must-hotel-booking'),
                 'value' => (string) \count($types),
-                'meta' => \sprintf(__('%d active sellable types', 'must-hotel-booking'), $activeTypes),
+                'meta' => \sprintf(__('%d active sellable listings', 'must-hotel-booking'), $activeTypes),
             ],
             [
                 'label' => \__('Physical Units', 'must-hotel-booking'),
@@ -994,6 +1061,43 @@ final class AccommodationAdminDataProvider
         $chips[] = ['label' => \__('Results', 'must-hotel-booking'), 'value' => (string) $count];
 
         return $chips;
+    }
+
+    /**
+     * @param array<string, mixed>|null $submittedForm
+     * @return array<string, mixed>
+     */
+    private function getCategoryFormData(AccommodationAdminQuery $query, ?array $submittedForm): array
+    {
+        $defaults = [
+            'category_id' => 0,
+            'name' => '',
+            'slug' => '',
+            'description' => '',
+            'sort_order' => 0,
+        ];
+
+        if (\is_array($submittedForm)) {
+            return \array_merge($defaults, $submittedForm);
+        }
+
+        if ($query->getAction() !== 'edit_category' || $query->getCategoryId() <= 0) {
+            return $defaults;
+        }
+
+        $category = $this->roomCategoryRepository->getCategoryById($query->getCategoryId());
+
+        if (!\is_array($category)) {
+            return $defaults;
+        }
+
+        return [
+            'category_id' => (int) ($category['id'] ?? 0),
+            'name' => (string) ($category['name'] ?? ''),
+            'slug' => (string) ($category['slug'] ?? ''),
+            'description' => (string) ($category['description'] ?? ''),
+            'sort_order' => (int) ($category['sort_order'] ?? 0),
+        ];
     }
 
     /**

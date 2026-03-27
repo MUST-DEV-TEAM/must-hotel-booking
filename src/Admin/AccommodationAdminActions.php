@@ -6,6 +6,9 @@ use MustHotelBooking\Core\RoomCatalog;
 
 final class AccommodationAdminActions
 {
+    /** @var \MustHotelBooking\Database\RoomCategoryRepository */
+    private $roomCategoryRepository;
+
     /** @var \MustHotelBooking\Database\RoomRepository */
     private $roomRepository;
 
@@ -17,6 +20,7 @@ final class AccommodationAdminActions
 
     public function __construct()
     {
+        $this->roomCategoryRepository = \MustHotelBooking\Engine\get_room_category_repository();
         $this->roomRepository = \MustHotelBooking\Engine\get_room_repository();
         $this->inventoryRepository = \MustHotelBooking\Engine\get_inventory_repository();
         $this->reservationRepository = \MustHotelBooking\Engine\get_reservation_repository();
@@ -51,6 +55,11 @@ final class AccommodationAdminActions
 
         if ($action === AccommodationImportExportService::ACTION_DOWNLOAD_TEMPLATE) {
             $this->handleWorkbookDownload(true);
+            return;
+        }
+
+        if ($action === 'delete_category') {
+            $this->deleteCategory($query);
             return;
         }
 
@@ -92,6 +101,10 @@ final class AccommodationAdminActions
 
         $action = isset($_POST['must_accommodation_action']) ? \sanitize_key((string) \wp_unslash($_POST['must_accommodation_action'])) : '';
 
+        if ($action === 'save_category') {
+            return $this->saveCategory();
+        }
+
         if ($action === 'save_type') {
             return $this->saveType();
         }
@@ -116,12 +129,74 @@ final class AccommodationAdminActions
 
         if (!\wp_verify_nonce($nonce, $action)) {
             $this->redirectToRoomsPage([
-                'tab' => 'types',
+                'tab' => 'rooms',
                 'notice' => 'invalid_nonce',
             ]);
         }
 
         (new AccommodationImportExportService())->handleExportDownload($template);
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function saveCategory(): array
+    {
+        $nonce = isset($_POST['must_accommodation_category_nonce']) ? (string) \wp_unslash($_POST['must_accommodation_category_nonce']) : '';
+
+        if (!\wp_verify_nonce($nonce, 'must_accommodation_save_category')) {
+            return [
+                'category_errors' => [\__('Security check failed. Please try again.', 'must-hotel-booking')],
+                'category_form' => null,
+                'type_errors' => [],
+                'type_form' => null,
+                'unit_errors' => [],
+                'unit_form' => null,
+            ];
+        }
+
+        /** @var array<string, mixed> $rawPost */
+        $rawPost = \is_array($_POST) ? $_POST : [];
+        $values = $this->sanitizeCategoryValues($rawPost);
+
+        if (!empty($values['errors'])) {
+            return [
+                'category_errors' => (array) $values['errors'],
+                'category_form' => $values,
+                'type_errors' => [],
+                'type_form' => null,
+                'unit_errors' => [],
+                'unit_form' => null,
+            ];
+        }
+
+        $categoryId = (int) $values['category_id'];
+        $saved = $categoryId > 0
+            ? $this->roomCategoryRepository->updateCategory($categoryId, $values)
+            : ($this->roomCategoryRepository->createCategory($values) > 0);
+
+        if (!$saved) {
+            return [
+                'category_errors' => [\__('Unable to save the accommodation category. Please check your database schema.', 'must-hotel-booking')],
+                'category_form' => $values,
+                'type_errors' => [],
+                'type_form' => null,
+                'unit_errors' => [],
+                'unit_form' => null,
+            ];
+        }
+
+        $redirectArgs = [
+            'tab' => 'categories',
+            'notice' => $categoryId > 0 ? 'category_updated' : 'category_created',
+        ];
+
+        if ($categoryId > 0) {
+            $redirectArgs['action'] = 'edit_category';
+            $redirectArgs['category_id'] = $categoryId;
+        }
+
+        $this->redirectToRoomsPage($redirectArgs);
     }
 
     /**
@@ -133,6 +208,8 @@ final class AccommodationAdminActions
 
         if (!\wp_verify_nonce($nonce, 'must_accommodation_save_type')) {
             return [
+                'category_errors' => [],
+                'category_form' => null,
                 'type_errors' => [\__('Security check failed. Please try again.', 'must-hotel-booking')],
                 'type_form' => null,
                 'unit_errors' => [],
@@ -146,6 +223,8 @@ final class AccommodationAdminActions
 
         if (!empty($values['errors'])) {
             return [
+                'category_errors' => [],
+                'category_form' => null,
                 'type_errors' => (array) $values['errors'],
                 'type_form' => $values,
                 'unit_errors' => [],
@@ -168,7 +247,9 @@ final class AccommodationAdminActions
 
         if ($savedId <= 0) {
             return [
-                'type_errors' => [\__('Unable to save the accommodation type. Please check your database schema.', 'must-hotel-booking')],
+                'category_errors' => [],
+                'category_form' => null,
+                'type_errors' => [\__('Unable to save the room listing. Please check your database schema.', 'must-hotel-booking')],
                 'type_form' => $values,
                 'unit_errors' => [],
                 'unit_form' => null,
@@ -195,10 +276,10 @@ final class AccommodationAdminActions
         );
 
         $this->redirectToRoomsPage([
-            'tab' => 'types',
-            'action' => 'edit_type',
+            'tab' => 'rooms',
+            'action' => 'edit_room',
             'type_id' => $savedId,
-            'notice' => $typeId > 0 ? 'type_updated' : 'type_created',
+            'notice' => $typeId > 0 ? 'room_updated' : 'room_created',
         ]);
     }
 
@@ -211,6 +292,8 @@ final class AccommodationAdminActions
 
         if (!\wp_verify_nonce($nonce, 'must_accommodation_save_unit')) {
             return [
+                'category_errors' => [],
+                'category_form' => null,
                 'type_errors' => [],
                 'type_form' => null,
                 'unit_errors' => [\__('Security check failed. Please try again.', 'must-hotel-booking')],
@@ -224,6 +307,8 @@ final class AccommodationAdminActions
 
         if (!empty($values['errors'])) {
             return [
+                'category_errors' => [],
+                'category_form' => null,
                 'type_errors' => [],
                 'type_form' => null,
                 'unit_errors' => (array) $values['errors'],
@@ -246,6 +331,8 @@ final class AccommodationAdminActions
 
         if ($savedId <= 0) {
             return [
+                'category_errors' => [],
+                'category_form' => null,
                 'type_errors' => [],
                 'type_form' => null,
                 'unit_errors' => [\__('Unable to save the accommodation unit. Please check your database schema.', 'must-hotel-booking')],
@@ -261,6 +348,39 @@ final class AccommodationAdminActions
         ]);
     }
 
+    private function deleteCategory(AccommodationAdminQuery $query): void
+    {
+        $categoryId = $query->getCategoryId();
+        $nonce = isset($_GET['_wpnonce']) ? (string) \wp_unslash($_GET['_wpnonce']) : '';
+
+        if ($categoryId <= 0 || !\wp_verify_nonce($nonce, 'must_accommodation_delete_category_' . $categoryId)) {
+            $this->redirectToRoomsPage(['tab' => 'categories', 'notice' => 'invalid_nonce']);
+        }
+
+        $category = $this->roomCategoryRepository->getCategoryById($categoryId);
+
+        if (!\is_array($category)) {
+            $this->redirectToRoomsPage(['tab' => 'categories', 'notice' => 'category_missing']);
+        }
+
+        $slug = \sanitize_key((string) ($category['slug'] ?? ''));
+        $assignedRooms = $slug !== '' ? $this->roomRepository->countRoomsForCategory($slug) : 0;
+
+        if ($assignedRooms > 0) {
+            $this->redirectToRoomsPage([
+                'tab' => 'categories',
+                'notice' => 'category_delete_blocked',
+                'category_id' => $categoryId,
+            ]);
+        }
+
+        $deleted = $this->roomCategoryRepository->deleteCategory($categoryId);
+        $this->redirectToRoomsPage([
+            'tab' => 'categories',
+            'notice' => $deleted ? 'category_deleted' : 'category_delete_failed',
+        ]);
+    }
+
     private function toggleTypeStatus(AccommodationAdminQuery $query): void
     {
         $typeId = $query->getTypeId();
@@ -268,13 +388,13 @@ final class AccommodationAdminActions
         $nonce = isset($_GET['_wpnonce']) ? (string) \wp_unslash($_GET['_wpnonce']) : '';
 
         if ($typeId <= 0 || !\wp_verify_nonce($nonce, 'must_accommodation_toggle_type_' . $typeId)) {
-            $this->redirectToRoomsPage(['tab' => 'types', 'notice' => 'invalid_nonce']);
+            $this->redirectToRoomsPage(['tab' => 'rooms', 'notice' => 'invalid_nonce']);
         }
 
         $room = $this->roomRepository->getRoomById($typeId);
 
         if (!\is_array($room)) {
-            $this->redirectToRoomsPage(['tab' => 'types', 'notice' => 'type_missing']);
+            $this->redirectToRoomsPage(['tab' => 'rooms', 'notice' => 'room_missing']);
         }
 
         $room['is_active'] = $target === 'active' ? 1 : 0;
@@ -293,8 +413,8 @@ final class AccommodationAdminActions
         }
 
         $this->redirectToRoomsPage([
-            'tab' => 'types',
-            'notice' => $saved ? ($target === 'active' ? 'type_activated' : 'type_deactivated') : 'type_update_failed',
+            'tab' => 'rooms',
+            'notice' => $saved ? ($target === 'active' ? 'room_activated' : 'room_deactivated') : 'room_update_failed',
         ]);
     }
 
@@ -329,13 +449,13 @@ final class AccommodationAdminActions
         $nonce = isset($_GET['_wpnonce']) ? (string) \wp_unslash($_GET['_wpnonce']) : '';
 
         if ($typeId <= 0 || !\wp_verify_nonce($nonce, 'must_accommodation_duplicate_type_' . $typeId)) {
-            $this->redirectToRoomsPage(['tab' => 'types', 'notice' => 'invalid_nonce']);
+            $this->redirectToRoomsPage(['tab' => 'rooms', 'notice' => 'invalid_nonce']);
         }
 
         $room = $this->roomRepository->getRoomById($typeId);
 
         if (!\is_array($room)) {
-            $this->redirectToRoomsPage(['tab' => 'types', 'notice' => 'type_missing']);
+            $this->redirectToRoomsPage(['tab' => 'rooms', 'notice' => 'room_missing']);
         }
 
         $copy = $room;
@@ -347,7 +467,7 @@ final class AccommodationAdminActions
         $newTypeId = $this->roomRepository->createRoom($copy);
 
         if ($newTypeId <= 0) {
-            $this->redirectToRoomsPage(['tab' => 'types', 'notice' => 'type_duplicate_failed']);
+            $this->redirectToRoomsPage(['tab' => 'rooms', 'notice' => 'room_duplicate_failed']);
         }
 
         save_room_meta_data(
@@ -370,10 +490,10 @@ final class AccommodationAdminActions
         );
 
         $this->redirectToRoomsPage([
-            'tab' => 'types',
-            'action' => 'edit_type',
+            'tab' => 'rooms',
+            'action' => 'edit_room',
             'type_id' => $newTypeId,
-            'notice' => 'type_duplicated',
+            'notice' => 'room_duplicated',
         ]);
     }
 
@@ -383,13 +503,13 @@ final class AccommodationAdminActions
         $nonce = isset($_GET['_wpnonce']) ? (string) \wp_unslash($_GET['_wpnonce']) : '';
 
         if ($typeId <= 0 || !\wp_verify_nonce($nonce, 'must_accommodation_delete_type_' . $typeId)) {
-            $this->redirectToRoomsPage(['tab' => 'types', 'notice' => 'invalid_nonce']);
+            $this->redirectToRoomsPage(['tab' => 'rooms', 'notice' => 'invalid_nonce']);
         }
 
         $room = $this->roomRepository->getRoomById($typeId);
 
         if (!\is_array($room)) {
-            $this->redirectToRoomsPage(['tab' => 'types', 'notice' => 'type_missing']);
+            $this->redirectToRoomsPage(['tab' => 'rooms', 'notice' => 'room_missing']);
         }
 
         $dependencySummary = $this->roomRepository->getRoomDeletionGuardSummary($typeId);
@@ -397,8 +517,8 @@ final class AccommodationAdminActions
 
         if (!empty($blockers)) {
             $this->redirectToRoomsPage([
-                'tab' => 'types',
-                'notice' => 'type_delete_blocked',
+                'tab' => 'rooms',
+                'notice' => 'room_delete_blocked',
                 'type_id' => $typeId,
             ]);
         }
@@ -407,8 +527,8 @@ final class AccommodationAdminActions
 
         if (!$mirrorDeleted) {
             $this->redirectToRoomsPage([
-                'tab' => 'types',
-                'notice' => 'type_delete_failed',
+                'tab' => 'rooms',
+                'notice' => 'room_delete_failed',
                 'type_id' => $typeId,
             ]);
         }
@@ -427,13 +547,13 @@ final class AccommodationAdminActions
             );
 
             $this->redirectToRoomsPage([
-                'tab' => 'types',
-                'notice' => 'type_delete_failed',
+                'tab' => 'rooms',
+                'notice' => 'room_delete_failed',
                 'type_id' => $typeId,
             ]);
         }
 
-        $this->redirectToRoomsPage(['tab' => 'types', 'notice' => 'type_deleted']);
+        $this->redirectToRoomsPage(['tab' => 'rooms', 'notice' => 'room_deleted']);
     }
 
     private function deleteUnit(AccommodationAdminQuery $query): void
@@ -457,13 +577,49 @@ final class AccommodationAdminActions
      * @param array<string, mixed> $source
      * @return array<string, mixed>
      */
+    private function sanitizeCategoryValues(array $source): array
+    {
+        $categoryId = isset($source['category_id']) ? \absint(\wp_unslash($source['category_id'])) : 0;
+        $existingCategory = $categoryId > 0 ? $this->roomCategoryRepository->getCategoryById($categoryId) : null;
+        $name = isset($source['name']) ? \sanitize_text_field((string) \wp_unslash($source['name'])) : '';
+        $description = isset($source['description']) ? \sanitize_textarea_field((string) \wp_unslash($source['description'])) : '';
+        $sortOrder = isset($source['sort_order']) ? (int) \wp_unslash($source['sort_order']) : 0;
+        $slug = \is_array($existingCategory)
+            ? \sanitize_key((string) ($existingCategory['slug'] ?? ''))
+            : $this->generateUniqueCategorySlug($name);
+        $errors = [];
+
+        if ($name === '') {
+            $errors[] = \__('Category name is required.', 'must-hotel-booking');
+        }
+
+        if ($slug === '') {
+            $errors[] = \__('A valid category slug could not be generated from the category name.', 'must-hotel-booking');
+        }
+
+        return [
+            'category_id' => $categoryId,
+            'name' => $name,
+            'slug' => $slug,
+            'description' => $description,
+            'sort_order' => $sortOrder,
+            'errors' => $errors,
+        ];
+    }
+
+    /**
+     * @param array<string, mixed> $source
+     * @return array<string, mixed>
+     */
     private function sanitizeTypeValues(array $source): array
     {
         $typeId = isset($source['type_id']) ? \absint(\wp_unslash($source['type_id'])) : 0;
         $existingType = $typeId > 0 ? $this->roomRepository->getRoomById($typeId) : null;
         $name = isset($source['name']) ? \sanitize_text_field((string) \wp_unslash($source['name'])) : '';
         $slugInput = isset($source['slug']) ? \sanitize_title((string) \wp_unslash($source['slug'])) : '';
-        $category = isset($source['category']) ? RoomCatalog::normalizeCategory((string) \wp_unslash($source['category'])) : 'standard-rooms';
+        $availableCategories = RoomCatalog::getCategories();
+        $rawCategory = isset($source['category']) ? \sanitize_key((string) \wp_unslash($source['category'])) : '';
+        $category = $rawCategory;
         $description = isset($source['description']) ? \sanitize_textarea_field((string) \wp_unslash($source['description'])) : '';
         $internalCode = isset($source['internal_code']) ? \sanitize_text_field((string) \wp_unslash($source['internal_code'])) : '';
         $sortOrder = isset($source['sort_order']) ? (int) \wp_unslash($source['sort_order']) : 0;
@@ -486,7 +642,24 @@ final class AccommodationAdminActions
         $errors = [];
 
         if ($name === '') {
-            $errors[] = \__('Accommodation type name is required.', 'must-hotel-booking');
+            $errors[] = \__('Room / listing name is required.', 'must-hotel-booking');
+        }
+
+        if (empty($availableCategories)) {
+            $errors[] = \__('Create at least one accommodation category before saving a room listing.', 'must-hotel-booking');
+            $category = '';
+        } elseif ($category === '') {
+            $fallbackCategory = \is_array($existingType)
+                ? \sanitize_key((string) ($existingType['category'] ?? ''))
+                : RoomCatalog::getDefaultCategory();
+
+            if ($fallbackCategory !== '' && isset($availableCategories[$fallbackCategory])) {
+                $category = $fallbackCategory;
+            } else {
+                $errors[] = \__('Select a valid accommodation category.', 'must-hotel-booking');
+            }
+        } elseif (!isset($availableCategories[$category])) {
+            $errors[] = \__('Select a valid accommodation category.', 'must-hotel-booking');
         }
 
         if ($maxGuests < $maxAdults) {
@@ -535,6 +708,31 @@ final class AccommodationAdminActions
         ];
     }
 
+    private function generateUniqueCategorySlug(string $name, int $excludeCategoryId = 0): string
+    {
+        $baseSlug = \sanitize_title($name);
+
+        if ($baseSlug === '') {
+            return '';
+        }
+
+        if (!$this->roomCategoryRepository->slugExists($baseSlug, $excludeCategoryId)) {
+            return $baseSlug;
+        }
+
+        $index = 2;
+
+        while (true) {
+            $candidate = $baseSlug . '-' . $index;
+
+            if (!$this->roomCategoryRepository->slugExists($candidate, $excludeCategoryId)) {
+                return $candidate;
+            }
+
+            $index++;
+        }
+    }
+
     /**
      * @param array<string, mixed> $source
      * @return array<string, mixed>
@@ -555,7 +753,7 @@ final class AccommodationAdminActions
         $errors = [];
 
         if ($roomTypeId <= 0 || !\is_array($this->roomRepository->getRoomById($roomTypeId))) {
-            $errors[] = \__('Select a valid accommodation type.', 'must-hotel-booking');
+            $errors[] = \__('Select a valid room listing.', 'must-hotel-booking');
         }
 
         if ($roomNumber === '') {
@@ -573,7 +771,7 @@ final class AccommodationAdminActions
         $typeRow = $roomTypeId > 0 ? $this->roomRepository->getRoomById($roomTypeId) : null;
 
         if (\is_array($typeRow) && $capacityOverride > 0 && $capacityOverride > (int) ($typeRow['max_guests'] ?? 0)) {
-            $errors[] = \__('Capacity override cannot exceed the linked accommodation type max guests.', 'must-hotel-booking');
+            $errors[] = \__('Capacity override cannot exceed the linked room listing max guests.', 'must-hotel-booking');
         }
 
         if ($title === '') {
@@ -605,6 +803,8 @@ final class AccommodationAdminActions
     private function blankState(): array
     {
         return [
+            'category_errors' => [],
+            'category_form' => null,
             'type_errors' => [],
             'type_form' => null,
             'unit_errors' => [],

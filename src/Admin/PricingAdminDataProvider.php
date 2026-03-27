@@ -338,9 +338,9 @@ final class PricingAdminDataProvider
 
         return [
             [
-                'label' => \__('Accommodation Types', 'must-hotel-booking'),
+                'label' => \__('Room Listings', 'must-hotel-booking'),
                 'value' => (string) \count($roomRows),
-                'meta' => \__('Direct pricing is anchored to accommodation type base rates.', 'must-hotel-booking'),
+                'meta' => \__('Direct pricing is anchored to room/listing base rates.', 'must-hotel-booking'),
             ],
             [
                 'label' => \__('Active Override Rules', 'must-hotel-booking'),
@@ -350,12 +350,12 @@ final class PricingAdminDataProvider
             [
                 'label' => \__('Missing Pricing', 'must-hotel-booking'),
                 'value' => (string) $missingPricing,
-                'meta' => \__('Active sellable accommodation types missing both base pricing and rate plan fallback.', 'must-hotel-booking'),
+                'meta' => \__('Active sellable room listings missing both base pricing and rate plan fallback.', 'must-hotel-booking'),
             ],
             [
                 'label' => \__('Rule Overlaps', 'must-hotel-booking'),
                 'value' => (string) $overlapCount,
-                'meta' => \__('Overlapping direct override rules on the same accommodation type.', 'must-hotel-booking'),
+                'meta' => \__('Overlapping direct override rules on the same room listing.', 'must-hotel-booking'),
             ],
         ];
     }

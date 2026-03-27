@@ -378,7 +378,7 @@ function render_calendar_board_controls(CalendarViewQuery $query, array $pageDat
 
     echo '<div class="must-calendar-board-controls">';
     echo '<div class="must-calendar-grid-head">';
-    echo '<div><h2>' . \esc_html__('Calendar Board', 'must-hotel-booking') . '</h2><p>' . \esc_html__('Set the visible weeks, then narrow by accommodation type or a single room without leaving the board.', 'must-hotel-booking') . '</p></div>';
+    echo '<div><h2>' . \esc_html__('Calendar Board', 'must-hotel-booking') . '</h2><p>' . \esc_html__('Set the visible weeks, then narrow by accommodation category or a single room listing without leaving the board.', 'must-hotel-booking') . '</p></div>';
     echo '<div class="must-calendar-grid-head-meta">';
     echo '<span class="must-calendar-active-filter is-strong">' . \esc_html((string) ($range['label'] ?? '')) . '</span>';
     echo '<span class="must-calendar-active-filter">' . \esc_html(\sprintf(_n('%d week', '%d weeks', (int) ($filters['weeks'] ?? 2), 'must-hotel-booking'), (int) ($filters['weeks'] ?? 2))) . '</span>';
@@ -402,7 +402,7 @@ function render_calendar_board_controls(CalendarViewQuery $query, array $pageDat
     }
 
     echo '</select></label>';
-    echo '<label class="must-calendar-field"><span>' . \esc_html__('Accommodation Type', 'must-hotel-booking') . '</span><select name="accommodation_type">';
+    echo '<label class="must-calendar-field"><span>' . \esc_html__('Accommodation Category', 'must-hotel-booking') . '</span><select name="accommodation_type">';
 
     foreach ((array) ($filters['category_options'] ?? []) as $value => $label) {
         echo '<option value="' . \esc_attr((string) $value) . '"' . \selected((string) ($filters['category'] ?? ''), (string) $value, false) . '>' . \esc_html((string) $label) . '</option>';
@@ -454,7 +454,7 @@ function render_calendar_board_controls(CalendarViewQuery $query, array $pageDat
     echo '<span class="must-calendar-active-filter">' . \esc_html__('Ends', 'must-hotel-booking') . ': ' . \esc_html(\wp_date(\get_option('date_format'), \strtotime((string) ($filters['end_date'] ?? '')))) . '</span>';
 
     if ($currentCategoryLabel !== '' && !\MustHotelBooking\Core\RoomCatalog::isBookingAllCategory((string) ($filters['category'] ?? ''))) {
-        echo '<span class="must-calendar-active-filter">' . \esc_html__('Type', 'must-hotel-booking') . ': ' . \esc_html($currentCategoryLabel) . '</span>';
+        echo '<span class="must-calendar-active-filter">' . \esc_html__('Category', 'must-hotel-booking') . ': ' . \esc_html($currentCategoryLabel) . '</span>';
     }
 
     if ((int) ($filters['room_id'] ?? 0) > 0 && $currentRoomLabel !== '') {

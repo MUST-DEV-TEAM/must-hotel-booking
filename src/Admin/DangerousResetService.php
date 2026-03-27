@@ -26,7 +26,7 @@ final class DangerousResetService
                 'summary' => \__('Delete accommodation, inventory, reservation, pricing, payment, tax, coupon, lock, and activity records while keeping the plugin configured for the current site.', 'must-hotel-booking'),
                 'warning' => \__('This wipes live hotel operating data. It does not remove plugin settings, managed pages, branding, Stripe/email configuration, or updater behavior.', 'must-hotel-booking'),
                 'delete_items' => [
-                    \__('Accommodation types, room inventory, room meta, guests, reservations, payments, pricing rules, availability rules, rate plans, seasons, seasonal prices, taxes, coupons, locks, cancellation policies, and activity history.', 'must-hotel-booking'),
+                    \__('Room listings, room inventory, room meta, guests, reservations, payments, pricing rules, availability rules, rate plans, seasons, seasonal prices, taxes, coupons, locks, cancellation policies, and activity history.', 'must-hotel-booking'),
                     \__('Booking selection session transients tied to in-progress booking flows.', 'must-hotel-booking'),
                 ],
                 'preserve_items' => [
@@ -390,9 +390,9 @@ final class DangerousResetService
             $wpdb->prefix . 'must_coupons' => \__('coupons', 'must-hotel-booking'),
             $wpdb->prefix . 'must_taxes' => \__('taxes', 'must-hotel-booking'),
             $wpdb->prefix . 'mhb_rooms' => \__('inventory units', 'must-hotel-booking'),
-            $wpdb->prefix . 'mhb_room_types' => \__('inventory room types', 'must-hotel-booking'),
+            $wpdb->prefix . 'mhb_room_types' => \__('inventory room listing mirrors', 'must-hotel-booking'),
             $wpdb->prefix . 'must_room_meta' => \__('room meta', 'must-hotel-booking'),
-            $wpdb->prefix . 'must_rooms' => \__('accommodation types', 'must-hotel-booking'),
+            $wpdb->prefix . 'must_rooms' => \__('room listings', 'must-hotel-booking'),
             $wpdb->prefix . 'must_activity_log' => \__('activity log', 'must-hotel-booking'),
         ];
     }

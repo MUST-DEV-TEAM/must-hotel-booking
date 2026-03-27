@@ -14,7 +14,7 @@ final class AccommodationWorkbookSchema
         return [
             'id',
             'title',
-            'accommodation_type',
+            'accommodation_category',
             'description',
             'internal_code',
             'max_adults',
@@ -45,5 +45,15 @@ final class AccommodationWorkbookSchema
     public static function getWorkbookSheetName(): string
     {
         return self::getAccommodationSheetName();
+    }
+
+    /**
+     * @return array<string, array<int, string>>
+     */
+    public static function getHeaderAliases(): array
+    {
+        return [
+            'accommodation_category' => ['accommodation_category', 'accommodation_type'],
+        ];
     }
 }

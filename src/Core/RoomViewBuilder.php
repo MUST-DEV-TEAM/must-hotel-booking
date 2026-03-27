@@ -17,7 +17,7 @@ final class RoomViewBuilder
         }
 
         $roomSlug = isset($room['slug']) ? (string) $room['slug'] : '';
-        $roomCategory = isset($room['category']) ? (string) $room['category'] : 'standard-rooms';
+        $roomCategory = isset($room['category']) ? (string) $room['category'] : RoomCatalog::getDefaultCategory();
         $currency = MustBookingConfig::get_currency();
         $primaryImageUrl = RoomData::getRoomMainImageUrl($roomId, 'large');
         $galleryImages = RoomData::getRoomGalleryImageUrls($roomId, 12, 'large');

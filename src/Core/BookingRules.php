@@ -58,10 +58,9 @@ final class BookingRules
         }
 
         if (empty($capacityMap)) {
+            $defaultCategory = RoomCatalog::getDefaultCategory();
             $capacityMap = [
-                'standard-rooms' => 4,
-                'suites' => 4,
-                'duplex-suite' => 4,
+                $defaultCategory => 4,
             ];
         }
 

@@ -178,7 +178,7 @@ function render_availability_filters(array $filters, array $roomOptions): void
     echo '<input type="hidden" name="page" value="must-hotel-booking-availability-rules" />';
     echo '<table class="form-table" role="presentation"><tbody>';
 
-    echo '<tr><th scope="row"><label for="must-availability-filter-room">' . \esc_html__('Accommodation type', 'must-hotel-booking') . '</label></th><td><select id="must-availability-filter-room" name="room_id"><option value="0">' . \esc_html__('All accommodation types', 'must-hotel-booking') . '</option>';
+    echo '<tr><th scope="row"><label for="must-availability-filter-room">' . \esc_html__('Room / Listing', 'must-hotel-booking') . '</label></th><td><select id="must-availability-filter-room" name="room_id"><option value="0">' . \esc_html__('All room listings', 'must-hotel-booking') . '</option>';
     foreach ($roomOptions as $option) {
         $optionId = isset($option['id']) ? (int) $option['id'] : 0;
         echo '<option value="' . \esc_attr((string) $optionId) . '"' . \selected((int) ($filters['room_id'] ?? 0), $optionId, false) . '>' . \esc_html((string) ($option['label'] ?? '')) . '</option>';
@@ -234,7 +234,7 @@ function render_availability_room_overview(array $rows): void
     echo '<div class="postbox" style="padding:16px;margin-bottom:20px;">';
     echo '<h2 style="margin-top:0;">' . \esc_html__('Accommodation Availability Overview', 'must-hotel-booking') . '</h2>';
     echo '<table class="widefat striped"><thead><tr>';
-    echo '<th>' . \esc_html__('Accommodation Type', 'must-hotel-booking') . '</th>';
+    echo '<th>' . \esc_html__('Room / Listing', 'must-hotel-booking') . '</th>';
     echo '<th>' . \esc_html__('Rules', 'must-hotel-booking') . '</th>';
     echo '<th>' . \esc_html__('Manual Blocks', 'must-hotel-booking') . '</th>';
     echo '<th>' . \esc_html__('Reservations', 'must-hotel-booking') . '</th>';
@@ -243,7 +243,7 @@ function render_availability_room_overview(array $rows): void
     echo '</tr></thead><tbody>';
 
     if (empty($rows)) {
-        echo '<tr><td colspan="6">' . \esc_html__('No accommodation types matched the current filters.', 'must-hotel-booking') . '</td></tr>';
+        echo '<tr><td colspan="6">' . \esc_html__('No room listings matched the current filters.', 'must-hotel-booking') . '</td></tr>';
     } else {
         foreach ($rows as $row) {
             if (!\is_array($row)) {
@@ -392,7 +392,7 @@ function render_availability_rule_form(array $form, array $roomOptions): void
     echo '<input type="hidden" name="rule_id" value="' . \esc_attr((string) ($form['id'] ?? 0)) . '" />';
     echo '<table class="form-table" role="presentation"><tbody>';
 
-    echo '<tr><th scope="row"><label for="must-availability-rule-room-id">' . \esc_html__('Rule scope', 'must-hotel-booking') . '</label></th><td><select id="must-availability-rule-room-id" name="room_id"><option value="0">' . \esc_html__('All accommodation types', 'must-hotel-booking') . '</option>';
+    echo '<tr><th scope="row"><label for="must-availability-rule-room-id">' . \esc_html__('Rule scope', 'must-hotel-booking') . '</label></th><td><select id="must-availability-rule-room-id" name="room_id"><option value="0">' . \esc_html__('All room listings', 'must-hotel-booking') . '</option>';
     foreach ($roomOptions as $option) {
         $optionId = isset($option['id']) ? (int) $option['id'] : 0;
         echo '<option value="' . \esc_attr((string) $optionId) . '"' . \selected((int) ($form['room_id'] ?? 0), $optionId, false) . '>' . \esc_html((string) ($option['label'] ?? '')) . '</option>';
@@ -445,7 +445,7 @@ function render_manual_block_form(array $form, array $roomOptions): void
     echo '<input type="hidden" name="must_availability_action" value="save_block" />';
     echo '<input type="hidden" name="block_id" value="' . \esc_attr((string) ($form['id'] ?? 0)) . '" />';
     echo '<table class="form-table" role="presentation"><tbody>';
-    echo '<tr><th scope="row"><label for="must-availability-block-room-id">' . \esc_html__('Accommodation type', 'must-hotel-booking') . '</label></th><td><select id="must-availability-block-room-id" name="room_id">';
+    echo '<tr><th scope="row"><label for="must-availability-block-room-id">' . \esc_html__('Room / Listing', 'must-hotel-booking') . '</label></th><td><select id="must-availability-block-room-id" name="room_id">';
     foreach ($roomOptions as $option) {
         $optionId = isset($option['id']) ? (int) $option['id'] : 0;
         echo '<option value="' . \esc_attr((string) $optionId) . '"' . \selected((int) ($form['room_id'] ?? 0), $optionId, false) . '>' . \esc_html((string) ($option['label'] ?? '')) . '</option>';
@@ -486,7 +486,7 @@ function render_admin_availability_rules_page(): void
         echo '<a class="button button-secondary" href="' . \esc_url(get_admin_calendar_page_url(['start_date' => \current_time('Y-m-d'), 'weeks' => 2])) . '">' . \esc_html__('Open Calendar', 'must-hotel-booking') . '</a> ';
     }
     if (\function_exists(__NAMESPACE__ . '\get_admin_rooms_page_url')) {
-        echo '<a class="button button-secondary" href="' . \esc_url(get_admin_rooms_page_url(['tab' => 'types'])) . '">' . \esc_html__('Open Accommodations', 'must-hotel-booking') . '</a> ';
+        echo '<a class="button button-secondary" href="' . \esc_url(get_admin_rooms_page_url(['tab' => 'rooms'])) . '">' . \esc_html__('Open Room Listings', 'must-hotel-booking') . '</a> ';
     }
     if (\function_exists(__NAMESPACE__ . '\get_admin_pricing_page_url')) {
         echo '<a class="button button-secondary" href="' . \esc_url(get_admin_pricing_page_url()) . '">' . \esc_html__('Open Rates & Pricing', 'must-hotel-booking') . '</a>';

@@ -512,7 +512,7 @@ final class CalendarDataProvider
             'locks' => $this->formatLockItems($locks),
             'actions' => [
                 'room_url' => \function_exists(__NAMESPACE__ . '\get_admin_rooms_page_url')
-                    ? get_admin_rooms_page_url(['tab' => 'types', 'action' => 'edit_type', 'type_id' => $roomId])
+                    ? get_admin_rooms_page_url(['tab' => 'rooms', 'action' => 'edit_room', 'type_id' => $roomId])
                     : '',
                 'availability_rules_url' => \function_exists(__NAMESPACE__ . '\get_admin_availability_rules_page_url')
                     ? get_admin_availability_rules_page_url(
@@ -623,7 +623,7 @@ final class CalendarDataProvider
     private function getCategoryOptions(): array
     {
         return [
-            RoomCatalog::BOOKING_ALL_CATEGORY => \__('All accommodation types', 'must-hotel-booking'),
+            RoomCatalog::BOOKING_ALL_CATEGORY => \__('All accommodation categories', 'must-hotel-booking'),
         ] + RoomCatalog::getCategories();
     }
 
@@ -641,7 +641,7 @@ final class CalendarDataProvider
             }
 
             $roomId = isset($room['id']) ? (int) $room['id'] : 0;
-            $category = isset($room['category']) ? RoomCatalog::normalizeCategory((string) $room['category']) : 'standard-rooms';
+            $category = isset($room['category']) ? RoomCatalog::normalizeCategory((string) $room['category']) : RoomCatalog::getDefaultCategory();
 
             if ($roomId <= 0) {
                 continue;
@@ -709,7 +709,7 @@ final class CalendarDataProvider
             }
 
             $roomId = isset($row['id']) ? (int) $row['id'] : 0;
-            $category = isset($row['category']) ? RoomCatalog::normalizeCategory((string) $row['category']) : 'standard-rooms';
+            $category = isset($row['category']) ? RoomCatalog::normalizeCategory((string) $row['category']) : RoomCatalog::getDefaultCategory();
 
             if ($roomId <= 0) {
                 continue;

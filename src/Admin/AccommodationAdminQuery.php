@@ -6,6 +6,7 @@ final class AccommodationAdminQuery
 {
     private string $tab;
     private string $action;
+    private int $categoryId;
     private int $typeId;
     private int $unitId;
     private int $paged;
@@ -25,23 +26,40 @@ final class AccommodationAdminQuery
      */
     public static function fromRequest(array $request): self
     {
-        $tab = isset($request['tab']) ? \sanitize_key((string) $request['tab']) : 'types';
+        $tab = isset($request['tab']) ? \sanitize_key((string) $request['tab']) : 'rooms';
         $action = isset($request['action']) ? \sanitize_key((string) $request['action']) : '';
+        $categoryId = isset($request['category_id']) ? \absint($request['category_id']) : 0;
         $legacyRoomId = isset($request['room_id']) ? \absint($request['room_id']) : 0;
         $typeId = isset($request['type_id']) ? \absint($request['type_id']) : 0;
         $unitId = isset($request['unit_id']) ? \absint($request['unit_id']) : 0;
 
         if ($action === 'edit' && $typeId <= 0 && $legacyRoomId > 0) {
-            $action = 'edit_type';
+            $action = 'edit_room';
             $typeId = $legacyRoomId;
         }
 
-        if (!\in_array($tab, ['types', 'units'], true)) {
-            $tab = $action === 'edit_unit' ? 'units' : 'types';
+        if ($tab === 'types') {
+            $tab = 'rooms';
         }
 
         if ($action === 'edit_type') {
-            $tab = 'types';
+            $action = 'edit_room';
+        }
+
+        if (!\in_array($tab, ['categories', 'rooms', 'units'], true)) {
+            if ($action === 'edit_category') {
+                $tab = 'categories';
+            } elseif ($action === 'edit_unit') {
+                $tab = 'units';
+            } else {
+                $tab = 'rooms';
+            }
+        }
+
+        if ($action === 'edit_category') {
+            $tab = 'categories';
+        } elseif ($action === 'edit_room') {
+            $tab = 'rooms';
         } elseif ($action === 'edit_unit') {
             $tab = 'units';
         }
@@ -49,6 +67,7 @@ final class AccommodationAdminQuery
         return new self(
             $tab,
             $action,
+            $categoryId,
             $typeId,
             $unitId,
             \max(1, isset($request['paged']) ? (int) $request['paged'] : 1),
@@ -68,6 +87,7 @@ final class AccommodationAdminQuery
     public function __construct(
         string $tab,
         string $action,
+        int $categoryId,
         int $typeId,
         int $unitId,
         int $paged,
@@ -84,6 +104,7 @@ final class AccommodationAdminQuery
     ) {
         $this->tab = $tab;
         $this->action = $action;
+        $this->categoryId = $categoryId;
         $this->typeId = $typeId;
         $this->unitId = $unitId;
         $this->paged = $paged;
@@ -109,7 +130,17 @@ final class AccommodationAdminQuery
         return $this->action;
     }
 
+    public function getCategoryId(): int
+    {
+        return $this->categoryId;
+    }
+
     public function getTypeId(): int
+    {
+        return $this->typeId;
+    }
+
+    public function getRoomId(): int
     {
         return $this->typeId;
     }
@@ -174,9 +205,19 @@ final class AccommodationAdminQuery
         return $this->notice;
     }
 
+    public function isCategoriesTab(): bool
+    {
+        return $this->tab === 'categories';
+    }
+
+    public function isRoomsTab(): bool
+    {
+        return $this->tab === 'rooms';
+    }
+
     public function isTypesTab(): bool
     {
-        return $this->tab === 'types';
+        return $this->isRoomsTab();
     }
 
     public function isUnitsTab(): bool
@@ -199,10 +240,10 @@ final class AccommodationAdminQuery
             'paged' => $this->paged,
         ];
 
-        if ($this->isTypesTab()) {
+        if ($this->isRoomsTab()) {
             $args['category'] = $this->category;
             $args['setup'] = $this->setup;
-        } else {
+        } elseif ($this->isUnitsTab()) {
             $args['room_type_id'] = $this->unitTypeId;
             $args['unit_status'] = $this->unitStatus;
         }

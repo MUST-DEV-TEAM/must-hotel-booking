@@ -2,20 +2,48 @@
 
 namespace MustHotelBooking\Core;
 
+use MustHotelBooking\Database\AccommodationCategoryUpgradeService;
+
 final class RoomCatalog
 {
     public const BOOKING_ALL_CATEGORY = 'all';
+
+    /** @var array<string, string>|null */
+    private static ?array $categories = null;
 
     /**
      * @return array<string, string>
      */
     public static function getCategories(): array
     {
-        return [
-            'standard-rooms' => \__('Standard Rooms', 'must-hotel-booking'),
-            'suites' => \__('Suites', 'must-hotel-booking'),
-            'duplex-suite' => \__('Duplex Suite', 'must-hotel-booking'),
-        ];
+        if (\is_array(self::$categories)) {
+            return self::$categories;
+        }
+
+        $categories = \MustHotelBooking\Engine\get_room_category_repository()->getCategoryOptions();
+
+        if (empty($categories)) {
+            $categories = AccommodationCategoryUpgradeService::getLegacyDefaultCategories();
+        }
+
+        self::$categories = $categories;
+
+        return self::$categories;
+    }
+
+    public static function getDefaultCategory(): string
+    {
+        $categories = self::getCategories();
+
+        if (isset($categories['standard-rooms'])) {
+            return 'standard-rooms';
+        }
+
+        if (!empty($categories)) {
+            return (string) \array_key_first($categories);
+        }
+
+        return 'standard-rooms';
     }
 
     /**
@@ -37,7 +65,7 @@ final class RoomCatalog
             return $normalized;
         }
 
-        return 'standard-rooms';
+        return self::getDefaultCategory();
     }
 
     public static function normalizeBookingCategory(string $category): string
@@ -56,7 +84,15 @@ final class RoomCatalog
         $categories = self::getCategories();
         $slug = self::normalizeCategory($category);
 
-        return isset($categories[$slug]) ? (string) $categories[$slug] : (string) $categories['standard-rooms'];
+        if (isset($categories[$slug])) {
+            return (string) $categories[$slug];
+        }
+
+        $defaultCategory = self::getDefaultCategory();
+
+        return isset($categories[$defaultCategory])
+            ? (string) $categories[$defaultCategory]
+            : (string) \ucwords(\str_replace(['-', '_'], ' ', $slug));
     }
 
     public static function getBookingCategoryLabel(string $category): string
@@ -64,7 +100,15 @@ final class RoomCatalog
         $categories = self::getBookingCategories();
         $slug = self::normalizeBookingCategory($category);
 
-        return isset($categories[$slug]) ? (string) $categories[$slug] : (string) $categories['standard-rooms'];
+        if (isset($categories[$slug])) {
+            return (string) $categories[$slug];
+        }
+
+        $defaultCategory = self::getDefaultCategory();
+
+        return isset($categories[$defaultCategory])
+            ? (string) $categories[$defaultCategory]
+            : (string) \ucwords(\str_replace(['-', '_'], ' ', $slug));
     }
 
     public static function isBookingAllCategory(string $category): bool

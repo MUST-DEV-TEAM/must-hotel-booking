@@ -4,7 +4,7 @@ Tags: hotel, booking, reservation, accommodation
 Requires at least: 5.0
 Tested up to: 6.0
 Requires PHP: 7.4
-Stable tag: 0.3.31
+Stable tag: 0.3.32
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -31,6 +31,13 @@ Main features include:
 5. When updating, upload the new release ZIP or use the configured updater, then review **Diagnostics & Maintenance** after the update completes.
 
 == Changelog ==
+
+= 0.3.32 =
+* Split accommodations into admin-managed top-level categories and separate sellable room/listing records.
+* Added a dedicated Categories view for creating, editing, deleting, and ordering accommodation categories in admin.
+* Kept pricing, availability, reservations, and booking logic attached to room/listing records while separating physical units into their own admin view.
+* Updated the Excel workflow so imports and exports manage room/listing records only and reference existing accommodation categories created in admin.
+* Removed the old cleanup demo accommodation panel from the production admin UI and replaced the mixed-model cleanup with safer category-aware upgrade handling.
 
 = 0.3.31 =
 * Reworked the accommodation Excel workflow into a single manager-friendly sheet focused on accommodation details only.

@@ -156,7 +156,7 @@ function render_accommodation_report_table(array $rows): void
         foreach ($rows as $row) {
             $roomId = (int) ($row['room_id'] ?? 0);
             $roomUrl = $roomId > 0 && \function_exists(__NAMESPACE__ . '\get_admin_rooms_page_url')
-                ? get_admin_rooms_page_url(['tab' => 'types', 'action' => 'edit_type', 'type_id' => $roomId])
+                ? get_admin_rooms_page_url(['tab' => 'rooms', 'action' => 'edit_room', 'type_id' => $roomId])
                 : '';
             $reservationUrl = $roomId > 0 && \function_exists(__NAMESPACE__ . '\get_admin_reservations_page_url')
                 ? get_admin_reservations_page_url(['room_id' => $roomId, 'created_after' => ''])

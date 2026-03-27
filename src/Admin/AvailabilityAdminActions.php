@@ -373,7 +373,7 @@ final class AvailabilityAdminActions
         }
 
         if ((int) $values['room_id'] > 0 && !$this->roomRepository->getRoomById((int) $values['room_id'])) {
-            $values['errors'][] = \__('Selected accommodation type could not be found.', 'must-hotel-booking');
+            $values['errors'][] = \__('Selected room listing could not be found.', 'must-hotel-booking');
         }
 
         if (\in_array($values['rule_type'], ['minimum_stay', 'maximum_stay'], true) && (int) $values['rule_value'] < 1) {
@@ -407,7 +407,7 @@ final class AvailabilityAdminActions
         ];
 
         if ((int) $values['room_id'] <= 0 || !$this->roomRepository->getRoomById((int) $values['room_id'])) {
-            $values['errors'][] = \__('Select a valid accommodation type for the manual block.', 'must-hotel-booking');
+            $values['errors'][] = \__('Select a valid room listing for the manual block.', 'must-hotel-booking');
         }
 
         if (

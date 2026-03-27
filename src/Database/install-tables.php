@@ -3,12 +3,12 @@
 namespace MustHotelBooking\Database;
 
 /**
- * Explicitly reconcile derived inventory room types against legacy must_rooms.
+ * Explicitly reconcile derived inventory room types against sellable must_rooms.
  *
- * must_rooms remains the authoritative accommodation-type table in this plugin
- * version. mhb_room_types and mhb_rooms still depend on those legacy IDs, but
- * this sync helper should only run from deliberate maintenance or save actions,
- * never as a silent page-load or installer side effect.
+ * must_rooms remains the authoritative sellable accommodation table in this
+ * plugin version. mhb_room_types and mhb_rooms still depend on those room IDs,
+ * but this sync helper should only run from deliberate maintenance or save
+ * actions, never as a silent page-load or installer side effect.
  *
  * @return array<string, int>
  */
@@ -158,6 +158,18 @@ function install_tables(): void
     $prefix = $wpdb->prefix;
 
     $tables = [];
+
+    $tables[] = "CREATE TABLE {$prefix}must_room_categories (
+        id BIGINT(20) UNSIGNED NOT NULL AUTO_INCREMENT,
+        name VARCHAR(191) NOT NULL,
+        slug VARCHAR(191) NOT NULL,
+        description LONGTEXT NULL,
+        sort_order INT(11) NOT NULL DEFAULT 0,
+        created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        PRIMARY KEY  (id),
+        UNIQUE KEY slug (slug),
+        KEY sort_order (sort_order)
+    ) {$charset_collate};";
 
     $tables[] = "CREATE TABLE {$prefix}must_rooms (
         id BIGINT(20) UNSIGNED NOT NULL AUTO_INCREMENT,
@@ -479,6 +491,8 @@ function install_tables(): void
     foreach ($tables as $sql) {
         \dbDelta($sql);
     }
+
+    (new AccommodationCategoryUpgradeService($wpdb))->run();
 
     \update_option('must_hotel_booking_db_version', MUST_HOTEL_BOOKING_VERSION);
 }

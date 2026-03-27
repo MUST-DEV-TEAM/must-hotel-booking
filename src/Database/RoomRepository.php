@@ -3,12 +3,12 @@
 namespace MustHotelBooking\Database;
 
 /**
- * Authoritative repository for accommodation types stored in must_rooms.
+ * Authoritative repository for sellable room/listing records stored in must_rooms.
  *
  * In the current plugin version, must_rooms is the source of truth for
- * accommodation types, public room content, and the IDs used across pricing,
- * availability, reservations, and admin flows. mhb_room_types is only a
- * derived mirror used by internal inventory/rate-plan structures.
+ * room/listing content and the IDs used across pricing, availability,
+ * reservations, and admin flows. mhb_room_types is only a derived mirror used
+ * by internal inventory/rate-plan structures.
  */
 final class RoomRepository extends AbstractRepository
 {
@@ -498,6 +498,72 @@ final class RoomRepository extends AbstractRepository
 
         return (int) $this->wpdb->get_var(
             'SELECT COUNT(*) FROM ' . $this->getRoomsTableName()
+        );
+    }
+
+    /**
+     * @return array<string, array<string, int>>
+     */
+    public function getCategoryUsageSummaryMap(): array
+    {
+        if (!$this->roomsTableExists()) {
+            return [];
+        }
+
+        $rows = $this->wpdb->get_results(
+            'SELECT
+                category,
+                COUNT(*) AS room_count,
+                SUM(CASE WHEN is_active = 1 THEN 1 ELSE 0 END) AS active_room_count,
+                SUM(CASE WHEN is_bookable = 1 THEN 1 ELSE 0 END) AS bookable_room_count
+            FROM ' . $this->getRoomsTableName() . '
+            WHERE category <> \'\'
+            GROUP BY category
+            ORDER BY category ASC',
+            ARRAY_A
+        );
+        $summary = [];
+
+        if (!\is_array($rows)) {
+            return $summary;
+        }
+
+        foreach ($rows as $row) {
+            if (!\is_array($row)) {
+                continue;
+            }
+
+            $category = \sanitize_key((string) ($row['category'] ?? ''));
+
+            if ($category === '') {
+                continue;
+            }
+
+            $summary[$category] = [
+                'room_count' => isset($row['room_count']) ? (int) $row['room_count'] : 0,
+                'active_room_count' => isset($row['active_room_count']) ? (int) $row['active_room_count'] : 0,
+                'bookable_room_count' => isset($row['bookable_room_count']) ? (int) $row['bookable_room_count'] : 0,
+            ];
+        }
+
+        return $summary;
+    }
+
+    public function countRoomsForCategory(string $categorySlug): int
+    {
+        $categorySlug = \sanitize_key($categorySlug);
+
+        if ($categorySlug === '' || !$this->roomsTableExists()) {
+            return 0;
+        }
+
+        return (int) $this->wpdb->get_var(
+            $this->wpdb->prepare(
+                'SELECT COUNT(*)
+                FROM ' . $this->getRoomsTableName() . '
+                WHERE category = %s',
+                $categorySlug
+            )
         );
     }
 

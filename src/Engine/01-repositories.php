@@ -12,6 +12,7 @@ use MustHotelBooking\Database\PaymentRepository;
 use MustHotelBooking\Database\ReportRepository;
 use MustHotelBooking\Database\RatePlanRepository;
 use MustHotelBooking\Database\ReservationRepository;
+use MustHotelBooking\Database\RoomCategoryRepository;
 use MustHotelBooking\Database\RoomRepository;
 
 function get_room_repository(): RoomRepository
@@ -31,6 +32,17 @@ function get_guest_repository(): GuestRepository
 
     if (!$repository instanceof GuestRepository) {
         $repository = new GuestRepository();
+    }
+
+    return $repository;
+}
+
+function get_room_category_repository(): RoomCategoryRepository
+{
+    static $repository = null;
+
+    if (!$repository instanceof RoomCategoryRepository) {
+        $repository = new RoomCategoryRepository();
     }
 
     return $repository;

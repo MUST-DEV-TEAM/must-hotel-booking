@@ -146,7 +146,7 @@ function render_pricing_filters(array $filters, array $roomOptions): void
     echo '<input type="hidden" name="page" value="must-hotel-booking-pricing" />';
     echo '<table class="form-table" role="presentation"><tbody>';
 
-    echo '<tr><th scope="row"><label for="must-pricing-filter-room">' . \esc_html__('Accommodation type', 'must-hotel-booking') . '</label></th><td><select id="must-pricing-filter-room" name="room_id"><option value="0">' . \esc_html__('All accommodation types', 'must-hotel-booking') . '</option>';
+    echo '<tr><th scope="row"><label for="must-pricing-filter-room">' . \esc_html__('Room / Listing', 'must-hotel-booking') . '</label></th><td><select id="must-pricing-filter-room" name="room_id"><option value="0">' . \esc_html__('All room listings', 'must-hotel-booking') . '</option>';
     foreach ($roomOptions as $option) {
         $optionId = isset($option['id']) ? (int) $option['id'] : 0;
         echo '<option value="' . \esc_attr((string) $optionId) . '"' . \selected((int) ($filters['room_id'] ?? 0), $optionId, false) . '>' . \esc_html((string) ($option['label'] ?? '')) . '</option>';
@@ -215,9 +215,9 @@ function render_pricing_base_rate_table(array $rows): void
 {
     echo '<div class="postbox" style="padding:16px;margin-bottom:20px;">';
     echo '<h2 style="margin-top:0;">' . \esc_html__('Base Pricing Overview', 'must-hotel-booking') . '</h2>';
-    echo '<p class="description">' . \esc_html__('Direct booking pricing starts from the accommodation type base price. Active rate plans can replace that base in the booking flow, and override rules below can change direct pricing for specific dates.', 'must-hotel-booking') . '</p>';
+    echo '<p class="description">' . \esc_html__('Direct booking pricing starts from the room/listing base price. Active rate plans can replace that base in the booking flow, and override rules below can change direct pricing for specific dates.', 'must-hotel-booking') . '</p>';
     echo '<table class="widefat striped"><thead><tr>';
-    echo '<th>' . \esc_html__('Accommodation Type', 'must-hotel-booking') . '</th>';
+    echo '<th>' . \esc_html__('Room / Listing', 'must-hotel-booking') . '</th>';
     echo '<th>' . \esc_html__('Base Price', 'must-hotel-booking') . '</th>';
     echo '<th>' . \esc_html__('Current Nightly Preview', 'must-hotel-booking') . '</th>';
     echo '<th>' . \esc_html__('Override Status', 'must-hotel-booking') . '</th>';
@@ -227,7 +227,7 @@ function render_pricing_base_rate_table(array $rows): void
     echo '</tr></thead><tbody>';
 
     if (empty($rows)) {
-        echo '<tr><td colspan="7">' . \esc_html__('No accommodation types matched the current filters.', 'must-hotel-booking') . '</td></tr>';
+        echo '<tr><td colspan="7">' . \esc_html__('No room listings matched the current filters.', 'must-hotel-booking') . '</td></tr>';
     } else {
         foreach ($rows as $row) {
             if (!\is_array($row)) {
@@ -235,7 +235,7 @@ function render_pricing_base_rate_table(array $rows): void
             }
 
             $roomId = isset($row['id']) ? (int) $row['id'] : 0;
-            $roomUrl = get_admin_rooms_page_url(['tab' => 'types', 'action' => 'edit_type', 'type_id' => $roomId]);
+            $roomUrl = get_admin_rooms_page_url(['tab' => 'rooms', 'action' => 'edit_room', 'type_id' => $roomId]);
             $pricingUrl = get_admin_pricing_page_url(['room_id' => $roomId]);
             $ratePlansUrl = \function_exists(__NAMESPACE__ . '\get_admin_rate_plans_page_url')
                 ? get_admin_rate_plans_page_url(['room_type_id' => $roomId])
@@ -381,7 +381,7 @@ function render_pricing_rule_form(array $form, array $roomOptions): void
     echo '<input type="hidden" name="rule_id" value="' . \esc_attr((string) ($form['id'] ?? 0)) . '" />';
     echo '<table class="form-table" role="presentation"><tbody>';
 
-    echo '<tr><th scope="row"><label for="must-pricing-rule-room-id">' . \esc_html__('Rule scope', 'must-hotel-booking') . '</label></th><td><select id="must-pricing-rule-room-id" name="room_id"><option value="0">' . \esc_html__('All accommodation types', 'must-hotel-booking') . '</option>';
+    echo '<tr><th scope="row"><label for="must-pricing-rule-room-id">' . \esc_html__('Rule scope', 'must-hotel-booking') . '</label></th><td><select id="must-pricing-rule-room-id" name="room_id"><option value="0">' . \esc_html__('All room listings', 'must-hotel-booking') . '</option>';
     foreach ($roomOptions as $option) {
         $optionId = isset($option['id']) ? (int) $option['id'] : 0;
         echo '<option value="' . \esc_attr((string) $optionId) . '"' . \selected((int) ($form['room_id'] ?? 0), $optionId, false) . '>' . \esc_html((string) ($option['label'] ?? '')) . '</option>';
@@ -424,7 +424,7 @@ function render_admin_pricing_page(): void
 
     echo '<div class="wrap">';
     echo '<h1>' . \esc_html__('Rates & Pricing', 'must-hotel-booking') . '</h1>';
-    echo '<p class="description">' . \esc_html__('Direct booking pricing is managed here using accommodation type base rates and date-range override rules. Rate Plans remain the advanced pricing layer for package-like pricing and dated rate calendars.', 'must-hotel-booking') . '</p>';
+    echo '<p class="description">' . \esc_html__('Direct booking pricing is managed here using room/listing base rates and date-range override rules. Rate Plans remain the advanced pricing layer for package-like pricing and dated rate calendars.', 'must-hotel-booking') . '</p>';
     echo '<p><strong>' . \esc_html__('Calculation order:', 'must-hotel-booking') . '</strong> ' . \esc_html((string) ($pageData['calculation_note'] ?? '')) . '</p>';
     echo '<p>';
     if (\function_exists(__NAMESPACE__ . '\get_admin_rate_plans_page_url')) {

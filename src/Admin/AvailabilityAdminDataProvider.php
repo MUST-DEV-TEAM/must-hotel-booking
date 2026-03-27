@@ -91,7 +91,7 @@ final class AvailabilityAdminDataProvider
             $warnings = [];
 
             if (!$hasInventory) {
-                $warnings[] = \__('No physical inventory units are assigned to this accommodation type.', 'must-hotel-booking');
+                $warnings[] = \__('No physical inventory units are assigned to this room listing.', 'must-hotel-booking');
             }
 
             if (empty($room['is_active']) && ((int) ($availabilityData['rule_count'] ?? 0) > 0 || $futureBlockCount > 0)) {
@@ -103,7 +103,7 @@ final class AvailabilityAdminDataProvider
             }
 
             if ($futureBlockCount > 0 && (int) ($reservationData['future_reservations'] ?? 0) > 0) {
-                $warnings[] = \__('Future manual blocks overlap future reservations on this accommodation type.', 'must-hotel-booking');
+                $warnings[] = \__('Future manual blocks overlap future reservations on this room listing.', 'must-hotel-booking');
             }
 
             $rows[] = [
@@ -126,7 +126,7 @@ final class AvailabilityAdminDataProvider
                     ? get_admin_calendar_page_url(['room_id' => $roomId, 'focus_room_id' => $roomId, 'start_date' => $today, 'weeks' => 2])
                     : '',
                 'accommodation_url' => \function_exists(__NAMESPACE__ . '\get_admin_rooms_page_url')
-                    ? get_admin_rooms_page_url(['tab' => 'types', 'action' => 'edit_type', 'type_id' => $roomId])
+                    ? get_admin_rooms_page_url(['tab' => 'rooms', 'action' => 'edit_room', 'type_id' => $roomId])
                     : '',
                 'filtered_url' => get_admin_availability_rules_page_url(['room_id' => $roomId]),
             ];
@@ -374,9 +374,9 @@ final class AvailabilityAdminDataProvider
 
         return [
             [
-                'label' => \__('Accommodation Types', 'must-hotel-booking'),
+                'label' => \__('Room Listings', 'must-hotel-booking'),
                 'value' => (string) \count($roomRows),
-                'meta' => \__('Availability rules apply at the accommodation-type level in the current model.', 'must-hotel-booking'),
+                'meta' => \__('Availability rules still apply at the sellable room/listing level.', 'must-hotel-booking'),
             ],
             [
                 'label' => \__('Active Restrictions', 'must-hotel-booking'),
@@ -391,7 +391,7 @@ final class AvailabilityAdminDataProvider
             [
                 'label' => \__('Setup Warnings', 'must-hotel-booking'),
                 'value' => (string) $roomWarnings,
-                'meta' => \__('Accommodation types with inventory gaps, inactive-state conflicts, or future block issues.', 'must-hotel-booking'),
+                'meta' => \__('Room listings with inventory gaps, inactive-state conflicts, or future block issues.', 'must-hotel-booking'),
             ],
         ];
     }

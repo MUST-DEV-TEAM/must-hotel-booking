@@ -58,7 +58,7 @@ final class AccommodationImportExportService
             );
         } catch (\Throwable $exception) {
             $this->redirectToRoomsPage([
-                'tab' => 'types',
+                'tab' => 'rooms',
                 'notice' => $template ? 'workbook_template_failed' : 'workbook_export_failed',
             ]);
         }
@@ -219,7 +219,7 @@ final class AccommodationImportExportService
             $rows[] = $this->buildOrderedRow($columns, [
                 'id' => $roomId,
                 'title' => (string) ($row['name'] ?? ''),
-                'accommodation_type' => RoomCatalog::getCategoryLabel((string) ($row['category'] ?? 'standard-rooms')),
+                'accommodation_category' => RoomCatalog::getCategoryLabel((string) ($row['category'] ?? RoomCatalog::getDefaultCategory())),
                 'description' => (string) ($row['description'] ?? ''),
                 'internal_code' => (string) ($row['internal_code'] ?? ''),
                 'max_adults' => (int) ($row['max_adults'] ?? 1),
@@ -302,8 +302,8 @@ final class AccommodationImportExportService
         $categoryLabels = \implode(' / ', \array_values(RoomCatalog::getCategories()));
 
         return \sprintf(
-            /* translators: %s: allowed accommodation type labels */
-            \__('Edit this sheet only. Leave id blank to create a new accommodation, use an existing id to update, keep accommodation_type within %s, use yes/no for booking flags, and manage slugs, images, units, and live availability in WordPress admin.', 'must-hotel-booking'),
+            /* translators: %s: allowed accommodation category labels */
+            \__('Edit this sheet only. Leave id blank to create a new room listing, use an existing id to update, keep accommodation_category within %s, use yes/no for booking flags, and manage categories, images, units, and live availability in WordPress admin.', 'must-hotel-booking'),
             $categoryLabels
         );
     }
@@ -428,13 +428,14 @@ final class AccommodationImportExportService
 
         $headerIndex = null;
         $headerMap = [];
+        $aliases = AccommodationWorkbookSchema::getHeaderAliases();
 
         foreach ($sheetRows as $rowIndex => $sheetRow) {
             if (!\is_array($sheetRow)) {
                 continue;
             }
 
-            $candidateHeaderMap = $this->buildHeaderMap($sheetRow);
+            $candidateHeaderMap = $this->buildHeaderMap($sheetRow, $aliases);
             $missingColumns = [];
 
             foreach ($expectedColumns as $columnName) {
@@ -492,7 +493,7 @@ final class AccommodationImportExportService
      * @param array<int, string> $sheetRow
      * @return array<string, int>
      */
-    private function buildHeaderMap(array $sheetRow): array
+    private function buildHeaderMap(array $sheetRow, array $aliases = []): array
     {
         $headerMap = [];
 
@@ -503,7 +504,16 @@ final class AccommodationImportExportService
                 continue;
             }
 
-            $headerMap[$headerName] = $index;
+            $canonicalHeader = $headerName;
+
+            foreach ($aliases as $expectedHeader => $acceptedHeaders) {
+                if (\in_array($headerName, $acceptedHeaders, true)) {
+                    $canonicalHeader = $expectedHeader;
+                    break;
+                }
+            }
+
+            $headerMap[$canonicalHeader] = $index;
         }
 
         return $headerMap;
@@ -535,7 +545,7 @@ final class AccommodationImportExportService
             $errors
         );
         $accommodationType = $this->resolveAccommodationType(
-            $values['accommodation_type'] ?? '',
+            $values['accommodation_category'] ?? '',
             $existingRoom !== null ? (string) ($existingRoom['category'] ?? '') : '',
             $errors
         );
@@ -764,8 +774,8 @@ final class AccommodationImportExportService
             }
 
             $errors[] = [
-                'field' => 'accommodation_type',
-                'message' => \__('Accommodation type is required.', 'must-hotel-booking'),
+                'field' => 'accommodation_category',
+                'message' => \__('Accommodation category is required.', 'must-hotel-booking'),
             ];
 
             return '';
@@ -786,10 +796,10 @@ final class AccommodationImportExportService
         }
 
         $errors[] = [
-            'field' => 'accommodation_type',
+            'field' => 'accommodation_category',
             'message' => \sprintf(
-                /* translators: %s: allowed accommodation types */
-                \__('Use one of the existing accommodation types: %s.', 'must-hotel-booking'),
+                /* translators: %s: allowed accommodation categories */
+                \__('Use one of the existing accommodation categories: %s.', 'must-hotel-booking'),
                 \implode(', ', \array_values($categories))
             ),
         ];
