@@ -618,8 +618,8 @@ function render_rooms_summary_cards(array $cards): void
 function render_accommodation_import_export_panel(AccommodationAdminQuery $query): void
 {
     $baseArgs = ['tab' => $query->getTab()];
-    $unitSheetName = AccommodationWorkbookSchema::getUnitSheetName();
-    $referenceSheetName = AccommodationWorkbookSchema::getReferenceSheetName();
+    $sheetName = AccommodationWorkbookSchema::getAccommodationSheetName();
+    $categoryLabels = \implode(', ', \array_values(RoomCatalog::getCategories()));
     $exportUrl = \wp_nonce_url(
         get_admin_rooms_page_url($baseArgs + ['action' => AccommodationImportExportService::ACTION_EXPORT_WORKBOOK]),
         AccommodationImportExportService::ACTION_EXPORT_WORKBOOK
@@ -631,23 +631,23 @@ function render_accommodation_import_export_panel(AccommodationAdminQuery $query
 
     echo '<section class="must-accommodation-panel must-accommodation-import-tools-panel">';
     echo '<div class="must-accommodation-panel-head">';
-    echo '<div><h2>' . \esc_html__('Excel Import & Export', 'must-hotel-booking') . '</h2><p>' . \esc_html__('Download a staff-friendly room workbook, start from a clean template, or import room/unit updates with row-level validation.', 'must-hotel-booking') . '</p></div>';
+    echo '<div><h2>' . \esc_html__('Excel Import & Export', 'must-hotel-booking') . '</h2><p>' . \esc_html__('Download a manager-friendly accommodation workbook, start from a clean template, or import accommodation detail changes with row-level validation.', 'must-hotel-booking') . '</p></div>';
     echo '<div class="must-accommodation-panel-actions">';
-    echo '<a class="button button-secondary" href="' . \esc_url($exportUrl) . '">' . \esc_html__('Export Current Data', 'must-hotel-booking') . '</a>';
-    echo '<a class="button button-secondary" href="' . \esc_url($templateUrl) . '">' . \esc_html__('Download Empty Template', 'must-hotel-booking') . '</a>';
+    echo '<a class="button button-secondary" href="' . \esc_url($exportUrl) . '">' . \esc_html__('Download Current Data', 'must-hotel-booking') . '</a>';
+    echo '<a class="button button-secondary" href="' . \esc_url($templateUrl) . '">' . \esc_html__('Download Template', 'must-hotel-booking') . '</a>';
     echo '</div></div>';
     echo '<div class="must-accommodation-import-tools-grid">';
     echo '<div class="must-accommodation-import-tools-copy">';
     echo '<span class="must-accommodation-kicker">' . \esc_html__('Workbook Structure', 'must-hotel-booking') . '</span>';
-    echo '<h3>' . \esc_html__('Two sheets, one staff workflow.', 'must-hotel-booking') . '</h3>';
-    echo '<p>' . \esc_html__('The workbook includes one editable room-units sheet for hotel staff and one reference-only room-types sheet exported from the plugin. Accommodation types still stay managed inside the WordPress admin.', 'must-hotel-booking') . '</p>';
+    echo '<h3>' . \esc_html__('One editable sheet for accommodation details.', 'must-hotel-booking') . '</h3>';
+    echo '<p>' . \esc_html__('Excel is now limited to bulk accommodation create and edit work. Physical units, operational inventory, and live availability stay managed inside WordPress admin.', 'must-hotel-booking') . '</p>';
     echo '<ul class="must-accommodation-import-facts">';
-    echo '<li>' . \esc_html(\sprintf(__('Sheet 1 (%s) is the only sheet staff should edit. Each row is one physical room/unit.', 'must-hotel-booking'), $unitSheetName)) . '</li>';
-    echo '<li>' . \esc_html(\sprintf(__('Sheet 2 (%s) is reference-only. It shows the available accommodation types and should not be edited in Excel.', 'must-hotel-booking'), $referenceSheetName)) . '</li>';
-    echo '<li>' . \esc_html__('Use the id column to update existing records. Leave id empty to create new ones.', 'must-hotel-booking') . '</li>';
-    echo '<li>' . \esc_html__('Use room_type_id whenever possible. room_type_name is only used as a safe fallback when it resolves to exactly one existing accommodation type.', 'must-hotel-booking') . '</li>';
-    echo '<li>' . \esc_html(\sprintf(__('Import reads only the %1$s sheet and ignores any changes made to the %2$s sheet.', 'must-hotel-booking'), $unitSheetName, $referenceSheetName)) . '</li>';
-    echo '<li>' . \esc_html__('Room types themselves are not edited in Excel. Update those from the accommodation type admin screens.', 'must-hotel-booking') . '</li>';
+    echo '<li>' . \esc_html(\sprintf(__('Edit only the %s sheet. Each row is one accommodation record.', 'must-hotel-booking'), $sheetName)) . '</li>';
+    echo '<li>' . \esc_html__('Use the id column to update existing accommodations. Leave id empty to create a new accommodation.', 'must-hotel-booking') . '</li>';
+    echo '<li>' . \esc_html(\sprintf(__('Use accommodation_type values that match the existing admin-managed types/categories: %s.', 'must-hotel-booking'), $categoryLabels)) . '</li>';
+    echo '<li>' . \esc_html__('Slug is handled automatically. New rows generate a slug from the title, and existing rows keep their current slug.', 'must-hotel-booking') . '</li>';
+    echo '<li>' . \esc_html__('Images are not imported from Excel. Add or update room images later in WordPress admin.', 'must-hotel-booking') . '</li>';
+    echo '<li>' . \esc_html__('Excel no longer manages accommodation units, unit status, inventory locks, or live availability state.', 'must-hotel-booking') . '</li>';
     echo '<li>' . \esc_html__('Only .xlsx is supported for import in this release.', 'must-hotel-booking') . '</li>';
     echo '</ul>';
     echo '</div>';
@@ -656,9 +656,9 @@ function render_accommodation_import_export_panel(AccommodationAdminQuery $query
     echo '<input type="hidden" name="must_accommodation_action" value="' . \esc_attr(AccommodationImportExportService::ACTION_IMPORT_WORKBOOK) . '" />';
     echo '<input type="hidden" name="tab" value="' . \esc_attr($query->getTab()) . '" />';
     echo '<label><span>' . \esc_html__('Workbook File', 'must-hotel-booking') . '</span><input type="file" name="accommodation_workbook" accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" required /></label>';
-    echo '<p class="description">' . \esc_html(\sprintf(__('Import processes the %1$s sheet only. Existing units are updated by id, blank ids create new units, the %2$s sheet is ignored, and row-level errors are shown after the run so you can fix only what failed.', 'must-hotel-booking'), $unitSheetName, $referenceSheetName)) . '</p>';
+    echo '<p class="description">' . \esc_html(\sprintf(__('Import processes the %1$s sheet only. Existing accommodations are updated by id, blank ids create new accommodations, invalid accommodation_type values fail at the row level, and units/inventory data are ignored by this workflow.', 'must-hotel-booking'), $sheetName)) . '</p>';
     echo '<div class="must-accommodation-panel-actions">';
-    echo '<button type="submit" class="button button-primary">' . \esc_html__('Import Excel Workbook', 'must-hotel-booking') . '</button>';
+    echo '<button type="submit" class="button button-primary">' . \esc_html__('Import Accommodation Workbook', 'must-hotel-booking') . '</button>';
     echo '</div>';
     echo '</form>';
     echo '</div>';
@@ -705,8 +705,8 @@ function render_accommodation_import_report(?array $report): void
     echo '</div>';
 
     $summaryCards = [
-        ['label' => \__('Units Created', 'must-hotel-booking'), 'value' => (string) ((int) ($report['units_created'] ?? 0))],
-        ['label' => \__('Units Updated', 'must-hotel-booking'), 'value' => (string) ((int) ($report['units_updated'] ?? 0))],
+        ['label' => \__('Accommodations Created', 'must-hotel-booking'), 'value' => (string) ((int) ($report['accommodations_created'] ?? 0))],
+        ['label' => \__('Accommodations Updated', 'must-hotel-booking'), 'value' => (string) ((int) ($report['accommodations_updated'] ?? 0))],
         ['label' => \__('Rows Skipped', 'must-hotel-booking'), 'value' => (string) ((int) ($report['rows_skipped'] ?? 0))],
         ['label' => \__('Rows Failed', 'must-hotel-booking'), 'value' => (string) ((int) ($report['rows_failed'] ?? 0))],
     ];

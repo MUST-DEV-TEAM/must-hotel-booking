@@ -4,7 +4,7 @@ Tags: hotel, booking, reservation, accommodation
 Requires at least: 5.0
 Tested up to: 6.0
 Requires PHP: 7.4
-Stable tag: 0.3.30
+Stable tag: 0.3.31
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -31,6 +31,12 @@ Main features include:
 5. When updating, upload the new release ZIP or use the configured updater, then review **Diagnostics & Maintenance** after the update completes.
 
 == Changelog ==
+
+= 0.3.31 =
+* Reworked the accommodation Excel workflow into a single manager-friendly sheet focused on accommodation details only.
+* Removed Excel handling for accommodation units, operational inventory state, and live availability so those stay managed in WordPress admin.
+* Added separate template and current-data workbook downloads for bulk accommodation creation and editing.
+* Import now updates existing accommodations by id, creates new accommodations when id is blank, validates accommodation types row by row, auto-generates slugs for new records, and leaves images to the admin UI.
 
 = 0.3.30 =
 * The Danger Zone reset tools in Diagnostics & Maintenance are now visible by default for full administrators in wp-admin.
