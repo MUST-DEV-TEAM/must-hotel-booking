@@ -4,7 +4,7 @@ Tags: hotel, booking, reservation, accommodation
 Requires at least: 5.0
 Tested up to: 6.0
 Requires PHP: 7.4
-Stable tag: 0.3.27
+Stable tag: 0.3.28
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -27,7 +27,7 @@ MUST Hotel Booking helps hotel and accommodation websites:
 
 == Changelog ==
 
-= 0.3.27 =
+= 0.3.28 =
 * Hardened accommodation cleanup safety with guarded type deletion and explicit inventory-mirror repair tooling.
 * Tightened GitHub release update validation, version alignment, and release asset matching.
 
