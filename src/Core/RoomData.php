@@ -48,6 +48,31 @@ final class RoomData
     /**
      * @return array<int, array<string, mixed>>
      */
+    public static function getRoomSelectorRows(bool $includeInactive = true, bool $onlyBookable = false): array
+    {
+        return self::repository()->getRoomSelectorRows($includeInactive, $onlyBookable);
+    }
+
+    /**
+     * @param array<int, int> $roomIds
+     * @return array<int, array<string, mixed>>
+     */
+    public static function getRoomsByIds(array $roomIds): array
+    {
+        return self::repository()->getRoomsByIds($roomIds);
+    }
+
+    /**
+     * @return array<int, array<string, mixed>>
+     */
+    public static function getRoomsForTextGrid(int $limit = 0): array
+    {
+        return self::repository()->getRoomsForTextGrid($limit);
+    }
+
+    /**
+     * @return array<int, array<string, mixed>>
+     */
     public static function getRoomsForDisplay(string $category = 'all', int $limit = 50): array
     {
         $normalizedCategory = $category !== '' && $category !== 'all'

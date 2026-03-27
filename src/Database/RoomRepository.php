@@ -75,6 +75,35 @@ final class RoomRepository extends AbstractRepository
     }
 
     /**
+     * @param array<int, int> $roomIds
+     * @return array<int, array<string, mixed>>
+     */
+    public function getRoomsByIds(array $roomIds): array
+    {
+        $roomIds = $this->normalizeIds($roomIds);
+
+        if (empty($roomIds) || !$this->roomsTableExists()) {
+            return [];
+        }
+
+        $sql = \sprintf(
+            'SELECT id, name, slug, category, description, is_active, is_bookable, is_online_bookable, sort_order, max_guests, base_price, room_size, beds
+            FROM %s
+            WHERE id IN (%s)
+            ORDER BY sort_order ASC, name ASC, id ASC',
+            $this->getRoomsTableName(),
+            $this->buildIntegerPlaceholders($roomIds)
+        );
+
+        $rows = $this->wpdb->get_results(
+            $this->wpdb->prepare($sql, $roomIds),
+            ARRAY_A
+        );
+
+        return \is_array($rows) ? $rows : [];
+    }
+
+    /**
      * @return array<int, array<string, mixed>>
      */
     public function getRoomSelectorRows(bool $includeInactive = true, bool $onlyBookable = false): array
@@ -102,6 +131,37 @@ final class RoomRepository extends AbstractRepository
 
         $sql .= '
             ORDER BY sort_order ASC, name ASC, id ASC';
+
+        $rows = $this->wpdb->get_results(
+            $sql,
+            ARRAY_A
+        );
+
+        return \is_array($rows) ? $rows : [];
+    }
+
+    /**
+     * @return array<int, array<string, mixed>>
+     */
+    public function getRoomsForTextGrid(int $limit = 0): array
+    {
+        if (!$this->roomsTableExists()) {
+            return [];
+        }
+
+        $limit = $limit > 0 ? \max(1, \min(200, $limit)) : 0;
+        $sql = 'SELECT id, name, slug, category, description, is_active, is_bookable, is_online_bookable, sort_order
+            FROM ' . $this->getRoomsTableName() . '
+            WHERE is_active = 1
+            ORDER BY sort_order ASC, name ASC, id ASC';
+
+        if ($limit > 0) {
+            $sql = $this->wpdb->prepare(
+                $sql . '
+                LIMIT %d',
+                $limit
+            );
+        }
 
         $rows = $this->wpdb->get_results(
             $sql,
