@@ -206,6 +206,7 @@ final class SettingsPage
             'branding' => self::getBrandingForm($formOverrides['branding'] ?? []),
             'managed_pages' => self::getManagedPagesForm($formOverrides['managed_pages'] ?? []),
             'notifications_summary' => self::getNotificationsForm($formOverrides['notifications_summary'] ?? []),
+            'maintenance' => self::getMaintenanceForm($formOverrides['maintenance'] ?? []),
         ];
     }
 
@@ -227,6 +228,10 @@ final class SettingsPage
 
         if ($action === 'maintenance_action') {
             return self::processMaintenanceAction($source, $persist);
+        }
+
+        if ($action === 'dangerous_reset_action') {
+            return self::processDangerousResetAction($source, $persist);
         }
 
         return $state;
@@ -313,6 +318,8 @@ final class SettingsPage
         }
 
         if ($persist) {
+            ManagedPages::resumeAutoManagement();
+
             if ($task === 'recreate') {
                 ManagedPages::recreatePage($pageKey);
             } else {
@@ -363,6 +370,7 @@ final class SettingsPage
 
         if ($persist) {
             if ($task === 'reinstall_pages') {
+                ManagedPages::resumeAutoManagement();
                 ManagedPages::install();
                 PortalRouter::flushRewriteRules();
             } elseif ($task === 'reschedule_cron') {
@@ -411,6 +419,26 @@ final class SettingsPage
     }
 
     /**
+     * @param array<string, mixed> $source
+     * @return array<string, mixed>
+     */
+    private static function processDangerousResetAction(array $source, bool $persist): array
+    {
+        $result = DangerousResetService::processRequest($source, $persist);
+
+        return [
+            'tab' => 'maintenance',
+            'notice' => (string) ($result['notice'] ?? ''),
+            'errors' => isset($result['errors']) && \is_array($result['errors']) ? $result['errors'] : [],
+            'forms' => [
+                'maintenance' => [
+                    'dangerous_reset' => isset($result['form']) && \is_array($result['form']) ? $result['form'] : DangerousResetService::getFormState(),
+                ],
+            ],
+        ];
+    }
+
+    /**
      * @param array<string, mixed> $updates
      */
     private static function persistUpdates(array $updates): void
@@ -423,14 +451,23 @@ final class SettingsPage
                 continue;
             }
 
+            if ($group === 'managed_pages') {
+                foreach ($values as $settingKey => $pageId) {
+                    if (!\is_string($settingKey)) {
+                        continue;
+                    }
+
+                    ManagedPages::assignPage($settingKey, (int) \absint($pageId));
+                }
+
+                $needsPageSync = true;
+                continue;
+            }
+
             MustBookingConfig::set_group_settings($group, $values);
 
             if ($group === 'staff_access') {
                 $needsRoleSync = true;
-                $needsPageSync = true;
-            }
-
-            if ($group === 'managed_pages') {
                 $needsPageSync = true;
             }
         }
@@ -660,6 +697,21 @@ final class SettingsPage
         ];
 
         return \array_merge($form, $overrides);
+    }
+
+    /**
+     * @param array<string, mixed> $overrides
+     * @return array<string, mixed>
+     */
+    private static function getMaintenanceForm(array $overrides): array
+    {
+        return [
+            'dangerous_reset' => DangerousResetService::getFormState(
+                isset($overrides['dangerous_reset']) && \is_array($overrides['dangerous_reset'])
+                    ? $overrides['dangerous_reset']
+                    : []
+            ),
+        ];
     }
 
     /**
@@ -1198,6 +1250,8 @@ final class SettingsPage
             'notifications_summary_saved' => \__('Notification and email summary settings saved.', 'must-hotel-booking'),
             'managed_page_repaired' => \__('Managed page action completed.', 'must-hotel-booking'),
             'maintenance_action_completed' => \__('Maintenance action completed.', 'must-hotel-booking'),
+            'hotel_operational_reset_completed' => \__('Hotel operational data reset completed.', 'must-hotel-booking'),
+            'plugin_factory_reset_completed' => \__('Full plugin factory reset completed.', 'must-hotel-booking'),
         ];
 
         if ($notice === 'inventory_mirror_repaired') {
@@ -1400,7 +1454,7 @@ final class SettingsPage
             return;
         }
 
-        self::renderMaintenanceTab($diagnostics);
+        self::renderMaintenanceTab($diagnostics, $forms['maintenance']);
     }
 
     private static function renderFormStart(string $tab): void
@@ -1976,7 +2030,7 @@ final class SettingsPage
     /**
      * @param array<string, mixed> $diagnostics
      */
-    private static function renderMaintenanceTab(array $diagnostics): void
+    private static function renderMaintenanceTab(array $diagnostics, array $form): void
     {
         $environment = isset($diagnostics['environment']) && \is_array($diagnostics['environment']) ? $diagnostics['environment'] : [];
         $payments = isset($diagnostics['payments']) && \is_array($diagnostics['payments']) ? $diagnostics['payments'] : [];
@@ -2061,6 +2115,107 @@ final class SettingsPage
         }
         echo '</div></div></div>';
         self::renderPanelEnd();
+        self::renderDangerZoneSection(
+            isset($form['dangerous_reset']) && \is_array($form['dangerous_reset'])
+                ? $form['dangerous_reset']
+                : DangerousResetService::getFormState()
+        );
+    }
+
+    /**
+     * @param array<string, mixed> $form
+     */
+    private static function renderDangerZoneSection(array $form): void
+    {
+        if (!DangerousResetService::canCurrentUserAccess()) {
+            return;
+        }
+
+        self::renderPanelStart(
+            \__('Danger Zone', 'must-hotel-booking'),
+            \__('Restricted destructive tools for full administrators only. Both actions are irreversible and require typed confirmation plus the current WordPress password.', 'must-hotel-booking')
+        );
+        echo '<div class="must-danger-zone-intro">';
+        echo '<p>' . \esc_html__('Use these actions only when you intentionally need to wipe live booking data or return the plugin to a near first-install state. Neither action recreates demo data.', 'must-hotel-booking') . '</p>';
+        echo '</div>';
+        echo '<div class="must-danger-zone-grid">';
+
+        foreach (DangerousResetService::getDefinitions() as $target => $definition) {
+            if (!\is_array($definition)) {
+                continue;
+            }
+
+            self::renderDangerousResetCard($target, $definition, $form);
+        }
+
+        echo '</div>';
+        self::renderPanelEnd();
+    }
+
+    /**
+     * @param array<string, mixed> $definition
+     * @param array<string, mixed> $form
+     */
+    private static function renderDangerousResetCard(string $target, array $definition, array $form): void
+    {
+        $values = isset($form['values'][$target]) && \is_array($form['values'][$target]) ? $form['values'][$target] : [];
+        $isOpen = (string) ($form['active_target'] ?? '') === $target;
+        $toneClass = $target === DangerousResetService::TARGET_FACTORY
+            ? 'must-danger-zone-card--factory'
+            : 'must-danger-zone-card--operational';
+
+        echo '<details class="must-danger-zone-card ' . \esc_attr($toneClass) . '"' . ($isOpen ? ' open' : '') . '>';
+        echo '<summary class="must-danger-zone-summary">';
+        echo '<div class="must-danger-zone-summary-copy">';
+        echo '<strong>' . \esc_html((string) ($definition['label'] ?? $target)) . '</strong>';
+        echo '<span>' . \esc_html((string) ($definition['summary'] ?? '')) . '</span>';
+        echo '</div>';
+        echo '<span class="must-danger-zone-summary-toggle">' . \esc_html__('Review confirmation', 'must-hotel-booking') . '</span>';
+        echo '</summary>';
+        echo '<div class="must-danger-zone-body">';
+        echo '<p class="must-danger-zone-warning">' . \esc_html((string) ($definition['warning'] ?? '')) . '</p>';
+        self::renderDangerousResetItemList(\__('Deletes', 'must-hotel-booking'), (array) ($definition['delete_items'] ?? []));
+        self::renderDangerousResetItemList(\__('Preserves', 'must-hotel-booking'), (array) ($definition['preserve_items'] ?? []));
+        echo '<form method="post" action="' . \esc_url(get_admin_settings_page_url(['tab' => 'maintenance'])) . '" class="must-danger-zone-form">';
+        \wp_nonce_field((string) ($definition['nonce_action'] ?? ''), 'must_settings_nonce');
+        echo '<input type="hidden" name="must_settings_action" value="dangerous_reset_action" />';
+        echo '<input type="hidden" name="dangerous_reset_target" value="' . \esc_attr($target) . '" />';
+        echo '<label for="must-danger-target-' . \esc_attr($target) . '"><span>' . \esc_html__('Select reset target', 'must-hotel-booking') . '</span>';
+        echo '<select id="must-danger-target-' . \esc_attr($target) . '" name="dangerous_reset_target_selection" required>';
+        echo '<option value="">' . \esc_html__('Choose one...', 'must-hotel-booking') . '</option>';
+        echo '<option value="' . \esc_attr($target) . '"' . \selected((string) ($values['selected_target'] ?? ''), $target, false) . '>' . \esc_html((string) ($definition['target_label'] ?? $target)) . '</option>';
+        echo '</select></label>';
+        echo '<label for="must-danger-phrase-' . \esc_attr($target) . '"><span>' . \esc_html__('Type the confirmation phrase', 'must-hotel-booking') . '</span>';
+        echo '<input id="must-danger-phrase-' . \esc_attr($target) . '" type="text" name="dangerous_reset_confirmation_phrase" value="' . \esc_attr((string) ($values['confirmation_phrase'] ?? '')) . '" spellcheck="false" autocapitalize="off" autocomplete="off" required /></label>';
+        echo '<p class="description">' . \esc_html__('Required phrase:', 'must-hotel-booking') . ' <code>' . \esc_html((string) ($definition['confirmation_phrase'] ?? '')) . '</code></p>';
+        echo '<label for="must-danger-password-' . \esc_attr($target) . '"><span>' . \esc_html__('Current WordPress password', 'must-hotel-booking') . '</span>';
+        echo '<input id="must-danger-password-' . \esc_attr($target) . '" type="password" name="dangerous_reset_password" value="" autocomplete="current-password" required /></label>';
+        echo '<label class="must-danger-zone-checkbox"><input type="checkbox" name="dangerous_reset_acknowledge" value="1"' . \checked(!empty($values['acknowledged']), true, false) . ' required /> <span>' . \esc_html__('I understand this action cannot be undone.', 'must-hotel-booking') . '</span></label>';
+        echo '<button type="submit" class="button must-danger-zone-submit">' . \esc_html((string) ($definition['submit_label'] ?? \__('Run reset', 'must-hotel-booking'))) . '</button>';
+        echo '</form>';
+        echo '</div>';
+        echo '</details>';
+    }
+
+    /**
+     * @param array<int|string, mixed> $items
+     */
+    private static function renderDangerousResetItemList(string $label, array $items): void
+    {
+        if (empty($items)) {
+            return;
+        }
+
+        echo '<div class="must-danger-zone-list-block">';
+        echo '<h4>' . \esc_html($label) . '</h4>';
+        echo '<ul class="must-danger-zone-list">';
+
+        foreach ($items as $item) {
+            echo '<li>' . \esc_html((string) $item) . '</li>';
+        }
+
+        echo '</ul>';
+        echo '</div>';
     }
 
     /**

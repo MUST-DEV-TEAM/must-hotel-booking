@@ -4,6 +4,8 @@ namespace MustHotelBooking\Core;
 
 final class ManagedPages
 {
+    private const SUSPENDED_OPTION = 'must_hotel_booking_managed_pages_suspended';
+
     /**
      * @return array<string, string>
      */
@@ -129,8 +131,27 @@ final class ManagedPages
         return false;
     }
 
+    public static function isManagementSuspended(): bool
+    {
+        return !empty(\get_option(self::SUSPENDED_OPTION, false));
+    }
+
+    public static function suspendAutoManagement(): void
+    {
+        \update_option(self::SUSPENDED_OPTION, true);
+    }
+
+    public static function resumeAutoManagement(): void
+    {
+        \delete_option(self::SUSPENDED_OPTION);
+    }
+
     public static function install(): void
     {
+        if (self::isManagementSuspended()) {
+            return;
+        }
+
         foreach (self::getConfig() as $settingKey => $config) {
             if (!self::shouldAutoCreate($settingKey)) {
                 continue;
@@ -143,6 +164,10 @@ final class ManagedPages
 
     public static function sync(): void
     {
+        if (self::isManagementSuspended()) {
+            return;
+        }
+
         foreach (self::getConfig() as $settingKey => $config) {
             if (!self::shouldAutoCreate($settingKey)) {
                 continue;
@@ -231,6 +256,10 @@ final class ManagedPages
         }
 
         MustBookingConfig::set_setting($settingKey, \absint($pageId));
+
+        if ($pageId > 0) {
+            self::resumeAutoManagement();
+        }
 
         return true;
     }
@@ -365,6 +394,10 @@ final class ManagedPages
 
     public static function getPageUrl(string $settingKey, string $fallbackPath): string
     {
+        if (self::isManagementSuspended()) {
+            return '';
+        }
+
         $pageId = self::getAssignedPageId($settingKey);
 
         if ($pageId > 0) {
@@ -424,6 +457,10 @@ final class ManagedPages
 
     public static function getConfiguredPagePath(string $settingKey, string $fallbackSlug): string
     {
+        if (self::isManagementSuspended()) {
+            return '';
+        }
+
         $page = self::getAssignedPage($settingKey);
 
         if ($page instanceof \WP_Post && $page->post_type === 'page') {
@@ -439,7 +476,7 @@ final class ManagedPages
 
     public static function isCurrentPage(string $settingKey, string $fallbackSlug): bool
     {
-        if (\is_admin()) {
+        if (\is_admin() || self::isManagementSuspended()) {
             return false;
         }
 
@@ -454,7 +491,7 @@ final class ManagedPages
 
     public static function isAssignedCurrentPage(string $settingKey): bool
     {
-        if (\is_admin()) {
+        if (\is_admin() || self::isManagementSuspended()) {
             return false;
         }
 

@@ -141,12 +141,20 @@ final class PortalRouter
     {
         $url = ManagedPages::getPortalPageUrl();
 
+        if ($url === '') {
+            return '';
+        }
+
         return empty($args) ? $url : \add_query_arg($args, $url);
     }
 
     public static function getLoginUrl(array $args = []): string
     {
         $url = ManagedPages::getPortalLoginPageUrl();
+
+        if ($url === '') {
+            return '';
+        }
 
         return empty($args) ? $url : \add_query_arg($args, $url);
     }
@@ -157,7 +165,13 @@ final class PortalRouter
     public static function getModuleUrl(string $moduleKey, array $args = []): string
     {
         $definition = PortalRegistry::getDefinition($moduleKey);
-        $baseUrl = \untrailingslashit(self::getPortalUrl());
+        $portalUrl = self::getPortalUrl();
+
+        if ($portalUrl === '') {
+            return '';
+        }
+
+        $baseUrl = \untrailingslashit($portalUrl);
 
         if (!$definition) {
             return empty($args) ? $baseUrl : \add_query_arg($args, $baseUrl);
