@@ -279,7 +279,7 @@ if ($checkout !== '') {
             </div>
         </form>
 
-        <div id="must-booking-live-messages" class="must-hotel-booking-messages">
+        <div id="must-booking-live-messages" class="must-hotel-booking-messages" <?php echo empty($messages) ? 'hidden' : ''; ?>>
             <?php if (!empty($messages)) : ?>
                 <?php foreach ($messages as $message) : ?>
                     <p><?php echo \esc_html((string) $message); ?></p>

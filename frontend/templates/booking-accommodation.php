@@ -85,7 +85,7 @@ $continue_label = \function_exists('\must_hotel_booking\get_accommodation_contin
             </div>
         </section>
 
-        <div id="must-booking-live-messages" class="must-hotel-booking-messages">
+        <div id="must-booking-live-messages" class="must-hotel-booking-messages" <?php echo empty($messages) ? 'hidden' : ''; ?>>
             <?php if (!empty($messages)) : ?>
                 <?php foreach ($messages as $message) : ?>
                     <p><?php echo \esc_html((string) $message); ?></p>
@@ -102,14 +102,14 @@ $continue_label = \function_exists('\must_hotel_booking\get_accommodation_contin
         <?php else : ?>
             <section id="must-booking-results" class="must-hotel-booking-results">
                 <div class="must-booking-results-toolbar">
-                    <button type="button" class="must-booking-results-filter" data-filter-target="must-booking-accommodation-dates-panel" aria-expanded="false">
+                    <button type="button" class="must-booking-results-filter" data-filter-target="must-booking-accommodation-dates-panel" aria-expanded="false" aria-controls="must-booking-accommodation-dates-panel">
                         <span><?php echo \esc_html($results_date_range); ?></span>
                         <?php if ($filter_icon_url !== '') : ?>
                             <img src="<?php echo \esc_url($filter_icon_url); ?>" alt="" aria-hidden="true" />
                         <?php endif; ?>
                     </button>
 
-                    <button type="button" class="must-booking-results-filter" data-filter-target="must-booking-accommodation-party-panel" aria-expanded="false">
+                    <button type="button" class="must-booking-results-filter" data-filter-target="must-booking-accommodation-party-panel" aria-expanded="false" aria-controls="must-booking-accommodation-party-panel">
                         <span><?php echo \esc_html($results_selection_summary); ?></span>
                         <?php if ($filter_icon_url !== '') : ?>
                             <img src="<?php echo \esc_url($filter_icon_url); ?>" alt="" aria-hidden="true" />
@@ -141,23 +141,51 @@ $continue_label = \function_exists('\must_hotel_booking\get_accommodation_contin
                         class="must-booking-results-filter-panel"
                         method="get"
                         action="<?php echo \esc_url(\must_hotel_booking\get_booking_accommodation_page_url()); ?>"
+                        aria-label="<?php echo \esc_attr__('Update stay dates', 'must-hotel-booking'); ?>"
                         hidden
                     >
                         <input type="hidden" name="guests" value="<?php echo \esc_attr((string) $guests); ?>" />
                         <input type="hidden" name="room_count" value="<?php echo \esc_attr((string) $room_count); ?>" />
                         <input type="hidden" name="accommodation_type" value="<?php echo \esc_attr($accommodation_type); ?>" />
 
-                        <label class="must-booking-results-filter-field">
-                            <span><?php echo \esc_html__('Check-in', 'must-hotel-booking'); ?></span>
-                            <input type="date" name="checkin" value="<?php echo \esc_attr($checkin); ?>" min="<?php echo \esc_attr(\current_time('Y-m-d')); ?>" required />
-                        </label>
+                        <div class="must-booking-results-filter-panel-copy">
+                            <p class="must-booking-results-filter-panel-kicker"><?php echo \esc_html__('Stay Dates', 'must-hotel-booking'); ?></p>
+                            <p class="must-booking-results-filter-panel-title"><?php echo \esc_html($results_date_range); ?></p>
+                        </div>
 
-                        <label class="must-booking-results-filter-field">
-                            <span><?php echo \esc_html__('Check-out', 'must-hotel-booking'); ?></span>
-                            <input type="date" name="checkout" value="<?php echo \esc_attr($checkout); ?>" min="<?php echo \esc_attr(\current_time('Y-m-d')); ?>" required />
-                        </label>
+                        <div class="must-booking-results-filter-panel-fields">
+                            <label class="must-booking-results-filter-field">
+                                <span><?php echo \esc_html__('Check-in', 'must-hotel-booking'); ?></span>
+                                <input
+                                    type="text"
+                                    name="checkin"
+                                    class="must-booking-results-filter-date-input must-booking-results-filter-checkin"
+                                    value="<?php echo \esc_attr($checkin); ?>"
+                                    placeholder="<?php echo \esc_attr__('Check-in', 'must-hotel-booking'); ?>"
+                                    autocomplete="off"
+                                    inputmode="none"
+                                    required
+                                />
+                            </label>
 
-                        <button type="submit" class="must-booking-results-filter-apply"><?php echo \esc_html__('Update Results', 'must-hotel-booking'); ?></button>
+                            <label class="must-booking-results-filter-field">
+                                <span><?php echo \esc_html__('Check-out', 'must-hotel-booking'); ?></span>
+                                <input
+                                    type="text"
+                                    name="checkout"
+                                    class="must-booking-results-filter-date-input must-booking-results-filter-checkout"
+                                    value="<?php echo \esc_attr($checkout); ?>"
+                                    placeholder="<?php echo \esc_attr__('Check-out', 'must-hotel-booking'); ?>"
+                                    autocomplete="off"
+                                    inputmode="none"
+                                    required
+                                />
+                            </label>
+                        </div>
+
+                        <div class="must-booking-results-filter-panel-actions">
+                            <button type="submit" class="must-booking-results-filter-apply"><?php echo \esc_html__('Update Results', 'must-hotel-booking'); ?></button>
+                        </div>
                     </form>
 
                     <form
@@ -165,36 +193,46 @@ $continue_label = \function_exists('\must_hotel_booking\get_accommodation_contin
                         class="must-booking-results-filter-panel"
                         method="get"
                         action="<?php echo \esc_url(\must_hotel_booking\get_booking_accommodation_page_url()); ?>"
+                        aria-label="<?php echo \esc_attr__('Update guest and room details', 'must-hotel-booking'); ?>"
                         hidden
                     >
                         <input type="hidden" name="checkin" value="<?php echo \esc_attr($checkin); ?>" />
                         <input type="hidden" name="checkout" value="<?php echo \esc_attr($checkout); ?>" />
                         <input type="hidden" name="accommodation_type" value="<?php echo \esc_attr($accommodation_type); ?>" />
 
-                        <label class="must-booking-results-filter-field">
-                            <span><?php echo \esc_html__('Guests', 'must-hotel-booking'); ?></span>
-                            <select name="guests">
-                                <?php for ($guest_option = 1; $guest_option <= $max_booking_guests; $guest_option++) : ?>
-                                    <option value="<?php echo \esc_attr((string) $guest_option); ?>" <?php selected($guests, $guest_option); ?>>
-                                        <?php echo \esc_html((string) $guest_option); ?>
-                                    </option>
-                                <?php endfor; ?>
-                            </select>
-                        </label>
+                        <div class="must-booking-results-filter-panel-copy">
+                            <p class="must-booking-results-filter-panel-kicker"><?php echo \esc_html__('Guest Setup', 'must-hotel-booking'); ?></p>
+                            <p class="must-booking-results-filter-panel-title"><?php echo \esc_html($results_selection_summary); ?></p>
+                        </div>
 
-                        <label class="must-booking-results-filter-field">
-                            <span><?php echo \esc_html__('Rooms', 'must-hotel-booking'); ?></span>
-                            <select name="room_count">
-                                <option value="0" <?php selected($room_count, 0); ?>><?php echo \esc_html__('Auto', 'must-hotel-booking'); ?></option>
-                                <?php for ($room_option = 1; $room_option <= $max_booking_rooms; $room_option++) : ?>
-                                    <option value="<?php echo \esc_attr((string) $room_option); ?>" <?php selected($room_count, $room_option); ?>>
-                                        <?php echo \esc_html(\must_hotel_booking\format_booking_room_count_label($room_option)); ?>
-                                    </option>
-                                <?php endfor; ?>
-                            </select>
-                        </label>
+                        <div class="must-booking-results-filter-panel-fields">
+                            <label class="must-booking-results-filter-field">
+                                <span><?php echo \esc_html__('Guests', 'must-hotel-booking'); ?></span>
+                                <select name="guests">
+                                    <?php for ($guest_option = 1; $guest_option <= $max_booking_guests; $guest_option++) : ?>
+                                        <option value="<?php echo \esc_attr((string) $guest_option); ?>" <?php selected($guests, $guest_option); ?>>
+                                            <?php echo \esc_html((string) $guest_option); ?>
+                                        </option>
+                                    <?php endfor; ?>
+                                </select>
+                            </label>
 
-                        <button type="submit" class="must-booking-results-filter-apply"><?php echo \esc_html__('Update Results', 'must-hotel-booking'); ?></button>
+                            <label class="must-booking-results-filter-field">
+                                <span><?php echo \esc_html__('Rooms', 'must-hotel-booking'); ?></span>
+                                <select name="room_count">
+                                    <option value="0" <?php selected($room_count, 0); ?>><?php echo \esc_html__('Auto', 'must-hotel-booking'); ?></option>
+                                    <?php for ($room_option = 1; $room_option <= $max_booking_rooms; $room_option++) : ?>
+                                        <option value="<?php echo \esc_attr((string) $room_option); ?>" <?php selected($room_count, $room_option); ?>>
+                                            <?php echo \esc_html(\must_hotel_booking\format_booking_room_count_label($room_option)); ?>
+                                        </option>
+                                    <?php endfor; ?>
+                                </select>
+                            </label>
+                        </div>
+
+                        <div class="must-booking-results-filter-panel-actions">
+                            <button type="submit" class="must-booking-results-filter-apply"><?php echo \esc_html__('Update Results', 'must-hotel-booking'); ?></button>
+                        </div>
                     </form>
                 </div>
 

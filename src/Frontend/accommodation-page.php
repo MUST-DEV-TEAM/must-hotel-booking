@@ -388,6 +388,21 @@ function enqueue_booking_accommodation_page_assets(): void
     }
 
     \wp_enqueue_style(
+        'must-hotel-booking-flatpickr',
+        'https://cdn.jsdelivr.net/npm/flatpickr/dist/flatpickr.min.css',
+        [],
+        MUST_HOTEL_BOOKING_VERSION
+    );
+
+    \wp_enqueue_script(
+        'must-hotel-booking-flatpickr',
+        'https://cdn.jsdelivr.net/npm/flatpickr/dist/flatpickr.min.js',
+        [],
+        MUST_HOTEL_BOOKING_VERSION,
+        true
+    );
+
+    \wp_enqueue_style(
         'must-hotel-booking-booking-page',
         MUST_HOTEL_BOOKING_URL . 'assets/css/booking-page.css',
         [],
@@ -404,7 +419,7 @@ function enqueue_booking_accommodation_page_assets(): void
     \wp_enqueue_script(
         'must-hotel-booking-booking-accommodation',
         MUST_HOTEL_BOOKING_URL . 'assets/js/booking-accommodation.js',
-        [],
+        ['must-hotel-booking-flatpickr'],
         MUST_HOTEL_BOOKING_VERSION,
         true
     );
@@ -415,6 +430,10 @@ function enqueue_booking_accommodation_page_assets(): void
         [
             'ajaxUrl' => \admin_url('admin-ajax.php'),
             'ajaxAction' => 'must_booking_accommodation_room_action',
+            'today' => \current_time('Y-m-d'),
+            'queryDateFormat' => 'Y-m-d',
+            'displayDateFormat' => 'd/m/Y',
+            'bookingWindowDays' => 365,
             'icons' => [
                 'lightboxPrev' => MUST_HOTEL_BOOKING_URL . 'assets/img/lightboxleft.svg',
                 'lightboxNext' => MUST_HOTEL_BOOKING_URL . 'assets/img/lightboxright.svg',

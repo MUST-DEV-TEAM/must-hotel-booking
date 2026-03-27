@@ -560,10 +560,12 @@
 
         if (!message) {
             messagesEl.innerHTML = '';
+            messagesEl.hidden = true;
             return;
         }
 
         var cssClass = type === 'error' ? 'must-booking-message must-booking-message-error' : 'must-booking-message';
+        messagesEl.hidden = false;
         messagesEl.innerHTML = '<p class="' + cssClass + '">' + escapeHtml(message) + '</p>';
     }
 

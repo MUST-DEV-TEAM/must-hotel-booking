@@ -35,12 +35,87 @@
         return config;
     }
 
+    var config = getAccommodationConfig();
+
     function escapeHtmlAttribute(value) {
         return String(value)
             .replace(/&/g, '&amp;')
             .replace(/"/g, '&quot;')
             .replace(/</g, '&lt;')
             .replace(/>/g, '&gt;');
+    }
+
+    function isValidYmd(value) {
+        return /^\d{4}-\d{2}-\d{2}$/.test(String(value || ''));
+    }
+
+    function formatYmd(date) {
+        var year = String(date.getFullYear());
+        var month = String(date.getMonth() + 1).padStart(2, '0');
+        var day = String(date.getDate()).padStart(2, '0');
+
+        return year + '-' + month + '-' + day;
+    }
+
+    function getTodayYmd() {
+        if (isValidYmd(config.today)) {
+            return String(config.today);
+        }
+
+        return formatYmd(new Date());
+    }
+
+    function addDays(ymdDate, days) {
+        if (!isValidYmd(ymdDate)) {
+            return ymdDate;
+        }
+
+        var date = new Date(ymdDate + 'T00:00:00');
+
+        if (Number.isNaN(date.getTime())) {
+            return ymdDate;
+        }
+
+        date.setDate(date.getDate() + Number(days || 0));
+
+        return formatYmd(date);
+    }
+
+    function getMaxDateYmd(todayYmd) {
+        var windowDays = parseInt(String(config.bookingWindowDays || '365'), 10);
+
+        if (!Number.isFinite(windowDays) || windowDays < 1) {
+            windowDays = 365;
+        }
+
+        return addDays(todayYmd, windowDays);
+    }
+
+    function buildPopupPickerOptions(todayYmd, maxDateYmd) {
+        return {
+            dateFormat: String(config.queryDateFormat || 'Y-m-d'),
+            altInput: true,
+            altFormat: String(config.displayDateFormat || 'd/m/Y'),
+            allowInput: false,
+            clickOpens: true,
+            position: 'auto left',
+            monthSelectorType: 'dropdown',
+            disableMobile: true,
+            minDate: todayYmd,
+            maxDate: maxDateYmd,
+            onReady: function (selectedDates, dateStr, instance) {
+                if (!instance || !instance.altInput) {
+                    return;
+                }
+
+                instance.altInput.setAttribute('autocomplete', 'off');
+                instance.altInput.setAttribute('inputmode', 'none');
+
+                if (instance.input && instance.input.getAttribute('placeholder')) {
+                    instance.altInput.setAttribute('placeholder', instance.input.getAttribute('placeholder'));
+                }
+            }
+        };
     }
 
     function getLightboxArrowMarkup(url, fallbackCharacter) {
@@ -53,6 +128,7 @@
 
     function renderLiveMessages(messages) {
         var messagesNode = document.getElementById('must-booking-live-messages');
+        var hasRenderedMessage = false;
 
         if (!messagesNode) {
             return;
@@ -61,6 +137,7 @@
         messagesNode.innerHTML = '';
 
         if (!Array.isArray(messages) || !messages.length) {
+            messagesNode.hidden = true;
             return;
         }
 
@@ -72,7 +149,10 @@
             var paragraph = document.createElement('p');
             paragraph.textContent = message;
             messagesNode.appendChild(paragraph);
+            hasRenderedMessage = true;
         });
+
+        messagesNode.hidden = !hasRenderedMessage;
     }
 
     function getArrowIconClone() {
@@ -643,6 +723,65 @@
         });
     }
 
+    function initAccommodationDatePickers() {
+        var datesPanel = document.getElementById('must-booking-accommodation-dates-panel');
+        var checkinInput;
+        var checkoutInput;
+        var todayYmd;
+        var maxDateYmd;
+        var commonOptions;
+        var checkoutPicker;
+
+        if (!datesPanel || typeof window.flatpickr !== 'function') {
+            return;
+        }
+
+        checkinInput = datesPanel.querySelector('.must-booking-results-filter-checkin');
+        checkoutInput = datesPanel.querySelector('.must-booking-results-filter-checkout');
+
+        if (!(checkinInput instanceof HTMLInputElement) || !(checkoutInput instanceof HTMLInputElement)) {
+            return;
+        }
+
+        if (checkinInput.dataset.mustFlatpickrReady === '1' || checkoutInput.dataset.mustFlatpickrReady === '1') {
+            return;
+        }
+
+        todayYmd = getTodayYmd();
+        maxDateYmd = getMaxDateYmd(todayYmd);
+        commonOptions = buildPopupPickerOptions(todayYmd, maxDateYmd);
+
+        checkoutPicker = window.flatpickr(checkoutInput, Object.assign({}, commonOptions, {
+            minDate: isValidYmd(checkinInput.value) ? addDays(checkinInput.value, 1) : addDays(todayYmd, 1)
+        }));
+
+        window.flatpickr(checkinInput, Object.assign({}, commonOptions, {
+            onChange: function (selectedDates, checkinValue) {
+                if (!checkoutPicker) {
+                    return;
+                }
+
+                if (!selectedDates || !selectedDates.length || !isValidYmd(checkinValue)) {
+                    checkoutPicker.set('minDate', addDays(todayYmd, 1));
+                    return;
+                }
+
+                var minCheckout = addDays(checkinValue, 1);
+
+                checkoutPicker.set('minDate', minCheckout);
+
+                if (isValidYmd(checkoutInput.value) && checkoutInput.value < minCheckout) {
+                    checkoutPicker.clear();
+                }
+
+                checkoutPicker.open();
+            }
+        }));
+
+        checkinInput.dataset.mustFlatpickrReady = '1';
+        checkoutInput.dataset.mustFlatpickrReady = '1';
+    }
+
     function initSelectionForms() {
         document.addEventListener('submit', function (event) {
             var target = event.target;
@@ -686,6 +825,7 @@
 
     document.addEventListener('click', onDocumentClick);
     document.addEventListener('keydown', onDocumentKeyDown);
+    initAccommodationDatePickers();
     initAccommodationFilters();
     initSelectionForms();
 })();

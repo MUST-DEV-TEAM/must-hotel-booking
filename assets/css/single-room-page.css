@@ -19,11 +19,12 @@
 }
 
 .must-hotel-booking-page-single-room .must-hotel-booking-single-room {
-    --must-single-room-gutter: 150px;
+    --must-single-room-gutter-x: 150px;
+    --must-single-room-gutter-y: 150px;
     width: 100%;
     box-sizing: border-box;
     margin: 0 auto;
-    padding: var(--must-single-room-gutter);
+    padding: var(--must-single-room-gutter-y) var(--must-single-room-gutter-x);
     color: #141414;
     font-family: 'PP Neue Montreal', sans-serif;
 }
@@ -265,10 +266,10 @@
 
 .must-hotel-booking-single-room .must-hotel-booking-related-rooms-section {
     position: relative;
-    width: calc(100% + var(--must-single-room-gutter) + var(--must-single-room-gutter));
+    width: calc(100% + var(--must-single-room-gutter-x) + var(--must-single-room-gutter-x));
     margin-top: 110px;
-    margin-left: calc(0px - var(--must-single-room-gutter));
-    margin-right: calc(0px - var(--must-single-room-gutter));
+    margin-left: calc(0px - var(--must-single-room-gutter-x));
+    margin-right: calc(0px - var(--must-single-room-gutter-x));
     background: #fff;
     min-height: 1015px;
 }
@@ -492,10 +493,10 @@
 
 .must-hotel-booking-single-room .must-hotel-booking-included-accommodations-section {
     position: relative;
-    width: calc(100% + var(--must-single-room-gutter) + var(--must-single-room-gutter));
+    width: calc(100% + var(--must-single-room-gutter-x) + var(--must-single-room-gutter-x));
     margin-top: 60px;
-    margin-left: calc(0px - var(--must-single-room-gutter));
-    margin-right: calc(0px - var(--must-single-room-gutter));
+    margin-left: calc(0px - var(--must-single-room-gutter-x));
+    margin-right: calc(0px - var(--must-single-room-gutter-x));
     background: #f5f3ec;
 }
 
@@ -694,8 +695,9 @@ body.must-hotel-booking-single-room-lightbox-open {
 
 @media (max-width: 1600px) {
     .must-hotel-booking-page-single-room .must-hotel-booking-single-room {
-        --must-single-room-gutter: 120px;
-        padding: var(--must-single-room-gutter);
+        --must-single-room-gutter-x: 120px;
+        --must-single-room-gutter-y: 120px;
+        padding: var(--must-single-room-gutter-y) var(--must-single-room-gutter-x);
     }
 
     .must-hotel-booking-single-room .must-hotel-booking-single-room-grid {
@@ -722,8 +724,9 @@ body.must-hotel-booking-single-room-lightbox-open {
 
 @media (max-width: 1360px) {
     .must-hotel-booking-page-single-room .must-hotel-booking-single-room {
-        --must-single-room-gutter: 96px;
-        padding: var(--must-single-room-gutter);
+        --must-single-room-gutter-x: 96px;
+        --must-single-room-gutter-y: 96px;
+        padding: var(--must-single-room-gutter-y) var(--must-single-room-gutter-x);
     }
 
     .must-hotel-booking-single-room .must-hotel-booking-single-room-grid {
@@ -791,8 +794,9 @@ body.must-hotel-booking-single-room-lightbox-open {
 
 @media (max-width: 1199px) {
     .must-hotel-booking-page-single-room .must-hotel-booking-single-room {
-        --must-single-room-gutter: 75px;
-        padding: var(--must-single-room-gutter);
+        --must-single-room-gutter-x: 50px;
+        --must-single-room-gutter-y: 100px;
+        padding: var(--must-single-room-gutter-y) var(--must-single-room-gutter-x);
     }
 
     .must-hotel-booking-single-room .must-hotel-booking-single-room-grid {
@@ -982,8 +986,9 @@ body.must-hotel-booking-single-room-lightbox-open {
 
 @media (max-width: 767px) {
     .must-hotel-booking-page-single-room .must-hotel-booking-single-room {
-        --must-single-room-gutter: 30px;
-        padding: var(--must-single-room-gutter);
+        --must-single-room-gutter-x: 20px;
+        --must-single-room-gutter-y: 50px;
+        padding: var(--must-single-room-gutter-y) var(--must-single-room-gutter-x);
     }
 
     .must-hotel-booking-single-room .must-hotel-booking-single-room-grid {
