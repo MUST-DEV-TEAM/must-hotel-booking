@@ -58,9 +58,14 @@ final class RoomViewBuilder
             )
         );
         $galleryImages = \array_slice($galleryImages, 0, 3);
-        $detailsUrl = $roomSlug !== ''
-            ? \add_query_arg(['room' => \sanitize_title($roomSlug)], ManagedPages::getRoomsPageUrl())
-            : ManagedPages::getRoomsPageUrl();
+        $roomsPageUrl = ManagedPages::getRoomsPageUrl();
+        $detailsUrl = '';
+
+        if ($roomsPageUrl !== '') {
+            $detailsUrl = $roomSlug !== ''
+                ? \add_query_arg(['room' => \sanitize_title($roomSlug)], $roomsPageUrl)
+                : $roomsPageUrl;
+        }
 
         return [
             'id' => $roomId,

@@ -4,8 +4,16 @@ namespace MustHotelBooking\Admin;
 
 final class SimpleXlsxWorkbook
 {
+    public const STYLE_DEFAULT = 0;
+    public const STYLE_WARNING = 1;
+    public const STYLE_HEADER = 2;
+
     /**
-     * @param array<int, array{name: string, rows: array<int, array<int, bool|float|int|string|null>>}> $sheets
+     * @param array<int, array{
+     *     name: string,
+     *     rows: array<int, array<int, array{value?: bool|float|int|string|null, style_id?: int}|bool|float|int|string|null>>,
+     *     protect?: bool
+     * }> $sheets
      */
     public function createTemporaryWorkbook(array $sheets): string
     {
@@ -49,7 +57,8 @@ final class SimpleXlsxWorkbook
             $entries[] = [
                 \PCLZIP_ATT_FILE_NAME => 'xl/worksheets/sheet' . ($index + 1) . '.xml',
                 \PCLZIP_ATT_FILE_CONTENT => $this->buildWorksheetXml(
-                    isset($sheet['rows']) && \is_array($sheet['rows']) ? $sheet['rows'] : []
+                    isset($sheet['rows']) && \is_array($sheet['rows']) ? $sheet['rows'] : [],
+                    !empty($sheet['protect'])
                 ),
             ];
         }
@@ -117,7 +126,11 @@ final class SimpleXlsxWorkbook
     }
 
     /**
-     * @param array<int, array{name: string, rows: array<int, array<int, bool|float|int|string|null>>}> $sheets
+     * @param array<int, array{
+     *     name: string,
+     *     rows: array<int, array<int, array{value?: bool|float|int|string|null, style_id?: int}|bool|float|int|string|null>>,
+     *     protect?: bool
+     * }> $sheets
      */
     private function buildContentTypesXml(array $sheets): string
     {
@@ -148,7 +161,11 @@ final class SimpleXlsxWorkbook
     }
 
     /**
-     * @param array<int, array{name: string, rows: array<int, array<int, bool|float|int|string|null>>}> $sheets
+     * @param array<int, array{
+     *     name: string,
+     *     rows: array<int, array<int, array{value?: bool|float|int|string|null, style_id?: int}|bool|float|int|string|null>>,
+     *     protect?: bool
+     * }> $sheets
      */
     private function buildWorkbookXml(array $sheets): string
     {
@@ -165,7 +182,11 @@ final class SimpleXlsxWorkbook
     }
 
     /**
-     * @param array<int, array{name: string, rows: array<int, array<int, bool|float|int|string|null>>}> $sheets
+     * @param array<int, array{
+     *     name: string,
+     *     rows: array<int, array<int, array{value?: bool|float|int|string|null, style_id?: int}|bool|float|int|string|null>>,
+     *     protect?: bool
+     * }> $sheets
      */
     private function buildWorkbookRelationshipsXml(array $sheets): string
     {
@@ -188,19 +209,35 @@ final class SimpleXlsxWorkbook
     {
         return '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
             . '<styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">'
-            . '<fonts count="1"><font><sz val="11"/><name val="Calibri"/></font></fonts>'
-            . '<fills count="2"><fill><patternFill patternType="none"/></fill><fill><patternFill patternType="gray125"/></fill></fills>'
-            . '<borders count="1"><border><left/><right/><top/><bottom/><diagonal/></border></borders>'
+            . '<fonts count="3">'
+            . '<font><sz val="11"/><name val="Calibri"/></font>'
+            . '<font><b/><sz val="11"/><color rgb="FFFFFFFF"/><name val="Calibri"/></font>'
+            . '<font><b/><sz val="11"/><color rgb="FF1F1F1F"/><name val="Calibri"/></font>'
+            . '</fonts>'
+            . '<fills count="4">'
+            . '<fill><patternFill patternType="none"/></fill>'
+            . '<fill><patternFill patternType="gray125"/></fill>'
+            . '<fill><patternFill patternType="solid"><fgColor rgb="FFB42318"/><bgColor indexed="64"/></patternFill></fill>'
+            . '<fill><patternFill patternType="solid"><fgColor rgb="FFEAE6DB"/><bgColor indexed="64"/></patternFill></fill>'
+            . '</fills>'
+            . '<borders count="2">'
+            . '<border><left/><right/><top/><bottom/><diagonal/></border>'
+            . '<border><left style="thin"/><right style="thin"/><top style="thin"/><bottom style="thin"/><diagonal/></border>'
+            . '</borders>'
             . '<cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs>'
-            . '<cellXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/></cellXfs>'
+            . '<cellXfs count="3">'
+            . '<xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/>'
+            . '<xf numFmtId="0" fontId="1" fillId="2" borderId="1" xfId="0" applyFont="1" applyFill="1" applyBorder="1" applyAlignment="1"><alignment horizontal="center" vertical="center" wrapText="1"/></xf>'
+            . '<xf numFmtId="0" fontId="2" fillId="3" borderId="1" xfId="0" applyFont="1" applyFill="1" applyBorder="1" applyAlignment="1"><alignment horizontal="center" vertical="center" wrapText="1"/></xf>'
+            . '</cellXfs>'
             . '<cellStyles count="1"><cellStyle name="Normal" xfId="0" builtinId="0"/></cellStyles>'
             . '</styleSheet>';
     }
 
     /**
-     * @param array<int, array<int, bool|float|int|string|null>> $rows
+     * @param array<int, array<int, array{value?: bool|float|int|string|null, style_id?: int}|bool|float|int|string|null>> $rows
      */
-    private function buildWorksheetXml(array $rows): string
+    private function buildWorksheetXml(array $rows, bool $protect = false): string
     {
         $rowXml = [];
         $maxColumns = 1;
@@ -216,19 +253,30 @@ final class SimpleXlsxWorkbook
 
             foreach (\array_values($row) as $columnIndex => $value) {
                 $cellRef = $this->columnNumberToName($columnIndex + 1) . $rowNumber;
-                $cells[] = $this->buildWorksheetCellXml($cellRef, $value);
+                $styleId = self::STYLE_DEFAULT;
+
+                if (\is_array($value)) {
+                    $styleId = isset($value['style_id']) ? (int) $value['style_id'] : self::STYLE_DEFAULT;
+                    $value = $value['value'] ?? '';
+                }
+
+                $cells[] = $this->buildWorksheetCellXml($cellRef, $value, $styleId);
             }
 
             $rowXml[] = '<row r="' . $rowNumber . '">' . \implode('', $cells) . '</row>';
         }
 
         $lastCell = $this->columnNumberToName($maxColumns) . \max(1, \count($rows));
+        $sheetProtectionXml = $protect
+            ? '<sheetProtection sheet="1" objects="1" scenarios="1"/>'
+            : '';
 
         return '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
             . '<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">'
             . '<dimension ref="A1:' . $lastCell . '"/>'
             . '<sheetViews><sheetView workbookViewId="0"/></sheetViews>'
             . '<sheetFormatPr defaultRowHeight="15"/>'
+            . $sheetProtectionXml
             . '<sheetData>' . \implode('', $rowXml) . '</sheetData>'
             . '</worksheet>';
     }
@@ -236,14 +284,16 @@ final class SimpleXlsxWorkbook
     /**
      * @param bool|float|int|string|null $value
      */
-    private function buildWorksheetCellXml(string $cellReference, $value): string
+    private function buildWorksheetCellXml(string $cellReference, $value, int $styleId = self::STYLE_DEFAULT): string
     {
+        $styleAttribute = $styleId > self::STYLE_DEFAULT ? ' s="' . $styleId . '"' : '';
+
         if (\is_bool($value)) {
-            return '<c r="' . $cellReference . '" t="b"><v>' . ($value ? '1' : '0') . '</v></c>';
+            return '<c r="' . $cellReference . '"' . $styleAttribute . ' t="b"><v>' . ($value ? '1' : '0') . '</v></c>';
         }
 
         if (\is_int($value) || \is_float($value)) {
-            return '<c r="' . $cellReference . '"><v>' . $value . '</v></c>';
+            return '<c r="' . $cellReference . '"' . $styleAttribute . '><v>' . $value . '</v></c>';
         }
 
         if ($value === null) {
@@ -252,7 +302,7 @@ final class SimpleXlsxWorkbook
 
         $stringValue = (string) $value;
 
-        return '<c r="' . $cellReference . '" t="inlineStr"><is><t xml:space="preserve">' . $this->escapeXmlText($stringValue) . '</t></is></c>';
+        return '<c r="' . $cellReference . '"' . $styleAttribute . ' t="inlineStr"><is><t xml:space="preserve">' . $this->escapeXmlText($stringValue) . '</t></is></c>';
     }
 
     private function getArchiveEntryContents(\PclZip $archive, string $entryName, bool $required = true): string

@@ -162,9 +162,15 @@ function maybe_load_frontend_template(string $template): string
             continue;
         }
 
-        $plugin_template = MUST_HOTEL_BOOKING_PATH . $page_config['template'];
+        $plugin_template_relative = isset($page_config['template']) ? (string) $page_config['template'] : '';
 
-        if (\file_exists($plugin_template)) {
+        if ($plugin_template_relative === '') {
+            continue;
+        }
+
+        $plugin_template = MUST_HOTEL_BOOKING_PATH . $plugin_template_relative;
+
+        if (\is_file($plugin_template)) {
             return $plugin_template;
         }
     }
@@ -667,7 +673,7 @@ function enqueue_booking_page_assets(): void
                 'continueToGuestInfo' => \__('Continue to Guest Information', 'must-hotel-booking'),
                 'bookNow' => \__('Book Now', 'must-hotel-booking'),
                 'additionalDetails' => \__('Additional Details', 'must-hotel-booking'),
-                'noImage' => \__('Add room image in admin', 'must-hotel-booking'),
+                'noImage' => \__('Image unavailable', 'must-hotel-booking'),
             ],
         ]
     );

@@ -26,6 +26,18 @@ After activation:
 2. Configure hotel rooms and booking options.
 3. Add the booking functionality to any page using the provided shortcode or block.
 
+## Release Readiness Checklist
+
+Before publishing a GitHub release for WordPress updates:
+
+1. Bump the plugin header `Version` in [must-hotel-booking.php](must-hotel-booking.php).
+2. Bump `MUST_HOTEL_BOOKING_VERSION` in [must-hotel-booking.php](must-hotel-booking.php) to the exact same value.
+3. Align `Stable tag` in [readme.txt](readme.txt) with that exact same version.
+4. Create a matching Git tag in the format `vX.Y.Z`.
+5. Publish exactly one canonical release ZIP asset named `must-hotel-booking-X.Y.Z.zip`.
+6. If the repository or releases are private, define `MUST_HOTEL_BOOKING_GITHUB_TOKEN` in `wp-config.php`.
+7. Test the update on staging from a previous installed version before production rollout.
+
 ## Requirements
 
 - WordPress 5.0+

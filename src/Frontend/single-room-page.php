@@ -12,7 +12,7 @@ use MustHotelBooking\Database\RoomRepository;
  */
 function is_frontend_rooms_page(): bool
 {
-    return ManagedPages::isCurrentPage('page_rooms_id', 'rooms');
+    return ManagedPages::isAssignedCurrentPage('page_rooms_id');
 }
 
 /**
@@ -77,7 +77,14 @@ function get_single_room_record_from_request(): ?array
  */
 function get_single_room_url(string $slug): string
 {
-    return \add_query_arg(['room' => \sanitize_title($slug)], ManagedPages::getRoomsPageUrl());
+    $slug = \sanitize_title($slug);
+    $roomsPageUrl = ManagedPages::getRoomsPageUrl();
+
+    if ($slug === '' || $roomsPageUrl === '') {
+        return '';
+    }
+
+    return \add_query_arg(['room' => $slug], $roomsPageUrl);
 }
 
 /**

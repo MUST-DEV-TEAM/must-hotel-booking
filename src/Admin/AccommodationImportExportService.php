@@ -2,8 +2,6 @@
 
 namespace MustHotelBooking\Admin;
 
-use MustHotelBooking\Core\RoomCatalog;
-
 final class AccommodationImportExportService
 {
     public const ACTION_EXPORT_WORKBOOK = 'export_accommodation_workbook';
@@ -64,8 +62,8 @@ final class AccommodationImportExportService
         }
 
         $downloadName = $template
-            ? 'must-hotel-booking-accommodations-template.xlsx'
-            : 'must-hotel-booking-accommodations-' . \gmdate('Ymd-His') . '.xlsx';
+            ? 'must-hotel-booking-room-units-template.xlsx'
+            : 'must-hotel-booking-room-units-' . \gmdate('Ymd-His') . '.xlsx';
 
         \nocache_headers();
         \header('Content-Type: application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
@@ -159,111 +157,81 @@ final class AccommodationImportExportService
     }
 
     /**
-     * @return array<int, array{name: string, rows: array<int, array<int, bool|float|int|string|null>>}>
+     * @return array<int, array{
+     *     name: string,
+     *     rows: array<int, array<int, array{value?: bool|float|int|string|null, style_id?: int}|bool|float|int|string|null>>,
+     *     protect?: bool
+     * }>
      */
     private function buildExportSheets(): array
     {
         return [
             [
-                'name' => AccommodationWorkbookSchema::SHEET_TYPES,
-                'rows' => $this->buildAccommodationTypeSheetRows(),
+                'name' => AccommodationWorkbookSchema::getUnitSheetName(),
+                'rows' => $this->buildAccommodationUnitSheetRows(),
             ],
             [
-                'name' => AccommodationWorkbookSchema::SHEET_UNITS,
-                'rows' => $this->buildAccommodationUnitSheetRows(),
+                'name' => AccommodationWorkbookSchema::getReferenceSheetName(),
+                'rows' => $this->buildAccommodationTypeReferenceSheetRows(),
+                'protect' => true,
             ],
         ];
     }
 
     /**
-     * @return array<int, array{name: string, rows: array<int, array<int, bool|float|int|string|null>>}>
+     * @return array<int, array{
+     *     name: string,
+     *     rows: array<int, array<int, array{value?: bool|float|int|string|null, style_id?: int}|bool|float|int|string|null>>,
+     *     protect?: bool
+     * }>
      */
     private function buildTemplateSheets(): array
     {
         return [
             [
-                'name' => AccommodationWorkbookSchema::SHEET_TYPES,
-                'rows' => [
-                    AccommodationWorkbookSchema::getAccommodationTypeColumns(),
-                ],
+                'name' => AccommodationWorkbookSchema::getUnitSheetName(),
+                'rows' => [$this->buildStyledHeaderRow(AccommodationWorkbookSchema::getUnitSheetColumns())],
             ],
             [
-                'name' => AccommodationWorkbookSchema::SHEET_UNITS,
-                'rows' => [
-                    AccommodationWorkbookSchema::getAccommodationUnitColumns(),
-                ],
+                'name' => AccommodationWorkbookSchema::getReferenceSheetName(),
+                'rows' => $this->buildAccommodationTypeReferenceSheetRows(),
+                'protect' => true,
             ],
         ];
     }
 
     /**
-     * @return array<int, array<int, bool|float|int|string|null>>
-     */
-    private function buildAccommodationTypeSheetRows(): array
-    {
-        $columns = AccommodationWorkbookSchema::getAccommodationTypeColumns();
-        $amenityColumns = AccommodationWorkbookSchema::getAmenityColumnMap();
-        $rows = [$columns];
-
-        foreach ($this->roomRepository->getRoomsListRows() as $row) {
-            if (!\is_array($row)) {
-                continue;
-            }
-
-            $roomId = isset($row['id']) ? (int) $row['id'] : 0;
-            $selectedAmenities = $roomId > 0 ? \array_fill_keys($this->roomRepository->getRoomAmenities($roomId), true) : [];
-            $record = [
-                'id' => $roomId,
-                'name' => (string) ($row['name'] ?? ''),
-                'slug' => (string) ($row['slug'] ?? ''),
-                'category' => (string) ($row['category'] ?? ''),
-                'description' => (string) ($row['description'] ?? ''),
-                'internal_code' => (string) ($row['internal_code'] ?? ''),
-                'is_active' => !empty($row['is_active']) ? 1 : 0,
-                'is_bookable' => !empty($row['is_bookable']) ? 1 : 0,
-                'is_online_bookable' => !empty($row['is_online_bookable']) ? 1 : 0,
-                'is_calendar_visible' => !empty($row['is_calendar_visible']) ? 1 : 0,
-                'sort_order' => (int) ($row['sort_order'] ?? 0),
-                'max_adults' => (int) ($row['max_adults'] ?? 1),
-                'max_children' => (int) ($row['max_children'] ?? 0),
-                'max_guests' => (int) ($row['max_guests'] ?? 1),
-                'default_occupancy' => (int) ($row['default_occupancy'] ?? 1),
-                'base_price' => (float) ($row['base_price'] ?? 0.0),
-                'extra_guest_price' => (float) ($row['extra_guest_price'] ?? 0.0),
-                'room_size' => (string) ($row['room_size'] ?? ''),
-                'beds' => (string) ($row['beds'] ?? ''),
-                'room_rules' => $roomId > 0 ? $this->roomRepository->getRoomMetaTextValue($roomId, 'room_rules') : '',
-                'amenities_intro' => $roomId > 0 ? $this->roomRepository->getRoomMetaTextValue($roomId, 'amenities_intro') : '',
-                'admin_notes' => (string) ($row['admin_notes'] ?? ''),
-            ];
-
-            foreach ($amenityColumns as $columnName => $amenityKey) {
-                $record[$columnName] = isset($selectedAmenities[$amenityKey]) ? 1 : 0;
-            }
-
-            $rows[] = $this->buildOrderedRow($columns, $record);
-        }
-
-        return $rows;
-    }
-
-    /**
-     * @return array<int, array<int, bool|float|int|string|null>>
+     * @return array<int, array<int, array{value?: bool|float|int|string|null, style_id?: int}|bool|float|int|string|null>>
      */
     private function buildAccommodationUnitSheetRows(): array
     {
-        $columns = AccommodationWorkbookSchema::getAccommodationUnitColumns();
-        $rows = [$columns];
+        $columns = AccommodationWorkbookSchema::getUnitSheetColumns();
+        $rows = [$this->buildStyledHeaderRow($columns)];
+        $typeNameIndex = [];
+
+        foreach ($this->roomRepository->getRoomsListRows() as $typeRow) {
+            if (!\is_array($typeRow)) {
+                continue;
+            }
+
+            $typeId = isset($typeRow['id']) ? (int) $typeRow['id'] : 0;
+
+            if ($typeId > 0) {
+                $typeNameIndex[$typeId] = (string) ($typeRow['name'] ?? '');
+            }
+        }
 
         foreach ($this->inventoryRepository->getInventoryUnitAdminRows() as $row) {
             if (!\is_array($row)) {
                 continue;
             }
 
+            $roomTypeId = (int) ($row['room_type_id'] ?? 0);
+
             $record = [
                 'id' => (int) ($row['id'] ?? 0),
-                'room_type_id' => (int) ($row['room_type_id'] ?? 0),
-                'room_type_name' => (string) ($row['room_type_name'] ?? ''),
+                'room_type_id' => $roomTypeId,
+                'room_type_name' => (string) ($typeNameIndex[$roomTypeId] ?? ''),
                 'title' => (string) ($row['title'] ?? ''),
                 'room_number' => (string) ($row['room_number'] ?? ''),
                 'floor' => (int) ($row['floor'] ?? 0),
@@ -276,6 +244,45 @@ final class AccommodationImportExportService
                 'building' => (string) ($row['building'] ?? ''),
                 'section' => (string) ($row['section'] ?? ''),
                 'admin_notes' => (string) ($row['admin_notes'] ?? ''),
+            ];
+
+            $rows[] = $this->buildOrderedRow($columns, $record);
+        }
+
+        return $rows;
+    }
+
+    /**
+     * @return array<int, array<int, array{value?: bool|float|int|string|null, style_id?: int}|bool|float|int|string|null>>
+     */
+    private function buildAccommodationTypeReferenceSheetRows(): array
+    {
+        $columns = AccommodationWorkbookSchema::getReferenceSheetColumns();
+        $rows = [
+            $this->buildStyledWarningRow(
+                AccommodationWorkbookSchema::getReferenceSheetWarning(),
+                \count($columns)
+            ),
+            $this->buildStyledHeaderRow($columns),
+        ];
+
+        foreach ($this->roomRepository->getRoomsListRows() as $row) {
+            if (!\is_array($row)) {
+                continue;
+            }
+
+            $record = [
+                'id' => (int) ($row['id'] ?? 0),
+                'name' => (string) ($row['name'] ?? ''),
+                'slug' => (string) ($row['slug'] ?? ''),
+                'status' => !empty($row['is_active'])
+                    ? \__('Active', 'must-hotel-booking')
+                    : \__('Inactive', 'must-hotel-booking'),
+                'max_guests' => (int) ($row['max_guests'] ?? 0),
+                'base_price' => (float) ($row['base_price'] ?? 0),
+                'beds' => (string) ($row['beds'] ?? ''),
+                'room_size' => (string) ($row['room_size'] ?? ''),
+                'description' => (string) ($row['description'] ?? ''),
             ];
 
             $rows[] = $this->buildOrderedRow($columns, $record);
@@ -301,6 +308,42 @@ final class AccommodationImportExportService
     }
 
     /**
+     * @param array<int, string> $values
+     * @return array<int, array{value: string, style_id: int}>
+     */
+    private function buildStyledHeaderRow(array $values): array
+    {
+        $row = [];
+
+        foreach ($values as $value) {
+            $row[] = [
+                'value' => $value,
+                'style_id' => SimpleXlsxWorkbook::STYLE_HEADER,
+            ];
+        }
+
+        return $row;
+    }
+
+    /**
+     * @return array<int, array{value: string, style_id: int}>
+     */
+    private function buildStyledWarningRow(string $warning, int $columnCount): array
+    {
+        $columnCount = \max(1, $columnCount);
+        $row = [];
+
+        for ($index = 0; $index < $columnCount; $index++) {
+            $row[] = [
+                'value' => $index === 0 ? $warning : '',
+                'style_id' => SimpleXlsxWorkbook::STYLE_WARNING,
+            ];
+        }
+
+        return $row;
+    }
+
+    /**
      * @param array<string, array<int, array<int, string>>> $sheets
      * @return array<string, mixed>
      */
@@ -309,8 +352,6 @@ final class AccommodationImportExportService
         $report = [
             'file_name' => $fileName,
             'imported_at' => \current_time('mysql'),
-            'types_created' => 0,
-            'types_updated' => 0,
             'units_created' => 0,
             'units_updated' => 0,
             'rows_skipped' => 0,
@@ -319,69 +360,12 @@ final class AccommodationImportExportService
             'status' => 'success',
         ];
 
-        $typeRows = $this->normalizeSheetRows(
-            $sheets,
-            AccommodationWorkbookSchema::SHEET_TYPES,
-            AccommodationWorkbookSchema::getAccommodationTypeColumns(),
-            $report
-        );
         $unitRows = $this->normalizeSheetRows(
             $sheets,
-            AccommodationWorkbookSchema::SHEET_UNITS,
-            AccommodationWorkbookSchema::getAccommodationUnitColumns(),
+            AccommodationWorkbookSchema::getUnitSheetName(),
+            AccommodationWorkbookSchema::getUnitSheetColumns(),
             $report
         );
-
-        foreach ($typeRows as $sheetRow) {
-            $rowNumber = (int) ($sheetRow['row_number'] ?? 0);
-            $values = isset($sheetRow['values']) && \is_array($sheetRow['values']) ? $sheetRow['values'] : [];
-
-            if ($this->isBlankImportRow($values)) {
-                $report['rows_skipped'] = (int) $report['rows_skipped'] + 1;
-                continue;
-            }
-
-            $validation = $this->validateAccommodationTypeRow($values);
-            $rowErrors = isset($validation['errors']) && \is_array($validation['errors']) ? $validation['errors'] : [];
-
-            if (!empty($rowErrors)) {
-                $report['rows_failed'] = (int) $report['rows_failed'] + 1;
-
-                foreach ($rowErrors as $error) {
-                    $this->addImportError(
-                        $report,
-                        AccommodationWorkbookSchema::SHEET_TYPES,
-                        $rowNumber,
-                        (string) ($error['field'] ?? ''),
-                        (string) ($error['message'] ?? '')
-                    );
-                }
-
-                continue;
-            }
-
-            $payload = isset($validation['payload']) && \is_array($validation['payload']) ? $validation['payload'] : [];
-            $operation = (string) ($validation['operation'] ?? 'create');
-            $savedId = $this->persistAccommodationType($payload, $operation === 'update');
-
-            if ($savedId <= 0) {
-                $report['rows_failed'] = (int) $report['rows_failed'] + 1;
-                $this->addImportError(
-                    $report,
-                    AccommodationWorkbookSchema::SHEET_TYPES,
-                    $rowNumber,
-                    'id',
-                    \__('The accommodation type could not be saved.', 'must-hotel-booking')
-                );
-                continue;
-            }
-
-            if ($operation === 'update') {
-                $report['types_updated'] = (int) $report['types_updated'] + 1;
-            } else {
-                $report['types_created'] = (int) $report['types_created'] + 1;
-            }
-        }
 
         $roomTypeLookup = $this->buildRoomTypeLookup();
 
@@ -403,7 +387,7 @@ final class AccommodationImportExportService
                 foreach ($rowErrors as $error) {
                     $this->addImportError(
                         $report,
-                        AccommodationWorkbookSchema::SHEET_UNITS,
+                        AccommodationWorkbookSchema::getUnitSheetName(),
                         $rowNumber,
                         (string) ($error['field'] ?? ''),
                         (string) ($error['message'] ?? '')
@@ -421,7 +405,7 @@ final class AccommodationImportExportService
                 $report['rows_failed'] = (int) $report['rows_failed'] + 1;
                 $this->addImportError(
                     $report,
-                    AccommodationWorkbookSchema::SHEET_UNITS,
+                    AccommodationWorkbookSchema::getUnitSheetName(),
                     $rowNumber,
                     'id',
                     \__('The accommodation unit could not be saved.', 'must-hotel-booking')
@@ -538,192 +522,6 @@ final class AccommodationImportExportService
         }
 
         return $normalizedRows;
-    }
-
-    /**
-     * @param array<string, string> $values
-     * @return array<string, mixed>
-     */
-    private function validateAccommodationTypeRow(array $values): array
-    {
-        $errors = [];
-        $typeId = isset($values['id']) ? \absint($values['id']) : 0;
-        $existingType = $typeId > 0 ? $this->roomRepository->getRoomById($typeId) : null;
-
-        if ($typeId > 0 && !\is_array($existingType)) {
-            $errors[] = [
-                'field' => 'id',
-                'message' => \__('No accommodation type exists for the provided id.', 'must-hotel-booking'),
-            ];
-        }
-
-        $name = \sanitize_text_field((string) ($values['name'] ?? ''));
-
-        if ($name === '' && \is_array($existingType)) {
-            $name = \sanitize_text_field((string) ($existingType['name'] ?? ''));
-        }
-
-        if ($name === '') {
-            $errors[] = [
-                'field' => 'name',
-                'message' => \__('Accommodation type name is required.', 'must-hotel-booking'),
-            ];
-        }
-
-        $categoryInput = \sanitize_key((string) ($values['category'] ?? ''));
-        $availableCategories = RoomCatalog::getCategories();
-
-        if ($categoryInput === '' && \is_array($existingType)) {
-            $categoryInput = \sanitize_key((string) ($existingType['category'] ?? ''));
-        }
-
-        if ($categoryInput === '' || !isset($availableCategories[$categoryInput])) {
-            $errors[] = [
-                'field' => 'category',
-                'message' => \__('Use a valid accommodation category slug from the current plugin catalog.', 'must-hotel-booking'),
-            ];
-        }
-
-        $sortOrder = $this->parseIntegerField(
-            $values['sort_order'] ?? '',
-            'sort_order',
-            \is_array($existingType) ? (int) ($existingType['sort_order'] ?? 0) : 0,
-            $errors
-        );
-        $maxAdults = $this->parseIntegerField(
-            $values['max_adults'] ?? '',
-            'max_adults',
-            \is_array($existingType) ? (int) ($existingType['max_adults'] ?? 1) : 1,
-            $errors,
-            1
-        );
-        $maxChildren = $this->parseIntegerField(
-            $values['max_children'] ?? '',
-            'max_children',
-            \is_array($existingType) ? (int) ($existingType['max_children'] ?? 0) : 0,
-            $errors,
-            0
-        );
-        $maxGuests = $this->parseIntegerField(
-            $values['max_guests'] ?? '',
-            'max_guests',
-            \is_array($existingType) ? (int) ($existingType['max_guests'] ?? 1) : 1,
-            $errors,
-            1
-        );
-        $defaultOccupancy = $this->parseIntegerField(
-            $values['default_occupancy'] ?? '',
-            'default_occupancy',
-            \is_array($existingType) ? (int) ($existingType['default_occupancy'] ?? 1) : 1,
-            $errors,
-            1
-        );
-        $basePrice = $this->parseDecimalField(
-            $values['base_price'] ?? '',
-            'base_price',
-            \is_array($existingType) ? (float) ($existingType['base_price'] ?? 0.0) : 0.0,
-            $errors,
-            0.0
-        );
-        $extraGuestPrice = $this->parseDecimalField(
-            $values['extra_guest_price'] ?? '',
-            'extra_guest_price',
-            \is_array($existingType) ? (float) ($existingType['extra_guest_price'] ?? 0.0) : 0.0,
-            $errors,
-            0.0
-        );
-        $isActive = $this->parseBinaryField(
-            $values['is_active'] ?? '',
-            'is_active',
-            \is_array($existingType) ? (int) ($existingType['is_active'] ?? 1) : 1,
-            $errors
-        );
-        $isBookable = $this->parseBinaryField(
-            $values['is_bookable'] ?? '',
-            'is_bookable',
-            \is_array($existingType) ? (int) ($existingType['is_bookable'] ?? 1) : 1,
-            $errors
-        );
-        $isOnlineBookable = $this->parseBinaryField(
-            $values['is_online_bookable'] ?? '',
-            'is_online_bookable',
-            \is_array($existingType) ? (int) ($existingType['is_online_bookable'] ?? 1) : 1,
-            $errors
-        );
-        $isCalendarVisible = $this->parseBinaryField(
-            $values['is_calendar_visible'] ?? '',
-            'is_calendar_visible',
-            \is_array($existingType) ? (int) ($existingType['is_calendar_visible'] ?? 1) : 1,
-            $errors
-        );
-
-        if ($maxGuests < $maxAdults) {
-            $errors[] = [
-                'field' => 'max_guests',
-                'message' => \__('Max guests cannot be lower than max adults.', 'must-hotel-booking'),
-            ];
-        }
-
-        if ($defaultOccupancy > $maxGuests) {
-            $errors[] = [
-                'field' => 'default_occupancy',
-                'message' => \__('Default occupancy cannot exceed max guests.', 'must-hotel-booking'),
-            ];
-        }
-
-        if ($maxChildren > 0 && $maxGuests > ($maxAdults + $maxChildren)) {
-            $errors[] = [
-                'field' => 'max_guests',
-                'message' => \__('Max guests cannot exceed max adults plus max children.', 'must-hotel-booking'),
-            ];
-        }
-
-        $existingAmenityMap = \is_array($existingType)
-            ? \array_fill_keys($this->roomRepository->getRoomAmenities($typeId), true)
-            : [];
-        $amenityKeys = [];
-
-        foreach (AccommodationWorkbookSchema::getAmenityColumnMap() as $columnName => $amenityKey) {
-            $defaultAmenity = isset($existingAmenityMap[$amenityKey]) ? 1 : 0;
-            $hasAmenity = $this->parseBinaryField($values[$columnName] ?? '', $columnName, $defaultAmenity, $errors);
-
-            if ($hasAmenity === 1) {
-                $amenityKeys[] = $amenityKey;
-            }
-        }
-
-        $slugInput = \sanitize_title((string) ($values['slug'] ?? ''));
-        $slug = $this->generateUniqueRoomSlug($slugInput !== '' ? $slugInput : $name, $typeId);
-
-        return [
-            'operation' => $typeId > 0 ? 'update' : 'create',
-            'errors' => $errors,
-            'payload' => [
-                'id' => $typeId,
-                'name' => $name,
-                'slug' => $slug,
-                'category' => $categoryInput,
-                'description' => \sanitize_textarea_field((string) ($values['description'] ?? '')),
-                'internal_code' => \sanitize_text_field((string) ($values['internal_code'] ?? '')),
-                'is_active' => $isActive,
-                'is_bookable' => $isBookable,
-                'is_online_bookable' => $isOnlineBookable,
-                'is_calendar_visible' => $isCalendarVisible,
-                'sort_order' => $sortOrder,
-                'max_adults' => $maxAdults,
-                'max_children' => $maxChildren,
-                'max_guests' => $maxGuests,
-                'default_occupancy' => $defaultOccupancy,
-                'base_price' => \round($basePrice, 2),
-                'extra_guest_price' => \round($extraGuestPrice, 2),
-                'room_size' => \sanitize_text_field((string) ($values['room_size'] ?? '')),
-                'beds' => \sanitize_text_field((string) ($values['beds'] ?? '')),
-                'room_rules' => \sanitize_textarea_field((string) ($values['room_rules'] ?? '')),
-                'amenities_intro' => \sanitize_textarea_field((string) ($values['amenities_intro'] ?? '')),
-                'amenity_keys' => $amenityKeys,
-                'admin_notes' => \sanitize_textarea_field((string) ($values['admin_notes'] ?? '')),
-            ],
-        ];
     }
 
     /**
@@ -909,53 +707,6 @@ final class AccommodationImportExportService
     /**
      * @param array<string, mixed> $payload
      */
-    private function persistAccommodationType(array $payload, bool $isUpdate): int
-    {
-        $typeId = isset($payload['id']) ? (int) $payload['id'] : 0;
-        $savedId = 0;
-
-        if ($isUpdate && $typeId > 0) {
-            $saved = $this->roomRepository->updateRoom($typeId, $payload);
-            $savedId = $saved ? $typeId : 0;
-        } else {
-            $savedId = $this->roomRepository->createRoom($payload);
-        }
-
-        if ($savedId <= 0) {
-            return 0;
-        }
-
-        $mainImageId = $isUpdate ? $this->roomRepository->getRoomMainImageId($savedId) : 0;
-        $galleryIds = $isUpdate ? $this->roomRepository->getRoomGalleryImageIds($savedId) : [];
-        $metaSaved = $this->roomRepository->saveRoomMeta(
-            $savedId,
-            $mainImageId,
-            (string) ($payload['room_rules'] ?? ''),
-            (string) ($payload['amenities_intro'] ?? ''),
-            isset($payload['amenity_keys']) && \is_array($payload['amenity_keys']) ? $payload['amenity_keys'] : [],
-            $galleryIds
-        );
-
-        if (!$metaSaved) {
-            return 0;
-        }
-
-        $synced = $this->inventoryRepository->syncRoomType(
-            $savedId,
-            [
-                'name' => (string) ($payload['name'] ?? ''),
-                'description' => (string) ($payload['description'] ?? ''),
-                'capacity' => (int) ($payload['max_guests'] ?? 1),
-                'base_price' => (float) ($payload['base_price'] ?? 0.0),
-            ]
-        );
-
-        return $synced ? $savedId : 0;
-    }
-
-    /**
-     * @param array<string, mixed> $payload
-     */
     private function persistAccommodationUnit(array $payload, bool $isUpdate): int
     {
         $unitId = isset($payload['id']) ? (int) $payload['id'] : 0;
@@ -1050,38 +801,6 @@ final class AccommodationImportExportService
     /**
      * @param array<int, array{field: string, message: string}> $errors
      */
-    private function parseDecimalField(string $rawValue, string $field, float $default, array &$errors, ?float $minimum = null): float
-    {
-        $value = \trim($rawValue);
-
-        if ($value === '') {
-            return $minimum !== null ? \max($minimum, $default) : $default;
-        }
-
-        if (!\is_numeric($value)) {
-            $errors[] = [
-                'field' => $field,
-                'message' => \__('Use a numeric value for this column.', 'must-hotel-booking'),
-            ];
-
-            return $default;
-        }
-
-        $parsed = (float) $value;
-
-        if ($minimum !== null && $parsed < $minimum) {
-            $errors[] = [
-                'field' => $field,
-                'message' => \__('The value cannot be below the allowed minimum.', 'must-hotel-booking'),
-            ];
-        }
-
-        return $minimum !== null ? \max($minimum, $parsed) : $parsed;
-    }
-
-    /**
-     * @param array<int, array{field: string, message: string}> $errors
-     */
     private function parseBinaryField(string $rawValue, string $field, int $default, array &$errors): int
     {
         $value = \trim($rawValue);
@@ -1123,9 +842,7 @@ final class AccommodationImportExportService
     {
         $failedRows = isset($report['rows_failed']) ? (int) $report['rows_failed'] : 0;
         $errorCount = isset($report['errors']) && \is_array($report['errors']) ? \count($report['errors']) : 0;
-        $successfulRows = (int) ($report['types_created'] ?? 0)
-            + (int) ($report['types_updated'] ?? 0)
-            + (int) ($report['units_created'] ?? 0)
+        $successfulRows = (int) ($report['units_created'] ?? 0)
             + (int) ($report['units_updated'] ?? 0);
 
         if (($failedRows > 0 || $errorCount > 0) && $successfulRows === 0) {
@@ -1168,8 +885,6 @@ final class AccommodationImportExportService
         return [
             'file_name' => $fileName,
             'imported_at' => \current_time('mysql'),
-            'types_created' => 0,
-            'types_updated' => 0,
             'units_created' => 0,
             'units_updated' => 0,
             'rows_skipped' => 0,
@@ -1216,30 +931,5 @@ final class AccommodationImportExportService
         }
 
         exit;
-    }
-
-    private function generateUniqueRoomSlug(string $rawSlug, int $excludeTypeId = 0): string
-    {
-        $baseSlug = \sanitize_title($rawSlug);
-
-        if ($baseSlug === '') {
-            $baseSlug = 'accommodation-type';
-        }
-
-        if (!$this->roomRepository->roomSlugExists($baseSlug, $excludeTypeId)) {
-            return $baseSlug;
-        }
-
-        $suffix = 2;
-
-        while (true) {
-            $candidate = $baseSlug . '-' . $suffix;
-
-            if (!$this->roomRepository->roomSlugExists($candidate, $excludeTypeId)) {
-                return $candidate;
-            }
-
-            $suffix++;
-        }
     }
 }

@@ -70,19 +70,23 @@ final class PricingEngine
             ];
         }
 
+        if (!\is_array($ratePlanContext)) {
+            return [
+                'success' => false,
+                'message' => 'No valid rate plan is available for this room.',
+            ];
+        }
+
         $roomBasePrice = isset($roomContext['room_base_price']) ? (float) $roomContext['room_base_price'] : 0.0;
         $baseCapacity = isset($roomContext['base_capacity']) ? (int) $roomContext['base_capacity'] : 1;
+        $ratePlanBasePrice = isset($ratePlanContext['base_price']) ? (float) $ratePlanContext['base_price'] : 0.0;
 
-        if (\is_array($ratePlanContext)) {
-            $ratePlanBasePrice = isset($ratePlanContext['base_price']) ? (float) $ratePlanContext['base_price'] : 0.0;
+        if ($ratePlanBasePrice > 0) {
+            $roomBasePrice = $ratePlanBasePrice;
+        }
 
-            if ($ratePlanBasePrice > 0) {
-                $roomBasePrice = $ratePlanBasePrice;
-            }
-
-            if (!empty($ratePlanContext['max_occupancy'])) {
-                $baseCapacity = \min($baseCapacity, \max(1, (int) $ratePlanContext['max_occupancy']));
-            }
+        if (!empty($ratePlanContext['max_occupancy'])) {
+            $baseCapacity = \min($baseCapacity, \max(1, (int) $ratePlanContext['max_occupancy']));
         }
 
         if ($baseCapacity <= 0) {
@@ -162,8 +166,8 @@ final class PricingEngine
         return [
             'success' => true,
             'room_id' => $roomId,
-            'rate_plan_id' => \is_array($ratePlanContext) ? \max(0, $ratePlanId) : 0,
-            'rate_plan_name' => \is_array($ratePlanContext) ? (string) ($ratePlanContext['name'] ?? '') : '',
+            'rate_plan_id' => isset($ratePlanContext['id']) ? (int) $ratePlanContext['id'] : 0,
+            'rate_plan_name' => (string) ($ratePlanContext['name'] ?? ''),
             'checkin' => $checkin,
             'checkout' => $checkout,
             'nights' => $nights,
@@ -360,7 +364,7 @@ final class PricingEngine
 
     private static function getRoomRatePlanContext(int $roomId, int $ratePlanId = 0): ?array
     {
-        if ($roomId <= 0 || $ratePlanId <= 0) {
+        if ($roomId <= 0) {
             return null;
         }
 

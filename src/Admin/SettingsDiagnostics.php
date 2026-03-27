@@ -4,6 +4,7 @@ namespace MustHotelBooking\Admin;
 
 use MustHotelBooking\Core\ManagedPages;
 use MustHotelBooking\Core\MustBookingConfig;
+use MustHotelBooking\Core\Updater;
 use MustHotelBooking\Engine\EmailEngine;
 use MustHotelBooking\Engine\EmailLayoutEngine;
 use MustHotelBooking\Engine\LockEngine;
@@ -155,6 +156,12 @@ final class SettingsDiagnostics
             'deposit_value' => (float) MustBookingConfig::get_setting('deposit_value', 0),
         ];
 
+        $updater = Updater::getStatus();
+
+        if (empty($updater['version_consistent']) || empty($updater['asset_pattern_strict'])) {
+            $warnings++;
+        }
+
         $emailTemplates = EmailEngine::getTemplates();
         $emailSender = MustBookingConfig::get_email_from_email();
         $bookingRecipient = MustBookingConfig::get_booking_notification_email();
@@ -224,6 +231,7 @@ final class SettingsDiagnostics
             'cron' => $cron,
             'payments' => $payments,
             'emails' => $emails,
+            'updater' => $updater,
             'environment' => $environment,
         ];
     }
@@ -272,6 +280,15 @@ final class SettingsDiagnostics
 
             $lines[] = (string) ($tableRow['label'] ?? '') . ': ' . (string) ($tableRow['status'] ?? '') . ' - ' . (string) ($tableRow['table_name'] ?? '');
         }
+
+        $lines[] = '';
+        $lines[] = '[Updater]';
+        $lines[] = 'Repository: ' . (string) ($data['updater']['repository'] ?? '');
+        $lines[] = 'Branch: ' . (string) ($data['updater']['branch'] ?? '');
+        $lines[] = 'Version Consistent: ' . (!empty($data['updater']['version_consistent']) ? 'yes' : 'no');
+        $lines[] = 'Readme Stable Tag: ' . (string) ($data['updater']['readme_stable_tag'] ?? '');
+        $lines[] = 'Expected Release Asset: ' . (string) ($data['updater']['expected_release_asset_name'] ?? '');
+        $lines[] = 'Token Configured: ' . (!empty($data['updater']['token_configured']) ? 'yes' : 'no');
 
         return \implode("\n", $lines);
     }

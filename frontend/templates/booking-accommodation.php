@@ -319,7 +319,7 @@ $continue_label = \function_exists('\must_hotel_booking\get_accommodation_contin
                                                 <img src="<?php echo \esc_url($primary_image_url); ?>" alt="<?php echo \esc_attr($room_name); ?>" loading="lazy" />
                                             </button>
                                         <?php else : ?>
-                                            <div class="must-booking-room-media-placeholder"><?php echo \esc_html__('Add room image in admin', 'must-hotel-booking'); ?></div>
+                                            <div class="must-booking-room-media-placeholder"><?php echo \esc_html__('Image unavailable', 'must-hotel-booking'); ?></div>
                                         <?php endif; ?>
                                     </div>
 
@@ -489,10 +489,9 @@ $continue_label = \function_exists('\must_hotel_booking\get_accommodation_contin
                                             </div>
 
                                             <div class="must-booking-room-popup-side">
-                                                <section class="must-booking-room-popup-section">
-                                                    <h3><?php echo \esc_html__('Amenities', 'must-hotel-booking'); ?></h3>
-
-                                                    <?php if (!empty($amenities)) : ?>
+                                                <?php if (!empty($amenities)) : ?>
+                                                    <section class="must-booking-room-popup-section">
+                                                        <h3><?php echo \esc_html__('Amenities', 'must-hotel-booking'); ?></h3>
                                                         <div class="must-booking-room-popup-amenities">
                                                             <?php foreach ($amenities as $amenity) : ?>
                                                                 <?php
@@ -512,10 +511,8 @@ $continue_label = \function_exists('\must_hotel_booking\get_accommodation_contin
                                                                 </div>
                                                             <?php endforeach; ?>
                                                         </div>
-                                                    <?php else : ?>
-                                                        <p><?php echo \esc_html__('No amenities configured for this room yet.', 'must-hotel-booking'); ?></p>
-                                                    <?php endif; ?>
-                                                </section>
+                                                    </section>
+                                                <?php endif; ?>
                                             </div>
                                         </div>
                                     </div>

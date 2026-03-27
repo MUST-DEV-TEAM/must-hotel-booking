@@ -686,7 +686,7 @@
                 : '';
             var mediaHtml = primaryImageUrl !== ''
                 ? '<div class="must-booking-room-media"><img src="' + escapeHtml(primaryImageUrl) + '" alt="' + escapeHtml(roomName) + '" loading="lazy" /></div>'
-                : '<div class="must-booking-room-media"><div class="must-booking-room-media-placeholder">' + escapeHtml(strings.noImage || 'Add room image in admin') + '</div></div>';
+                : '<div class="must-booking-room-media"><div class="must-booking-room-media-placeholder">' + escapeHtml(strings.noImage || 'Image unavailable') + '</div></div>';
             var thumbsHtml = galleryImages.map(function (imageUrl) {
                 return '<span class="must-booking-room-thumb"><img src="' + escapeHtml(String(imageUrl || '')) + '" alt="" loading="lazy" /></span>';
             }).join('');

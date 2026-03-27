@@ -326,7 +326,7 @@ if ($checkout !== '') {
                         $room_size = isset($room['room_size']) ? (string) $room['room_size'] : '';
                         $primary_image_url = isset($room['primary_image_url']) ? (string) $room['primary_image_url'] : '';
                         $gallery_images = isset($room['gallery_images']) && \is_array($room['gallery_images']) ? $room['gallery_images'] : [];
-                        $details_url = isset($room['details_url']) ? (string) $room['details_url'] : \home_url('/rooms');
+                        $details_url = isset($room['details_url']) ? (string) $room['details_url'] : '';
                         $total_preview = isset($room['dynamic_total_price']) && $room['dynamic_total_price'] !== null
                             ? (float) $room['dynamic_total_price']
                             : (isset($room['price_preview_total']) && $room['price_preview_total'] !== null ? (float) $room['price_preview_total'] : null);
@@ -337,7 +337,7 @@ if ($checkout !== '') {
                                 <?php if ($primary_image_url !== '') : ?>
                                     <img src="<?php echo \esc_url($primary_image_url); ?>" alt="<?php echo \esc_attr($room_name); ?>" loading="lazy" />
                                 <?php else : ?>
-                                    <div class="must-booking-room-media-placeholder"><?php echo \esc_html__('Add room image in admin', 'must-hotel-booking'); ?></div>
+                                    <div class="must-booking-room-media-placeholder"><?php echo \esc_html__('Image unavailable', 'must-hotel-booking'); ?></div>
                                 <?php endif; ?>
                             </div>
 
@@ -479,12 +479,14 @@ if ($checkout !== '') {
                                         </div>
                                     <?php endif; ?>
 
-                                    <a class="must-booking-room-details" href="<?php echo \esc_url($details_url); ?>">
-                                        <span><?php echo \esc_html__('Additional Details', 'must-hotel-booking'); ?></span>
-                                        <?php if ($bed_icon_url !== '') : ?>
-                                            <img src="<?php echo \esc_url($bed_icon_url); ?>" alt="" aria-hidden="true" />
-                                        <?php endif; ?>
-                                    </a>
+                                    <?php if ($details_url !== '') : ?>
+                                        <a class="must-booking-room-details" href="<?php echo \esc_url($details_url); ?>">
+                                            <span><?php echo \esc_html__('Additional Details', 'must-hotel-booking'); ?></span>
+                                            <?php if ($bed_icon_url !== '') : ?>
+                                                <img src="<?php echo \esc_url($bed_icon_url); ?>" alt="" aria-hidden="true" />
+                                            <?php endif; ?>
+                                        </a>
+                                    <?php endif; ?>
                                 </div>
                             </div>
                         </article>

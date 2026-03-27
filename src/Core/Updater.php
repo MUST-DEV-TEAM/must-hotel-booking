@@ -64,6 +64,11 @@ final class Updater
     public static function getStatus(): array
     {
         $repositoryUrl = self::getRepositoryUrl();
+        $readmeStableTag = self::getReadmeStableTag();
+        $expectedAssetName = self::getExpectedReleaseAssetName();
+        $tokenConfigured = self::getToken() !== '';
+        $versionConsistent = $readmeStableTag !== '' && $readmeStableTag === MUST_HOTEL_BOOKING_VERSION;
+        $assetPatternStrict = self::getReleaseAssetPattern() === self::getRecommendedReleaseAssetPattern();
 
         return [
             'enabled' => self::isEnabled(),
@@ -72,7 +77,20 @@ final class Updater
             'branch' => self::getBranch(),
             'plugin_slug' => MUST_HOTEL_BOOKING_PLUGIN_SLUG,
             'release_asset_pattern' => self::getReleaseAssetPattern(),
+            'recommended_release_asset_pattern' => self::getRecommendedReleaseAssetPattern(),
+            'expected_release_asset_name' => $expectedAssetName,
             'version' => MUST_HOTEL_BOOKING_VERSION,
+            'readme_stable_tag' => $readmeStableTag,
+            'version_consistent' => $versionConsistent,
+            'asset_pattern_strict' => $assetPatternStrict,
+            'token_configured' => $tokenConfigured,
+            'release_readiness_message' => self::buildReleaseReadinessMessage(
+                self::isRepositoryConfigured($repositoryUrl),
+                $versionConsistent,
+                $assetPatternStrict,
+                $tokenConfigured,
+                $expectedAssetName
+            ),
             'library_loaded' => self::$updateChecker !== null,
         ];
     }
@@ -100,9 +118,80 @@ final class Updater
         return (string) MUST_HOTEL_BOOKING_GITHUB_RELEASE_ASSET_PATTERN;
     }
 
+    private static function getRecommendedReleaseAssetPattern(): string
+    {
+        return '/^must-hotel-booking-[0-9]+\.[0-9]+\.[0-9]+\.zip$/i';
+    }
+
     private static function getToken(): string
     {
         return \trim((string) MUST_HOTEL_BOOKING_GITHUB_TOKEN);
+    }
+
+    private static function getReadmeStableTag(): string
+    {
+        $readmePath = MUST_HOTEL_BOOKING_PATH . 'readme.txt';
+
+        if (!\is_file($readmePath)) {
+            return '';
+        }
+
+        $contents = \file_get_contents($readmePath);
+
+        if (!\is_string($contents)) {
+            return '';
+        }
+
+        if (!\preg_match('/^Stable tag:\s*([0-9A-Za-z._-]+)\s*$/mi', $contents, $matches)) {
+            return '';
+        }
+
+        return isset($matches[1]) ? \trim((string) $matches[1]) : '';
+    }
+
+    private static function getExpectedReleaseAssetName(string $version = ''): string
+    {
+        $version = \trim($version);
+
+        if ($version === '') {
+            $version = MUST_HOTEL_BOOKING_VERSION;
+        }
+
+        return MUST_HOTEL_BOOKING_PLUGIN_SLUG . '-' . $version . '.zip';
+    }
+
+    private static function buildReleaseReadinessMessage(
+        bool $repositoryConfigured,
+        bool $versionConsistent,
+        bool $assetPatternStrict,
+        bool $tokenConfigured,
+        string $expectedAssetName
+    ): string {
+        if (!$repositoryConfigured) {
+            return \__('GitHub updater is enabled but the repository URL is not configured correctly.', 'must-hotel-booking');
+        }
+
+        if (!$versionConsistent) {
+            return \__('Plugin header version, version constant, and readme stable tag must match before publishing a release.', 'must-hotel-booking');
+        }
+
+        if (!$assetPatternStrict) {
+            return \__('Release asset matching is broader than the recommended single-ZIP production pattern.', 'must-hotel-booking');
+        }
+
+        if (!$tokenConfigured) {
+            return \sprintf(
+                /* translators: %s: expected release asset file name. */
+                \__('Updater metadata is aligned. Publish exactly one public release ZIP named %s, or define MUST_HOTEL_BOOKING_GITHUB_TOKEN for private releases.', 'must-hotel-booking'),
+                $expectedAssetName
+            );
+        }
+
+        return \sprintf(
+            /* translators: %s: expected release asset file name. */
+            \__('Updater metadata is aligned. Publish exactly one release ZIP named %s from the configured branch.', 'must-hotel-booking'),
+            $expectedAssetName
+        );
     }
 
     private static function isRepositoryConfigured(string $repositoryUrl): bool

@@ -2,6 +2,14 @@
 
 namespace MustHotelBooking\Database;
 
+/**
+ * Internal inventory repository for derived mhb_* tables.
+ *
+ * mhb_room_types mirrors authoritative must_rooms rows for internal inventory
+ * and rate-plan bookkeeping. mhb_rooms stores physical units and still uses
+ * legacy room-type IDs from must_rooms. UI and business rules should treat
+ * these tables as internal derivatives, not the primary accommodation source.
+ */
 final class InventoryRepository extends AbstractRepository
 {
     private function mhbTable(string $suffix): string
@@ -214,12 +222,9 @@ final class InventoryRepository extends AbstractRepository
                 r.capacity_override,
                 r.building,
                 r.section,
-                r.admin_notes,
-                rt.name AS room_type_name,
-                rt.capacity AS room_type_capacity
+                r.admin_notes
             FROM ' . $this->roomsTable() . ' r
-            LEFT JOIN ' . $this->roomTypesTable() . ' rt ON rt.id = r.room_type_id
-            ORDER BY r.sort_order ASC, rt.name ASC, r.floor ASC, r.room_number ASC, r.id ASC',
+            ORDER BY r.sort_order ASC, r.room_type_id ASC, r.floor ASC, r.room_number ASC, r.id ASC',
             ARRAY_A
         );
 
@@ -304,6 +309,21 @@ final class InventoryRepository extends AbstractRepository
         );
 
         return $inserted !== false;
+    }
+
+    public function deleteDerivedRoomType(int $roomTypeId): bool
+    {
+        if ($roomTypeId <= 0 || !$this->mhbTableExists('room_types')) {
+            return true;
+        }
+
+        $deleted = $this->wpdb->delete(
+            $this->roomTypesTable(),
+            ['id' => $roomTypeId],
+            ['%d']
+        );
+
+        return $deleted !== false;
     }
 
     /**

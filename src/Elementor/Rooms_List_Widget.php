@@ -178,10 +178,14 @@ class Rooms_List_Widget extends \Elementor\Widget_Base
             $lightbox_images_attr = \is_string($lightbox_images_json) ? \esc_attr($lightbox_images_json) : '[]';
             $room_name_attr = \esc_attr($room_name);
 
-            $details_url = \add_query_arg(
-                ['room' => $room_slug],
-                $rooms_page_url
-            );
+            $details_url = '';
+
+            if ($rooms_page_url !== '' && $room_slug !== '') {
+                $details_url = \add_query_arg(
+                    ['room' => $room_slug],
+                    $rooms_page_url
+                );
+            }
 
             $book_url = \add_query_arg(
                 ['room_id' => $room_id],
@@ -196,7 +200,7 @@ class Rooms_List_Widget extends \Elementor\Widget_Base
                 echo '<img src="' . \esc_url($primary_image) . '" alt="' . \esc_attr($room_name) . '" loading="lazy" />';
                 echo '</button>';
             } else {
-                echo '<div class="must-hotel-booking-rooms-list-placeholder">' . \esc_html__('Add room image in admin', 'must-hotel-booking') . '</div>';
+                echo '<div class="must-hotel-booking-rooms-list-placeholder">' . \esc_html__('Image unavailable', 'must-hotel-booking') . '</div>';
             }
 
             echo '</div>';
@@ -236,10 +240,14 @@ class Rooms_List_Widget extends \Elementor\Widget_Base
             echo '<span class="must-hotel-booking-rooms-list-book-text">' . \esc_html__('Book Now', 'must-hotel-booking') . '</span>';
             echo '<img class="must-hotel-booking-rooms-list-book-icon" src="' . \esc_url($arrow_icon_url) . '" alt="" aria-hidden="true" />';
             echo '</a>';
-            echo '<a class="must-hotel-booking-rooms-list-details" href="' . \esc_url($details_url) . '">';
-            echo '<span class="must-hotel-booking-rooms-list-details-text">' . \esc_html__('Additional Details', 'must-hotel-booking') . '</span>';
-            echo '<img class="must-hotel-booking-rooms-list-details-icon" src="' . \esc_url($bed_icon_url) . '" alt="" aria-hidden="true" />';
-            echo '</a>';
+
+            if ($details_url !== '') {
+                echo '<a class="must-hotel-booking-rooms-list-details" href="' . \esc_url($details_url) . '">';
+                echo '<span class="must-hotel-booking-rooms-list-details-text">' . \esc_html__('Additional Details', 'must-hotel-booking') . '</span>';
+                echo '<img class="must-hotel-booking-rooms-list-details-icon" src="' . \esc_url($bed_icon_url) . '" alt="" aria-hidden="true" />';
+                echo '</a>';
+            }
+
             echo '</div>';
             echo '</div>';
             echo '</div>';

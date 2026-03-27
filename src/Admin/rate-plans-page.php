@@ -3,7 +3,6 @@
 namespace MustHotelBooking\Admin;
 
 use MustHotelBooking\Database\CancellationPolicyRepository;
-use MustHotelBooking\Database\InventoryRepository;
 use MustHotelBooking\Database\RatePlanRepository;
 
 /**
@@ -117,18 +116,6 @@ function get_rate_plan_form_data(?array $submitted_form = null): array
  */
 function get_rate_plan_assignable_rooms(): array
 {
-    static $repository = null;
-
-    if (!$repository instanceof InventoryRepository) {
-        $repository = new InventoryRepository();
-    }
-
-    $roomTypes = $repository->getRoomTypes();
-
-    if (!empty($roomTypes)) {
-        return $roomTypes;
-    }
-
     if (\function_exists(__NAMESPACE__ . '\get_rooms_list_rows')) {
         return (array) get_rooms_list_rows();
     }

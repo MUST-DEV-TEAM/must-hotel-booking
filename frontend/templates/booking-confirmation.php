@@ -150,7 +150,7 @@ $render_payment_method_icon = static function (string $payment_method_key): stri
 };
 ?>
 <?php \get_header(); ?>
-<main class="must-hotel-booking-page must-hotel-booking-page-booking-confirmation must-booking-process-page">
+<main class="must-hotel-booking-page must-hotel-booking-page-booking-confirmation must-booking-process-page<?php echo $is_confirmation_success_layout ? ' is-success-layout' : ''; ?>">
     <div class="must-hotel-booking-container">
         <?php if (!$is_confirmation_success_layout) : ?>
             <section class="must-booking-step-header">

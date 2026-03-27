@@ -3,312 +3,25 @@
 namespace MustHotelBooking\Database;
 
 /**
- * Get default room description from provided room design references.
- */
-function get_default_seed_room_description(): string
-{
-    return 'At 25 m2, this Standard Room with Mountain View combines comfort with tranquil scenery, showcasing the surrounding mountains while placing you steps away from the sea.';
-}
-
-/**
- * Get the built-in room seed catalog.
+ * Explicitly reconcile derived inventory room types against legacy must_rooms.
  *
- * @return array<int, array<string, string>>
- */
-function get_seed_room_catalog(): array
-{
-    $description = get_default_seed_room_description();
-
-    return [
-        [
-            'name' => 'Duplex Suite',
-            'slug' => 'duplex-suite',
-            'category' => 'duplex-suite',
-            'room_size' => '25 m2',
-            'beds' => '1 Double Bed',
-            'description' => $description,
-        ],
-        [
-            'name' => 'Junior Suite',
-            'slug' => 'junior-suite',
-            'category' => 'suites',
-            'room_size' => '45 m2',
-            'beds' => '1 Double Bed',
-            'description' => $description,
-        ],
-        [
-            'name' => 'Deluxe Suite',
-            'slug' => 'deluxe-suite',
-            'category' => 'suites',
-            'room_size' => '45 m2',
-            'beds' => '1 Double Bed',
-            'description' => $description,
-        ],
-        [
-            'name' => 'Deluxe Suite with Jacuzzi',
-            'slug' => 'deluxe-suite-with-jacuzzi',
-            'category' => 'suites',
-            'room_size' => '45 m2',
-            'beds' => '1 Double Bed',
-            'description' => $description,
-        ],
-        [
-            'name' => 'Executive Suite',
-            'slug' => 'executive-suite',
-            'category' => 'suites',
-            'room_size' => '45 m2',
-            'beds' => '1 Double Bed',
-            'description' => $description,
-        ],
-        [
-            'name' => 'Standard Double Room with Side Sea View',
-            'slug' => 'standard-double-room-with-side-sea-view-1',
-            'category' => 'standard-rooms',
-            'room_size' => '25 m2',
-            'beds' => '1 Double Bed',
-            'description' => $description,
-        ],
-        [
-            'name' => 'Standard Double Room with Pool Sea View & Balcony',
-            'slug' => 'standard-double-room-with-pool-sea-view-balcony-1',
-            'category' => 'standard-rooms',
-            'room_size' => '25 m2',
-            'beds' => '1 Double Bed',
-            'description' => $description,
-        ],
-        [
-            'name' => 'Standard Double Room with Mountain View',
-            'slug' => 'standard-double-room-with-mountain-view-1',
-            'category' => 'standard-rooms',
-            'room_size' => '25 m2',
-            'beds' => '1 Double Bed',
-            'description' => $description,
-        ],
-        [
-            'name' => 'Standard Double Room with Mountain View',
-            'slug' => 'standard-double-room-with-mountain-view-2',
-            'category' => 'standard-rooms',
-            'room_size' => '25 m2',
-            'beds' => '1 Double Bed',
-            'description' => $description,
-        ],
-        [
-            'name' => 'Standard Double Room with Garden Sea View & Balcony',
-            'slug' => 'standard-double-room-with-garden-sea-view-balcony',
-            'category' => 'standard-rooms',
-            'room_size' => '25 m2',
-            'beds' => '1 Double Bed',
-            'description' => $description,
-        ],
-        [
-            'name' => 'Standard Double Room with Garden Sea View',
-            'slug' => 'standard-double-room-with-garden-sea-view',
-            'category' => 'standard-rooms',
-            'room_size' => '25 m2',
-            'beds' => '1 Double Bed',
-            'description' => $description,
-        ],
-        [
-            'name' => 'Standard Double Room with Pool Sea View & Balcony',
-            'slug' => 'standard-double-room-with-pool-sea-view-balcony-2',
-            'category' => 'standard-rooms',
-            'room_size' => '25 m2',
-            'beds' => '1 Double Bed',
-            'description' => $description,
-        ],
-        [
-            'name' => 'Standard Double Room with Pool View',
-            'slug' => 'standard-double-room-with-pool-view',
-            'category' => 'standard-rooms',
-            'room_size' => '25 m2',
-            'beds' => '1 Double Bed',
-            'description' => $description,
-        ],
-        [
-            'name' => 'Standard Double Room with Side Sea View',
-            'slug' => 'standard-double-room-with-side-sea-view-2',
-            'category' => 'standard-rooms',
-            'room_size' => '25 m2',
-            'beds' => '1 Double Bed',
-            'description' => $description,
-        ],
-        [
-            'name' => 'Standard Double Room with Mountain View',
-            'slug' => 'standard-double-room-with-mountain-view-3',
-            'category' => 'standard-rooms',
-            'room_size' => '25 m2',
-            'beds' => '1 Double Bed',
-            'description' => $description,
-        ],
-        [
-            'name' => 'Standard Double Room With Garden & Sea View',
-            'slug' => 'standard-double-room-with-garden-and-sea-view',
-            'category' => 'standard-rooms',
-            'room_size' => '25 m2',
-            'beds' => '1 Double Bed',
-            'description' => $description,
-        ],
-        [
-            'name' => 'Twin Room with Mountain View',
-            'slug' => 'twin-room-with-mountain-view',
-            'category' => 'standard-rooms',
-            'room_size' => '25 m2',
-            'beds' => '2 Twin Beds',
-            'description' => $description,
-        ],
-        [
-            'name' => 'Standard Double Room with Direct Pool Access & Balcony',
-            'slug' => 'standard-double-room-with-direct-pool-access-balcony',
-            'category' => 'standard-rooms',
-            'room_size' => '25 m2',
-            'beds' => '1 Double Bed',
-            'description' => $description,
-        ],
-        [
-            'name' => 'Standard Double Room with Direct Pool Acces',
-            'slug' => 'standard-double-room-with-direct-pool-acces',
-            'category' => 'standard-rooms',
-            'room_size' => '25 m2',
-            'beds' => '1 Double Bed',
-            'description' => $description,
-        ],
-    ];
-}
-
-/**
- * Get the built-in cancellation policy seed catalog.
+ * must_rooms remains the authoritative accommodation-type table in this plugin
+ * version. mhb_room_types and mhb_rooms still depend on those legacy IDs, but
+ * this sync helper should only run from deliberate maintenance or save actions,
+ * never as a silent page-load or installer side effect.
  *
- * @return array<int, array<string, int|string>>
+ * @return array<string, int>
  */
-function get_seed_cancellation_policy_catalog(): array
+function seed_inventory_model_from_legacy_rooms(): array
 {
-    return [
-        [
-            'name' => 'Free Cancellation',
-            'hours_before_checkin' => 48,
-            'penalty_percent' => 0,
-            'description' => 'Cancel at least 48 hours before check-in to avoid any penalty.',
-        ],
-        [
-            'name' => 'Moderate',
-            'hours_before_checkin' => 24,
-            'penalty_percent' => 50,
-            'description' => 'Cancellations made less than 24 hours before check-in incur a 50% penalty.',
-        ],
-        [
-            'name' => 'Non Refundable',
-            'hours_before_checkin' => 0,
-            'penalty_percent' => 100,
-            'description' => 'This rate is fully non-refundable after booking.',
-        ],
+    global $wpdb;
+
+    $summary = [
+        'legacy_types' => 0,
+        'mirrored_types_inserted' => 0,
+        'mirrored_types_updated' => 0,
+        'inventory_units_created' => 0,
     ];
-}
-
-/**
- * Seed default categories/rooms if they are not present yet.
- */
-function seed_default_room_catalog(): void
-{
-    global $wpdb;
-
-    $rooms_table = $wpdb->prefix . 'must_rooms';
-    $room_rows = get_seed_room_catalog();
-
-    foreach ($room_rows as $room) {
-        $name = isset($room['name']) ? \sanitize_text_field((string) $room['name']) : '';
-        $raw_slug = isset($room['slug']) ? (string) $room['slug'] : $name;
-        $slug = \sanitize_title($raw_slug);
-
-        if ($name === '' || $slug === '') {
-            continue;
-        }
-
-        $existing_id = (int) $wpdb->get_var(
-            $wpdb->prepare(
-                "SELECT id FROM {$rooms_table} WHERE slug = %s LIMIT 1",
-                $slug
-            )
-        );
-
-        if ($existing_id > 0) {
-            continue;
-        }
-
-        $wpdb->insert(
-            $rooms_table,
-            [
-                'name' => $name,
-                'slug' => $slug,
-                'category' => isset($room['category']) ? \sanitize_key((string) $room['category']) : 'standard-rooms',
-                'description' => isset($room['description']) ? \sanitize_textarea_field((string) $room['description']) : '',
-                'max_guests' => 2,
-                'base_price' => 0.00,
-                'extra_guest_price' => 0.00,
-                'room_size' => isset($room['room_size']) ? \sanitize_text_field((string) $room['room_size']) : '',
-                'beds' => isset($room['beds']) ? \sanitize_text_field((string) $room['beds']) : '',
-                'created_at' => \current_time('mysql'),
-            ],
-            ['%s', '%s', '%s', '%s', '%d', '%f', '%f', '%s', '%s', '%s']
-        );
-    }
-}
-
-/**
- * Seed default cancellation policies if they are not present yet.
- */
-function seed_default_cancellation_policies(): void
-{
-    global $wpdb;
-
-    $policies_table = $wpdb->prefix . 'mhb_cancellation_policies';
-    $table_exists = $wpdb->get_var(
-        $wpdb->prepare(
-            'SHOW TABLES LIKE %s',
-            $policies_table
-        )
-    );
-
-    if (!\is_string($table_exists) || $table_exists === '') {
-        return;
-    }
-
-    foreach (get_seed_cancellation_policy_catalog() as $policy) {
-        $name = isset($policy['name']) ? \sanitize_text_field((string) $policy['name']) : '';
-
-        if ($name === '') {
-            continue;
-        }
-
-        $existing_id = (int) $wpdb->get_var(
-            $wpdb->prepare(
-                "SELECT id FROM {$policies_table} WHERE name = %s LIMIT 1",
-                $name
-            )
-        );
-
-        if ($existing_id > 0) {
-            continue;
-        }
-
-        $wpdb->insert(
-            $policies_table,
-            [
-                'name' => $name,
-                'hours_before_checkin' => isset($policy['hours_before_checkin']) ? \max(0, (int) $policy['hours_before_checkin']) : 0,
-                'penalty_percent' => isset($policy['penalty_percent']) ? \max(0, \min(100, (int) $policy['penalty_percent'])) : 0,
-                'description' => isset($policy['description']) ? \sanitize_textarea_field((string) $policy['description']) : '',
-            ],
-            ['%s', '%d', '%d', '%s']
-        );
-    }
-}
-
-/**
- * Seed the room-type/inventory model from legacy room records.
- */
-function seed_inventory_model_from_legacy_rooms(): void
-{
-    global $wpdb;
 
     $room_types_table = $wpdb->prefix . 'mhb_room_types';
     $inventory_rooms_table = $wpdb->prefix . 'mhb_rooms';
@@ -332,7 +45,7 @@ function seed_inventory_model_from_legacy_rooms(): void
         !\is_string($inventory_rooms_exists) ||
         $inventory_rooms_exists === ''
     ) {
-        return;
+        return $summary;
     }
 
     $legacy_rooms = $wpdb->get_results(
@@ -343,7 +56,7 @@ function seed_inventory_model_from_legacy_rooms(): void
     );
 
     if (!\is_array($legacy_rooms)) {
-        return;
+        return $summary;
     }
 
     foreach ($legacy_rooms as $legacy_room) {
@@ -356,6 +69,8 @@ function seed_inventory_model_from_legacy_rooms(): void
         if ($room_type_id <= 0) {
             continue;
         }
+
+        $summary['legacy_types']++;
 
         $room_type_data = [
             'name' => isset($legacy_room['name']) ? \sanitize_text_field((string) $legacy_room['name']) : '',
@@ -374,19 +89,27 @@ function seed_inventory_model_from_legacy_rooms(): void
         );
 
         if ($room_type_exists > 0) {
-            $wpdb->update(
+            $updated = $wpdb->update(
                 $room_types_table,
                 $room_type_data,
                 ['id' => $room_type_id],
                 ['%s', '%s', '%d', '%f'],
                 ['%d']
             );
+
+            if ($updated !== false) {
+                $summary['mirrored_types_updated']++;
+            }
         } else {
-            $wpdb->insert(
+            $inserted = $wpdb->insert(
                 $room_types_table,
                 ['id' => $room_type_id] + $room_type_data,
                 ['%d', '%s', '%s', '%d', '%f']
             );
+
+            if ($inserted !== false) {
+                $summary['mirrored_types_inserted']++;
+            }
         }
 
         $inventory_room_count = (int) $wpdb->get_var(
@@ -402,7 +125,7 @@ function seed_inventory_model_from_legacy_rooms(): void
             continue;
         }
 
-        $wpdb->insert(
+        $insertedUnit = $wpdb->insert(
             $inventory_rooms_table,
             [
                 'room_type_id' => $room_type_id,
@@ -413,7 +136,13 @@ function seed_inventory_model_from_legacy_rooms(): void
             ],
             ['%d', '%s', '%s', '%d', '%s']
         );
+
+        if ($insertedUnit !== false) {
+            $summary['inventory_units_created']++;
+        }
     }
+
+    return $summary;
 }
 
 /**
@@ -750,10 +479,6 @@ function install_tables(): void
     foreach ($tables as $sql) {
         \dbDelta($sql);
     }
-
-    seed_default_cancellation_policies();
-    seed_default_room_catalog();
-    seed_inventory_model_from_legacy_rooms();
 
     \update_option('must_hotel_booking_db_version', MUST_HOTEL_BOOKING_VERSION);
 }

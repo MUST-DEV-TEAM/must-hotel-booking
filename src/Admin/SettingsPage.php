@@ -111,7 +111,7 @@ final class SettingsPage
 
         \wp_safe_redirect(
             get_admin_settings_page_url(
-                [
+                (isset($state['query_args']) && \is_array($state['query_args']) ? $state['query_args'] : []) + [
                     'tab' => (string) ($state['tab'] ?? 'general'),
                     'notice' => (string) ($state['notice'] ?? ''),
                 ]
@@ -350,7 +350,7 @@ final class SettingsPage
         }
 
         $task = isset($source['maintenance_task']) ? \sanitize_key((string) \wp_unslash($source['maintenance_task'])) : '';
-        $allowedTasks = ['reinstall_pages', 'reschedule_cron', 'rerun_installer', 'cleanup_expired_locks', 'send_test_email', 'flush_portal_routes'];
+        $allowedTasks = ['reinstall_pages', 'reschedule_cron', 'cleanup_expired_locks', 'send_test_email', 'flush_portal_routes', 'repair_inventory_mirror'];
 
         if (!\in_array($task, $allowedTasks, true)) {
             return [
@@ -368,11 +368,6 @@ final class SettingsPage
             } elseif ($task === 'reschedule_cron') {
                 LockEngine::unscheduleCleanupCron();
                 LockEngine::scheduleCleanupCron();
-            } elseif ($task === 'rerun_installer') {
-                \MustHotelBooking\Database\install_tables();
-                ManagedPages::install();
-                LockEngine::scheduleCleanupCron();
-                PortalRouter::flushRewriteRules();
             } elseif ($task === 'cleanup_expired_locks') {
                 LockEngine::cleanupExpiredLocks();
             } elseif ($task === 'send_test_email') {
@@ -389,6 +384,21 @@ final class SettingsPage
                 }
             } elseif ($task === 'flush_portal_routes') {
                 PortalRouter::flushRewriteRules();
+            } elseif ($task === 'repair_inventory_mirror') {
+                $summary = \MustHotelBooking\Database\seed_inventory_model_from_legacy_rooms();
+
+                return [
+                    'tab' => $tab,
+                    'notice' => 'inventory_mirror_repaired',
+                    'errors' => [],
+                    'forms' => [],
+                    'query_args' => [
+                        'legacy_types' => (int) ($summary['legacy_types'] ?? 0),
+                        'mirrored_types_inserted' => (int) ($summary['mirrored_types_inserted'] ?? 0),
+                        'mirrored_types_updated' => (int) ($summary['mirrored_types_updated'] ?? 0),
+                        'inventory_units_created' => (int) ($summary['inventory_units_created'] ?? 0),
+                    ],
+                ];
             }
         }
 
@@ -1190,6 +1200,23 @@ final class SettingsPage
             'maintenance_action_completed' => \__('Maintenance action completed.', 'must-hotel-booking'),
         ];
 
+        if ($notice === 'inventory_mirror_repaired') {
+            $legacyTypes = isset($_GET['legacy_types']) ? \absint(\wp_unslash($_GET['legacy_types'])) : 0;
+            $inserted = isset($_GET['mirrored_types_inserted']) ? \absint(\wp_unslash($_GET['mirrored_types_inserted'])) : 0;
+            $updated = isset($_GET['mirrored_types_updated']) ? \absint(\wp_unslash($_GET['mirrored_types_updated'])) : 0;
+            $unitsCreated = isset($_GET['inventory_units_created']) ? \absint(\wp_unslash($_GET['inventory_units_created'])) : 0;
+
+            echo '<div class="notice notice-success"><p>' . \esc_html(\sprintf(
+                /* translators: 1: legacy types scanned, 2: mirrored types inserted, 3: mirrored types updated, 4: inventory units created. */
+                __('Inventory mirror repaired. Scanned %1$d legacy types, inserted %2$d mirrored types, updated %3$d mirrored types, and created %4$d default inventory units.', 'must-hotel-booking'),
+                $legacyTypes,
+                $inserted,
+                $updated,
+                $unitsCreated
+            )) . '</p></div>';
+            return;
+        }
+
         if (!isset($messages[$notice])) {
             return;
         }
@@ -1955,6 +1982,7 @@ final class SettingsPage
         $payments = isset($diagnostics['payments']) && \is_array($diagnostics['payments']) ? $diagnostics['payments'] : [];
         $emails = isset($diagnostics['emails']) && \is_array($diagnostics['emails']) ? $diagnostics['emails'] : [];
         $cron = isset($diagnostics['cron']) && \is_array($diagnostics['cron']) ? $diagnostics['cron'] : [];
+        $updater = isset($diagnostics['updater']) && \is_array($diagnostics['updater']) ? $diagnostics['updater'] : [];
 
         self::renderPanelStart(\__('Diagnostics & Maintenance', 'must-hotel-booking'), \__('Turn system health into direct admin actions for setup repair and release readiness.', 'must-hotel-booking'));
         echo '<div class="must-settings-summary-grid">';
@@ -1975,6 +2003,7 @@ final class SettingsPage
             ['label' => __('Email config', 'must-hotel-booking'), 'status' => !empty($emails['is_configured']) ? 'ok' : 'warning', 'text' => !empty($emails['is_configured']) ? __('Email sending basics are configured.', 'must-hotel-booking') : __('Email configuration needs attention.', 'must-hotel-booking')],
             ['label' => __('Payment config', 'must-hotel-booking'), 'status' => !empty($payments['stripe_enabled']) && empty($payments['stripe_configured']) ? 'warning' : 'ok', 'text' => !empty($payments['stripe_enabled']) ? __('Stripe is enabled on this site.', 'must-hotel-booking') : __('Stripe is disabled.', 'must-hotel-booking')],
             ['label' => __('Cron / cleanup', 'must-hotel-booking'), 'status' => (string) ($cron['status'] ?? 'warning'), 'text' => (string) ($cron['message'] ?? '')],
+            ['label' => __('GitHub updater', 'must-hotel-booking'), 'status' => !empty($updater['version_consistent']) && !empty($updater['asset_pattern_strict']) ? 'ok' : 'warning', 'text' => !empty($updater['release_readiness_message']) ? (string) $updater['release_readiness_message'] : __('Updater readiness has not been validated yet.', 'must-hotel-booking')],
         ];
 
         foreach ($items as $item) {
@@ -1987,7 +2016,7 @@ final class SettingsPage
         echo '<div class="must-settings-status-column">';
         self::renderSectionIntro(\__('Maintenance actions', 'must-hotel-booking'));
         echo '<div class="must-dashboard-actions-grid">';
-        foreach (['reinstall_pages' => __('Reinstall missing managed pages', 'must-hotel-booking'), 'flush_portal_routes' => __('Flush portal routes', 'must-hotel-booking'), 'reschedule_cron' => __('Reschedule cleanup cron', 'must-hotel-booking'), 'rerun_installer' => __('Rerun installer / migrations', 'must-hotel-booking'), 'cleanup_expired_locks' => __('Clear expired locks', 'must-hotel-booking'), 'send_test_email' => __('Send test email', 'must-hotel-booking')] as $task => $label) {
+        foreach (['reinstall_pages' => __('Reinstall missing managed pages', 'must-hotel-booking'), 'flush_portal_routes' => __('Flush portal routes', 'must-hotel-booking'), 'reschedule_cron' => __('Reschedule cleanup cron', 'must-hotel-booking'), 'cleanup_expired_locks' => __('Clear expired locks', 'must-hotel-booking'), 'repair_inventory_mirror' => __('Repair inventory mirror', 'must-hotel-booking'), 'send_test_email' => __('Send test email', 'must-hotel-booking')] as $task => $label) {
             echo '<form method="post" action="' . \esc_url(get_admin_settings_page_url(['tab' => 'maintenance'])) . '">';
             \wp_nonce_field('must_settings_maintenance_action', 'must_settings_nonce');
             echo '<input type="hidden" name="must_settings_action" value="maintenance_action" />';

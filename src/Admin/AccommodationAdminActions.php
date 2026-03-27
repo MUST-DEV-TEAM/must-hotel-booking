@@ -69,6 +69,11 @@ final class AccommodationAdminActions
             return;
         }
 
+        if ($action === 'delete_type') {
+            $this->deleteType($query);
+            return;
+        }
+
         if ($action === 'delete_unit') {
             $this->deleteUnit($query);
         }
@@ -370,6 +375,65 @@ final class AccommodationAdminActions
             'type_id' => $newTypeId,
             'notice' => 'type_duplicated',
         ]);
+    }
+
+    private function deleteType(AccommodationAdminQuery $query): void
+    {
+        $typeId = $query->getTypeId();
+        $nonce = isset($_GET['_wpnonce']) ? (string) \wp_unslash($_GET['_wpnonce']) : '';
+
+        if ($typeId <= 0 || !\wp_verify_nonce($nonce, 'must_accommodation_delete_type_' . $typeId)) {
+            $this->redirectToRoomsPage(['tab' => 'types', 'notice' => 'invalid_nonce']);
+        }
+
+        $room = $this->roomRepository->getRoomById($typeId);
+
+        if (!\is_array($room)) {
+            $this->redirectToRoomsPage(['tab' => 'types', 'notice' => 'type_missing']);
+        }
+
+        $dependencySummary = $this->roomRepository->getRoomDeletionGuardSummary($typeId);
+        $blockers = isset($dependencySummary['blockers']) && \is_array($dependencySummary['blockers']) ? $dependencySummary['blockers'] : [];
+
+        if (!empty($blockers)) {
+            $this->redirectToRoomsPage([
+                'tab' => 'types',
+                'notice' => 'type_delete_blocked',
+                'type_id' => $typeId,
+            ]);
+        }
+
+        $mirrorDeleted = $this->inventoryRepository->deleteDerivedRoomType($typeId);
+
+        if (!$mirrorDeleted) {
+            $this->redirectToRoomsPage([
+                'tab' => 'types',
+                'notice' => 'type_delete_failed',
+                'type_id' => $typeId,
+            ]);
+        }
+
+        $deleted = $this->roomRepository->deleteRoom($typeId);
+
+        if (!$deleted) {
+            $this->inventoryRepository->syncRoomType(
+                $typeId,
+                [
+                    'name' => (string) ($room['name'] ?? ''),
+                    'description' => (string) ($room['description'] ?? ''),
+                    'capacity' => (int) ($room['max_guests'] ?? 1),
+                    'base_price' => (float) ($room['base_price'] ?? 0.0),
+                ]
+            );
+
+            $this->redirectToRoomsPage([
+                'tab' => 'types',
+                'notice' => 'type_delete_failed',
+                'type_id' => $typeId,
+            ]);
+        }
+
+        $this->redirectToRoomsPage(['tab' => 'types', 'notice' => 'type_deleted']);
     }
 
     private function deleteUnit(AccommodationAdminQuery $query): void

@@ -6,7 +6,7 @@ if (!\defined('ABSPATH')) {
 
 $view = \must_hotel_booking\get_single_room_page_view_data();
 $success = !empty($view['success']);
-$rooms_url = isset($view['rooms_url']) ? (string) $view['rooms_url'] : \home_url('/rooms');
+$rooms_url = isset($view['rooms_url']) ? (string) $view['rooms_url'] : '';
 ?>
 <?php \get_header(); ?>
 <main class="must-hotel-booking-page must-hotel-booking-page-single-room">
@@ -14,11 +14,13 @@ $rooms_url = isset($view['rooms_url']) ? (string) $view['rooms_url'] : \home_url
         <?php if (!$success) : ?>
             <h1><?php echo \esc_html__('Room Details', 'must-hotel-booking'); ?></h1>
             <p><?php echo \esc_html((string) ($view['message'] ?? __('Room was not found.', 'must-hotel-booking'))); ?></p>
-            <p>
-                <a href="<?php echo \esc_url($rooms_url); ?>">
-                    <?php echo \esc_html__('Back to Rooms', 'must-hotel-booking'); ?>
-                </a>
-            </p>
+            <?php if ($rooms_url !== '') : ?>
+                <p>
+                    <a href="<?php echo \esc_url($rooms_url); ?>">
+                        <?php echo \esc_html__('Back to Rooms', 'must-hotel-booking'); ?>
+                    </a>
+                </p>
+            <?php endif; ?>
         <?php else : ?>
             <?php
             $room_title = isset($view['room_title']) ? (string) $view['room_title'] : '';
@@ -118,35 +120,35 @@ $rooms_url = isset($view['rooms_url']) ? (string) $view['rooms_url'] : \home_url
                         <?php endif; ?>
                     </section>
 
-                    <section class="must-hotel-booking-single-room-section">
-                        <h2><?php echo \esc_html__('Amenities', 'must-hotel-booking'); ?></h2>
-                        <?php if ($amenities_intro !== '') : ?>
-                            <p><?php echo \wp_kses_post(\nl2br(\esc_html($amenities_intro))); ?></p>
-                        <?php endif; ?>
+                    <?php if ($amenities_intro !== '' || !empty($amenities)) : ?>
+                        <section class="must-hotel-booking-single-room-section">
+                            <h2><?php echo \esc_html__('Amenities', 'must-hotel-booking'); ?></h2>
+                            <?php if ($amenities_intro !== '') : ?>
+                                <p><?php echo \wp_kses_post(\nl2br(\esc_html($amenities_intro))); ?></p>
+                            <?php endif; ?>
 
-                        <?php if (!empty($amenities)) : ?>
-                            <div class="must-hotel-booking-single-room-amenities-grid">
-                                <?php foreach ($amenities as $amenity) : ?>
-                                    <?php
-                                    $amenity_label = isset($amenity['label']) ? (string) $amenity['label'] : '';
-                                    $amenity_icon = isset($amenity['icon']) ? (string) $amenity['icon'] : '';
-                                    ?>
-                                    <?php if ($amenity_label !== '') : ?>
-                                        <div class="must-hotel-booking-single-room-amenity-item">
-                                            <?php if ($amenity_icon !== '') : ?>
-                                                <span class="must-hotel-booking-single-room-amenity-icon-wrap">
-                                                    <img src="<?php echo \esc_url($amenity_icon); ?>" alt="" aria-hidden="true" />
-                                                </span>
-                                            <?php endif; ?>
-                                            <span><?php echo \esc_html($amenity_label); ?></span>
-                                        </div>
-                                    <?php endif; ?>
-                                <?php endforeach; ?>
-                            </div>
-                        <?php else : ?>
-                            <p><?php echo \esc_html__('No amenities configured for this room yet.', 'must-hotel-booking'); ?></p>
-                        <?php endif; ?>
-                    </section>
+                            <?php if (!empty($amenities)) : ?>
+                                <div class="must-hotel-booking-single-room-amenities-grid">
+                                    <?php foreach ($amenities as $amenity) : ?>
+                                        <?php
+                                        $amenity_label = isset($amenity['label']) ? (string) $amenity['label'] : '';
+                                        $amenity_icon = isset($amenity['icon']) ? (string) $amenity['icon'] : '';
+                                        ?>
+                                        <?php if ($amenity_label !== '') : ?>
+                                            <div class="must-hotel-booking-single-room-amenity-item">
+                                                <?php if ($amenity_icon !== '') : ?>
+                                                    <span class="must-hotel-booking-single-room-amenity-icon-wrap">
+                                                        <img src="<?php echo \esc_url($amenity_icon); ?>" alt="" aria-hidden="true" />
+                                                    </span>
+                                                <?php endif; ?>
+                                                <span><?php echo \esc_html($amenity_label); ?></span>
+                                            </div>
+                                        <?php endif; ?>
+                                    <?php endforeach; ?>
+                                </div>
+                            <?php endif; ?>
+                        </section>
+                    <?php endif; ?>
 
                     <a class="must-hotel-booking-single-room-terms-link" href="<?php echo \esc_url($terms_url); ?>">
                         <span><?php echo \esc_html__('Terms and Conditions', 'must-hotel-booking'); ?></span>
@@ -180,7 +182,7 @@ $rooms_url = isset($view['rooms_url']) ? (string) $view['rooms_url'] : \home_url
                         </figure>
                     <?php else : ?>
                         <div class="must-hotel-booking-single-room-image-placeholder">
-                            <?php echo \esc_html__('Add room images in admin to display the gallery.', 'must-hotel-booking'); ?>
+                            <?php echo \esc_html__('Gallery coming soon.', 'must-hotel-booking'); ?>
                         </div>
                     <?php endif; ?>
 
@@ -230,7 +232,7 @@ $rooms_url = isset($view['rooms_url']) ? (string) $view['rooms_url'] : \home_url
                                 }
 
                                 $related_room_name = isset($related_room['name']) ? (string) $related_room['name'] : '';
-                                $related_room_url = isset($related_room['permalink']) ? (string) $related_room['permalink'] : $rooms_url;
+                                $related_room_url = isset($related_room['permalink']) ? (string) $related_room['permalink'] : '';
                                 $related_room_booking_url = isset($related_room['booking_url']) ? (string) $related_room['booking_url'] : $booking_url;
                                 $related_room_images = isset($related_room['images']) && \is_array($related_room['images']) ? $related_room['images'] : [];
                                 $related_room_cover_image = isset($related_room['cover_image']) ? (string) $related_room['cover_image'] : '';
@@ -297,12 +299,14 @@ $rooms_url = isset($view['rooms_url']) ? (string) $view['rooms_url'] : \home_url
                                                     <img src="<?php echo \esc_url($arrow_icon_url); ?>" alt="" aria-hidden="true" />
                                                 <?php endif; ?>
                                             </a>
-                                            <a class="must-hotel-booking-related-room-details" href="<?php echo \esc_url($related_room_url); ?>">
-                                                <span><?php echo \esc_html__('Additional Details', 'must-hotel-booking'); ?></span>
-                                                <?php if ($bed_icon_url !== '') : ?>
-                                                    <img src="<?php echo \esc_url($bed_icon_url); ?>" alt="" aria-hidden="true" />
-                                                <?php endif; ?>
-                                            </a>
+                                            <?php if ($related_room_url !== '') : ?>
+                                                <a class="must-hotel-booking-related-room-details" href="<?php echo \esc_url($related_room_url); ?>">
+                                                    <span><?php echo \esc_html__('Additional Details', 'must-hotel-booking'); ?></span>
+                                                    <?php if ($bed_icon_url !== '') : ?>
+                                                        <img src="<?php echo \esc_url($bed_icon_url); ?>" alt="" aria-hidden="true" />
+                                                    <?php endif; ?>
+                                                </a>
+                                            <?php endif; ?>
                                         </div>
                                     </div>
                                 </article>

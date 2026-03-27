@@ -2,6 +2,14 @@
 
 namespace MustHotelBooking\Database;
 
+/**
+ * Authoritative repository for accommodation types stored in must_rooms.
+ *
+ * In the current plugin version, must_rooms is the source of truth for
+ * accommodation types, public room content, and the IDs used across pricing,
+ * availability, reservations, and admin flows. mhb_room_types is only a
+ * derived mirror used by internal inventory/rate-plan structures.
+ */
 final class RoomRepository extends AbstractRepository
 {
     public function getRoomsTableName(): string
@@ -381,6 +389,10 @@ final class RoomRepository extends AbstractRepository
             return false;
         }
 
+        if (!$this->canDeleteRoom($roomId)) {
+            return false;
+        }
+
         $deleted = $this->wpdb->delete(
             $this->getRoomsTableName(),
             ['id' => $roomId],
@@ -400,6 +412,82 @@ final class RoomRepository extends AbstractRepository
         }
 
         return true;
+    }
+
+    /**
+     * @return array<string, int|array<int, string>>
+     */
+    public function getRoomDeletionGuardSummary(int $roomId): array
+    {
+        if ($roomId <= 0) {
+            return [
+                'inventory_units' => 0,
+                'rate_plan_assignments' => 0,
+                'pricing_rules' => 0,
+                'availability_rules' => 0,
+                'reservations' => 0,
+                'blockers' => [],
+            ];
+        }
+
+        $inventoryRepository = new InventoryRepository();
+        $ratePlanRepository = new RatePlanRepository();
+        $pricingRuleRepository = new PricingRuleRepository();
+        $availabilityRepository = new AvailabilityRepository();
+        $reservationRepository = new ReservationRepository();
+
+        $inventorySummaryRows = $inventoryRepository->getRoomTypeInventorySummaries([$roomId]);
+        $inventorySummary = \is_array($inventorySummaryRows) && isset($inventorySummaryRows[0]) && \is_array($inventorySummaryRows[0])
+            ? $inventorySummaryRows[0]
+            : [];
+        $ratePlanSummary = $ratePlanRepository->getRoomTypeRatePlanSummaryMap([$roomId])[$roomId] ?? [];
+        $pricingSummary = $pricingRuleRepository->getRoomPricingRuleSummaryMap([$roomId])[$roomId] ?? [];
+        $availabilitySummary = $availabilityRepository->getRoomAvailabilityRuleSummaryMap([$roomId])[$roomId] ?? [];
+        $reservationSummary = $reservationRepository->getAccommodationReservationSummaryMap([$roomId], \current_time('Y-m-d'))[$roomId] ?? [];
+
+        $inventoryUnits = isset($inventorySummary['total_units']) ? (int) $inventorySummary['total_units'] : 0;
+        $ratePlanAssignments = isset($ratePlanSummary['assignment_count']) ? (int) $ratePlanSummary['assignment_count'] : 0;
+        $pricingRules = isset($pricingSummary['rule_count']) ? (int) $pricingSummary['rule_count'] : 0;
+        $availabilityRules = isset($availabilitySummary['rule_count']) ? (int) $availabilitySummary['rule_count'] : 0;
+        $reservations = isset($reservationSummary['reservation_count']) ? (int) $reservationSummary['reservation_count'] : 0;
+        $blockers = [];
+
+        if ($inventoryUnits > 0) {
+            $blockers[] = 'inventory_units';
+        }
+
+        if ($ratePlanAssignments > 0) {
+            $blockers[] = 'rate_plan_assignments';
+        }
+
+        if ($pricingRules > 0) {
+            $blockers[] = 'pricing_rules';
+        }
+
+        if ($availabilityRules > 0) {
+            $blockers[] = 'availability_rules';
+        }
+
+        if ($reservations > 0) {
+            $blockers[] = 'reservations';
+        }
+
+        return [
+            'inventory_units' => $inventoryUnits,
+            'rate_plan_assignments' => $ratePlanAssignments,
+            'pricing_rules' => $pricingRules,
+            'availability_rules' => $availabilityRules,
+            'reservations' => $reservations,
+            'blockers' => $blockers,
+        ];
+    }
+
+    public function canDeleteRoom(int $roomId): bool
+    {
+        $summary = $this->getRoomDeletionGuardSummary($roomId);
+        $blockers = isset($summary['blockers']) && \is_array($summary['blockers']) ? $summary['blockers'] : [];
+
+        return empty($blockers);
     }
 
     public function countRooms(): int

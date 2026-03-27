@@ -2,66 +2,17 @@
 
 namespace MustHotelBooking\Admin;
 
-use MustHotelBooking\Core\RoomCatalog;
-
 final class AccommodationWorkbookSchema
 {
-    public const SHEET_TYPES = 'accommodation_types';
-    public const SHEET_UNITS = 'accommodation_units';
+    public const SHEET_UNITS = 'rooms';
+    public const SHEET_TYPES_REFERENCE = 'room_types_reference';
 
-    /**
-     * @return array<string, string>
-     */
-    public static function getAmenityColumnMap(): array
-    {
-        $columns = [];
-
-        foreach (RoomCatalog::getAvailableAmenities() as $amenityKey => $meta) {
-            unset($meta);
-            $columns['amenity_' . \str_replace('-', '_', (string) $amenityKey)] = (string) $amenityKey;
-        }
-
-        return $columns;
-    }
+    public const REFERENCE_WARNING = 'DO NOT EDIT - REFERENCE ONLY. Manage room types in WordPress admin.';
 
     /**
      * @return array<int, string>
      */
-    public static function getAccommodationTypeColumns(): array
-    {
-        return \array_merge(
-            [
-                'id',
-                'name',
-                'slug',
-                'category',
-                'description',
-                'internal_code',
-                'is_active',
-                'is_bookable',
-                'is_online_bookable',
-                'is_calendar_visible',
-                'sort_order',
-                'max_adults',
-                'max_children',
-                'max_guests',
-                'default_occupancy',
-                'base_price',
-                'extra_guest_price',
-                'room_size',
-                'beds',
-                'room_rules',
-                'amenities_intro',
-                'admin_notes',
-            ],
-            \array_keys(self::getAmenityColumnMap())
-        );
-    }
-
-    /**
-     * @return array<int, string>
-     */
-    public static function getAccommodationUnitColumns(): array
+    public static function getUnitSheetColumns(): array
     {
         return [
             'id',
@@ -83,13 +34,40 @@ final class AccommodationWorkbookSchema
     }
 
     /**
-     * @return array<string, array<int, string>>
+     * @return array<int, string>
      */
-    public static function getWorkbookColumns(): array
+    public static function getReferenceSheetColumns(): array
     {
         return [
-            self::SHEET_TYPES => self::getAccommodationTypeColumns(),
-            self::SHEET_UNITS => self::getAccommodationUnitColumns(),
+            'id',
+            'name',
+            'slug',
+            'status',
+            'max_guests',
+            'base_price',
+            'beds',
+            'room_size',
+            'description',
         ];
+    }
+
+    public static function getUnitSheetName(): string
+    {
+        return self::SHEET_UNITS;
+    }
+
+    public static function getReferenceSheetName(): string
+    {
+        return self::SHEET_TYPES_REFERENCE;
+    }
+
+    public static function getReferenceSheetWarning(): string
+    {
+        return self::REFERENCE_WARNING;
+    }
+
+    public static function getWorkbookSheetName(): string
+    {
+        return self::getUnitSheetName();
     }
 }

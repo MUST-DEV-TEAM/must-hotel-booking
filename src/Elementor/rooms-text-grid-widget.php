@@ -218,15 +218,13 @@ function get_rooms_for_text_grid_widget_render(string $source_mode, array $selec
 function get_rooms_text_grid_room_url(array $room): string
 {
     $slug = isset($room['slug']) ? \sanitize_title((string) $room['slug']) : '';
+    $roomsPageUrl = ManagedPages::getRoomsPageUrl();
 
-    if ($slug === '') {
+    if ($slug === '' || $roomsPageUrl === '') {
         return '';
     }
 
-    return \add_query_arg(
-        ['room' => $slug],
-        ManagedPages::getRoomsPageUrl()
-    );
+    return \add_query_arg(['room' => $slug], $roomsPageUrl);
 }
 
 /**
@@ -297,7 +295,7 @@ function get_rooms_text_grid_current_room_context(): array
         return $context;
     }
 
-    if (!ManagedPages::isCurrentPage('page_rooms_id', 'rooms')) {
+    if (!ManagedPages::isAssignedCurrentPage('page_rooms_id')) {
         $context = [
             'room_id' => 0,
             'room_slug' => '',

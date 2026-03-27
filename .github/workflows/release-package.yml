@@ -38,23 +38,47 @@ jobs:
           ref: ${{ steps.ref.outputs.ref }}
           fetch-depth: 0
 
-      - name: Determine asset name
+      - name: Validate release metadata
         id: meta
         shell: bash
         run: |
+          plugin_header_version="$(php -r "preg_match('/^[[:space:]]*\\*[[:space:]]Version:\\s*([0-9A-Za-z._-]+)/m', file_get_contents('must-hotel-booking.php'), \$m); echo \$m[1] ?? '';")"
+          plugin_constant_version="$(php -r "preg_match(\"/define\\('MUST_HOTEL_BOOKING_VERSION',\\s*'([^']+)'\\)/\", file_get_contents('must-hotel-booking.php'), \$m); echo \$m[1] ?? '';")"
+          readme_stable_tag="$(php -r "preg_match('/^Stable tag:\\s*([0-9A-Za-z._-]+)/mi', file_get_contents('readme.txt'), \$m); echo \$m[1] ?? '';")"
+
+          if [[ -z "$plugin_header_version" || -z "$plugin_constant_version" || -z "$readme_stable_tag" ]]; then
+            echo "Unable to read version metadata from plugin files."
+            exit 1
+          fi
+
+          if [[ "$plugin_header_version" != "$plugin_constant_version" ]]; then
+            echo "Plugin header version ($plugin_header_version) does not match MUST_HOTEL_BOOKING_VERSION ($plugin_constant_version)."
+            exit 1
+          fi
+
+          if [[ "$plugin_header_version" != "$readme_stable_tag" ]]; then
+            echo "Plugin version ($plugin_header_version) does not match readme stable tag ($readme_stable_tag)."
+            exit 1
+          fi
+
           if [[ "${GITHUB_EVENT_NAME}" == "release" ]]; then
             tag="${GITHUB_EVENT_RELEASE_TAG_NAME}"
           elif [[ "${REF_NAME}" =~ ^refs/tags/ ]]; then
             tag="${REF_NAME#refs/tags/}"
           else
-            tag="$(git describe --tags --abbrev=0 2>/dev/null || true)"
+            tag=""
           fi
 
+          if [[ -n "$tag" && "${tag#v}" != "$plugin_header_version" ]]; then
+            echo "Release tag ($tag) does not match plugin version ($plugin_header_version)."
+            exit 1
+          fi
+
+          version="$plugin_header_version"
+
           if [[ -z "$tag" ]]; then
-            version="$(php -r "preg_match(\"/Version:\\s*([0-9A-Za-z._-]+)/\", file_get_contents('must-hotel-booking.php'), \$m); echo \$m[1] ?? 'dev';")"
             asset="must-hotel-booking-${version}-manual.zip"
           else
-            version="${tag#v}"
             asset="must-hotel-booking-${version}.zip"
           fi
 
@@ -87,6 +111,11 @@ jobs:
             cd dist
             zip -r "../${{ steps.meta.outputs.asset }}" must-hotel-booking
           )
+
+      - name: Validate ZIP structure
+        shell: bash
+        run: |
+          unzip -l "${{ steps.meta.outputs.asset }}" | grep -q "must-hotel-booking/must-hotel-booking.php"
 
       - name: Upload build artifact
         uses: actions/upload-artifact@v4

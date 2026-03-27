@@ -574,6 +574,12 @@ final class AvailabilityAjaxController
                 }
             }
 
+            $ratePlans = RatePlanEngine::getRoomRatePlansWithPricing($currentRoomId, $checkin, $checkout, $pricingGuests);
+
+            if (empty($ratePlans)) {
+                continue;
+            }
+
             $roomPayload = [
                 'id' => $currentRoomId,
                 'name' => isset($room['name']) ? (string) $room['name'] : '',
@@ -588,7 +594,7 @@ final class AvailabilityAjaxController
                 'dynamic_total_price' => $dynamicTotalPrice,
                 'dynamic_room_subtotal' => $dynamicRoomSubtotal,
                 'dynamic_nights' => $dynamicNights,
-                'rate_plans' => RatePlanEngine::getRoomRatePlansWithPricing($currentRoomId, $checkin, $checkout, $pricingGuests),
+                'rate_plans' => $ratePlans,
             ];
 
             $enrichedPayload = RoomViewBuilder::buildBookingResultsRoomViewData($roomPayload);

@@ -4,6 +4,13 @@ namespace MustHotelBooking\Core;
 
 use MustHotelBooking\Database\RoomRepository;
 
+/**
+ * Read-only room data facade backed by the legacy must_rooms authority.
+ *
+ * Public room pages, selectors, and room content still resolve from
+ * must_rooms. Any mirrored inventory room-type structures remain internal and
+ * must not replace these reads in this plugin version.
+ */
 final class RoomData
 {
     private static function repository(): RoomRepository

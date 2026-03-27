@@ -25,11 +25,11 @@ final class ManagedPages
             'page_rooms_id' => [
                 'title' => \__('Rooms', 'must-hotel-booking'),
                 'slug' => 'rooms',
-                'template' => 'frontend/templates/rooms.php',
+                'template' => '',
                 'group' => 'public_booking',
                 'fallback_path' => '/rooms',
-                'required' => true,
-                'auto_create' => true,
+                'required' => false,
+                'auto_create' => false,
             ],
             'page_booking_id' => [
                 'title' => \__('Booking', 'must-hotel-booking'),
@@ -253,6 +253,17 @@ final class ManagedPages
         return $page instanceof \WP_Post ? $page : null;
     }
 
+    public static function hasAssignedPage(string $settingKey): bool
+    {
+        $page = self::getAssignedPage($settingKey);
+
+        if (!$page instanceof \WP_Post || $page->post_type !== 'page') {
+            return false;
+        }
+
+        return $page->post_status === 'publish';
+    }
+
     /**
      * @return array<string, mixed>
      */
@@ -367,9 +378,18 @@ final class ManagedPages
         return \home_url($fallbackPath);
     }
 
+    public static function getAssignedPageUrl(string $settingKey): string
+    {
+        if (!self::hasAssignedPage($settingKey)) {
+            return '';
+        }
+
+        return self::safePermalink(self::getAssignedPageId($settingKey));
+    }
+
     public static function getRoomsPageUrl(): string
     {
-        return self::getPageUrl('page_rooms_id', '/rooms');
+        return self::getAssignedPageUrl('page_rooms_id');
     }
 
     public static function getBookingPageUrl(): string
@@ -430,6 +450,17 @@ final class ManagedPages
         }
 
         return \is_page($fallbackSlug);
+    }
+
+    public static function isAssignedCurrentPage(string $settingKey): bool
+    {
+        if (\is_admin()) {
+            return false;
+        }
+
+        $pageId = self::getAssignedPageId($settingKey);
+
+        return $pageId > 0 && \is_page($pageId);
     }
 
     private static function safePermalink(int $pageId): string

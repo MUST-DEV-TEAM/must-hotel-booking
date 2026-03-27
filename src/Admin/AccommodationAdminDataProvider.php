@@ -5,6 +5,13 @@ namespace MustHotelBooking\Admin;
 use MustHotelBooking\Core\RoomCatalog;
 use MustHotelBooking\Core\RoomData;
 
+/**
+ * Builds rooms admin data from the authoritative must_rooms table.
+ *
+ * Accommodation types remain authoritative in must_rooms for this plugin
+ * version. mhb_room_types stays as an internal mirror only, and mhb_rooms
+ * units continue to reference those legacy type IDs.
+ */
 final class AccommodationAdminDataProvider
 {
     /** @var \MustHotelBooking\Database\RoomRepository */
@@ -39,11 +46,12 @@ final class AccommodationAdminDataProvider
     {
         $today = \current_time('Y-m-d');
         $rawTypes = $this->roomRepository->getAccommodationAdminRows();
-        $this->synchronizeInventoryRoomTypes($rawTypes);
         $types = $this->buildAccommodationTypeRows($rawTypes, $today);
         $typeIndex = $this->indexRowsById($types);
         $rawUnits = $this->inventoryRepository->getInventoryUnitAdminRows();
         $units = $this->buildUnitRows($rawUnits, $typeIndex, $today);
+        $authorityAudit = (new AccommodationAuthorityAudit())->getAuditData($rawTypes);
+        $adminWarnings = $this->buildAdminWarnings($types);
         $filteredTypes = $this->filterAccommodationTypes($types, $query);
         $filteredUnits = $this->filterUnits($units, $query);
         $paginatedTypes = $this->paginateRows($filteredTypes, $query->getPaged(), $query->getPerPage());
@@ -57,6 +65,8 @@ final class AccommodationAdminDataProvider
             'tab' => $query->getTab(),
             'notice' => $query->getNotice(),
             'summary_cards' => $this->buildSummaryCards($types, $units),
+            'authority_audit' => $authorityAudit,
+            'admin_warnings' => $adminWarnings,
             'type_rows' => $paginatedTypes['rows'],
             'unit_rows' => $paginatedUnits['rows'],
             'type_pagination' => $paginatedTypes['pagination'],
@@ -77,39 +87,26 @@ final class AccommodationAdminDataProvider
     }
 
     /**
-     * @param array<int, array<string, mixed>> $typeRows
+     * @param array<int, array<string, mixed>> $types
+     * @return array<int, string>
      */
-    private function synchronizeInventoryRoomTypes(array $typeRows): void
+    private function buildAdminWarnings(array $types): array
     {
-        static $didSync = false;
-
-        if ($didSync) {
-            return;
+        if (empty($types)) {
+            return [
+                \__('No accommodation types exist yet. Create at least one type before configuring units, pricing, availability, or rate plans.', 'must-hotel-booking'),
+            ];
         }
 
-        $didSync = true;
-
-        foreach ($typeRows as $typeRow) {
-            if (!\is_array($typeRow)) {
-                continue;
+        foreach ($types as $type) {
+            if (\is_array($type) && !empty($type['pricing_configured'])) {
+                return [];
             }
-
-            $typeId = isset($typeRow['id']) ? (int) $typeRow['id'] : 0;
-
-            if ($typeId <= 0) {
-                continue;
-            }
-
-            $this->inventoryRepository->syncRoomType(
-                $typeId,
-                [
-                    'name' => (string) ($typeRow['name'] ?? ''),
-                    'description' => (string) ($typeRow['description'] ?? ''),
-                    'capacity' => (int) ($typeRow['max_guests'] ?? 1),
-                    'base_price' => (float) ($typeRow['base_price'] ?? 0.0),
-                ]
-            );
         }
+
+        return [
+            \__('All accommodation types are currently incomplete for pricing. Add a base price or an active rate-plan assignment before selling rooms.', 'must-hotel-booking'),
+        ];
     }
 
     /**

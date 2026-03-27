@@ -74,13 +74,3 @@ foreach ($module_directories as $module_directory) {
     }
 }
 
-$legacy_template_files = [
-    MUST_HOTEL_BOOKING_PATH . 'templates/room-card.php',
-    MUST_HOTEL_BOOKING_PATH . 'templates/booking-summary.php',
-];
-
-foreach ($legacy_template_files as $legacy_template_file) {
-    if (\is_file($legacy_template_file)) {
-        require_once $legacy_template_file;
-    }
-}

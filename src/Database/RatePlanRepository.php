@@ -561,13 +561,12 @@ final class RatePlanRepository extends AbstractRepository
                     rtrp.base_price,
                     rtrp.max_occupancy,
                     rtrp.created_at,
-                    COALESCE(rt.name, rm.name) AS room_name,
+                    COALESCE(rm.name, CONCAT(\'#\', rtrp.room_type_id)) AS room_name,
                     rm.category AS room_category
                 FROM ' . $this->mhbTable('room_type_rate_plans') . ' rtrp
-                LEFT JOIN ' . $this->mhbTable('room_types') . ' rt ON rt.id = rtrp.room_type_id
                 LEFT JOIN ' . $this->table('rooms') . ' rm ON rm.id = rtrp.room_type_id
                 WHERE rtrp.rate_plan_id = %d
-                ORDER BY COALESCE(rt.name, rm.name) ASC, rtrp.id ASC',
+                ORDER BY COALESCE(rm.name, CONCAT(\'#\', rtrp.room_type_id)) ASC, rtrp.id ASC',
                 $ratePlanId
             ),
             ARRAY_A

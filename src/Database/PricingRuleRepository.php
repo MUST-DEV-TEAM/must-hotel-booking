@@ -142,6 +142,65 @@ final class PricingRuleRepository extends AbstractRepository
     }
 
     /**
+     * @param array<int, int> $roomIds
+     * @return array<int, array<string, int>>
+     */
+    public function getRoomPricingRuleSummaryMap(array $roomIds): array
+    {
+        $roomIds = \array_values(
+            \array_filter(
+                \array_map('intval', $roomIds),
+                static function (int $roomId): bool {
+                    return $roomId > 0;
+                }
+            )
+        );
+
+        if (empty($roomIds) || !$this->pricingTableExists()) {
+            return [];
+        }
+
+        $rows = $this->wpdb->get_results(
+            $this->wpdb->prepare(
+                'SELECT
+                    room_id,
+                    COUNT(*) AS rule_count,
+                    SUM(CASE WHEN is_active = 1 THEN 1 ELSE 0 END) AS active_rule_count
+                FROM ' . $this->table('pricing') . '
+                WHERE room_id IN (' . \implode(', ', \array_fill(0, \count($roomIds), '%d')) . ')
+                GROUP BY room_id
+                ORDER BY room_id ASC',
+                ...$roomIds
+            ),
+            ARRAY_A
+        );
+        $summary = [];
+
+        if (!\is_array($rows)) {
+            return $summary;
+        }
+
+        foreach ($rows as $row) {
+            if (!\is_array($row)) {
+                continue;
+            }
+
+            $roomId = isset($row['room_id']) ? (int) $row['room_id'] : 0;
+
+            if ($roomId <= 0) {
+                continue;
+            }
+
+            $summary[$roomId] = [
+                'rule_count' => isset($row['rule_count']) ? (int) $row['rule_count'] : 0,
+                'active_rule_count' => isset($row['active_rule_count']) ? (int) $row['active_rule_count'] : 0,
+            ];
+        }
+
+        return $summary;
+    }
+
+    /**
      * @param array<string, mixed> $ruleData
      */
     public function saveRule(array $ruleData): int

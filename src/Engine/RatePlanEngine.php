@@ -21,34 +21,24 @@ final class RatePlanEngine
 
         $plans = get_rate_plan_repository()->getRatePlansForRoomType($roomTypeId);
 
-        if (!empty($plans)) {
-            return \array_values(
-                \array_map(
-                    static function (array $plan) use ($roomTypeId): array {
-                        $plan['id'] = isset($plan['id']) ? (int) $plan['id'] : 0;
-                        $plan['room_type_id'] = $roomTypeId;
-                        $plan['base_price'] = isset($plan['base_price']) ? (float) $plan['base_price'] : 0.0;
-                        $plan['max_occupancy'] = isset($plan['max_occupancy']) ? \max(1, (int) $plan['max_occupancy']) : 1;
-                        $plan['is_fallback'] = false;
-
-                        return $plan;
-                    },
-                    $plans
-                )
-            );
+        if (empty($plans)) {
+            return [];
         }
 
-        return [[
-            'id' => 0,
-            'room_type_id' => $roomTypeId,
-            'name' => \__('Standard Rate', 'must-hotel-booking'),
-            'description' => '',
-            'cancellation_policy_id' => 0,
-            'is_active' => 1,
-            'base_price' => isset($room['base_price']) ? (float) $room['base_price'] : 0.0,
-            'max_occupancy' => isset($room['max_guests']) ? \max(1, (int) $room['max_guests']) : 1,
-            'is_fallback' => true,
-        ]];
+        return \array_values(
+            \array_map(
+                static function (array $plan) use ($roomTypeId): array {
+                    $plan['id'] = isset($plan['id']) ? (int) $plan['id'] : 0;
+                    $plan['room_type_id'] = $roomTypeId;
+                    $plan['base_price'] = isset($plan['base_price']) ? (float) $plan['base_price'] : 0.0;
+                    $plan['max_occupancy'] = isset($plan['max_occupancy']) ? \max(1, (int) $plan['max_occupancy']) : 1;
+                    $plan['is_fallback'] = false;
+
+                    return $plan;
+                },
+                $plans
+            )
+        );
     }
 
     /**
@@ -62,21 +52,21 @@ final class RatePlanEngine
 
         $plans = self::getRatePlansForRoomType($roomTypeId);
 
-        foreach ($plans as $plan) {
-            if (!\is_array($plan)) {
-                continue;
+        if ($ratePlanId > 0) {
+            foreach ($plans as $plan) {
+                if (!\is_array($plan)) {
+                    continue;
+                }
+
+                if ((int) ($plan['id'] ?? 0) === $ratePlanId) {
+                    return $plan;
+                }
             }
 
-            if ((int) ($plan['id'] ?? 0) === $ratePlanId) {
-                return $plan;
-            }
+            return null;
         }
 
-        if ($ratePlanId === 0 && !empty($plans[0]) && \is_array($plans[0]) && !empty($plans[0]['is_fallback'])) {
-            return $plans[0];
-        }
-
-        return null;
+        return !empty($plans[0]) && \is_array($plans[0]) ? $plans[0] : null;
     }
 
     public static function getRatePlanPrice(int $ratePlanId, string $date): float
@@ -132,6 +122,11 @@ final class RatePlanEngine
             }
 
             $pricing = PricingEngine::calculateTotal($roomId, $checkin, $checkout, \max(1, $guests), '', $planId);
+
+            if (!\is_array($pricing) || empty($pricing['success'])) {
+                continue;
+            }
+
             $roomSubtotal = isset($pricing['room_subtotal']) ? (float) $pricing['room_subtotal'] : 0.0;
             $nights = isset($pricing['nights']) ? \max(1, (int) $pricing['nights']) : 1;
             $nightlyPrice = $roomSubtotal > 0 ? \round($roomSubtotal / $nights, 2) : (float) ($plan['base_price'] ?? 0.0);
