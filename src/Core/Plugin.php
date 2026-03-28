@@ -7,6 +7,7 @@ final class Plugin
     public static function activate(): void
     {
         \MustHotelBooking\Database\install_tables();
+        (new \MustHotelBooking\Database\DefaultInventoryUnitSyncService())->maybeRunBackfill();
         \MustHotelBooking\Core\ManagedPages::install();
         \MustHotelBooking\Core\StaffAccess::syncRoleCapabilities();
         \MustHotelBooking\Engine\LockEngine::scheduleCleanupCron();
@@ -35,6 +36,7 @@ final class Plugin
 
     public static function initPlugin(): void
     {
+        (new \MustHotelBooking\Database\DefaultInventoryUnitSyncService())->maybeRunBackfill();
         \MustHotelBooking\Core\ManagedPages::sync();
         \MustHotelBooking\Core\StaffAccess::syncRoleCapabilities();
         \MustHotelBooking\Core\Updater::boot();

@@ -28,6 +28,7 @@ $room_count = isset($view['room_count']) ? (int) $view['room_count'] : 0;
 $coupon_code = isset($view['coupon_code']) ? (string) $view['coupon_code'] : '';
 $coupon_input_value = isset($view['coupon_input_value']) ? (string) $view['coupon_input_value'] : $coupon_code;
 $applied_coupon_code = isset($view['applied_coupon_code']) ? (string) $view['applied_coupon_code'] : '';
+$coupon_notice = isset($view['coupon_notice']) && \is_array($view['coupon_notice']) ? $view['coupon_notice'] : null;
 $coupon_control_classes = 'must-checkout-coupon-control';
 
 if ($coupon_input_value !== '' || $applied_coupon_code !== '') {
@@ -169,6 +170,12 @@ $format_display_date = static function (string $date): string {
                         </button>
                     </div>
                 </section>
+
+                <?php if (\is_array($coupon_notice) && (string) ($coupon_notice['message'] ?? '') !== '') : ?>
+                    <div class="must-checkout-coupon-notice is-<?php echo \esc_attr((string) ($coupon_notice['type'] ?? 'info')); ?>">
+                        <p><?php echo \esc_html((string) $coupon_notice['message']); ?></p>
+                    </div>
+                <?php endif; ?>
 
                 <div class="must-checkout-room-stack">
                     <?php foreach ($selected_rooms as $index => $selected_room_item) : ?>

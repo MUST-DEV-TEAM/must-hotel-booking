@@ -18,12 +18,19 @@ final class AccommodationImportExportService
     /** @var \MustHotelBooking\Database\InventoryRepository */
     private $inventoryRepository;
 
+    /** @var \MustHotelBooking\Database\DefaultInventoryUnitSyncService */
+    private $defaultInventoryUnitSyncService;
+
     private SimpleXlsxWorkbook $workbook;
 
     public function __construct()
     {
         $this->roomRepository = \MustHotelBooking\Engine\get_room_repository();
         $this->inventoryRepository = \MustHotelBooking\Engine\get_inventory_repository();
+        $this->defaultInventoryUnitSyncService = new \MustHotelBooking\Database\DefaultInventoryUnitSyncService(
+            $this->roomRepository,
+            $this->inventoryRepository
+        );
         $this->workbook = new SimpleXlsxWorkbook();
     }
 
@@ -745,6 +752,7 @@ final class AccommodationImportExportService
                 'base_price' => (float) ($payload['base_price'] ?? 0.0),
             ]
         );
+        $this->defaultInventoryUnitSyncService->syncRoomListing($savedId);
 
         return $savedId;
     }

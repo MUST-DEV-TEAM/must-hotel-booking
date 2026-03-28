@@ -4,6 +4,7 @@ namespace MustHotelBooking\Frontend;
 
 use MustHotelBooking\Core\ManagedPages;
 use MustHotelBooking\Engine\BookingValidationEngine;
+use MustHotelBooking\Engine\CouponService;
 use MustHotelBooking\Engine\PricingEngine;
 use MustHotelBooking\Engine\ReservationEngine;
 
@@ -423,9 +424,22 @@ function get_checkout_page_view_data(): array
     $summary_view = isset($room_items['summary']) && \is_array($room_items['summary']) ? $room_items['summary'] : [];
     $applied_coupon_code = isset($summary_view['applied_coupon']) ? \sanitize_text_field((string) $summary_view['applied_coupon']) : '';
     $coupon_input_value = $submitted_coupon_code;
+    $coupon_notice = null;
 
     if ($applied_coupon_code !== '' && ((float) ($summary_view['discount_total'] ?? 0.0)) > 0.0) {
         $coupon_input_value = '';
+    }
+
+    if ($request_action === 'preview_coupon' || ($applied_coupon_code !== '' && $coupon_code !== '')) {
+        $coupon_notice = CouponService::buildCustomerCouponNotice(
+            $coupon_code !== '' ? $coupon_code : $applied_coupon_code,
+            \max(
+                0.0,
+                (float) ($summary_view['room_subtotal'] ?? 0.0) + (float) ($summary_view['fees_total'] ?? 0.0)
+            ),
+            (string) ($context['checkin'] ?? ''),
+            (float) ($summary_view['discount_total'] ?? 0.0)
+        );
     }
 
     $messages = \array_values(
@@ -449,6 +463,7 @@ function get_checkout_page_view_data(): array
         'coupon_code' => $coupon_code,
         'coupon_input_value' => $coupon_input_value,
         'applied_coupon_code' => $applied_coupon_code,
+        'coupon_notice' => $coupon_notice,
         'selected_room_count' => \count($selected_room_ids),
         'fixed_room_mode' => $fixed_room_mode,
         'fixed_room_id' => $fixed_room_id,

@@ -4,6 +4,58 @@ namespace MustHotelBooking\Engine;
 
 final class CouponService
 {
+    /**
+     * @return array{type: string, code: string, message: string}
+     */
+    public static function buildCustomerCouponNotice(string $couponCode, float $bookingAmount, string $stayDate = '', float $discountAmount = 0.0): array
+    {
+        $normalized = self::normalizeCode($couponCode);
+
+        if ($normalized === '') {
+            return [
+                'type' => 'error',
+                'code' => '',
+                'message' => \__('Enter a coupon code to check it.', 'must-hotel-booking'),
+            ];
+        }
+
+        $validation = self::validateCouponForAmount($normalized, $bookingAmount, $stayDate);
+
+        if (empty($validation['valid']) || !isset($validation['coupon']) || !\is_array($validation['coupon'])) {
+            $errors = isset($validation['errors']) && \is_array($validation['errors']) ? $validation['errors'] : [];
+
+            return [
+                'type' => 'error',
+                'code' => $normalized,
+                'message' => isset($errors[0]) ? (string) $errors[0] : \__('This coupon cannot be used for the current booking.', 'must-hotel-booking'),
+            ];
+        }
+
+        $coupon = $validation['coupon'];
+        $resolvedCode = self::normalizeCode((string) ($coupon['code'] ?? $normalized));
+        $resolvedDiscountAmount = $discountAmount > 0.0
+            ? \round($discountAmount, 2)
+            : self::calculateDiscountAmount($bookingAmount, $coupon);
+
+        if ($resolvedDiscountAmount <= 0.0) {
+            return [
+                'type' => 'error',
+                'code' => $resolvedCode,
+                'message' => \__('This coupon does not reduce the current booking total.', 'must-hotel-booking'),
+            ];
+        }
+
+        return [
+            'type' => 'success',
+            'code' => $resolvedCode,
+            'message' => \sprintf(
+                /* translators: %s is the applied coupon code. */
+                \__('Coupon %s was applied successfully.', 'must-hotel-booking'),
+                $resolvedCode
+            ),
+        ];
+    }
+
     public static function normalizeCode(string $couponCode): string
     {
         $normalized = \strtoupper(\trim($couponCode));
@@ -70,7 +122,7 @@ final class CouponService
             return [
                 'valid' => false,
                 'coupon' => null,
-                'errors' => [\__('Coupon code was not found.', 'must-hotel-booking')],
+                'errors' => [\__('That coupon code could not be found.', 'must-hotel-booking')],
             ];
         }
 
@@ -80,12 +132,12 @@ final class CouponService
 
         if (empty($state['usable_now'])) {
             $messages = [
-                'inactive' => \__('Coupon is disabled.', 'must-hotel-booking'),
-                'scheduled' => \__('Coupon is not active yet.', 'must-hotel-booking'),
-                'expired' => \__('Coupon has expired.', 'must-hotel-booking'),
-                'fully_used' => \__('Coupon usage limit has been reached.', 'must-hotel-booking'),
+                'inactive' => \__('This coupon is not available right now.', 'must-hotel-booking'),
+                'scheduled' => \__('This coupon is not active yet.', 'must-hotel-booking'),
+                'expired' => \__('This coupon has expired.', 'must-hotel-booking'),
+                'fully_used' => \__('This coupon is no longer available.', 'must-hotel-booking'),
             ];
-            $errors[] = $messages[(string) $state['status']] ?? \__('Coupon is not currently valid.', 'must-hotel-booking');
+            $errors[] = $messages[(string) $state['status']] ?? \__('This coupon is not currently valid.', 'must-hotel-booking');
         }
 
         $minimumBookingAmount = isset($coupon['minimum_booking_amount']) ? (float) $coupon['minimum_booking_amount'] : 0.0;
@@ -93,7 +145,7 @@ final class CouponService
         if ($minimumBookingAmount > 0 && $bookingAmount < $minimumBookingAmount) {
             $errors[] = \sprintf(
                 /* translators: %s is minimum amount. */
-                \__('Coupon requires a booking amount of at least %s.', 'must-hotel-booking'),
+                \__('This coupon is available only for bookings of at least %s.', 'must-hotel-booking'),
                 \number_format_i18n($minimumBookingAmount, 2)
             );
         }
@@ -151,7 +203,7 @@ final class CouponService
             'coupon' => $coupon,
             'amount' => $amount,
             'applied_code' => self::normalizeCode((string) ($coupon['code'] ?? $couponCode)),
-            'errors' => $amount > 0.0 ? [] : [\__('Coupon did not produce a discount for this booking.', 'must-hotel-booking')],
+            'errors' => $amount > 0.0 ? [] : [\__('This coupon does not reduce the current booking total.', 'must-hotel-booking')],
         ];
     }
 

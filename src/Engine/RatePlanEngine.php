@@ -5,6 +5,34 @@ namespace MustHotelBooking\Engine;
 final class RatePlanEngine
 {
     /**
+     * @param array<string, mixed> $room
+     * @return array<string, mixed>
+     */
+    private static function buildFallbackRatePlan(array $room, int $roomTypeId): array
+    {
+        $roomName = isset($room['name']) ? \trim((string) $room['name']) : '';
+        $description = \__('Uses this accommodation\'s base price because no rate plan is assigned.', 'must-hotel-booking');
+
+        if ($roomName !== '') {
+            $description = \sprintf(
+                /* translators: %s is the room/listing name. */
+                \__('Uses %s\'s base price because no rate plan is assigned.', 'must-hotel-booking'),
+                $roomName
+            );
+        }
+
+        return [
+            'id' => 0,
+            'room_type_id' => $roomTypeId,
+            'name' => \__('Base Price', 'must-hotel-booking'),
+            'description' => $description,
+            'base_price' => isset($room['base_price']) ? (float) $room['base_price'] : 0.0,
+            'max_occupancy' => isset($room['max_guests']) ? \max(1, (int) $room['max_guests']) : 1,
+            'is_fallback' => true,
+        ];
+    }
+
+    /**
      * @return array<int, array<string, mixed>>
      */
     public static function getRatePlansForRoomType(int $roomTypeId): array
@@ -22,7 +50,7 @@ final class RatePlanEngine
         $plans = get_rate_plan_repository()->getRatePlansForRoomType($roomTypeId);
 
         if (empty($plans)) {
-            return [];
+            return [self::buildFallbackRatePlan($room, $roomTypeId)];
         }
 
         return \array_values(

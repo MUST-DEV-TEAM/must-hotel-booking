@@ -60,7 +60,16 @@
         });
     }
 
+    function syncToggleCards($scope) {
+        $scope.find('.must-accommodation-toggle input[type="checkbox"]').each(function () {
+            var $input = $(this);
+            $input.closest('.must-accommodation-toggle').toggleClass('is-active', $input.is(':checked'));
+        });
+    }
+
     function updateBehaviorSummary($scope) {
+        syncToggleCards($scope);
+
         $scope.find('.must-accommodation-form-section').has('.must-accommodation-behavior-summary').each(function () {
             var $section = $(this);
             var $pillWrap = $section.find('[data-booking-behavior-pills]');
@@ -70,8 +79,6 @@
                 var $input = $(this);
                 var isChecked = $input.is(':checked');
                 var label = isChecked ? $input.attr('data-toggle-label-on') : $input.attr('data-toggle-label-off');
-
-                $input.closest('[data-toggle-card]').toggleClass('is-active', isChecked);
 
                 if (label) {
                     pills.push('<span class="must-accommodation-behavior-pill' + (isChecked ? ' is-active' : '') + '">' + label + '</span>');
@@ -127,6 +134,7 @@
 
     function initializeEditorScope($scope) {
         bindAmenityState($scope);
+        syncToggleCards($scope);
         updateBehaviorSummary($scope);
         updateAmenitySummary($scope);
     }
@@ -285,7 +293,23 @@
         updateAmenitySummary($scope);
     });
 
-    $(document).on('change', '[data-toggle-card] input[type="checkbox"]', function () {
+    $(document).on('click', '.must-accommodation-toggle', function (event) {
+        var $target = $(event.target);
+        var $input = $(this).find('input[type="checkbox"]').first();
+
+        if (!$input.length || $input.is(':disabled') || $target.is('a, button, select, textarea')) {
+            return;
+        }
+
+        if ($target.is('input[type="checkbox"]')) {
+            return;
+        }
+
+        event.preventDefault();
+        $input.prop('checked', !$input.is(':checked')).trigger('change');
+    });
+
+    $(document).on('change', '.must-accommodation-toggle input[type="checkbox"]', function () {
         updateBehaviorSummary($(this).closest('.must-accommodation-editor-modal, .must-accommodation-editor-card'));
     });
 

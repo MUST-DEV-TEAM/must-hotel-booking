@@ -980,6 +980,8 @@ body.must-accommodation-modal-open {
     border-radius: 18px;
     background: linear-gradient(180deg, #ffffff 0%, #f8fbff 100%);
     transition: border-color 0.16s ease, box-shadow 0.16s ease, background-color 0.16s ease;
+    cursor: pointer;
+    user-select: none;
 }
 
 .must-hotel-booking-rooms-admin .must-accommodation-toggle.is-active {

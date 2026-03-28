@@ -4,7 +4,7 @@ Tags: hotel, booking, reservation, accommodation
 Requires at least: 5.0
 Tested up to: 6.0
 Requires PHP: 7.4
-Stable tag: 0.3.33
+Stable tag: 0.3.34
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -31,6 +31,14 @@ Main features include:
 5. When updating, upload the new release ZIP or use the configured updater, then review **Diagnostics & Maintenance** after the update completes.
 
 == Changelog ==
+
+= 0.3.34 =
+* Added automatic default inventory unit backfill and sync so existing accommodations and newly created room/listing records always get a sellable unit when none exists yet.
+* Kept default units aligned with the accommodation's active, bookable, and calendar visibility flags, including rooms created manually in admin or imported from Excel.
+* Added a booking fallback that uses the accommodation's own base price when no rate plan is assigned, so public booking does not fail just because pricing plans have not been configured yet.
+* Fixed coupon data loading so newly created coupons appear correctly in admin and can be found during checkout validation.
+* Added clearer checkout coupon feedback for guests, including friendly success and failure messages such as coupon not found, not active yet, expired, unavailable, minimum amount not met, or no discount applied.
+* Fixed the accommodation editor toggle cards so booking behavior options in the modal can be clicked reliably again.
 
 = 0.3.33 =
 * Fixed a fatal admin/runtime load error caused by the new accommodation category repository declaring an incompatible `tableExists()` method signature.

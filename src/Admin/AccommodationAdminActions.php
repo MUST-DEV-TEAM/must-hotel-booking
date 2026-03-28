@@ -18,12 +18,19 @@ final class AccommodationAdminActions
     /** @var \MustHotelBooking\Database\ReservationRepository */
     private $reservationRepository;
 
+    /** @var \MustHotelBooking\Database\DefaultInventoryUnitSyncService */
+    private $defaultInventoryUnitSyncService;
+
     public function __construct()
     {
         $this->roomCategoryRepository = \MustHotelBooking\Engine\get_room_category_repository();
         $this->roomRepository = \MustHotelBooking\Engine\get_room_repository();
         $this->inventoryRepository = \MustHotelBooking\Engine\get_inventory_repository();
         $this->reservationRepository = \MustHotelBooking\Engine\get_reservation_repository();
+        $this->defaultInventoryUnitSyncService = new \MustHotelBooking\Database\DefaultInventoryUnitSyncService(
+            $this->roomRepository,
+            $this->inventoryRepository
+        );
     }
 
     /**
@@ -274,6 +281,7 @@ final class AccommodationAdminActions
                 'base_price' => (float) $values['base_price'],
             ]
         );
+        $this->defaultInventoryUnitSyncService->syncRoomListing($savedId);
 
         $this->redirectToRoomsPage([
             'tab' => 'rooms',
@@ -410,6 +418,7 @@ final class AccommodationAdminActions
                     'base_price' => (float) ($room['base_price'] ?? 0.0),
                 ]
             );
+            $this->defaultInventoryUnitSyncService->syncRoomListing($typeId);
         }
 
         $this->redirectToRoomsPage([
@@ -488,6 +497,7 @@ final class AccommodationAdminActions
                 'base_price' => (float) ($copy['base_price'] ?? 0.0),
             ]
         );
+        $this->defaultInventoryUnitSyncService->syncRoomListing($newTypeId);
 
         $this->redirectToRoomsPage([
             'tab' => 'rooms',

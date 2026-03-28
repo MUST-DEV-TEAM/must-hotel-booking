@@ -33,7 +33,7 @@ final class CouponRepository extends AbstractRepository
         }
 
         if ($filters['status'] === 'active') {
-            $where[] = 'c.is_active = 1 AND c.valid_from <= %s AND c.valid_until >= %s AND (c.usage_limit = 0 OR COALESCE(usage.used_count, 0) < c.usage_limit)';
+            $where[] = 'c.is_active = 1 AND c.valid_from <= %s AND c.valid_until >= %s AND (c.usage_limit = 0 OR COALESCE(coupon_usage.used_count, 0) < c.usage_limit)';
             $params[] = $today;
             $params[] = $today;
         } elseif ($filters['status'] === 'inactive') {
@@ -45,7 +45,7 @@ final class CouponRepository extends AbstractRepository
             $where[] = 'c.valid_from > %s';
             $params[] = $today;
         } elseif ($filters['status'] === 'fully_used') {
-            $where[] = 'c.usage_limit > 0 AND COALESCE(usage.used_count, 0) >= c.usage_limit';
+            $where[] = 'c.usage_limit > 0 AND COALESCE(coupon_usage.used_count, 0) >= c.usage_limit';
         } elseif ($filters['status'] === 'currently_valid') {
             $where[] = 'c.valid_from <= %s AND c.valid_until >= %s';
             $params[] = $today;
@@ -70,9 +70,9 @@ final class CouponRepository extends AbstractRepository
                 c.usage_limit,
                 c.updated_at,
                 c.created_at,
-                COALESCE(usage.used_count, 0) AS used_count,
-                COALESCE(usage.last_used_at, \'\') AS last_used_at,
-                COALESCE(usage.future_reservation_count, 0) AS future_reservation_count
+                COALESCE(coupon_usage.used_count, 0) AS used_count,
+                COALESCE(coupon_usage.last_used_at, \'\') AS last_used_at,
+                COALESCE(coupon_usage.future_reservation_count, 0) AS future_reservation_count
             FROM ' . $this->table('coupons') . ' c
             ' . $usageJoin;
 
@@ -111,7 +111,7 @@ final class CouponRepository extends AbstractRepository
         }
 
         if ($filters['status'] === 'active') {
-            $where[] = 'c.is_active = 1 AND c.valid_from <= %s AND c.valid_until >= %s AND (c.usage_limit = 0 OR COALESCE(usage.used_count, 0) < c.usage_limit)';
+            $where[] = 'c.is_active = 1 AND c.valid_from <= %s AND c.valid_until >= %s AND (c.usage_limit = 0 OR COALESCE(coupon_usage.used_count, 0) < c.usage_limit)';
             $params[] = $today;
             $params[] = $today;
         } elseif ($filters['status'] === 'inactive') {
@@ -123,7 +123,7 @@ final class CouponRepository extends AbstractRepository
             $where[] = 'c.valid_from > %s';
             $params[] = $today;
         } elseif ($filters['status'] === 'fully_used') {
-            $where[] = 'c.usage_limit > 0 AND COALESCE(usage.used_count, 0) >= c.usage_limit';
+            $where[] = 'c.usage_limit > 0 AND COALESCE(coupon_usage.used_count, 0) >= c.usage_limit';
         } elseif ($filters['status'] === 'currently_valid') {
             $where[] = 'c.valid_from <= %s AND c.valid_until >= %s';
             $params[] = $today;
@@ -175,9 +175,9 @@ final class CouponRepository extends AbstractRepository
                     c.usage_limit,
                     c.updated_at,
                     c.created_at,
-                    COALESCE(usage.used_count, 0) AS used_count,
-                    COALESCE(usage.last_used_at, \'\') AS last_used_at,
-                    COALESCE(usage.future_reservation_count, 0) AS future_reservation_count
+                    COALESCE(coupon_usage.used_count, 0) AS used_count,
+                    COALESCE(coupon_usage.last_used_at, \'\') AS last_used_at,
+                    COALESCE(coupon_usage.future_reservation_count, 0) AS future_reservation_count
                 FROM ' . $this->table('coupons') . ' c
                 ' . $usageJoin . '
                 WHERE c.id = %d
@@ -221,9 +221,9 @@ final class CouponRepository extends AbstractRepository
                     c.usage_limit,
                     c.updated_at,
                     c.created_at,
-                    COALESCE(usage.used_count, 0) AS used_count,
-                    COALESCE(usage.last_used_at, \'\') AS last_used_at,
-                    COALESCE(usage.future_reservation_count, 0) AS future_reservation_count
+                    COALESCE(coupon_usage.used_count, 0) AS used_count,
+                    COALESCE(coupon_usage.last_used_at, \'\') AS last_used_at,
+                    COALESCE(coupon_usage.future_reservation_count, 0) AS future_reservation_count
                 FROM ' . $this->table('coupons') . ' c
                 ' . $usageJoin . '
                 WHERE UPPER(c.code) = %s
@@ -394,7 +394,7 @@ final class CouponRepository extends AbstractRepository
     private function buildUsageJoin(): string
     {
         if (!$this->tableExists('reservations')) {
-            return ' LEFT JOIN (SELECT 0 AS coupon_id, 0 AS used_count, \'\' AS last_used_at, 0 AS future_reservation_count) usage ON usage.coupon_id = c.id';
+            return ' LEFT JOIN (SELECT 0 AS coupon_id, 0 AS used_count, \'\' AS last_used_at, 0 AS future_reservation_count) coupon_usage ON coupon_usage.coupon_id = c.id';
         }
 
         $today = \current_time('Y-m-d');
@@ -412,7 +412,7 @@ final class CouponRepository extends AbstractRepository
                 FROM ' . $this->table('reservations') . ' r
                 WHERE r.coupon_id > 0
                 GROUP BY r.coupon_id
-            ) usage ON usage.coupon_id = c.id';
+            ) coupon_usage ON coupon_usage.coupon_id = c.id';
     }
 
     /**

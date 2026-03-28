@@ -2054,6 +2054,33 @@ body .must-booking-room-modal .must-booking-room-modal-close:active {
     align-items: center;
 }
 
+.must-hotel-booking-page-checkout .must-checkout-coupon-notice {
+    margin-top: -20px;
+    padding: 14px 18px;
+    border: 1px solid #141414;
+    background: #ffffff;
+    color: #141414;
+    font-family: 'PP Neue Montreal', sans-serif;
+}
+
+.must-hotel-booking-page-checkout .must-checkout-coupon-notice p {
+    margin: 0;
+    font-size: 16px;
+    line-height: 1.5;
+}
+
+.must-hotel-booking-page-checkout .must-checkout-coupon-notice.is-success {
+    background: #eef6ec;
+    border-color: #2f6f39;
+    color: #1f4c27;
+}
+
+.must-hotel-booking-page-checkout .must-checkout-coupon-notice.is-error {
+    background: #f9eceb;
+    border-color: #b53a2d;
+    color: #7f241b;
+}
+
 .must-hotel-booking-page-checkout .must-checkout-coupon-control {
     display: grid;
     grid-template-columns: minmax(0, 178px) 54px;
@@ -2511,6 +2538,7 @@ body .must-booking-room-modal .must-booking-room-modal-close:active {
     letter-spacing: -0.011em;
     color: #141414;
     min-height: 44px;
+    height: 100%;
 }
 
 .must-hotel-booking-page-checkout .must-checkout-field input::placeholder,
