@@ -4,7 +4,7 @@ Tags: hotel, booking, reservation, accommodation
 Requires at least: 5.0
 Tested up to: 6.0
 Requires PHP: 7.4
-Stable tag: 0.3.34
+Stable tag: 0.3.35
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -31,6 +31,11 @@ Main features include:
 5. When updating, upload the new release ZIP or use the configured updater, then review **Diagnostics & Maintenance** after the update completes.
 
 == Changelog ==
+
+= 0.3.35 =
+* Reworked the wp-admin operations experience so Calendar, Accommodations, Rates & Pricing, Availability Rules, Payments, and Emails now share the same polished dashboard-style shell, cards, filters, badges, and action hierarchy.
+* Improved long-form admin workspaces with clearer KPI strips, cleaner tools and filter sections, stronger grouping, and easier-to-scan tables and cards for day-to-day hotel operations.
+* Refined supporting admin flows and shared styling so quick booking and related operational screens feel more consistent, intentional, and product-level across the plugin.
 
 = 0.3.34 =
 * Added automatic default inventory unit backfill and sync so existing accommodations and newly created room/listing records always get a sellable unit when none exists yet.

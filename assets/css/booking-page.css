@@ -948,7 +948,6 @@
     min-height: 60px;
     padding: 14px 18px;
     border: 1px solid rgba(34, 72, 88, 0.35);
-    border-radius: 18px;
     background: rgba(255, 255, 255, 0.62);
     color: #141414;
     font-family: 'PP Neue Montreal', sans-serif;
@@ -988,7 +987,6 @@
     align-items: end;
     padding: 24px 26px;
     border: 1px solid rgba(20, 20, 20, 0.14);
-    border-radius: 24px;
     background: rgba(255, 255, 255, 0.82);
     box-shadow: 0 20px 44px rgba(20, 20, 20, 0.06);
 }

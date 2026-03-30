@@ -258,6 +258,30 @@
     cursor: not-allowed;
 }
 
+.must-admin-quick-booking-panel.is-inline {
+    margin: 0;
+    border-radius: 18px !important;
+    box-shadow: none;
+}
+
+.must-admin-quick-booking-panel.is-inline .must-quick-booking-header {
+    padding: 18px 18px 14px;
+}
+
+.must-admin-quick-booking-panel.is-inline .must-quick-booking-header-copy > h2 {
+    font-size: 20px;
+}
+
+.must-admin-quick-booking-panel.is-inline .must-quick-booking-form {
+    padding: 18px;
+    gap: 16px;
+}
+
+.must-admin-quick-booking-panel.is-inline .must-quick-booking-fields-grid.is-stay,
+.must-admin-quick-booking-panel.is-inline .must-quick-booking-fields-grid.is-guest {
+    grid-template-columns: 1fr 1fr;
+}
+
 @media (max-width: 1120px) {
     .must-admin-quick-booking-panel .must-quick-booking-fields-grid.is-stay,
     .must-admin-quick-booking-panel .must-quick-booking-fields-grid.is-guest {
@@ -275,6 +299,11 @@
 
     .must-admin-quick-booking-panel .must-quick-booking-fields-grid.is-stay,
     .must-admin-quick-booking-panel .must-quick-booking-fields-grid.is-guest {
+        grid-template-columns: 1fr;
+    }
+
+    .must-admin-quick-booking-panel.is-inline .must-quick-booking-fields-grid.is-stay,
+    .must-admin-quick-booking-panel.is-inline .must-quick-booking-fields-grid.is-guest {
         grid-template-columns: 1fr;
     }
 

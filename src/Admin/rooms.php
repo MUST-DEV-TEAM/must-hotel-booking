@@ -578,13 +578,19 @@ function render_accommodation_admin_warnings(array $warnings): void
         return;
     }
 
-    echo '<div class="notice notice-warning"><ul>';
+    echo '<section class="postbox must-dashboard-panel must-accommodation-warning-panel">';
+    echo '<div class="must-dashboard-panel-inner">';
+    echo '<div class="must-accommodation-warning-panel-head">';
+    echo '<span class="must-dashboard-status-badge is-warning">' . \esc_html__('Needs Review', 'must-hotel-booking') . '</span>';
+    echo '<div><h2>' . \esc_html__('Accommodation setup warnings', 'must-hotel-booking') . '</h2><p>' . \esc_html__('These signals affect how cleanly the accommodations workspace can be configured or imported right now.', 'must-hotel-booking') . '</p></div>';
+    echo '</div>';
+    echo '<ul class="must-accommodation-warning-panel-list">';
 
     foreach ($warnings as $warning) {
         echo '<li>' . \esc_html((string) $warning) . '</li>';
     }
 
-    echo '</ul></div>';
+    echo '</ul></div></section>';
 }
 
 /**
@@ -610,17 +616,157 @@ function render_accommodation_admin_errors(array $errors): void
  */
 function render_rooms_summary_cards(array $cards): void
 {
-    echo '<section class="must-accommodation-summary-grid">';
+    if (\function_exists(__NAMESPACE__ . '\render_dashboard_kpi_cards')) {
+        $dashboardCards = [];
+
+        foreach ($cards as $card) {
+            if (!\is_array($card)) {
+                continue;
+            }
+
+            $dashboardCards[] = [
+                'label' => (string) ($card['label'] ?? ''),
+                'value' => (string) ($card['value'] ?? '0'),
+                'descriptor' => (string) ($card['meta'] ?? ''),
+            ];
+        }
+
+        render_dashboard_kpi_cards($dashboardCards);
+
+        return;
+    }
+
+    echo '<section class="must-dashboard-kpis">';
 
     foreach ($cards as $card) {
-        echo '<article class="must-accommodation-summary-card">';
-        echo '<span class="must-accommodation-summary-label">' . \esc_html((string) ($card['label'] ?? '')) . '</span>';
-        echo '<strong class="must-accommodation-summary-value">' . \esc_html((string) ($card['value'] ?? '0')) . '</strong>';
-        echo '<span class="must-accommodation-summary-meta">' . \esc_html((string) ($card['meta'] ?? '')) . '</span>';
+        if (!\is_array($card)) {
+            continue;
+        }
+
+        echo '<article class="must-dashboard-kpi-card">';
+        echo '<span class="must-dashboard-kpi-label">' . \esc_html((string) ($card['label'] ?? '')) . '</span>';
+        echo '<strong class="must-dashboard-kpi-value">' . \esc_html((string) ($card['value'] ?? '0')) . '</strong>';
+        echo '<span class="must-dashboard-kpi-descriptor">' . \esc_html((string) ($card['meta'] ?? '')) . '</span>';
         echo '</article>';
     }
 
     echo '</section>';
+}
+
+function get_accommodation_current_view_label(AccommodationAdminQuery $query): string
+{
+    if ($query->isCategoriesTab()) {
+        return \__('Categories', 'must-hotel-booking');
+    }
+
+    if ($query->isUnitsTab()) {
+        return \__('Units / Rooms', 'must-hotel-booking');
+    }
+
+    return \__('Rooms / Listings', 'must-hotel-booking');
+}
+
+function get_accommodation_current_view_count(AccommodationAdminQuery $query, array $pageData): int
+{
+    if ($query->isCategoriesTab()) {
+        return isset($pageData['category_rows']) && \is_array($pageData['category_rows'])
+            ? \count($pageData['category_rows'])
+            : 0;
+    }
+
+    if ($query->isUnitsTab()) {
+        return isset($pageData['unit_filter_count']) ? (int) $pageData['unit_filter_count'] : 0;
+    }
+
+    return isset($pageData['type_filter_count']) ? (int) $pageData['type_filter_count'] : 0;
+}
+
+/**
+ * @return array{label: string, url: string, modal: string}
+ */
+function get_accommodation_primary_action(AccommodationAdminQuery $query): array
+{
+    if ($query->isCategoriesTab()) {
+        return [
+            'label' => \__('Create Category', 'must-hotel-booking'),
+            'url' => get_admin_rooms_page_url(['tab' => 'categories']),
+            'modal' => 'category',
+        ];
+    }
+
+    if ($query->isUnitsTab()) {
+        return [
+            'label' => \__('Create Unit', 'must-hotel-booking'),
+            'url' => get_admin_rooms_page_url(['tab' => 'units']),
+            'modal' => 'unit',
+        ];
+    }
+
+    return [
+        'label' => \__('Add Accommodation', 'must-hotel-booking'),
+        'url' => get_admin_rooms_page_url(['tab' => 'rooms']),
+        'modal' => 'type',
+    ];
+}
+
+function render_accommodation_page_header(
+    AccommodationAdminQuery $query,
+    array $pageData,
+    string $calendarUrl,
+    string $reservationsUrl,
+    string $ratePlansUrl
+): void {
+    $primaryAction = get_accommodation_primary_action($query);
+    $viewLabel = get_accommodation_current_view_label($query);
+    $viewCount = get_accommodation_current_view_count($query, $pageData);
+    $categoryCount = isset($pageData['category_rows']) && \is_array($pageData['category_rows'])
+        ? \count($pageData['category_rows'])
+        : 0;
+    $listingCount = isset($pageData['summary_cards'][1]['value']) ? (int) $pageData['summary_cards'][1]['value'] : 0;
+    $publiclyVisible = isset($pageData['summary_cards'][2]['value']) ? (int) $pageData['summary_cards'][2]['value'] : 0;
+    $pricingReady = isset($pageData['summary_cards'][3]['value']) ? (int) $pageData['summary_cards'][3]['value'] : 0;
+    $futureReservations = isset($pageData['summary_cards'][5]['value']) ? (int) $pageData['summary_cards'][5]['value'] : 0;
+
+    echo '<header class="must-dashboard-hero must-accommodation-hero">';
+    echo '<div class="must-dashboard-hero-copy">';
+    echo '<span class="must-dashboard-eyebrow">' . \esc_html__('Accommodation Structure', 'must-hotel-booking') . '</span>';
+    echo '<h1>' . \esc_html__('Accommodations', 'must-hotel-booking') . '</h1>';
+    echo '<p class="description">' . \esc_html__('Run categories, sellable room listings, and physical units from one workspace while staying aligned with pricing, availability, reservations, and the calendar.', 'must-hotel-booking') . '</p>';
+    echo '<div class="must-dashboard-hero-meta">';
+    echo '<span class="must-dashboard-hero-pill"><strong>' . \esc_html__('Current View', 'must-hotel-booking') . '</strong> ' . \esc_html($viewLabel) . '</span>';
+    echo '<span class="must-dashboard-hero-pill"><strong>' . \esc_html__('In View', 'must-hotel-booking') . '</strong> ' . \esc_html((string) $viewCount) . '</span>';
+    echo '<span class="must-dashboard-hero-pill"><strong>' . \esc_html__('Categories', 'must-hotel-booking') . '</strong> ' . \esc_html((string) $categoryCount) . '</span>';
+    echo '<span class="must-dashboard-hero-pill"><strong>' . \esc_html__('Listings', 'must-hotel-booking') . '</strong> ' . \esc_html((string) $listingCount) . '</span>';
+    echo '<span class="must-dashboard-hero-pill"><strong>' . \esc_html__('Public', 'must-hotel-booking') . '</strong> ' . \esc_html((string) $publiclyVisible) . '</span>';
+    echo '<span class="must-dashboard-hero-pill"><strong>' . \esc_html__('Pricing Ready', 'must-hotel-booking') . '</strong> ' . \esc_html((string) $pricingReady) . '</span>';
+    echo '<span class="must-dashboard-hero-pill"><strong>' . \esc_html__('Future Reservations', 'must-hotel-booking') . '</strong> ' . \esc_html((string) $futureReservations) . '</span>';
+    echo '</div>';
+    echo '</div>';
+    echo '<div class="must-dashboard-hero-actions">';
+    echo '<a class="button button-primary must-open-accommodation-editor" href="' . \esc_url($primaryAction['url']) . '" data-editor-url="' . \esc_url($primaryAction['url']) . '" data-editor-modal="' . \esc_attr($primaryAction['modal']) . '">' . \esc_html($primaryAction['label']) . '</a>';
+
+    if (!$query->isCategoriesTab()) {
+        echo '<a class="button must-dashboard-header-link must-open-accommodation-editor" href="' . \esc_url(get_admin_rooms_page_url(['tab' => 'categories'])) . '" data-editor-url="' . \esc_url(get_admin_rooms_page_url(['tab' => 'categories'])) . '" data-editor-modal="category">' . \esc_html__('Create Category', 'must-hotel-booking') . '</a>';
+    }
+
+    if (!$query->isRoomsTab()) {
+        echo '<a class="button must-dashboard-header-link must-open-accommodation-editor" href="' . \esc_url(get_admin_rooms_page_url(['tab' => 'rooms'])) . '" data-editor-url="' . \esc_url(get_admin_rooms_page_url(['tab' => 'rooms'])) . '" data-editor-modal="type">' . \esc_html__('Add Accommodation', 'must-hotel-booking') . '</a>';
+    }
+
+    if ($calendarUrl !== '') {
+        echo '<a class="button must-dashboard-header-link" href="' . \esc_url($calendarUrl) . '">' . \esc_html__('Open Calendar', 'must-hotel-booking') . '</a>';
+    }
+
+    if ($reservationsUrl !== '') {
+        echo '<a class="button must-dashboard-header-link" href="' . \esc_url($reservationsUrl) . '">' . \esc_html__('Open Reservations', 'must-hotel-booking') . '</a>';
+    }
+
+    if ($ratePlansUrl !== '') {
+        echo '<a class="button must-dashboard-header-link" href="' . \esc_url($ratePlansUrl) . '">' . \esc_html__('Open Rate Plans', 'must-hotel-booking') . '</a>';
+    }
+
+    echo '</div>';
+    echo '</header>';
 }
 
 function render_accommodation_import_export_panel(AccommodationAdminQuery $query): void
@@ -637,38 +783,67 @@ function render_accommodation_import_export_panel(AccommodationAdminQuery $query
         AccommodationImportExportService::ACTION_DOWNLOAD_TEMPLATE
     );
 
-    echo '<section class="must-accommodation-panel must-accommodation-import-tools-panel">';
-    echo '<div class="must-accommodation-panel-head">';
-    echo '<div><h2>' . \esc_html__('Excel Import & Export', 'must-hotel-booking') . '</h2><p>' . \esc_html__('Download a manager-friendly room-listing workbook, start from a clean template, or import room detail changes with row-level validation.', 'must-hotel-booking') . '</p></div>';
-    echo '<div class="must-accommodation-panel-actions">';
-    echo '<a class="button button-secondary" href="' . \esc_url($exportUrl) . '">' . \esc_html__('Download Current Data', 'must-hotel-booking') . '</a>';
-    echo '<a class="button button-secondary" href="' . \esc_url($templateUrl) . '">' . \esc_html__('Download Template', 'must-hotel-booking') . '</a>';
-    echo '</div></div>';
-    echo '<div class="must-accommodation-import-tools-grid">';
-    echo '<div class="must-accommodation-import-tools-copy">';
-    echo '<span class="must-accommodation-kicker">' . \esc_html__('Workbook Structure', 'must-hotel-booking') . '</span>';
-    echo '<h3>' . \esc_html__('One editable sheet for room/listing details.', 'must-hotel-booking') . '</h3>';
-    echo '<p>' . \esc_html__('Excel is limited to bulk room/listing create and edit work. Categories, physical units, operational inventory, and live availability stay managed inside WordPress admin.', 'must-hotel-booking') . '</p>';
-    echo '<ul class="must-accommodation-import-facts">';
-    echo '<li>' . \esc_html(\sprintf(__('Edit only the %s sheet. Each row is one sellable room/listing record.', 'must-hotel-booking'), $sheetName)) . '</li>';
-    echo '<li>' . \esc_html__('Use the id column to update existing room listings. Leave id empty to create a new room listing.', 'must-hotel-booking') . '</li>';
-    echo '<li>' . \esc_html(\sprintf(__('Use accommodation_category values that match the existing admin-managed categories: %s.', 'must-hotel-booking'), $categoryLabels)) . '</li>';
-    echo '<li>' . \esc_html__('Slug is handled automatically. New rows generate a slug from the title, and existing rows keep their current slug.', 'must-hotel-booking') . '</li>';
-    echo '<li>' . \esc_html__('Images are not imported from Excel. Add or update room images later in WordPress admin.', 'must-hotel-booking') . '</li>';
-    echo '<li>' . \esc_html__('Excel no longer manages accommodation units, unit status, inventory locks, or live availability state.', 'must-hotel-booking') . '</li>';
-    echo '<li>' . \esc_html__('Only .xlsx is supported for import in this release.', 'must-hotel-booking') . '</li>';
-    echo '</ul>';
+    echo '<section class="postbox must-dashboard-panel must-accommodation-tools-panel">';
+    echo '<div class="must-dashboard-panel-inner must-accommodation-tools-inner">';
+    echo '<div class="must-dashboard-panel-heading">';
+    echo '<div class="must-dashboard-panel-heading-copy"><h2>' . \esc_html__('Excel Import & Export', 'must-hotel-booking') . '</h2><p>' . \esc_html__('Use one operations-ready workbook to export live accommodation data, prep bulk listing changes offline, and import validated updates back into the product workspace.', 'must-hotel-booking') . '</p></div>';
     echo '</div>';
+    echo '<div class="must-accommodation-tools-grid">';
+    echo '<div class="must-accommodation-tools-main">';
+    echo '<div class="must-accommodation-tools-overview">';
+    echo '<div class="must-accommodation-tools-overview-copy">';
+    echo '<span class="must-dashboard-eyebrow">' . \esc_html__('Workbook Workflow', 'must-hotel-booking') . '</span>';
+    echo '<h3>' . \esc_html__('Keep bulk listing updates disciplined and predictable.', 'must-hotel-booking') . '</h3>';
+    echo '<p>' . \esc_html__('Excel is intentionally limited to sellable room/listing records. Categories, physical units, operational inventory, and live availability stay inside WordPress admin so the accommodation model stays operationally clean.', 'must-hotel-booking') . '</p>';
+    echo '</div>';
+    echo '<div class="must-accommodation-tools-overview-pills">';
+    echo '<span class="must-dashboard-hero-pill"><strong>' . \esc_html__('Editable Sheet', 'must-hotel-booking') . '</strong> ' . \esc_html($sheetName) . '</span>';
+    echo '<span class="must-dashboard-hero-pill"><strong>' . \esc_html__('Category Source', 'must-hotel-booking') . '</strong> ' . \esc_html__('Admin managed', 'must-hotel-booking') . '</span>';
+    echo '<span class="must-dashboard-hero-pill"><strong>' . \esc_html__('Import Format', 'must-hotel-booking') . '</strong> .xlsx</span>';
+    echo '</div></div>';
+    echo '<div class="must-accommodation-tools-knowledge">';
+    echo '<details class="must-accommodation-disclosure" open>';
+    echo '<summary><div><strong>' . \esc_html__('What the workbook controls', 'must-hotel-booking') . '</strong><small>' . \esc_html__('Use the spreadsheet for listing records only.', 'must-hotel-booking') . '</small></div></summary>';
+    echo '<div class="must-accommodation-disclosure-body"><ul class="must-accommodation-import-facts">';
+    echo '<li>' . \esc_html(\sprintf(__('Edit only the %s sheet. Each row represents one sellable room/listing record.', 'must-hotel-booking'), $sheetName)) . '</li>';
+    echo '<li>' . \esc_html__('Use the id column to update existing room listings. Leave id empty to create a new room listing.', 'must-hotel-booking') . '</li>';
+    echo '<li>' . \esc_html__('Slug is handled automatically. New rows generate a slug from the title, and existing rows keep their current slug.', 'must-hotel-booking') . '</li>';
+    echo '<li>' . \esc_html__('Excel no longer manages accommodation units, inventory locks, or live availability state.', 'must-hotel-booking') . '</li>';
+    echo '</ul></div></details>';
+    echo '<details class="must-accommodation-disclosure">';
+    echo '<summary><div><strong>' . \esc_html__('Before you import', 'must-hotel-booking') . '</strong><small>' . \esc_html__('Validate categories and assets before running the file.', 'must-hotel-booking') . '</small></div></summary>';
+    echo '<div class="must-accommodation-disclosure-body"><ul class="must-accommodation-import-facts">';
+    echo '<li>' . \esc_html(\sprintf(__('Use accommodation_category values that match the existing admin-managed categories: %s.', 'must-hotel-booking'), $categoryLabels)) . '</li>';
+    echo '<li>' . \esc_html__('Images are not imported from Excel. Add or update room images later in WordPress admin.', 'must-hotel-booking') . '</li>';
+    echo '<li>' . \esc_html__('Only .xlsx is supported for import in this release.', 'must-hotel-booking') . '</li>';
+    echo '</ul></div></details>';
+    echo '</div></div>';
+    echo '<div class="must-accommodation-tools-side">';
+    echo '<article class="must-accommodation-tool-card">';
+    echo '<span class="must-dashboard-eyebrow">' . \esc_html__('Export Workspace', 'must-hotel-booking') . '</span>';
+    echo '<h3>' . \esc_html__('Start from current data or a clean template.', 'must-hotel-booking') . '</h3>';
+    echo '<p>' . \esc_html__('Use the live export when staff need the current listing structure, or start from a clean template for controlled catalog creation.', 'must-hotel-booking') . '</p>';
+    echo '<div class="must-accommodation-tool-card-actions">';
+    echo '<a class="button button-primary" href="' . \esc_url($exportUrl) . '">' . \esc_html__('Download Current Data', 'must-hotel-booking') . '</a>';
+    echo '<a class="button must-dashboard-header-link" href="' . \esc_url($templateUrl) . '">' . \esc_html__('Download Template', 'must-hotel-booking') . '</a>';
+    echo '</div>';
+    echo '</article>';
+    echo '<article class="must-accommodation-tool-card is-accent">';
+    echo '<span class="must-dashboard-eyebrow">' . \esc_html__('Import Workspace', 'must-hotel-booking') . '</span>';
+    echo '<h3>' . \esc_html__('Import validated listing updates.', 'must-hotel-booking') . '</h3>';
+    echo '<p>' . \esc_html(\sprintf(__('Import processes the %1$s sheet only. Existing listings update by id, blank ids create new rows, invalid categories fail at row level, and units or inventory data are ignored.', 'must-hotel-booking'), $sheetName)) . '</p>';
     echo '<form method="post" enctype="multipart/form-data" class="must-accommodation-import-form">';
     \wp_nonce_field('must_accommodation_import_workbook', 'must_accommodation_import_nonce');
     echo '<input type="hidden" name="must_accommodation_action" value="' . \esc_attr(AccommodationImportExportService::ACTION_IMPORT_WORKBOOK) . '" />';
     echo '<input type="hidden" name="tab" value="' . \esc_attr($query->getTab()) . '" />';
     echo '<label><span>' . \esc_html__('Workbook File', 'must-hotel-booking') . '</span><input type="file" name="accommodation_workbook" accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" required /></label>';
-    echo '<p class="description">' . \esc_html(\sprintf(__('Import processes the %1$s sheet only. Existing room listings are updated by id, blank ids create new listings, invalid accommodation_category values fail at the row level, and units/inventory data are ignored by this workflow.', 'must-hotel-booking'), $sheetName)) . '</p>';
-    echo '<div class="must-accommodation-panel-actions">';
+    echo '<p class="description">' . \esc_html__('Import keeps the current workspace in place and returns a row-level report whenever validation blocks a change.', 'must-hotel-booking') . '</p>';
+    echo '<div class="must-accommodation-tool-card-actions">';
     echo '<button type="submit" class="button button-primary">' . \esc_html__('Import Room Listing Workbook', 'must-hotel-booking') . '</button>';
     echo '</div>';
     echo '</form>';
+    echo '</article>';
+    echo '</div>';
     echo '</div>';
     echo '</section>';
 }
@@ -690,7 +865,8 @@ function render_accommodation_import_report(?array $report): void
         ? \__('Import Failed', 'must-hotel-booking')
         : ($status === 'warning' ? \__('Import Completed With Issues', 'must-hotel-booking') : \__('Import Completed', 'must-hotel-booking'));
 
-    echo '<section class="must-accommodation-import-report is-' . \esc_attr($status) . '">';
+    echo '<section class="postbox must-dashboard-panel must-accommodation-import-report is-' . \esc_attr($status) . '">';
+    echo '<div class="must-dashboard-panel-inner">';
     echo '<div class="must-accommodation-import-report-head">';
     echo '<div><span class="must-accommodation-kicker">' . \esc_html__('Workbook Import', 'must-hotel-booking') . '</span><h2>' . \esc_html($statusLabel) . '</h2>';
 
@@ -709,7 +885,7 @@ function render_accommodation_import_report(?array $report): void
     }
 
     echo '</div>';
-    echo '<span class="must-accommodation-badge is-' . \esc_attr($status === 'warning' ? 'warning' : ($status === 'error' ? 'danger' : 'success')) . '">' . \esc_html($statusLabel) . '</span>';
+    render_accommodation_badge($statusLabel, $status === 'warning' ? 'warning' : ($status === 'error' ? 'danger' : 'success'));
     echo '</div>';
 
     $summaryCards = [
@@ -751,6 +927,7 @@ function render_accommodation_import_report(?array $report): void
         echo '</tbody></table></div></div>';
     }
 
+    echo '</div>';
     echo '</section>';
 }
 
@@ -761,16 +938,36 @@ function render_accommodation_category_list(array $pageData): void
 {
     $rows = isset($pageData['category_rows']) && \is_array($pageData['category_rows']) ? $pageData['category_rows'] : [];
 
-    echo '<section class="must-accommodation-panel must-accommodation-list-panel">';
-    echo '<div class="must-accommodation-panel-head">';
-    echo '<div><h2>' . \esc_html__('Accommodation Categories', 'must-hotel-booking') . '</h2><p>' . \esc_html__('Manage the top-level groupings that room listings are assigned to. Categories are admin-managed and are no longer created from Excel.', 'must-hotel-booking') . '</p></div>';
-    echo '<div class="must-accommodation-panel-actions">';
+    echo '<section class="postbox must-dashboard-panel must-accommodation-list-panel">';
+    echo '<div class="must-dashboard-panel-inner">';
+    echo '<div class="must-dashboard-panel-heading">';
+    echo '<div class="must-dashboard-panel-heading-copy"><h2>' . \esc_html__('Accommodation Categories', 'must-hotel-booking') . '</h2><p>' . \esc_html__('Manage the top-level groupings that room listings are assigned to. Categories are admin-managed and are no longer created from Excel.', 'must-hotel-booking') . '</p></div>';
+    echo '<div class="must-accommodation-list-heading-actions">';
+    echo '<span class="must-dashboard-hero-pill"><strong>' . \esc_html__('Categories', 'must-hotel-booking') . '</strong> ' . \esc_html((string) \count($rows)) . '</span>';
     echo '<a class="button button-primary must-open-accommodation-editor" href="' . \esc_url(get_admin_rooms_page_url(['tab' => 'categories'])) . '" data-editor-url="' . \esc_url(get_admin_rooms_page_url(['tab' => 'categories'])) . '" data-editor-modal="category">' . \esc_html__('Create Category', 'must-hotel-booking') . '</a>';
     echo '</div></div>';
     echo '<div class="must-accommodation-record-list">';
 
     if (empty($rows)) {
-        echo '<div class="must-accommodation-empty-table">' . \esc_html__('No accommodation categories exist yet.', 'must-hotel-booking') . '</div>';
+        render_accommodation_empty_state(
+            \__('No categories exist yet.', 'must-hotel-booking'),
+            \__('Create the top-level category structure first so listings can be grouped cleanly across the accommodations workspace.', 'must-hotel-booking'),
+            [
+                [
+                    'label' => \__('Create Category', 'must-hotel-booking'),
+                    'url' => get_admin_rooms_page_url(['tab' => 'categories']),
+                    'class' => 'button button-primary',
+                    'editor_modal' => 'category',
+                ],
+                [
+                    'label' => \__('Download Template', 'must-hotel-booking'),
+                    'url' => \wp_nonce_url(
+                        get_admin_rooms_page_url(['tab' => 'categories', 'action' => AccommodationImportExportService::ACTION_DOWNLOAD_TEMPLATE]),
+                        AccommodationImportExportService::ACTION_DOWNLOAD_TEMPLATE
+                    ),
+                ],
+            ]
+        );
     } else {
         foreach ($rows as $row) {
             if (!\is_array($row)) {
@@ -825,6 +1022,7 @@ function render_accommodation_category_list(array $pageData): void
         }
     }
 
+    echo '</div>';
     echo '</div>';
     echo '</section>';
 }
@@ -889,10 +1087,11 @@ function render_rooms_tabs(AccommodationAdminQuery $query): void
     $roomUrl = get_admin_rooms_page_url($query->buildUrlArgs(['tab' => 'rooms', 'paged' => 1]));
     $unitUrl = get_admin_rooms_page_url($query->buildUrlArgs(['tab' => 'units', 'paged' => 1]));
 
-    echo '<nav class="must-accommodation-tabs" aria-label="' . \esc_attr__('Accommodation views', 'must-hotel-booking') . '">';
-    echo '<a class="must-accommodation-tab' . ($query->isCategoriesTab() ? ' is-active' : '') . '" href="' . \esc_url($categoryUrl) . '">' . \esc_html__('Categories', 'must-hotel-booking') . '</a>';
-    echo '<a class="must-accommodation-tab' . ($query->isRoomsTab() ? ' is-active' : '') . '" href="' . \esc_url($roomUrl) . '">' . \esc_html__('Rooms / Listings', 'must-hotel-booking') . '</a>';
-    echo '<a class="must-accommodation-tab' . ($query->isUnitsTab() ? ' is-active' : '') . '" href="' . \esc_url($unitUrl) . '">' . \esc_html__('Units / Rooms', 'must-hotel-booking') . '</a>';
+    echo '<nav class="must-dashboard-action-strip must-accommodation-view-switcher" aria-label="' . \esc_attr__('Accommodation views', 'must-hotel-booking') . '">';
+    echo '<span class="must-dashboard-action-strip-label">' . \esc_html__('Workspace', 'must-hotel-booking') . '</span>';
+    echo '<a class="must-dashboard-action-chip must-accommodation-view-chip' . ($query->isCategoriesTab() ? ' is-current' : '') . '" href="' . \esc_url($categoryUrl) . '"' . ($query->isCategoriesTab() ? ' aria-current="page"' : '') . '>' . \esc_html__('Categories', 'must-hotel-booking') . '</a>';
+    echo '<a class="must-dashboard-action-chip must-accommodation-view-chip' . ($query->isRoomsTab() ? ' is-current' : '') . '" href="' . \esc_url($roomUrl) . '"' . ($query->isRoomsTab() ? ' aria-current="page"' : '') . '>' . \esc_html__('Rooms / Listings', 'must-hotel-booking') . '</a>';
+    echo '<a class="must-dashboard-action-chip must-accommodation-view-chip' . ($query->isUnitsTab() ? ' is-current' : '') . '" href="' . \esc_url($unitUrl) . '"' . ($query->isUnitsTab() ? ' aria-current="page"' : '') . '>' . \esc_html__('Units / Rooms', 'must-hotel-booking') . '</a>';
     echo '</nav>';
 }
 
@@ -905,10 +1104,56 @@ function render_accommodation_filter_chips(array $chips): void
         return;
     }
 
-    echo '<div class="must-accommodation-filter-chips">';
+    echo '<div class="must-accommodation-filter-chips" aria-label="' . \esc_attr__('Active filters', 'must-hotel-booking') . '">';
 
     foreach ($chips as $chip) {
         echo '<span class="must-accommodation-filter-chip"><strong>' . \esc_html((string) ($chip['label'] ?? '')) . '</strong> ' . \esc_html((string) ($chip['value'] ?? '')) . '</span>';
+    }
+
+    echo '</div>';
+}
+
+/**
+ * @param array<int, array{label: string, url: string, class?: string, editor_url?: string, editor_modal?: string}> $actions
+ */
+function render_accommodation_empty_state(string $title, string $message, array $actions = []): void
+{
+    echo '<div class="must-accommodation-empty-state">';
+    echo '<div class="must-accommodation-empty-state-copy">';
+    echo '<span class="must-dashboard-eyebrow">' . \esc_html__('Nothing In View', 'must-hotel-booking') . '</span>';
+    echo '<h3>' . \esc_html($title) . '</h3>';
+    echo '<p>' . \esc_html($message) . '</p>';
+    echo '</div>';
+
+    if (!empty($actions)) {
+        echo '<div class="must-accommodation-empty-state-actions">';
+
+        foreach ($actions as $action) {
+            $label = isset($action['label']) ? (string) $action['label'] : '';
+            $url = isset($action['url']) ? (string) $action['url'] : '';
+
+            if ($label === '' || $url === '') {
+                continue;
+            }
+
+            $class = isset($action['class']) && (string) $action['class'] !== ''
+                ? (string) $action['class']
+                : 'button must-dashboard-header-link';
+            $editorUrl = isset($action['editor_url']) && (string) $action['editor_url'] !== ''
+                ? (string) $action['editor_url']
+                : $url;
+            $editorModal = isset($action['editor_modal']) ? (string) $action['editor_modal'] : '';
+
+            echo '<a class="' . \esc_attr($class . ($editorModal !== '' ? ' must-open-accommodation-editor' : '')) . '" href="' . \esc_url($url) . '"';
+
+            if ($editorModal !== '') {
+                echo ' data-editor-url="' . \esc_url($editorUrl) . '" data-editor-modal="' . \esc_attr($editorModal) . '"';
+            }
+
+            echo '>' . \esc_html($label) . '</a>';
+        }
+
+        echo '</div>';
     }
 
     echo '</div>';
@@ -921,12 +1166,13 @@ function render_accommodation_filter_chips(array $chips): void
 function render_accommodation_pagination(array $pagination, array $args): void
 {
     $totalPages = isset($pagination['total_pages']) ? (int) $pagination['total_pages'] : 1;
+    $currentPage = isset($pagination['current_page']) ? (int) $pagination['current_page'] : 1;
+    $totalItems = isset($pagination['total_items']) ? (int) $pagination['total_items'] : 0;
 
-    if ($totalPages <= 1) {
+    if ($totalPages <= 1 && $totalItems <= 0) {
         return;
     }
 
-    $currentPage = isset($pagination['current_page']) ? (int) $pagination['current_page'] : 1;
     $big = 999999999;
     $baseUrl = \add_query_arg('paged', $big, get_admin_rooms_page_url($args));
     $links = \paginate_links(
@@ -941,16 +1187,39 @@ function render_accommodation_pagination(array $pagination, array $args): void
         ]
     );
 
-    if (!\is_string($links) || $links === '') {
-        return;
+    echo '<div class="must-accommodation-pagination">';
+    echo '<div class="must-accommodation-pagination-copy">';
+
+    if ($totalItems > 0) {
+        echo '<span class="must-accommodation-pagination-total">' . \esc_html(\sprintf(\_n('%d result', '%d results', $totalItems, 'must-hotel-booking'), $totalItems)) . '</span>';
     }
 
-    echo '<div class="must-accommodation-pagination">' . $links . '</div>'; // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped
+    if ($totalPages > 1) {
+        echo '<span class="must-accommodation-pagination-page">' . \esc_html(\sprintf(__('Page %1$d of %2$d', 'must-hotel-booking'), $currentPage, $totalPages)) . '</span>';
+    }
+
+    echo '</div>';
+
+    if (\is_string($links) && $links !== '') {
+        echo '<div class="must-accommodation-pagination-links">' . $links . '</div>'; // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped
+    }
+
+    echo '</div>';
 }
 
 function render_accommodation_badge(string $label, string $tone = 'neutral'): void
 {
-    echo '<span class="must-accommodation-badge is-' . \esc_attr($tone) . '">' . \esc_html($label) . '</span>';
+    $toneMap = [
+        'success' => 'is-ok',
+        'warning' => 'is-warning',
+        'danger' => 'is-error',
+        'info' => 'is-info',
+        'neutral' => 'is-info',
+        'muted' => 'is-muted',
+    ];
+    $className = isset($toneMap[$tone]) ? $toneMap[$tone] : 'is-info';
+
+    echo '<span class="must-dashboard-status-badge is-compact must-accommodation-badge ' . \esc_attr($className) . '">' . \esc_html($label) . '</span>';
 }
 
 /**
@@ -1030,58 +1299,62 @@ function render_accommodation_quick_links(array $links, array $labels): void
  */
 function render_accommodation_type_filters(AccommodationAdminQuery $query, array $form, array $categoryOptions, array $chips, int $count): void
 {
-    echo '<section class="must-accommodation-panel must-accommodation-filter-panel">';
-    echo '<div class="must-accommodation-panel-head">';
-    echo '<div><h2>' . \esc_html__('Filter Rooms / Listings', 'must-hotel-booking') . '</h2><p>' . \esc_html__('Surface the sellable room listings that still need pricing, availability, or status cleanup.', 'must-hotel-booking') . '</p></div>';
-    echo '<div class="must-accommodation-panel-actions">';
-    echo '<span class="must-accommodation-inline-stat">' . \esc_html(\sprintf(_n('%d listing in view', '%d listings in view', $count, 'must-hotel-booking'), $count)) . '</span>';
-    echo '<a class="button button-secondary" href="' . \esc_url(get_admin_rooms_page_url(['tab' => 'rooms'])) . '">' . \esc_html__('Reset', 'must-hotel-booking') . '</a>';
+    echo '<section class="postbox must-dashboard-panel must-accommodation-filter-panel">';
+    echo '<div class="must-dashboard-panel-inner">';
+    echo '<div class="must-dashboard-panel-heading">';
+    echo '<div class="must-dashboard-panel-heading-copy"><h2>' . \esc_html__('Filter Rooms / Listings', 'must-hotel-booking') . '</h2><p>' . \esc_html__('Search the sellable listing catalog, then narrow the workspace by category, live status, bookability, setup gaps, or future reservation exposure.', 'must-hotel-booking') . '</p></div>';
+    echo '<div class="must-accommodation-toolbar-meta">';
+    echo '<span class="must-dashboard-hero-pill"><strong>' . \esc_html__('Listings In View', 'must-hotel-booking') . '</strong> ' . \esc_html((string) $count) . '</span>';
+    echo '<a class="button must-dashboard-panel-link" href="' . \esc_url(get_admin_rooms_page_url(['tab' => 'rooms'])) . '">' . \esc_html__('Reset Filters', 'must-hotel-booking') . '</a>';
     echo '</div></div>';
-    echo '<form method="get" class="must-accommodation-filter-grid">';
+    echo '<form method="get" class="must-accommodation-toolbar">';
     echo '<input type="hidden" name="page" value="must-hotel-booking-rooms" />';
     echo '<input type="hidden" name="tab" value="rooms" />';
+    echo '<div class="must-accommodation-toolbar-grid">';
 
-    echo '<label><span>' . \esc_html__('Search', 'must-hotel-booking') . '</span><input type="search" name="search" value="' . \esc_attr($query->getSearch()) . '" placeholder="' . \esc_attr__('Name, slug, code, description', 'must-hotel-booking') . '" /></label>';
+    echo '<label class="must-accommodation-toolbar-field is-wide"><span>' . \esc_html__('Search', 'must-hotel-booking') . '</span><input type="search" name="search" value="' . \esc_attr($query->getSearch()) . '" placeholder="' . \esc_attr__('Name, slug, code, description', 'must-hotel-booking') . '" /><small>' . \esc_html__('Search listing names, internal codes, slugs, descriptions, and category labels.', 'must-hotel-booking') . '</small></label>';
 
-    echo '<label><span>' . \esc_html__('Category', 'must-hotel-booking') . '</span><select name="category">';
+    echo '<label class="must-accommodation-toolbar-field"><span>' . \esc_html__('Category', 'must-hotel-booking') . '</span><select name="category">';
     echo '<option value="">' . \esc_html__('All categories', 'must-hotel-booking') . '</option>';
     foreach ($categoryOptions as $categoryKey => $categoryLabel) {
         echo '<option value="' . \esc_attr((string) $categoryKey) . '"' . \selected($query->getCategory(), (string) $categoryKey, false) . '>' . \esc_html((string) $categoryLabel) . '</option>';
     }
     echo '</select></label>';
 
-    echo '<label><span>' . \esc_html__('Status', 'must-hotel-booking') . '</span><select name="status">';
+    echo '<label class="must-accommodation-toolbar-field"><span>' . \esc_html__('Status', 'must-hotel-booking') . '</span><select name="status">';
     echo '<option value="">' . \esc_html__('All statuses', 'must-hotel-booking') . '</option>';
     echo '<option value="active"' . \selected($query->getStatus(), 'active', false) . '>' . \esc_html__('Active', 'must-hotel-booking') . '</option>';
     echo '<option value="inactive"' . \selected($query->getStatus(), 'inactive', false) . '>' . \esc_html__('Inactive', 'must-hotel-booking') . '</option>';
     echo '</select></label>';
 
-    echo '<label><span>' . \esc_html__('Bookable', 'must-hotel-booking') . '</span><select name="bookable">';
+    echo '<label class="must-accommodation-toolbar-field"><span>' . \esc_html__('Bookable', 'must-hotel-booking') . '</span><select name="bookable">';
     echo '<option value="">' . \esc_html__('Any', 'must-hotel-booking') . '</option>';
     echo '<option value="yes"' . \selected($query->getBookable(), 'yes', false) . '>' . \esc_html__('Bookable', 'must-hotel-booking') . '</option>';
     echo '<option value="no"' . \selected($query->getBookable(), 'no', false) . '>' . \esc_html__('Not bookable', 'must-hotel-booking') . '</option>';
     echo '</select></label>';
 
-    echo '<label><span>' . \esc_html__('Setup', 'must-hotel-booking') . '</span><select name="setup">';
+    echo '<label class="must-accommodation-toolbar-field"><span>' . \esc_html__('Setup', 'must-hotel-booking') . '</span><select name="setup">';
     echo '<option value="">' . \esc_html__('Any setup state', 'must-hotel-booking') . '</option>';
     echo '<option value="missing_pricing"' . \selected($query->getSetup(), 'missing_pricing', false) . '>' . \esc_html__('Missing pricing', 'must-hotel-booking') . '</option>';
     echo '<option value="missing_availability"' . \selected($query->getSetup(), 'missing_availability', false) . '>' . \esc_html__('Missing availability', 'must-hotel-booking') . '</option>';
     echo '<option value="attention"' . \selected($query->getSetup(), 'attention', false) . '>' . \esc_html__('Needs attention', 'must-hotel-booking') . '</option>';
     echo '</select></label>';
 
-    echo '<label><span>' . \esc_html__('Future Reservations', 'must-hotel-booking') . '</span><select name="future">';
+    echo '<label class="must-accommodation-toolbar-field"><span>' . \esc_html__('Future Reservations', 'must-hotel-booking') . '</span><select name="future">';
     echo '<option value="">' . \esc_html__('Any', 'must-hotel-booking') . '</option>';
     echo '<option value="yes"' . \selected($query->getFuture(), 'yes', false) . '>' . \esc_html__('Has future reservations', 'must-hotel-booking') . '</option>';
     echo '<option value="no"' . \selected($query->getFuture(), 'no', false) . '>' . \esc_html__('No future reservations', 'must-hotel-booking') . '</option>';
     echo '</select></label>';
 
-    echo '<div class="must-accommodation-filter-actions">';
+    echo '<div class="must-accommodation-toolbar-actions">';
     echo '<button type="submit" class="button button-primary">' . \esc_html__('Apply Filters', 'must-hotel-booking') . '</button>';
-    echo '<a class="button button-secondary" href="' . \esc_url(get_admin_rooms_page_url(['tab' => 'rooms'])) . '">' . \esc_html__('Clear', 'must-hotel-booking') . '</a>';
+    echo '<a class="button must-dashboard-header-link" href="' . \esc_url(get_admin_rooms_page_url(['tab' => 'rooms'])) . '">' . \esc_html__('Clear', 'must-hotel-booking') . '</a>';
+    echo '</div>';
     echo '</div>';
     echo '</form>';
 
     render_accommodation_filter_chips($chips);
+    echo '</div>';
     echo '</section>';
 }
 
@@ -1092,20 +1365,22 @@ function render_accommodation_type_filters(AccommodationAdminQuery $query, array
  */
 function render_accommodation_unit_filters(AccommodationAdminQuery $query, array $typeOptions, array $statusOptions, array $chips, int $count): void
 {
-    echo '<section class="must-accommodation-panel must-accommodation-filter-panel">';
-    echo '<div class="must-accommodation-panel-head">';
-    echo '<div><h2>' . \esc_html__('Filter Units / Rooms', 'must-hotel-booking') . '</h2><p>' . \esc_html__('Inspect physical units, operational status, and reservation exposure without leaving the inventory workspace.', 'must-hotel-booking') . '</p></div>';
-    echo '<div class="must-accommodation-panel-actions">';
-    echo '<span class="must-accommodation-inline-stat">' . \esc_html(\sprintf(_n('%d unit in view', '%d units in view', $count, 'must-hotel-booking'), $count)) . '</span>';
-    echo '<a class="button button-secondary" href="' . \esc_url(get_admin_rooms_page_url(['tab' => 'units'])) . '">' . \esc_html__('Reset', 'must-hotel-booking') . '</a>';
+    echo '<section class="postbox must-dashboard-panel must-accommodation-filter-panel">';
+    echo '<div class="must-dashboard-panel-inner">';
+    echo '<div class="must-dashboard-panel-heading">';
+    echo '<div class="must-dashboard-panel-heading-copy"><h2>' . \esc_html__('Filter Units / Rooms', 'must-hotel-booking') . '</h2><p>' . \esc_html__('Inspect physical room inventory, operational state, and reservation exposure without leaving the accommodations workspace.', 'must-hotel-booking') . '</p></div>';
+    echo '<div class="must-accommodation-toolbar-meta">';
+    echo '<span class="must-dashboard-hero-pill"><strong>' . \esc_html__('Units In View', 'must-hotel-booking') . '</strong> ' . \esc_html((string) $count) . '</span>';
+    echo '<a class="button must-dashboard-panel-link" href="' . \esc_url(get_admin_rooms_page_url(['tab' => 'units'])) . '">' . \esc_html__('Reset Filters', 'must-hotel-booking') . '</a>';
     echo '</div></div>';
-    echo '<form method="get" class="must-accommodation-filter-grid">';
+    echo '<form method="get" class="must-accommodation-toolbar">';
     echo '<input type="hidden" name="page" value="must-hotel-booking-rooms" />';
     echo '<input type="hidden" name="tab" value="units" />';
+    echo '<div class="must-accommodation-toolbar-grid">';
 
-    echo '<label><span>' . \esc_html__('Search', 'must-hotel-booking') . '</span><input type="search" name="search" value="' . \esc_attr($query->getSearch()) . '" placeholder="' . \esc_attr__('Room number, title, building', 'must-hotel-booking') . '" /></label>';
+    echo '<label class="must-accommodation-toolbar-field is-wide"><span>' . \esc_html__('Search', 'must-hotel-booking') . '</span><input type="search" name="search" value="' . \esc_attr($query->getSearch()) . '" placeholder="' . \esc_attr__('Room number, title, building', 'must-hotel-booking') . '" /><small>' . \esc_html__('Search room numbers, unit titles, buildings, and linked listing names.', 'must-hotel-booking') . '</small></label>';
 
-    echo '<label><span>' . \esc_html__('Room / Listing', 'must-hotel-booking') . '</span><select name="room_type_id">';
+    echo '<label class="must-accommodation-toolbar-field"><span>' . \esc_html__('Room / Listing', 'must-hotel-booking') . '</span><select name="room_type_id">';
     echo '<option value="0">' . \esc_html__('All room listings', 'must-hotel-booking') . '</option>';
     foreach ($typeOptions as $typeOption) {
         $optionId = isset($typeOption['id']) ? (int) $typeOption['id'] : 0;
@@ -1119,38 +1394,40 @@ function render_accommodation_unit_filters(AccommodationAdminQuery $query, array
     }
     echo '</select></label>';
 
-    echo '<label><span>' . \esc_html__('Status', 'must-hotel-booking') . '</span><select name="status">';
+    echo '<label class="must-accommodation-toolbar-field"><span>' . \esc_html__('Status', 'must-hotel-booking') . '</span><select name="status">';
     echo '<option value="">' . \esc_html__('All statuses', 'must-hotel-booking') . '</option>';
     echo '<option value="active"' . \selected($query->getStatus(), 'active', false) . '>' . \esc_html__('Active', 'must-hotel-booking') . '</option>';
     echo '<option value="inactive"' . \selected($query->getStatus(), 'inactive', false) . '>' . \esc_html__('Inactive', 'must-hotel-booking') . '</option>';
     echo '</select></label>';
 
-    echo '<label><span>' . \esc_html__('Bookable', 'must-hotel-booking') . '</span><select name="bookable">';
+    echo '<label class="must-accommodation-toolbar-field"><span>' . \esc_html__('Bookable', 'must-hotel-booking') . '</span><select name="bookable">';
     echo '<option value="">' . \esc_html__('Any', 'must-hotel-booking') . '</option>';
     echo '<option value="yes"' . \selected($query->getBookable(), 'yes', false) . '>' . \esc_html__('Bookable', 'must-hotel-booking') . '</option>';
     echo '<option value="no"' . \selected($query->getBookable(), 'no', false) . '>' . \esc_html__('Not bookable', 'must-hotel-booking') . '</option>';
     echo '</select></label>';
 
-    echo '<label><span>' . \esc_html__('Operational State', 'must-hotel-booking') . '</span><select name="unit_status">';
+    echo '<label class="must-accommodation-toolbar-field"><span>' . \esc_html__('Operational State', 'must-hotel-booking') . '</span><select name="unit_status">';
     echo '<option value="">' . \esc_html__('Any state', 'must-hotel-booking') . '</option>';
     foreach ($statusOptions as $statusKey => $statusLabel) {
         echo '<option value="' . \esc_attr((string) $statusKey) . '"' . \selected($query->getUnitStatus(), (string) $statusKey, false) . '>' . \esc_html((string) $statusLabel) . '</option>';
     }
     echo '</select></label>';
 
-    echo '<label><span>' . \esc_html__('Future Reservations', 'must-hotel-booking') . '</span><select name="future">';
+    echo '<label class="must-accommodation-toolbar-field"><span>' . \esc_html__('Future Reservations', 'must-hotel-booking') . '</span><select name="future">';
     echo '<option value="">' . \esc_html__('Any', 'must-hotel-booking') . '</option>';
     echo '<option value="yes"' . \selected($query->getFuture(), 'yes', false) . '>' . \esc_html__('Has future reservations', 'must-hotel-booking') . '</option>';
     echo '<option value="no"' . \selected($query->getFuture(), 'no', false) . '>' . \esc_html__('No future reservations', 'must-hotel-booking') . '</option>';
     echo '</select></label>';
 
-    echo '<div class="must-accommodation-filter-actions">';
+    echo '<div class="must-accommodation-toolbar-actions">';
     echo '<button type="submit" class="button button-primary">' . \esc_html__('Apply Filters', 'must-hotel-booking') . '</button>';
-    echo '<a class="button button-secondary" href="' . \esc_url(get_admin_rooms_page_url(['tab' => 'units'])) . '">' . \esc_html__('Clear', 'must-hotel-booking') . '</a>';
+    echo '<a class="button must-dashboard-header-link" href="' . \esc_url(get_admin_rooms_page_url(['tab' => 'units'])) . '">' . \esc_html__('Clear', 'must-hotel-booking') . '</a>';
+    echo '</div>';
     echo '</div>';
     echo '</form>';
 
     render_accommodation_filter_chips($chips);
+    echo '</div>';
     echo '</section>';
 }
 
@@ -1489,103 +1766,177 @@ function render_accommodation_type_list(AccommodationAdminQuery $query, array $p
     $rows = isset($pageData['type_rows']) && \is_array($pageData['type_rows']) ? $pageData['type_rows'] : [];
     $pagination = isset($pageData['type_pagination']) && \is_array($pageData['type_pagination']) ? $pageData['type_pagination'] : [];
 
-    echo '<section class="must-accommodation-panel must-accommodation-list-panel">';
-    echo '<div class="must-accommodation-panel-head">';
-    echo '<div><h2>' . \esc_html__('Rooms / Listings', 'must-hotel-booking') . '</h2><p>' . \esc_html__('These sellable room/listing records drive pricing, availability, reservations, and the public room structure.', 'must-hotel-booking') . '</p></div>';
-    echo '<div class="must-accommodation-panel-actions">';
+    echo '<section class="postbox must-dashboard-panel must-accommodation-list-panel">';
+    echo '<div class="must-dashboard-panel-inner">';
+    echo '<div class="must-dashboard-panel-heading">';
+    echo '<div class="must-dashboard-panel-heading-copy"><h2>' . \esc_html__('Rooms / Listings', 'must-hotel-booking') . '</h2><p>' . \esc_html__('These sellable listing records drive pricing, availability, reservations, and the public-facing accommodation structure.', 'must-hotel-booking') . '</p></div>';
+    echo '<div class="must-accommodation-list-heading-actions">';
+    echo '<span class="must-dashboard-hero-pill"><strong>' . \esc_html__('Listings In View', 'must-hotel-booking') . '</strong> ' . \esc_html((string) (isset($pageData['type_filter_count']) ? (int) $pageData['type_filter_count'] : \count($rows))) . '</span>';
     echo '<a class="button button-primary must-open-accommodation-editor" href="' . \esc_url(get_admin_rooms_page_url(['tab' => 'rooms'])) . '" data-editor-url="' . \esc_url(get_admin_rooms_page_url(['tab' => 'rooms'])) . '" data-editor-modal="type">' . \esc_html__('Create New Listing', 'must-hotel-booking') . '</a>';
     echo '</div></div>';
     echo '<div class="must-accommodation-record-list">';
 
     if (empty($rows)) {
-        echo '<div class="must-accommodation-empty-table">' . \esc_html__('No room listings matched the current filters.', 'must-hotel-booking') . '</div>';
+        render_accommodation_empty_state(
+            \__('No room listings matched the current filters.', 'must-hotel-booking'),
+            \__('Clear one or more filters, import a workbook, or create a new listing to rebuild the workspace view.', 'must-hotel-booking'),
+            [
+                [
+                    'label' => \__('Add Accommodation', 'must-hotel-booking'),
+                    'url' => get_admin_rooms_page_url(['tab' => 'rooms']),
+                    'class' => 'button button-primary',
+                    'editor_modal' => 'type',
+                ],
+                [
+                    'label' => \__('Reset Filters', 'must-hotel-booking'),
+                    'url' => get_admin_rooms_page_url(['tab' => 'rooms']),
+                ],
+            ]
+        );
     } else {
+        $groups = [];
+
         foreach ($rows as $row) {
             if (!\is_array($row)) {
                 continue;
             }
 
-            $pricingTone = !empty($row['pricing_configured']) ? 'success' : 'warning';
-            $availabilityTone = !empty($row['availability_configured']) ? 'success' : 'warning';
-            $reservationDetail = \sprintf(__('Current stays: %d', 'must-hotel-booking'), (int) ($row['current_reservations'] ?? 0));
+            $groupLabel = \trim((string) ($row['category_label'] ?? ''));
 
-            if ((string) ($row['next_checkin'] ?? '') !== '') {
-                $reservationDetail .= ' / ' . \sprintf(__('Next %s', 'must-hotel-booking'), (string) $row['next_checkin']);
+            if ($groupLabel === '') {
+                $groupLabel = \__('Uncategorized', 'must-hotel-booking');
             }
 
-            echo '<article class="must-accommodation-record-card">';
-            echo '<div class="must-accommodation-record-head">';
-            echo '<div class="must-accommodation-record-main">';
-            echo '<div class="must-accommodation-record-title-row">';
-            echo '<h3 class="must-accommodation-record-title"><a class="must-open-accommodation-editor" href="' . \esc_url((string) ($row['edit_url'] ?? '')) . '" data-editor-url="' . \esc_url((string) ($row['edit_url'] ?? '')) . '" data-editor-modal="type">' . \esc_html((string) ($row['name'] ?? '')) . '</a></h3>';
-            if ((string) ($row['internal_code'] ?? '') !== '') {
-                echo '<span class="must-accommodation-record-code">' . \esc_html((string) $row['internal_code']) . '</span>';
+            if (!isset($groups[$groupLabel])) {
+                $groups[$groupLabel] = [];
             }
+
+            $groups[$groupLabel][] = $row;
+        }
+
+        foreach ($groups as $groupLabel => $groupRows) {
+            echo '<section class="must-accommodation-record-group">';
+            echo '<div class="must-accommodation-record-group-head">';
+            echo '<div><h3>' . \esc_html((string) $groupLabel) . '</h3><p>' . \esc_html(\sprintf(_n('%d listing in this group', '%d listings in this group', \count($groupRows), 'must-hotel-booking'), \count($groupRows))) . '</p></div>';
+            echo '<span class="must-dashboard-status-badge is-compact is-info">' . \esc_html(\sprintf(_n('%d listing', '%d listings', \count($groupRows), 'must-hotel-booking'), \count($groupRows))) . '</span>';
             echo '</div>';
 
-            echo '<div class="must-accommodation-row-meta">';
-            echo '<span>' . \esc_html((string) ($row['category_label'] ?? '')) . '</span>';
-            if ((string) ($row['slug'] ?? '') !== '') {
-                echo '<span>' . \esc_html((string) $row['slug']) . '</span>';
-            }
-            echo '<span>' . \esc_html(\sprintf(__('Sort %d', 'must-hotel-booking'), (int) ($row['sort_order'] ?? 0))) . '</span>';
-            echo '</div>';
+            foreach ($groupRows as $row) {
+                if (!\is_array($row)) {
+                    continue;
+                }
 
-            if ((string) ($row['description'] ?? '') !== '') {
-                echo '<p class="must-accommodation-record-description">' . \esc_html((string) $row['description']) . '</p>';
-            }
+                $pricingTone = !empty($row['pricing_configured']) ? 'success' : 'warning';
+                $availabilityTone = !empty($row['availability_configured']) ? 'success' : 'warning';
+                $reservationDetail = \sprintf(__('Current stays: %d', 'must-hotel-booking'), (int) ($row['current_reservations'] ?? 0));
+                $capacityDetailParts = [];
 
-            if (!empty($row['warnings']) && \is_array($row['warnings'])) {
-                echo '<div class="must-accommodation-record-alert">';
-                render_accommodation_warning_list($row['warnings']);
+                if ((string) ($row['next_checkin'] ?? '') !== '') {
+                    $reservationDetail .= ' / ' . \sprintf(__('Next %s', 'must-hotel-booking'), (string) $row['next_checkin']);
+                }
+
+                if ((string) ($row['beds'] ?? '') !== '') {
+                    $capacityDetailParts[] = (string) $row['beds'];
+                }
+
+                if ((string) ($row['room_size'] ?? '') !== '') {
+                    $capacityDetailParts[] = (string) $row['room_size'];
+                }
+
+                $pricingValue = (float) ($row['base_price'] ?? 0.0) > 0
+                    ? \number_format_i18n((float) ($row['base_price'] ?? 0.0), 2)
+                    : \__('Not set', 'must-hotel-booking');
+                $availabilityDetail = \sprintf(
+                    __('%1$d rules / %2$d manual blocks', 'must-hotel-booking'),
+                    (int) ($row['availability_rule_count'] ?? 0),
+                    (int) ($row['maintenance_block_count'] ?? 0)
+                );
+
+                echo '<article class="must-accommodation-record-card">';
+                echo '<div class="must-accommodation-record-head">';
+                echo '<div class="must-accommodation-record-main">';
+                echo '<div class="must-accommodation-record-title-row">';
+                echo '<h3 class="must-accommodation-record-title"><a class="must-open-accommodation-editor" href="' . \esc_url((string) ($row['edit_url'] ?? '')) . '" data-editor-url="' . \esc_url((string) ($row['edit_url'] ?? '')) . '" data-editor-modal="type">' . \esc_html((string) ($row['name'] ?? '')) . '</a></h3>';
+                if ((string) ($row['internal_code'] ?? '') !== '') {
+                    echo '<span class="must-accommodation-record-code">' . \esc_html((string) $row['internal_code']) . '</span>';
+                }
                 echo '</div>';
+
+                echo '<div class="must-accommodation-row-meta">';
+                if ((string) ($row['slug'] ?? '') !== '') {
+                    echo '<span>' . \esc_html((string) $row['slug']) . '</span>';
+                }
+                if ((string) ($row['room_size'] ?? '') !== '') {
+                    echo '<span>' . \esc_html((string) $row['room_size']) . '</span>';
+                }
+                echo '<span>' . \esc_html(\sprintf(__('Sort %d', 'must-hotel-booking'), (int) ($row['sort_order'] ?? 0))) . '</span>';
+                echo '</div>';
+
+                if ((string) ($row['description'] ?? '') !== '') {
+                    echo '<p class="must-accommodation-record-description">' . \esc_html((string) $row['description']) . '</p>';
+                }
+
+                if (!empty($row['warnings']) && \is_array($row['warnings'])) {
+                    echo '<div class="must-accommodation-record-alert">';
+                    render_accommodation_warning_list($row['warnings']);
+                    echo '</div>';
+                }
+
+                echo '</div>';
+
+                echo '<div class="must-accommodation-record-state">';
+                render_accommodation_badge(!empty($row['is_active']) ? __('Active', 'must-hotel-booking') : __('Inactive', 'must-hotel-booking'), !empty($row['is_active']) ? 'success' : 'muted');
+                render_accommodation_badge(!empty($row['is_bookable']) ? __('Bookable', 'must-hotel-booking') : __('Not bookable', 'must-hotel-booking'), !empty($row['is_bookable']) ? 'info' : 'warning');
+                render_accommodation_badge(!empty($row['is_online_bookable']) ? __('Online', 'must-hotel-booking') : __('Offline only', 'must-hotel-booking'), !empty($row['is_online_bookable']) ? 'neutral' : 'muted');
+                render_accommodation_badge(!empty($row['is_calendar_visible']) ? __('Calendar visible', 'must-hotel-booking') : __('Calendar hidden', 'must-hotel-booking'), !empty($row['is_calendar_visible']) ? 'neutral' : 'muted');
+                echo '</div>';
+                echo '</div>';
+
+                echo '<div class="must-accommodation-record-metrics">';
+                render_accommodation_metric_card(__('Capacity', 'must-hotel-booking'), (string) ($row['capacity_summary'] ?? ''), \implode(' / ', $capacityDetailParts), 'neutral');
+                render_accommodation_metric_card(__('Pricing', 'must-hotel-booking'), $pricingValue, \sprintf(_n('%d active rate plan', '%d active rate plans', (int) ($row['active_rate_plan_count'] ?? 0), 'must-hotel-booking'), (int) ($row['active_rate_plan_count'] ?? 0)), $pricingTone);
+                render_accommodation_metric_card(__('Availability', 'must-hotel-booking'), \sprintf(_n('%d unit', '%d units', (int) ($row['inventory_units'] ?? 0), 'must-hotel-booking'), (int) ($row['inventory_units'] ?? 0)), $availabilityDetail, $availabilityTone);
+                render_accommodation_metric_card(__('Reservations', 'must-hotel-booking'), (string) ((int) ($row['future_reservations'] ?? 0)), $reservationDetail, (int) ($row['future_reservations'] ?? 0) > 0 ? 'neutral' : 'muted');
+                echo '</div>';
+
+                echo '<div class="must-accommodation-record-foot">';
+                echo '<div class="must-accommodation-primary-actions">';
+                echo '<a class="button button-primary must-open-accommodation-editor" href="' . \esc_url((string) ($row['edit_url'] ?? '')) . '" data-editor-url="' . \esc_url((string) ($row['edit_url'] ?? '')) . '" data-editor-modal="type">' . \esc_html__('Edit Listing', 'must-hotel-booking') . '</a>';
+                if ((string) ($row['pricing_url'] ?? '') !== '') {
+                    echo '<a class="button must-dashboard-header-link" href="' . \esc_url((string) $row['pricing_url']) . '">' . \esc_html__('Pricing', 'must-hotel-booking') . '</a>';
+                }
+                if ((string) ($row['calendar_url'] ?? '') !== '') {
+                    echo '<a class="button must-dashboard-header-link" href="' . \esc_url((string) $row['calendar_url']) . '">' . \esc_html__('Calendar', 'must-hotel-booking') . '</a>';
+                }
+                echo '</div>';
+
+                echo '<div class="must-accommodation-secondary-actions">';
+                echo '<a href="' . \esc_url((string) ($row['duplicate_url'] ?? '')) . '">' . \esc_html__('Duplicate', 'must-hotel-booking') . '</a>';
+                if ((string) ($row['rate_plans_url'] ?? '') !== '') {
+                    echo '<a href="' . \esc_url((string) $row['rate_plans_url']) . '">' . \esc_html__('Rate Plans', 'must-hotel-booking') . '</a>';
+                }
+                if ((string) ($row['availability_url'] ?? '') !== '') {
+                    echo '<a href="' . \esc_url((string) ($row['availability_url'] ?? '')) . '">' . \esc_html__('Availability Rules', 'must-hotel-booking') . '</a>';
+                }
+                if ((string) ($row['reservations_url'] ?? '') !== '') {
+                    echo '<a href="' . \esc_url((string) ($row['reservations_url'] ?? '')) . '">' . \esc_html__('Reservations', 'must-hotel-booking') . '</a>';
+                }
+                echo '<a href="' . \esc_url((string) ($row['toggle_url'] ?? '')) . '">' . \esc_html(!empty($row['is_active']) ? __('Deactivate', 'must-hotel-booking') : __('Activate', 'must-hotel-booking')) . '</a>';
+                if ((string) ($row['delete_url'] ?? '') !== '') {
+                    echo '<a class="is-danger" href="' . \esc_url((string) $row['delete_url']) . '" onclick="return confirm(\'' . \esc_js(__('Delete this room / listing? This cannot be undone.', 'must-hotel-booking')) . '\');">' . \esc_html__('Delete', 'must-hotel-booking') . '</a>';
+                }
+                echo '</div>';
+                echo '</div>';
+                echo '</article>';
             }
 
-            echo '</div>';
-
-            echo '<div class="must-accommodation-record-state">';
-            render_accommodation_badge(!empty($row['is_active']) ? __('Active', 'must-hotel-booking') : __('Inactive', 'must-hotel-booking'), !empty($row['is_active']) ? 'success' : 'muted');
-            render_accommodation_badge(!empty($row['is_bookable']) ? __('Bookable', 'must-hotel-booking') : __('Not bookable', 'must-hotel-booking'), !empty($row['is_bookable']) ? 'info' : 'warning');
-            render_accommodation_badge(!empty($row['is_online_bookable']) ? __('Online', 'must-hotel-booking') : __('Offline only', 'must-hotel-booking'), !empty($row['is_online_bookable']) ? 'neutral' : 'muted');
-            render_accommodation_badge(!empty($row['is_calendar_visible']) ? __('Calendar visible', 'must-hotel-booking') : __('Calendar hidden', 'must-hotel-booking'), !empty($row['is_calendar_visible']) ? 'neutral' : 'muted');
-            echo '</div>';
-            echo '</div>';
-
-            echo '<div class="must-accommodation-record-metrics">';
-            render_accommodation_metric_card(__('Capacity', 'must-hotel-booking'), (string) ($row['capacity_summary'] ?? ''), (string) ($row['beds'] ?? ''), 'neutral');
-            render_accommodation_metric_card(__('Pricing', 'must-hotel-booking'), \number_format_i18n((float) ($row['base_price'] ?? 0.0), 2), \sprintf(_n('%d active rate plan', '%d active rate plans', (int) ($row['active_rate_plan_count'] ?? 0), 'must-hotel-booking'), (int) ($row['active_rate_plan_count'] ?? 0)), $pricingTone);
-            render_accommodation_metric_card(__('Availability', 'must-hotel-booking'), \sprintf(_n('%d unit', '%d units', (int) ($row['inventory_units'] ?? 0), 'must-hotel-booking'), (int) ($row['inventory_units'] ?? 0)), \sprintf(_n('%d rule', '%d rules', (int) ($row['availability_rule_count'] ?? 0), 'must-hotel-booking'), (int) ($row['availability_rule_count'] ?? 0)), $availabilityTone);
-            render_accommodation_metric_card(__('Reservations', 'must-hotel-booking'), (string) ((int) ($row['future_reservations'] ?? 0)), $reservationDetail, (int) ($row['future_reservations'] ?? 0) > 0 ? 'neutral' : 'muted');
-            echo '</div>';
-
-            echo '<div class="must-accommodation-record-foot">';
-            echo '<div class="must-accommodation-primary-actions">';
-            echo '<a class="button button-primary must-open-accommodation-editor" href="' . \esc_url((string) ($row['edit_url'] ?? '')) . '" data-editor-url="' . \esc_url((string) ($row['edit_url'] ?? '')) . '" data-editor-modal="type">' . \esc_html__('Edit Listing', 'must-hotel-booking') . '</a>';
-            if ((string) ($row['calendar_url'] ?? '') !== '') {
-                echo '<a class="button button-secondary" href="' . \esc_url((string) $row['calendar_url']) . '">' . \esc_html__('Calendar', 'must-hotel-booking') . '</a>';
-            }
-            if ((string) ($row['rate_plans_url'] ?? '') !== '') {
-                echo '<a class="button button-secondary" href="' . \esc_url((string) $row['rate_plans_url']) . '">' . \esc_html__('Rate Plans', 'must-hotel-booking') . '</a>';
-            }
-            echo '</div>';
-
-            echo '<div class="must-accommodation-secondary-actions">';
-            echo '<a href="' . \esc_url((string) ($row['toggle_url'] ?? '')) . '">' . \esc_html(!empty($row['is_active']) ? __('Deactivate', 'must-hotel-booking') : __('Activate', 'must-hotel-booking')) . '</a>';
-            echo '<a href="' . \esc_url((string) ($row['duplicate_url'] ?? '')) . '">' . \esc_html__('Duplicate', 'must-hotel-booking') . '</a>';
-            if ((string) ($row['availability_url'] ?? '') !== '') {
-                echo '<a href="' . \esc_url((string) $row['availability_url']) . '">' . \esc_html__('Availability Rules', 'must-hotel-booking') . '</a>';
-            }
-            if ((string) ($row['reservations_url'] ?? '') !== '') {
-                echo '<a href="' . \esc_url((string) $row['reservations_url']) . '">' . \esc_html__('Reservations', 'must-hotel-booking') . '</a>';
-            }
-            echo '</div>';
-            echo '</div>';
-            echo '</article>';
+            echo '</section>';
         }
     }
 
     echo '</div>';
     render_accommodation_pagination($pagination, $query->buildUrlArgs(['tab' => 'rooms']));
+    echo '</div>';
     echo '</section>';
 }
 
@@ -1597,100 +1948,148 @@ function render_accommodation_unit_list(AccommodationAdminQuery $query, array $p
     $rows = isset($pageData['unit_rows']) && \is_array($pageData['unit_rows']) ? $pageData['unit_rows'] : [];
     $pagination = isset($pageData['unit_pagination']) && \is_array($pageData['unit_pagination']) ? $pageData['unit_pagination'] : [];
 
-    echo '<section class="must-accommodation-panel must-accommodation-list-panel">';
-    echo '<div class="must-accommodation-panel-head">';
-    echo '<div><h2>' . \esc_html__('Units / Rooms', 'must-hotel-booking') . '</h2><p>' . \esc_html__('Manage the physical rooms that inventory, calendar assignment, and operational availability rely on.', 'must-hotel-booking') . '</p></div>';
-    echo '<div class="must-accommodation-panel-actions">';
+    echo '<section class="postbox must-dashboard-panel must-accommodation-list-panel">';
+    echo '<div class="must-dashboard-panel-inner">';
+    echo '<div class="must-dashboard-panel-heading">';
+    echo '<div class="must-dashboard-panel-heading-copy"><h2>' . \esc_html__('Units / Rooms', 'must-hotel-booking') . '</h2><p>' . \esc_html__('Manage the physical rooms that inventory, calendar assignment, and operational availability rely on every day.', 'must-hotel-booking') . '</p></div>';
+    echo '<div class="must-accommodation-list-heading-actions">';
+    echo '<span class="must-dashboard-hero-pill"><strong>' . \esc_html__('Units In View', 'must-hotel-booking') . '</strong> ' . \esc_html((string) (isset($pageData['unit_filter_count']) ? (int) $pageData['unit_filter_count'] : \count($rows))) . '</span>';
     echo '<a class="button button-primary must-open-accommodation-editor" href="' . \esc_url(get_admin_rooms_page_url(['tab' => 'units'])) . '" data-editor-url="' . \esc_url(get_admin_rooms_page_url(['tab' => 'units'])) . '" data-editor-modal="unit">' . \esc_html__('Create New Unit', 'must-hotel-booking') . '</a>';
     echo '</div></div>';
     echo '<div class="must-accommodation-record-list">';
 
     if (empty($rows)) {
-        echo '<div class="must-accommodation-empty-table">' . \esc_html__('No units matched the current filters.', 'must-hotel-booking') . '</div>';
+        render_accommodation_empty_state(
+            \__('No units matched the current filters.', 'must-hotel-booking'),
+            \__('Reset the current filters or create a new physical unit so inventory and availability can be assigned cleanly.', 'must-hotel-booking'),
+            [
+                [
+                    'label' => \__('Create Unit', 'must-hotel-booking'),
+                    'url' => get_admin_rooms_page_url(['tab' => 'units']),
+                    'class' => 'button button-primary',
+                    'editor_modal' => 'unit',
+                ],
+                [
+                    'label' => \__('Reset Filters', 'must-hotel-booking'),
+                    'url' => get_admin_rooms_page_url(['tab' => 'units']),
+                ],
+            ]
+        );
     } else {
+        $groups = [];
+
         foreach ($rows as $row) {
             if (!\is_array($row)) {
                 continue;
             }
 
-            $setupTone = (!empty($row['pricing_configured']) && !empty($row['availability_configured'])) ? 'success' : 'warning';
-            $reservationDetail = \sprintf(__('Current stays: %d', 'must-hotel-booking'), (int) ($row['current_reservations'] ?? 0));
+            $groupLabel = \trim((string) ($row['type_name'] ?? ''));
 
-            if ((string) ($row['next_checkin'] ?? '') !== '') {
-                $reservationDetail .= ' / ' . \sprintf(__('Next %s', 'must-hotel-booking'), (string) $row['next_checkin']);
+            if ($groupLabel === '') {
+                $groupLabel = \__('Unassigned Listing', 'must-hotel-booking');
             }
 
-            echo '<article class="must-accommodation-record-card is-unit-card">';
-            echo '<div class="must-accommodation-record-head">';
-            echo '<div class="must-accommodation-record-main">';
-            echo '<div class="must-accommodation-record-title-row">';
-            echo '<h3 class="must-accommodation-record-title"><a class="must-open-accommodation-editor" href="' . \esc_url((string) ($row['edit_url'] ?? '')) . '" data-editor-url="' . \esc_url((string) ($row['edit_url'] ?? '')) . '" data-editor-modal="unit">' . \esc_html((string) ($row['title'] ?? '')) . '</a></h3>';
-            echo '<span class="must-accommodation-record-code">' . \esc_html((string) ($row['room_number'] ?? '')) . '</span>';
-            echo '</div>';
-            echo '<div class="must-accommodation-row-meta">';
-            echo '<span>' . \esc_html((string) ($row['type_name'] ?? '')) . '</span>';
-            if ((string) ($row['building'] ?? '') !== '') {
-                echo '<span>' . \esc_html((string) $row['building']) . '</span>';
+            if (!isset($groups[$groupLabel])) {
+                $groups[$groupLabel] = [];
             }
-            if ((string) ($row['section'] ?? '') !== '') {
-                echo '<span>' . \esc_html((string) $row['section']) . '</span>';
-            }
-            if ((int) ($row['floor'] ?? 0) !== 0) {
-                echo '<span>' . \esc_html(\sprintf(__('Floor %d', 'must-hotel-booking'), (int) ($row['floor'] ?? 0))) . '</span>';
-            }
-            echo '<span>' . \esc_html(\sprintf(__('Sort %d', 'must-hotel-booking'), (int) ($row['sort_order'] ?? 0))) . '</span>';
+
+            $groups[$groupLabel][] = $row;
+        }
+
+        foreach ($groups as $groupLabel => $groupRows) {
+            echo '<section class="must-accommodation-record-group">';
+            echo '<div class="must-accommodation-record-group-head">';
+            echo '<div><h3>' . \esc_html((string) $groupLabel) . '</h3><p>' . \esc_html(\sprintf(_n('%d unit linked to this listing', '%d units linked to this listing', \count($groupRows), 'must-hotel-booking'), \count($groupRows))) . '</p></div>';
+            echo '<span class="must-dashboard-status-badge is-compact is-info">' . \esc_html(\sprintf(_n('%d unit', '%d units', \count($groupRows), 'must-hotel-booking'), \count($groupRows))) . '</span>';
             echo '</div>';
 
-            if (!empty($row['warnings']) && \is_array($row['warnings'])) {
-                echo '<div class="must-accommodation-record-alert">';
-                render_accommodation_warning_list($row['warnings']);
+            foreach ($groupRows as $row) {
+                if (!\is_array($row)) {
+                    continue;
+                }
+
+                $setupTone = (!empty($row['pricing_configured']) && !empty($row['availability_configured'])) ? 'success' : 'warning';
+                $reservationDetail = \sprintf(__('Current stays: %d', 'must-hotel-booking'), (int) ($row['current_reservations'] ?? 0));
+
+                if ((string) ($row['next_checkin'] ?? '') !== '') {
+                    $reservationDetail .= ' / ' . \sprintf(__('Next %s', 'must-hotel-booking'), (string) $row['next_checkin']);
+                }
+
+                echo '<article class="must-accommodation-record-card is-unit-card">';
+                echo '<div class="must-accommodation-record-head">';
+                echo '<div class="must-accommodation-record-main">';
+                echo '<div class="must-accommodation-record-title-row">';
+                echo '<h3 class="must-accommodation-record-title"><a class="must-open-accommodation-editor" href="' . \esc_url((string) ($row['edit_url'] ?? '')) . '" data-editor-url="' . \esc_url((string) ($row['edit_url'] ?? '')) . '" data-editor-modal="unit">' . \esc_html((string) ($row['title'] ?? '')) . '</a></h3>';
+                echo '<span class="must-accommodation-record-code">' . \esc_html((string) ($row['room_number'] ?? '')) . '</span>';
                 echo '</div>';
+                echo '<div class="must-accommodation-row-meta">';
+                echo '<span>' . \esc_html((string) ($row['type_name'] ?? '')) . '</span>';
+                if ((string) ($row['building'] ?? '') !== '') {
+                    echo '<span>' . \esc_html((string) $row['building']) . '</span>';
+                }
+                if ((string) ($row['section'] ?? '') !== '') {
+                    echo '<span>' . \esc_html((string) $row['section']) . '</span>';
+                }
+                if ((int) ($row['floor'] ?? 0) !== 0) {
+                    echo '<span>' . \esc_html(\sprintf(__('Floor %d', 'must-hotel-booking'), (int) ($row['floor'] ?? 0))) . '</span>';
+                }
+                echo '<span>' . \esc_html(\sprintf(__('Sort %d', 'must-hotel-booking'), (int) ($row['sort_order'] ?? 0))) . '</span>';
+                echo '</div>';
+
+                if (!empty($row['warnings']) && \is_array($row['warnings'])) {
+                    echo '<div class="must-accommodation-record-alert">';
+                    render_accommodation_warning_list($row['warnings']);
+                    echo '</div>';
+                }
+
+                echo '</div>';
+
+                echo '<div class="must-accommodation-record-state">';
+                render_accommodation_badge(!empty($row['is_active']) ? __('Active', 'must-hotel-booking') : __('Inactive', 'must-hotel-booking'), !empty($row['is_active']) ? 'success' : 'muted');
+                render_accommodation_badge(!empty($row['is_bookable']) ? __('Bookable', 'must-hotel-booking') : __('Not bookable', 'must-hotel-booking'), !empty($row['is_bookable']) ? 'info' : 'warning');
+                render_accommodation_badge((string) ($row['status_label'] ?? __('Available', 'must-hotel-booking')), (string) ($row['status'] ?? '') === 'available' ? 'neutral' : 'warning');
+                render_accommodation_badge(!empty($row['is_calendar_visible']) ? __('Calendar visible', 'must-hotel-booking') : __('Calendar hidden', 'must-hotel-booking'), !empty($row['is_calendar_visible']) ? 'neutral' : 'muted');
+                echo '</div>';
+                echo '</div>';
+
+                echo '<div class="must-accommodation-record-metrics">';
+                render_accommodation_metric_card(__('Capacity', 'must-hotel-booking'), (string) ($row['capacity_summary'] ?? ''), __('Unit-level occupancy handling', 'must-hotel-booking'), 'neutral');
+                render_accommodation_metric_card(__('Setup', 'must-hotel-booking'), !empty($row['pricing_configured']) ? __('Ready', 'must-hotel-booking') : __('Needs pricing', 'must-hotel-booking'), !empty($row['availability_configured']) ? __('Availability linked', 'must-hotel-booking') : __('Availability missing', 'must-hotel-booking'), $setupTone);
+                render_accommodation_metric_card(__('Reservations', 'must-hotel-booking'), (string) ((int) ($row['future_reservations'] ?? 0)), $reservationDetail, (int) ($row['future_reservations'] ?? 0) > 0 ? 'neutral' : 'muted');
+                render_accommodation_metric_card(__('Listing Link', 'must-hotel-booking'), (string) ($row['type_name'] ?? ''), __('Shares pricing and rules with its linked room/listing record', 'must-hotel-booking'), 'info');
+                echo '</div>';
+
+                echo '<div class="must-accommodation-record-foot">';
+                echo '<div class="must-accommodation-primary-actions">';
+                echo '<a class="button button-primary must-open-accommodation-editor" href="' . \esc_url((string) ($row['edit_url'] ?? '')) . '" data-editor-url="' . \esc_url((string) ($row['edit_url'] ?? '')) . '" data-editor-modal="unit">' . \esc_html__('Edit Unit', 'must-hotel-booking') . '</a>';
+                if ((string) ($row['calendar_url'] ?? '') !== '') {
+                    echo '<a class="button must-dashboard-header-link" href="' . \esc_url((string) $row['calendar_url']) . '">' . \esc_html__('Calendar', 'must-hotel-booking') . '</a>';
+                }
+                if ((string) ($row['type_edit_url'] ?? '') !== '') {
+                    echo '<a class="button must-dashboard-header-link" href="' . \esc_url((string) $row['type_edit_url']) . '">' . \esc_html__('Open Listing', 'must-hotel-booking') . '</a>';
+                }
+                echo '</div>';
+
+                echo '<div class="must-accommodation-secondary-actions">';
+                echo '<a href="' . \esc_url((string) ($row['toggle_url'] ?? '')) . '">' . \esc_html(!empty($row['is_active']) ? __('Deactivate', 'must-hotel-booking') : __('Activate', 'must-hotel-booking')) . '</a>';
+                if ((string) ($row['reservations_url'] ?? '') !== '') {
+                    echo '<a href="' . \esc_url((string) ($row['reservations_url'] ?? '')) . '">' . \esc_html__('Reservations', 'must-hotel-booking') . '</a>';
+                }
+                if ((string) ($row['delete_url'] ?? '') !== '') {
+                    echo '<a class="is-danger" href="' . \esc_url((string) $row['delete_url']) . '" onclick="return confirm(\'' . \esc_js(__('Delete this unit / room? This cannot be undone.', 'must-hotel-booking')) . '\');">' . \esc_html__('Delete', 'must-hotel-booking') . '</a>';
+                }
+                echo '</div>';
+                echo '</div>';
+                echo '</article>';
             }
 
-            echo '</div>';
-
-            echo '<div class="must-accommodation-record-state">';
-            render_accommodation_badge(!empty($row['is_active']) ? __('Active', 'must-hotel-booking') : __('Inactive', 'must-hotel-booking'), !empty($row['is_active']) ? 'success' : 'muted');
-            render_accommodation_badge(!empty($row['is_bookable']) ? __('Bookable', 'must-hotel-booking') : __('Not bookable', 'must-hotel-booking'), !empty($row['is_bookable']) ? 'info' : 'warning');
-            render_accommodation_badge((string) ($row['status_label'] ?? __('Available', 'must-hotel-booking')), (string) ($row['status'] ?? '') === 'available' ? 'neutral' : 'warning');
-            render_accommodation_badge(!empty($row['is_calendar_visible']) ? __('Calendar visible', 'must-hotel-booking') : __('Calendar hidden', 'must-hotel-booking'), !empty($row['is_calendar_visible']) ? 'neutral' : 'muted');
-            echo '</div>';
-            echo '</div>';
-
-            echo '<div class="must-accommodation-record-metrics">';
-            render_accommodation_metric_card(__('Capacity', 'must-hotel-booking'), (string) ($row['capacity_summary'] ?? ''), __('Unit-level occupancy handling', 'must-hotel-booking'), 'neutral');
-            render_accommodation_metric_card(__('Setup', 'must-hotel-booking'), !empty($row['pricing_configured']) ? __('Ready', 'must-hotel-booking') : __('Needs pricing', 'must-hotel-booking'), !empty($row['availability_configured']) ? __('Availability linked', 'must-hotel-booking') : __('Availability missing', 'must-hotel-booking'), $setupTone);
-            render_accommodation_metric_card(__('Reservations', 'must-hotel-booking'), (string) ((int) ($row['future_reservations'] ?? 0)), $reservationDetail, (int) ($row['future_reservations'] ?? 0) > 0 ? 'neutral' : 'muted');
-            render_accommodation_metric_card(__('Listing Link', 'must-hotel-booking'), (string) ($row['type_name'] ?? ''), __('Shares pricing and rules with its linked room/listing record', 'must-hotel-booking'), 'info');
-            echo '</div>';
-
-            echo '<div class="must-accommodation-record-foot">';
-            echo '<div class="must-accommodation-primary-actions">';
-            echo '<a class="button button-primary must-open-accommodation-editor" href="' . \esc_url((string) ($row['edit_url'] ?? '')) . '" data-editor-url="' . \esc_url((string) ($row['edit_url'] ?? '')) . '" data-editor-modal="unit">' . \esc_html__('Edit Unit', 'must-hotel-booking') . '</a>';
-            if ((string) ($row['calendar_url'] ?? '') !== '') {
-                echo '<a class="button button-secondary" href="' . \esc_url((string) $row['calendar_url']) . '">' . \esc_html__('Calendar', 'must-hotel-booking') . '</a>';
-            }
-            if ((string) ($row['type_edit_url'] ?? '') !== '') {
-                echo '<a class="button button-secondary" href="' . \esc_url((string) $row['type_edit_url']) . '">' . \esc_html__('Open Listing', 'must-hotel-booking') . '</a>';
-            }
-            echo '</div>';
-
-            echo '<div class="must-accommodation-secondary-actions">';
-            echo '<a href="' . \esc_url((string) ($row['toggle_url'] ?? '')) . '">' . \esc_html(!empty($row['is_active']) ? __('Deactivate', 'must-hotel-booking') : __('Activate', 'must-hotel-booking')) . '</a>';
-            if ((string) ($row['reservations_url'] ?? '') !== '') {
-                echo '<a href="' . \esc_url((string) $row['reservations_url']) . '">' . \esc_html__('Reservations', 'must-hotel-booking') . '</a>';
-            }
-            if ((string) ($row['delete_url'] ?? '') !== '') {
-                echo '<a class="is-danger" href="' . \esc_url((string) $row['delete_url']) . '">' . \esc_html__('Delete', 'must-hotel-booking') . '</a>';
-            }
-            echo '</div>';
-            echo '</div>';
-            echo '</article>';
+            echo '</section>';
         }
     }
 
     echo '</div>';
     render_accommodation_pagination($pagination, $query->buildUrlArgs(['tab' => 'units']));
+    echo '</div>';
     echo '</section>';
 }
 
@@ -1721,23 +2120,13 @@ function render_admin_rooms_page(): void
     $shouldOpenTypeEditor = $query->getAction() === 'edit_room' || !empty($typeErrors);
     $shouldOpenUnitEditor = $query->getAction() === 'edit_unit' || !empty($unitErrors);
 
-    echo '<div class="wrap must-accommodation-page must-hotel-booking-rooms-admin">';
-    echo '<header class="must-accommodation-hero"><div class="must-accommodation-hero-copy"><span class="must-accommodation-kicker">' . \esc_html__('Accommodation Structure', 'must-hotel-booking') . '</span><h1>' . \esc_html__('Accommodations', 'must-hotel-booking') . '</h1><p>' . \esc_html__('Manage top-level accommodation categories separately from the sellable room listings and the physical units behind them, while keeping pricing, reservations, and the calendar aligned.', 'must-hotel-booking') . '</p></div><div class="must-accommodation-hero-actions">';
-    if ($calendarUrl !== '') {
-        echo '<a class="button button-secondary" href="' . \esc_url($calendarUrl) . '">' . \esc_html__('Open Calendar', 'must-hotel-booking') . '</a>';
-    }
-    if ($reservationsUrl !== '') {
-        echo '<a class="button button-secondary" href="' . \esc_url($reservationsUrl) . '">' . \esc_html__('Open Reservations', 'must-hotel-booking') . '</a>';
-    }
-    if ($ratePlansUrl !== '') {
-        echo '<a class="button button-primary" href="' . \esc_url($ratePlansUrl) . '">' . \esc_html__('Open Rate Plans', 'must-hotel-booking') . '</a>';
-    }
-    echo '</div></header>';
+    echo '<div class="wrap must-dashboard-page must-accommodation-page must-hotel-booking-rooms-admin">';
+    render_accommodation_page_header($query, $pageData, $calendarUrl, $reservationsUrl, $ratePlansUrl);
 
     render_rooms_admin_notice_from_query();
+    render_rooms_summary_cards(isset($pageData['summary_cards']) && \is_array($pageData['summary_cards']) ? $pageData['summary_cards'] : []);
     render_accommodation_import_report($importReport);
     render_accommodation_admin_warnings(isset($pageData['admin_warnings']) && \is_array($pageData['admin_warnings']) ? $pageData['admin_warnings'] : []);
-    render_rooms_summary_cards(isset($pageData['summary_cards']) && \is_array($pageData['summary_cards']) ? $pageData['summary_cards'] : []);
     render_accommodation_import_export_panel($query);
     render_rooms_tabs($query);
 

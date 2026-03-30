@@ -292,6 +292,10 @@ final class AccommodationAdminDataProvider
                     ]),
                     'must_accommodation_toggle_type_' . $typeId
                 ),
+                'delete_url' => \wp_nonce_url(
+                    get_admin_rooms_page_url(['tab' => 'rooms', 'action' => 'delete_type', 'type_id' => $typeId]),
+                    'must_accommodation_delete_type_' . $typeId
+                ),
                 'calendar_url' => \function_exists(__NAMESPACE__ . '\get_admin_calendar_page_url')
                     ? get_admin_calendar_page_url(['room_id' => $typeId, 'focus_room_id' => $typeId, 'start_date' => $today, 'weeks' => 2])
                     : '',
@@ -771,31 +775,33 @@ final class AccommodationAdminDataProvider
     {
         $categoryCount = \count($categories);
         $activeTypes = 0;
-        $activeUnits = 0;
-        $missingPricing = 0;
-        $missingAvailability = 0;
+        $publiclyVisible = 0;
+        $calendarVisible = 0;
+        $pricingReady = 0;
         $futureReservations = 0;
+        $availabilityRules = 0;
+        $maintenanceBlocks = 0;
 
         foreach ($types as $type) {
             if (!empty($type['is_active'])) {
                 $activeTypes++;
             }
 
-            if (empty($type['pricing_configured'])) {
-                $missingPricing++;
+            if (!empty($type['is_online_bookable']) && !empty($type['is_active']) && !empty($type['is_bookable'])) {
+                $publiclyVisible++;
             }
 
-            if (empty($type['availability_configured'])) {
-                $missingAvailability++;
+            if (!empty($type['is_calendar_visible'])) {
+                $calendarVisible++;
+            }
+
+            if (!empty($type['pricing_configured'])) {
+                $pricingReady++;
             }
 
             $futureReservations += (int) ($type['future_reservations'] ?? 0);
-        }
-
-        foreach ($units as $unit) {
-            if (!empty($unit['is_active'])) {
-                $activeUnits++;
-            }
+            $availabilityRules += (int) ($type['availability_rule_count'] ?? 0);
+            $maintenanceBlocks += (int) ($type['maintenance_block_count'] ?? 0);
         }
 
         return [
@@ -810,19 +816,19 @@ final class AccommodationAdminDataProvider
                 'meta' => \sprintf(__('%d active sellable listings', 'must-hotel-booking'), $activeTypes),
             ],
             [
-                'label' => \__('Physical Units', 'must-hotel-booking'),
-                'value' => (string) \count($units),
-                'meta' => \sprintf(__('%d active units in inventory', 'must-hotel-booking'), $activeUnits),
+                'label' => \__('Publicly Visible', 'must-hotel-booking'),
+                'value' => (string) $publiclyVisible,
+                'meta' => \sprintf(__('%d listings remain calendar visible', 'must-hotel-booking'), $calendarVisible),
             ],
             [
-                'label' => \__('Missing Pricing', 'must-hotel-booking'),
-                'value' => (string) $missingPricing,
-                'meta' => \__('Types still missing a base price or active rate plan.', 'must-hotel-booking'),
+                'label' => \__('Pricing Ready', 'must-hotel-booking'),
+                'value' => (string) $pricingReady,
+                'meta' => \sprintf(__('%d listings still need pricing setup', 'must-hotel-booking'), \max(0, \count($types) - $pricingReady)),
             ],
             [
-                'label' => \__('Missing Availability', 'must-hotel-booking'),
-                'value' => (string) $missingAvailability,
-                'meta' => \__('Types without units or explicit availability setup.', 'must-hotel-booking'),
+                'label' => \__('Availability Rules', 'must-hotel-booking'),
+                'value' => (string) $availabilityRules,
+                'meta' => \sprintf(__('%d maintenance blocks are currently configured', 'must-hotel-booking'), $maintenanceBlocks),
             ],
             [
                 'label' => \__('Future Reservations', 'must-hotel-booking'),

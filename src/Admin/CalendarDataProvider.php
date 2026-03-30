@@ -2,6 +2,7 @@
 
 namespace MustHotelBooking\Admin;
 
+use MustHotelBooking\Core\MustBookingConfig;
 use MustHotelBooking\Core\ReservationStatus;
 use MustHotelBooking\Core\RoomCatalog;
 use MustHotelBooking\Engine\LockEngine;
@@ -480,6 +481,12 @@ final class CalendarDataProvider
             'room' => $room,
             'date' => $focusDate,
             'label' => \wp_date(\get_option('date_format'), \strtotime($focusDate)),
+            'selection' => [
+                'start' => $focusDate,
+                'end' => $nextDate,
+                'nights' => 1,
+                'range_label' => $this->formatStayRange($focusDate, $nextDate),
+            ],
             'summary' => $cell,
             'stays' => $this->formatReservationItems(
                 $stays,
@@ -760,6 +767,9 @@ final class CalendarDataProvider
 
             $reservationId = isset($reservation['id']) ? (int) $reservation['id'] : 0;
             $status = \sanitize_key((string) ($reservation['status'] ?? ''));
+            $checkin = (string) ($reservation['checkin'] ?? '');
+            $checkout = (string) ($reservation['checkout'] ?? '');
+            $paymentStatus = \sanitize_key((string) ($reservation['payment_status'] ?? ''));
             $items[] = [
                 'id' => $reservationId,
                 'reference' => $this->formatReservationReference($reservation),
@@ -768,10 +778,30 @@ final class CalendarDataProvider
                     : (string) ($reservation['guest_name'] ?? \__('Guest', 'must-hotel-booking')),
                 'status' => $status,
                 'status_label' => $this->getReservationStatusLabel($status),
-                'checkin' => (string) ($reservation['checkin'] ?? ''),
-                'checkout' => (string) ($reservation['checkout'] ?? ''),
+                'checkin' => $checkin,
+                'checkout' => $checkout,
+                'date_label' => $this->formatStayRange($checkin, $checkout),
+                'nights' => $this->calculateNightCount($checkin, $checkout),
+                'nights_label' => $this->formatNightCountLabel($checkin, $checkout),
+                'booking_source' => \sanitize_key((string) ($reservation['booking_source'] ?? '')),
+                'booking_source_label' => $this->formatBookingSourceLabel((string) ($reservation['booking_source'] ?? '')),
+                'payment_status' => $paymentStatus,
+                'payment_status_label' => $this->formatPaymentStatusLabel($paymentStatus),
+                'total_price' => isset($reservation['total_price']) ? (float) $reservation['total_price'] : 0.0,
+                'total_price_label' => isset($reservation['total_price'])
+                    ? $this->formatMoney((float) $reservation['total_price'])
+                    : '',
+                'notes' => \trim((string) ($reservation['notes'] ?? '')),
                 'view_url' => $reservationId > 0 && \function_exists(__NAMESPACE__ . '\get_admin_reservation_detail_page_url')
                     ? get_admin_reservation_detail_page_url($reservationId)
+                    : '',
+                'payment_url' => $reservationId > 0 && \function_exists(__NAMESPACE__ . '\get_admin_payments_page_url')
+                    ? get_admin_payments_page_url(
+                        [
+                            'action' => 'view',
+                            'reservation_id' => $reservationId,
+                        ]
+                    )
                     : '',
                 'remove_block_url' => $status === 'blocked' && $reservationId > 0
                     ? \wp_nonce_url(
@@ -895,10 +925,10 @@ final class CalendarDataProvider
         }
 
         if ($totalUnits > 1) {
-            return \sprintf(\__('%d free', 'must-hotel-booking'), $availableUnits);
+            return \sprintf(\__('%d open', 'must-hotel-booking'), $availableUnits);
         }
 
-        return \__('Open', 'must-hotel-booking');
+        return '';
     }
 
     private function getReservationBucket(string $status): string
@@ -1060,5 +1090,90 @@ final class CalendarDataProvider
         }
 
         return $formattedStart . ' - ' . \wp_date(\get_option('date_format'), \strtotime($endDate));
+    }
+
+    private function calculateNightCount(string $checkin, string $checkout): int
+    {
+        if ($checkin === '' || $checkout === '' || $checkin >= $checkout) {
+            return 0;
+        }
+
+        return (int) (new \DateTimeImmutable($checkin))->diff(new \DateTimeImmutable($checkout))->format('%a');
+    }
+
+    private function formatNightCountLabel(string $checkin, string $checkout): string
+    {
+        $nights = $this->calculateNightCount($checkin, $checkout);
+
+        if ($nights <= 0) {
+            return '';
+        }
+
+        return \sprintf(
+            /* translators: %d is the number of nights. */
+            \_n('%d night', '%d nights', $nights, 'must-hotel-booking'),
+            $nights
+        );
+    }
+
+    private function formatStayRange(string $checkin, string $checkout): string
+    {
+        if ($checkin === '') {
+            return '';
+        }
+
+        $formattedCheckin = \wp_date(\get_option('date_format'), \strtotime($checkin));
+
+        if ($checkout === '') {
+            return $formattedCheckin;
+        }
+
+        return $formattedCheckin . ' - ' . \wp_date(\get_option('date_format'), \strtotime($checkout));
+    }
+
+    private function formatBookingSourceLabel(string $source): string
+    {
+        $source = \sanitize_key($source);
+        $options = \function_exists(__NAMESPACE__ . '\get_calendar_booking_source_options')
+            ? get_calendar_booking_source_options()
+            : [];
+
+        if (isset($options[$source])) {
+            return (string) $options[$source];
+        }
+
+        return $source !== '' ? \ucfirst(\str_replace('_', ' ', $source)) : '';
+    }
+
+    private function formatPaymentStatusLabel(string $status): string
+    {
+        $status = \sanitize_key($status);
+
+        if ($status === '') {
+            return '';
+        }
+
+        $options = \function_exists(__NAMESPACE__ . '\get_reservation_payment_status_options')
+            ? get_reservation_payment_status_options()
+            : [];
+
+        if (isset($options[$status])) {
+            return (string) $options[$status];
+        }
+
+        return \ucfirst(\str_replace('_', ' ', $status));
+    }
+
+    private function formatMoney(float $amount): string
+    {
+        $currency = \class_exists(MustBookingConfig::class)
+            ? MustBookingConfig::get_currency()
+            : '';
+
+        $formatted = \number_format_i18n($amount, 2);
+
+        return $currency !== ''
+            ? $formatted . ' ' . $currency
+            : $formatted;
     }
 }

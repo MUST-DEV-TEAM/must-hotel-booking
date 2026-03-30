@@ -426,6 +426,19 @@ function render_admin_quick_booking_panel(?array $submitted_form = null, array $
     $submitLabel = isset($options['submit_label']) && (string) $options['submit_label'] !== ''
         ? (string) $options['submit_label']
         : \__('Create Reservation', 'must-hotel-booking');
+    $variant = isset($options['variant']) && (string) $options['variant'] !== ''
+        ? \sanitize_key((string) $options['variant'])
+        : 'default';
+    $panelClasses = ['must-admin-quick-booking-panel', 'postbox'];
+
+    if ($variant !== 'default') {
+        $panelClasses[] = 'is-' . $variant;
+    }
+
+    if (!empty($options['panel_class'])) {
+        $panelClasses[] = \sanitize_html_class((string) $options['panel_class']);
+    }
+
     $roomLabel = \__('No room selected', 'must-hotel-booking');
 
     foreach ($rooms as $room) {
@@ -462,7 +475,7 @@ function render_admin_quick_booking_panel(?array $submitted_form = null, array $
         $destinationLabel = \__('Opens the reservations list after save', 'must-hotel-booking');
     }
 
-    echo '<div class="must-admin-quick-booking-panel postbox">';
+    echo '<div class="' . \esc_attr(\implode(' ', $panelClasses)) . '">';
     echo '<div class="must-admin-quick-booking-panel-inner">';
     echo '<div class="must-quick-booking-header">';
     echo '<div class="must-quick-booking-header-copy">';
