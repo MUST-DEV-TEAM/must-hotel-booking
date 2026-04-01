@@ -110,36 +110,42 @@ final class DashboardDataProvider
 
         return [
             [
+                'key' => 'arrivals_today',
                 'label' => \__('Arrivals Today', 'must-hotel-booking'),
                 'value' => (string) $summary['arrivals_reservations'],
                 'descriptor' => $this->formatGuestCountDescriptor($summary['arrivals_guests']),
                 'url' => get_admin_reservations_page_url(['preset' => 'arrivals_today']),
             ],
             [
+                'key' => 'departures_today',
                 'label' => \__('Departures Today', 'must-hotel-booking'),
                 'value' => (string) $summary['departures_reservations'],
                 'descriptor' => $this->formatGuestCountDescriptor($summary['departures_guests']),
                 'url' => get_admin_reservations_page_url(['preset' => 'departures_today']),
             ],
             [
+                'key' => 'in_house_today',
                 'label' => \__('In-House Guests', 'must-hotel-booking'),
                 'value' => (string) $summary['in_house_guests'],
                 'descriptor' => $inHouseDescriptor,
                 'url' => get_admin_reservations_page_url(['preset' => 'in_house_today']),
             ],
             [
+                'key' => 'pending_reservations',
                 'label' => \__('Pending Reservations', 'must-hotel-booking'),
                 'value' => (string) $summary['pending_reservations'],
                 'descriptor' => \__('Awaiting confirmation or payment.', 'must-hotel-booking'),
                 'url' => get_admin_reservations_page_url(['preset' => 'pending']),
             ],
             [
+                'key' => 'unpaid_reservations',
                 'label' => \__('Unpaid Reservations', 'must-hotel-booking'),
                 'value' => (string) $summary['unpaid_reservations'],
                 'descriptor' => \__('Not fully paid yet.', 'must-hotel-booking'),
                 'url' => get_admin_payments_page_url(['payment_group' => 'due']),
             ],
             [
+                'key' => 'occupancy_today',
                 'label' => \__('Occupancy Today', 'must-hotel-booking'),
                 'value' => $occupancyPercent . '%',
                 'descriptor' => $unitCount > 0
@@ -148,12 +154,14 @@ final class DashboardDataProvider
                 'url' => get_admin_calendar_page_url(['start_date' => \current_time('Y-m-d'), 'weeks' => 2]),
             ],
             [
+                'key' => 'revenue_today',
                 'label' => \__('Revenue Today', 'must-hotel-booking'),
                 'value' => $this->formatMoney($revenueAmount, $currency),
                 'descriptor' => $revenueDescriptor,
                 'url' => get_admin_payments_page_url(),
             ],
             [
+                'key' => 'blocked_units',
                 'label' => \__('Blocked / Unavailable Units', 'must-hotel-booking'),
                 'value' => (string) $blockedUnits,
                 'descriptor' => \__('Manual blocks, maintenance, and room status issues.', 'must-hotel-booking'),
@@ -375,7 +383,8 @@ final class DashboardDataProvider
                 $reservationRow !== null && (string) ($reservationRow['status'] ?? '') === 'healthy' ? 'ok' : 'error',
                 \__('Reservations table', 'must-hotel-booking'),
                 $reservationRow !== null ? (string) ($reservationRow['message'] ?? '') : \__('Reservation storage is not available.', 'must-hotel-booking'),
-                get_admin_settings_page_url(['tab' => 'diagnostics'])
+                get_admin_settings_page_url(['tab' => 'diagnostics']),
+                \__('Open diagnostics', 'must-hotel-booking')
             ),
             $this->makeHealthItem(
                 $this->inventoryRepository->inventoryRoomsTableExists() || $this->inventoryRepository->roomTypesTableExists()
@@ -387,7 +396,8 @@ final class DashboardDataProvider
                         ? (string) $locksRow['message']
                         : \__('Inventory lock table is missing.', 'must-hotel-booking'))
                     : \__('Legacy room model is active; inventory locks are optional right now.', 'must-hotel-booking'),
-                get_admin_settings_page_url(['tab' => 'diagnostics'])
+                get_admin_settings_page_url(['tab' => 'diagnostics']),
+                \__('Open diagnostics', 'must-hotel-booking')
             ),
             $this->makeHealthItem(
                 !$stripeEnabled || PaymentEngine::isStripeCheckoutConfigured() ? 'ok' : 'error',
@@ -397,7 +407,8 @@ final class DashboardDataProvider
                     : (PaymentEngine::isStripeCheckoutConfigured()
                         ? \__('Stripe publishable and secret keys are configured.', 'must-hotel-booking')
                         : \__('Stripe is enabled, but the active keys are incomplete.', 'must-hotel-booking')),
-                get_admin_payments_page_url()
+                get_admin_payments_page_url(),
+                \__('Open payments', 'must-hotel-booking')
             ),
             $this->makeHealthItem(
                 !$stripeEnabled || PaymentEngine::getStripeWebhookSecret() !== '' ? 'ok' : 'warning',
@@ -407,7 +418,8 @@ final class DashboardDataProvider
                     : (PaymentEngine::getStripeWebhookSecret() !== ''
                         ? \__('Webhook signing secret is configured.', 'must-hotel-booking')
                         : \__('Webhook signing secret is missing for the active Stripe environment.', 'must-hotel-booking')),
-                get_admin_payments_page_url()
+                get_admin_payments_page_url(),
+                \__('Open payments', 'must-hotel-booking')
             ),
             $this->makeHealthItem(
                 $emailSender !== '' ? 'ok' : 'error',
@@ -415,7 +427,8 @@ final class DashboardDataProvider
                 $emailSender !== ''
                     ? \sprintf(\__('Notification emails will use %s.', 'must-hotel-booking'), $emailSender)
                     : \__('Booking notification email is missing.', 'must-hotel-booking'),
-                get_admin_emails_page_url()
+                get_admin_emails_page_url(),
+                \__('Open emails', 'must-hotel-booking')
             ),
             $this->makeHealthItem(
                 !empty($emailTemplates) ? 'ok' : 'error',
@@ -423,19 +436,22 @@ final class DashboardDataProvider
                 !empty($emailTemplates)
                     ? \sprintf(\_n('%d template is available.', '%d templates are available.', \count($emailTemplates), 'must-hotel-booking'), \count($emailTemplates))
                     : \__('No email templates are configured.', 'must-hotel-booking'),
-                get_admin_emails_page_url()
+                get_admin_emails_page_url(),
+                \__('Open emails', 'must-hotel-booking')
             ),
             $this->makeHealthItem(
                 $pagesHealthy ? 'ok' : 'error',
                 \__('Booking pages', 'must-hotel-booking'),
                 $pagesHealthy ? \__('All managed booking pages are assigned.', 'must-hotel-booking') : \__('One or more managed booking pages are missing or invalid.', 'must-hotel-booking'),
-                get_admin_settings_page_url(['tab' => 'pages'])
+                get_admin_settings_page_url(['tab' => 'pages']),
+                \__('Open page settings', 'must-hotel-booking')
             ),
             $this->makeHealthItem(
                 $hotelCoreHealthy ? 'ok' : 'warning',
                 \__('Hotel core settings', 'must-hotel-booking'),
                 $hotelCoreHealthy ? \__('Hotel name, currency, and timezone are configured.', 'must-hotel-booking') : \__('Core hotel identity settings are incomplete.', 'must-hotel-booking'),
-                get_admin_settings_page_url(['tab' => 'general'])
+                get_admin_settings_page_url(['tab' => 'general']),
+                \__('Open general settings', 'must-hotel-booking')
             ),
         ];
     }
@@ -571,13 +587,14 @@ final class DashboardDataProvider
     /**
      * @return array<string, string>
      */
-    private function makeHealthItem(string $status, string $label, string $message, string $actionUrl): array
+    private function makeHealthItem(string $status, string $label, string $message, string $actionUrl, string $actionLabel = ''): array
     {
         return [
             'status' => $status,
             'label' => $label,
             'message' => $message,
             'action_url' => $actionUrl,
+            'action_label' => $actionLabel,
         ];
     }
 

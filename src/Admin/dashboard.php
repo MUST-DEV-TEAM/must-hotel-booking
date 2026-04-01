@@ -640,7 +640,10 @@ function render_dashboard_health_panel(array $items): void
         echo '<p>' . \esc_html((string) ($item['message'] ?? '')) . '</p>';
 
         if (!empty($item['action_url'])) {
-            echo '<p><a class="must-dashboard-inline-link" href="' . \esc_url((string) $item['action_url']) . '">' . \esc_html__('Open settings', 'must-hotel-booking') . '</a></p>';
+            $actionLabel = !empty($item['action_label'])
+                ? (string) $item['action_label']
+                : \__('Open settings', 'must-hotel-booking');
+            echo '<p><a class="must-dashboard-inline-link" href="' . \esc_url((string) $item['action_url']) . '">' . \esc_html($actionLabel) . '</a></p>';
         }
 
         echo '</div>';

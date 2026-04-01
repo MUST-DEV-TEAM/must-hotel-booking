@@ -50,13 +50,8 @@ final class PortalAccessGuard
         }
 
         if (PortalRouter::isLoginRequest() && \is_user_logged_in()) {
-            if (\current_user_can('manage_options') && !StaffAccess::isPortalRestrictedUser()) {
-                \wp_safe_redirect(\admin_url());
-                exit;
-            }
-
             if (StaffAccess::userCanAccessPortal()) {
-                \wp_safe_redirect(self::getPostLoginRedirectUrl(\wp_get_current_user()));
+                \wp_safe_redirect(self::getPostLoginRedirectUrl(\wp_get_current_user(), true));
                 exit;
             }
         }
@@ -111,12 +106,16 @@ final class PortalAccessGuard
         return self::getPostLoginRedirectUrl($user);
     }
 
-    public static function getPostLoginRedirectUrl(?\WP_User $user = null): string
+    public static function getPostLoginRedirectUrl(?\WP_User $user = null, bool $preferPortal = false): string
     {
         $user = $user instanceof \WP_User ? $user : \wp_get_current_user();
 
-        if (\user_can($user, 'manage_options') && !StaffAccess::isPortalRestrictedUser($user)) {
+        if (!$preferPortal && \user_can($user, 'manage_options') && !StaffAccess::isPortalRestrictedUser($user)) {
             return \admin_url();
+        }
+
+        if (!StaffAccess::userCanAccessPortal($user)) {
+            return \user_can($user, 'manage_options') ? \admin_url() : \home_url('/');
         }
 
         if (empty(MustBookingConfig::get_setting('enable_staff_portal', false)) && !\user_can($user, 'manage_options')) {
@@ -135,7 +134,7 @@ final class PortalAccessGuard
             return PortalRouter::getModuleUrl($fallbackModule);
         }
 
-        return \home_url('/');
+        return \user_can($user, 'manage_options') ? \admin_url() : \home_url('/');
     }
 
     public static function getFirstAccessibleModuleKey(?\WP_User $user = null): string

@@ -32,8 +32,6 @@ final class PortalAuthController
 
             if (!\wp_verify_nonce($nonce, 'must_portal_login')) {
                 $errors[] = \__('Security check failed. Please reload the page and try again.', 'must-hotel-booking');
-            } elseif (!$portalEnabled && !\current_user_can('manage_options')) {
-                $errors[] = \__('The staff portal is currently disabled.', 'must-hotel-booking');
             } elseif ($values['identifier'] === '' || $password === '') {
                 $errors[] = \__('Enter your username or email address and password.', 'must-hotel-booking');
             } else {
@@ -61,6 +59,9 @@ final class PortalAuthController
                     $errors[] = \__('Unable to sign you in with those credentials.', 'must-hotel-booking');
                 } elseif (!$user instanceof \WP_User) {
                     $errors[] = \__('Unable to resolve your account for portal access.', 'must-hotel-booking');
+                } elseif (!$portalEnabled && !\user_can($user, 'manage_options')) {
+                    \wp_logout();
+                    $errors[] = \__('The staff portal is currently disabled.', 'must-hotel-booking');
                 } elseif (!StaffAccess::userCanAccessPortal($user)) {
                     \wp_logout();
                     $errors[] = \__('Your account does not have staff portal access.', 'must-hotel-booking');
@@ -68,7 +69,7 @@ final class PortalAuthController
                     \wp_logout();
                     $errors[] = \__('No portal modules are currently enabled for your account.', 'must-hotel-booking');
                 } else {
-                    \wp_safe_redirect(PortalAccessGuard::getPostLoginRedirectUrl($user));
+                    \wp_safe_redirect(PortalAccessGuard::getPostLoginRedirectUrl($user, true));
                     exit;
                 }
             }

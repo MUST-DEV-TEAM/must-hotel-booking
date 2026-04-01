@@ -4,7 +4,7 @@ Tags: hotel, booking, reservation, accommodation
 Requires at least: 5.0
 Tested up to: 6.0
 Requires PHP: 7.4
-Stable tag: 0.3.37
+Stable tag: 0.3.38
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -31,6 +31,12 @@ Main features include:
 5. When updating, upload the new release ZIP or use the configured updater, then review **Diagnostics & Maintenance** after the update completes.
 
 == Changelog ==
+
+= 0.3.38 =
+* Reworked the staff portal entry flow with a redesigned login experience, clearer staff-only messaging, stronger responsive behavior, and admin access that stays inside the same portal flow used by managers and workers.
+* Redesigned the staff dashboard into an action-first operations workspace with stronger task hierarchy, portal-safe links, and admin-only system health items that link directly to the settings or workspace that needs review.
+* Added a full reservation workspace inside the staff portal so front-desk teams can review attention items, update guest details and internal notes, resend reservation emails, and manage payment state without hopping back into wp-admin.
+* Refined shared portal UI patterns with richer feed cards, stronger reservation status and action layouts, improved queue filtering, and more consistent responsive behavior across dashboard, reservation, and related staff screens.
 
 = 0.3.37 =
 * Added an Elementor booking search widget option to send guests directly to the Select Accommodation page instead of the main booking page when that flow is preferred.
