@@ -4,7 +4,7 @@ Tags: hotel, booking, reservation, accommodation
 Requires at least: 5.0
 Tested up to: 6.0
 Requires PHP: 7.4
-Stable tag: 0.3.35
+Stable tag: 0.3.36
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -31,6 +31,11 @@ Main features include:
 5. When updating, upload the new release ZIP or use the configured updater, then review **Diagnostics & Maintenance** after the update completes.
 
 == Changelog ==
+
+= 0.3.36 =
+* Added an Elementor booking search widget option to send guests directly to the Select Accommodation page instead of the main booking page when that flow is preferred.
+* Fixed booking-calendar navigation so the shared previous and next month controls keep both check-in and checkout calendars moving together and keep the visible month labels in sync.
+* Refined booking and accommodation frontend presentation with cleaner step header spacing, calendar shell spacing, responsive room thumbnail layouts, stacked mobile room actions, and cleaner room/widget media edge treatment.
 
 = 0.3.35 =
 * Reworked the wp-admin operations experience so Calendar, Accommodations, Rates & Pricing, Availability Rules, Payments, and Emails now share the same polished dashboard-style shell, cards, filters, badges, and action hierarchy.

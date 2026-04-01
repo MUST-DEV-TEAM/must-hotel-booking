@@ -1263,7 +1263,9 @@
                     }
 
                     state.checkinPicker.changeMonth(-1);
+                    state.checkoutPicker.changeMonth(-1);
                     updateCalendarMeta(state.checkinPicker, 'must-booking-checkin-month', 'must-booking-checkin-year');
+                    updateCalendarMeta(state.checkoutPicker, 'must-booking-checkout-month', 'must-booking-checkout-year');
                     updateCalendarShiftState();
                     refreshUnavailableDayClasses();
                     updateRangeHighlights(checkinInput.value, checkoutInput.value, state.previewCheckout);
@@ -1272,7 +1274,9 @@
 
             if (nextButton) {
                 nextButton.addEventListener('click', function () {
+                    state.checkinPicker.changeMonth(1);
                     state.checkoutPicker.changeMonth(1);
+                    updateCalendarMeta(state.checkinPicker, 'must-booking-checkin-month', 'must-booking-checkin-year');
                     updateCalendarMeta(state.checkoutPicker, 'must-booking-checkout-month', 'must-booking-checkout-year');
                     refreshUnavailableDayClasses();
                     updateRangeHighlights(checkinInput.value, checkoutInput.value, state.previewCheckout);

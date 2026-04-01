@@ -2,6 +2,7 @@
 
 namespace MustHotelBooking\Elementor;
 
+use MustHotelBooking\Core\ManagedPages;
 use MustHotelBooking\Core\MustBookingConfig;
 
 class Booking_Search_Widget extends \Elementor\Widget_Base
@@ -69,6 +70,19 @@ class Booking_Search_Widget extends \Elementor\Widget_Base
             ]
         );
 
+        $this->add_control(
+            'direct_to_accommodation',
+            [
+                'label'        => \__('Direct to Accommodation Page', 'must-hotel-booking'),
+                'type'         => \Elementor\Controls_Manager::SWITCHER,
+                'label_on'     => \__('Yes', 'must-hotel-booking'),
+                'label_off'    => \__('No', 'must-hotel-booking'),
+                'return_value' => 'yes',
+                'default'      => '',
+                'description'  => \__('When enabled, the search form will send the user directly to the Select Accommodation page instead of the Booking page.', 'must-hotel-booking'),
+            ]
+        );
+
         $this->end_controls_section();
 
     }
@@ -89,7 +103,10 @@ class Booking_Search_Widget extends \Elementor\Widget_Base
         $max_booking_guests = \class_exists(MustBookingConfig::class)
             ? \max(1, MustBookingConfig::get_max_booking_guests())
             : 5;
-        $booking_url = get_booking_page_url_for_widget();
+        $direct_to_accommodation = isset($settings['direct_to_accommodation']) && $settings['direct_to_accommodation'] === 'yes';
+        $booking_url = $direct_to_accommodation
+            ? ManagedPages::getBookingAccommodationPageUrl()
+            : get_booking_page_url_for_widget();
         $calendar_icon_url = MUST_HOTEL_BOOKING_URL . 'assets/img/Calendar2Date.svg';
         $people_icon_url = MUST_HOTEL_BOOKING_URL . 'assets/img/PeopleFill.svg';
         $arrow_icon_url = MUST_HOTEL_BOOKING_URL . 'assets/img/ArrowRight.svg';
