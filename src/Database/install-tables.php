@@ -250,13 +250,53 @@ function install_tables(): void
         id BIGINT(20) UNSIGNED NOT NULL AUTO_INCREMENT,
         inventory_room_id BIGINT(20) UNSIGNED NOT NULL,
         status VARCHAR(30) NOT NULL DEFAULT 'dirty',
+        assigned_to_user_id BIGINT(20) UNSIGNED NOT NULL DEFAULT 0,
+        assigned_by_user_id BIGINT(20) UNSIGNED NOT NULL DEFAULT 0,
+        assigned_at DATETIME NULL DEFAULT NULL,
         updated_by BIGINT(20) UNSIGNED NOT NULL DEFAULT 0,
         updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
         PRIMARY KEY  (id),
         UNIQUE KEY inventory_room_id (inventory_room_id),
         KEY status (status),
+        KEY assigned_to_user_id (assigned_to_user_id),
+        KEY assigned_at (assigned_at),
         KEY updated_by (updated_by),
         KEY updated_at (updated_at)
+    ) {$charset_collate};";
+
+    $tables[] = "CREATE TABLE {$prefix}must_room_housekeeping_issues (
+        id BIGINT(20) UNSIGNED NOT NULL AUTO_INCREMENT,
+        inventory_room_id BIGINT(20) UNSIGNED NOT NULL,
+        issue_title VARCHAR(191) NOT NULL DEFAULT '',
+        issue_details LONGTEXT NULL,
+        status VARCHAR(30) NOT NULL DEFAULT 'open',
+        created_by BIGINT(20) UNSIGNED NOT NULL DEFAULT 0,
+        updated_by BIGINT(20) UNSIGNED NOT NULL DEFAULT 0,
+        created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        PRIMARY KEY  (id),
+        KEY inventory_room_id (inventory_room_id),
+        KEY status (status),
+        KEY created_by (created_by),
+        KEY updated_by (updated_by),
+        KEY updated_at (updated_at)
+    ) {$charset_collate};";
+
+    $tables[] = "CREATE TABLE {$prefix}must_housekeeping_handoffs (
+        id BIGINT(20) UNSIGNED NOT NULL AUTO_INCREMENT,
+        shift_label VARCHAR(191) NOT NULL DEFAULT '',
+        notes LONGTEXT NULL,
+        dirty_count INT(11) NOT NULL DEFAULT 0,
+        clean_count INT(11) NOT NULL DEFAULT 0,
+        inspected_count INT(11) NOT NULL DEFAULT 0,
+        out_of_order_count INT(11) NOT NULL DEFAULT 0,
+        assigned_count INT(11) NOT NULL DEFAULT 0,
+        open_issue_count INT(11) NOT NULL DEFAULT 0,
+        created_by BIGINT(20) UNSIGNED NOT NULL DEFAULT 0,
+        created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        PRIMARY KEY  (id),
+        KEY created_by (created_by),
+        KEY created_at (created_at)
     ) {$charset_collate};";
 
     $tables[] = "CREATE TABLE {$prefix}must_guests (

@@ -115,6 +115,15 @@ final class PortalController
             return [];
         }
 
+        if ($action === 'reservation_update_stay') {
+            return self::handleReservationUpdateStay();
+        }
+
+        if ($action === 'reservation_mark_no_show') {
+            self::handleReservationMarkNoShow();
+            return [];
+        }
+
         if ($action === 'reservation_add_note') {
             self::handleReservationAddNote();
             return [];
@@ -252,6 +261,46 @@ final class PortalController
                 StaffAccess::CAP_HOUSEKEEPING_INSPECT,
                 'housekeeping_marked_inspected'
             );
+            return [];
+        }
+
+        if ($action === 'housekeeping_assign_room') {
+            return self::handleHousekeepingAssignRoom();
+        }
+
+        if ($action === 'housekeeping_create_issue') {
+            return self::handleHousekeepingCreateIssue();
+        }
+
+        if ($action === 'housekeeping_update_issue_status') {
+            self::handleHousekeepingUpdateIssueStatus();
+            return [];
+        }
+
+        if ($action === 'housekeeping_create_handoff') {
+            return self::handleHousekeepingCreateHandoff();
+        }
+
+        if ($action === 'rooms_availability_save_block') {
+            return self::handleRoomsAvailabilitySaveBlock();
+        }
+
+        if ($action === 'rooms_availability_delete_block') {
+            self::handleRoomsAvailabilityDeleteBlock();
+            return [];
+        }
+
+        if ($action === 'rooms_availability_save_rule') {
+            return self::handleRoomsAvailabilitySaveRule();
+        }
+
+        if ($action === 'rooms_availability_delete_rule') {
+            self::handleRoomsAvailabilityDeleteRule();
+            return [];
+        }
+
+        if ($action === 'rooms_availability_toggle_rule_status') {
+            self::handleRoomsAvailabilityToggleRuleStatus();
             return [];
         }
 
@@ -967,7 +1016,7 @@ final class PortalController
         }
 
         if ($moduleKey === 'reservations') {
-            return self::prepareReservationsData();
+            return self::prepareReservationsData($actionState);
         }
 
         if ($moduleKey === 'calendar') {
@@ -995,7 +1044,7 @@ final class PortalController
         }
 
         if ($moduleKey === 'rooms_availability') {
-            return self::prepareRoomsAvailabilityData();
+            return self::prepareRoomsAvailabilityData($actionState);
         }
 
         return [];
@@ -1009,6 +1058,7 @@ final class PortalController
         $data = (new DashboardDataProvider())->getDashboardData();
         $data['kpis'] = self::mapDashboardKpisToPortal(isset($data['kpis']) && \is_array($data['kpis']) ? $data['kpis'] : []);
         $data = self::mapDashboardActionUrlsToPortal($data);
+        $data = self::filterDashboardDataForCurrentUser($data);
         $quickActions = [];
 
         foreach (PortalRegistry::getVisibleDefinitionsForCurrentUser() as $key => $definition) {
@@ -1268,20 +1318,82 @@ final class PortalController
     /**
      * @return array<string, mixed>
      */
-    private static function prepareReservationsData(): array
+    private static function prepareReservationsData(array $actionState = []): array
     {
         /** @var array<string, mixed> $request */
         $request = \is_array($_GET) ? \wp_unslash($_GET) : [];
+        $request = self::sanitizeReservationPortalRequestForCurrentUser($request);
         $provider = new ReservationAdminDataProvider();
         $data = $provider->getListPageData($request);
-        $reservationId = isset($_GET['reservation_id']) ? \absint(\wp_unslash($_GET['reservation_id'])) : 0;
+        $reservationId = isset($actionState['selected_reservation_id'])
+            ? (int) $actionState['selected_reservation_id']
+            : (isset($_GET['reservation_id']) ? \absint(\wp_unslash($_GET['reservation_id'])) : 0);
         $mode = isset($_GET['mode']) ? \sanitize_key((string) \wp_unslash($_GET['mode'])) : 'view';
-        $data['detail'] = $reservationId > 0 ? $provider->getDetailPageData($reservationId, $mode) : null;
+        $detail = $reservationId > 0 ? $provider->getDetailPageData($reservationId, $mode) : null;
+
+        if (\is_array($detail) && isset($actionState['forms']) && \is_array($actionState['forms'])) {
+            $detail['forms'] = $actionState['forms'];
+        }
+
+        if (!self::currentUserCanViewFinanceContext()) {
+            if (isset($data['filters']) && \is_array($data['filters'])) {
+                $data['filters']['payment_status'] = '';
+                $data['filters']['payment_method'] = '';
+            }
+
+            $data['payment_status_options'] = [];
+            $data['payment_method_options'] = [];
+            $data['quick_filters'] = \array_values(
+                \array_filter(
+                    isset($data['quick_filters']) && \is_array($data['quick_filters']) ? $data['quick_filters'] : [],
+                    static function ($filter): bool {
+                        if (!\is_array($filter)) {
+                            return false;
+                        }
+
+                        return !\in_array(
+                            \sanitize_key((string) ($filter['slug'] ?? '')),
+                            ['unpaid', 'paid', 'failed_payment'],
+                            true
+                        );
+                    }
+                )
+            );
+        }
+
+        $data['detail'] = $detail;
         $data['source_options'] = \function_exists('\MustHotelBooking\Admin\get_admin_quick_booking_source_options')
             ? \MustHotelBooking\Admin\get_admin_quick_booking_source_options()
             : [];
 
         return $data;
+    }
+
+    /**
+     * @param array<string, mixed> $request
+     * @return array<string, mixed>
+     */
+    private static function sanitizeReservationPortalRequestForCurrentUser(array $request): array
+    {
+        if (self::currentUserCanViewFinanceContext()) {
+            return $request;
+        }
+
+        unset($request['payment_status'], $request['payment_method']);
+
+        $quickFilter = isset($request['quick_filter']) ? \sanitize_key((string) $request['quick_filter']) : '';
+        $preset = isset($request['preset']) ? \sanitize_key((string) $request['preset']) : '';
+        $blockedQuickFilters = ['unpaid', 'paid', 'failed_payment'];
+
+        if (\in_array($quickFilter, $blockedQuickFilters, true)) {
+            unset($request['quick_filter']);
+        }
+
+        if (\in_array($preset, $blockedQuickFilters, true)) {
+            unset($request['preset']);
+        }
+
+        return $request;
     }
 
     /**
@@ -2125,13 +2237,10 @@ final class PortalController
     {
         $reservationId = isset($_POST['reservation_id']) ? \absint(\wp_unslash($_POST['reservation_id'])) : 0;
         $nonce         = isset($_POST['must_portal_reservation_nonce']) ? (string) \wp_unslash($_POST['must_portal_reservation_nonce']) : '';
+        $roomMoveRequest = self::isFrontDeskRoomMoveRequest();
 
         if ($reservationId <= 0 || !\wp_verify_nonce($nonce, 'must_portal_reservation_assign_room_' . $reservationId)) {
             self::redirectAfterReservationAssignRoom($reservationId, 'invalid_nonce');
-        }
-
-        if (!\current_user_can(StaffAccess::CAP_RESERVATION_ASSIGN_ROOM) && !\current_user_can('manage_options')) {
-            self::redirectAfterReservationAssignRoom($reservationId, 'access_denied');
         }
 
         $reservationRepository = \MustHotelBooking\Engine\get_reservation_repository();
@@ -2142,8 +2251,35 @@ final class PortalController
         }
 
         $status = \sanitize_key((string) ($reservation['status'] ?? ''));
+        $checkedInAt = \trim((string) ($reservation['checked_in_at'] ?? ''));
+        $checkedOutAt = \trim((string) ($reservation['checked_out_at'] ?? ''));
+        $isCheckedIn = $checkedInAt !== '' && $checkedInAt !== '0000-00-00 00:00:00';
+        $isCheckedOut = $checkedOutAt !== '' && $checkedOutAt !== '0000-00-00 00:00:00';
+        $requiresMoveCapability = $isCheckedIn && !$isCheckedOut;
+
+        $requiredCapability = $requiresMoveCapability
+            ? StaffAccess::CAP_RESERVATION_MOVE_ROOM
+            : StaffAccess::CAP_RESERVATION_ASSIGN_ROOM;
+
+        if (!\current_user_can($requiredCapability) && !\current_user_can('manage_options')) {
+            self::redirectAfterReservationAssignRoom($reservationId, 'access_denied');
+        }
 
         if (\in_array($status, ['cancelled', 'completed', 'blocked'], true)) {
+            self::redirectAfterReservationAssignRoom($reservationId, 'reservation_wrong_status');
+        }
+
+        if (
+            $roomMoveRequest
+            && !$requiresMoveCapability
+        ) {
+            self::redirectAfterReservationAssignRoom($reservationId, 'reservation_wrong_status');
+        }
+
+        if (
+            $requiresMoveCapability
+            && $isCheckedOut
+        ) {
             self::redirectAfterReservationAssignRoom($reservationId, 'reservation_wrong_status');
         }
 
@@ -2154,6 +2290,10 @@ final class PortalController
         $inventoryRepository  = \MustHotelBooking\Engine\get_inventory_repository();
         $roomLabel            = \__('Unassigned', 'must-hotel-booking');
         $updated              = false;
+
+        if ($requiresMoveCapability && $newRoomId <= 0) {
+            self::redirectAfterReservationAssignRoom($reservationId, 'portal_action_failed');
+        }
 
         if ($newRoomId > 0) {
             $inventoryRoom = $inventoryRepository->getInventoryRoomById($newRoomId);
@@ -2234,6 +2374,367 @@ final class PortalController
         );
 
         self::redirectAfterReservationAssignRoom($reservationId, 'reservation_room_assigned');
+    }
+
+    // -------------------------------------------------------------------------
+    // Stay change
+    // -------------------------------------------------------------------------
+
+    /**
+     * @return array<string, mixed>
+     */
+    private static function handleReservationUpdateStay(): array
+    {
+        $reservationId = isset($_POST['reservation_id']) ? \absint(\wp_unslash($_POST['reservation_id'])) : 0;
+        $nonce = isset($_POST['must_portal_reservation_nonce']) ? (string) \wp_unslash($_POST['must_portal_reservation_nonce']) : '';
+
+        if ($reservationId <= 0 || !\wp_verify_nonce($nonce, 'must_portal_reservation_update_stay_' . $reservationId)) {
+            self::redirectToPortalReservationDetail($reservationId, 'invalid_nonce');
+        }
+
+        if (!\current_user_can(StaffAccess::CAP_RESERVATION_EDIT_STAY) && !\current_user_can('manage_options')) {
+            self::redirectToPortalReservationDetail($reservationId, 'access_denied');
+        }
+
+        $reservationRepository = \MustHotelBooking\Engine\get_reservation_repository();
+        $reservation = $reservationRepository->getReservation($reservationId);
+
+        if (!\is_array($reservation)) {
+            self::redirectToPortalReservationDetail($reservationId, 'reservation_not_found');
+        }
+
+        $status = \sanitize_key((string) ($reservation['status'] ?? ''));
+        $currentCheckin = (string) ($reservation['checkin'] ?? '');
+        $currentCheckout = (string) ($reservation['checkout'] ?? '');
+        $checkedInAt = \trim((string) ($reservation['checked_in_at'] ?? ''));
+        $checkedOutAt = \trim((string) ($reservation['checked_out_at'] ?? ''));
+        $form = [
+            'checkin' => isset($_POST['stay_checkin'])
+                ? \sanitize_text_field((string) \wp_unslash($_POST['stay_checkin']))
+                : $currentCheckin,
+            'checkout' => isset($_POST['stay_checkout'])
+                ? \sanitize_text_field((string) \wp_unslash($_POST['stay_checkout']))
+                : $currentCheckout,
+        ];
+        $errors = [];
+
+        if (\in_array($status, ['cancelled', 'completed', 'blocked', 'expired', 'payment_failed'], true)) {
+            self::redirectToPortalReservationDetail($reservationId, 'reservation_wrong_status');
+        }
+
+        if ($checkedOutAt !== '' && $checkedOutAt !== '0000-00-00 00:00:00') {
+            self::redirectToPortalReservationDetail($reservationId, 'reservation_wrong_status');
+        }
+
+        if (!\MustHotelBooking\Engine\AvailabilityEngine::isValidBookingDate($form['checkin'])) {
+            $errors[] = \__('Enter a valid check-in date.', 'must-hotel-booking');
+        }
+
+        if (!\MustHotelBooking\Engine\AvailabilityEngine::isValidBookingDate($form['checkout'])) {
+            $errors[] = \__('Enter a valid check-out date.', 'must-hotel-booking');
+        }
+
+        if (empty($errors) && $form['checkout'] <= $form['checkin']) {
+            $errors[] = \__('Check-out must be later than check-in.', 'must-hotel-booking');
+        }
+
+        if (
+            empty($errors)
+            && $checkedInAt !== ''
+            && $checkedInAt !== '0000-00-00 00:00:00'
+            && $form['checkin'] !== $currentCheckin
+        ) {
+            $errors[] = \__('Check-in date cannot be changed after the guest has already checked in.', 'must-hotel-booking');
+        }
+
+        $roomTypeId = isset($reservation['room_type_id']) ? (int) $reservation['room_type_id'] : (int) ($reservation['room_id'] ?? 0);
+        $stayAvailability = [
+            'clear_assigned_room' => false,
+            'errors' => [],
+        ];
+
+        if (empty($errors) && $roomTypeId <= 0) {
+            $errors[] = \__('This reservation is missing its accommodation context, so stay dates cannot be updated safely.', 'must-hotel-booking');
+        }
+
+        if (
+            empty($errors)
+            && !\MustHotelBooking\Engine\AvailabilityEngine::checkBookingRestrictions($roomTypeId, $form['checkin'], $form['checkout'])
+        ) {
+            $errors[] = \__('The selected stay dates are blocked by the current booking rules for this accommodation.', 'must-hotel-booking');
+        }
+
+        if (empty($errors)) {
+            $stayAvailability = self::validateReservationStayAvailability(
+                $reservationId,
+                $reservation,
+                $roomTypeId,
+                $form['checkin'],
+                $form['checkout']
+            );
+            $errors = \array_merge($errors, isset($stayAvailability['errors']) && \is_array($stayAvailability['errors']) ? $stayAvailability['errors'] : []);
+        }
+
+        $pricing = null;
+        $newTotalPrice = isset($reservation['total_price']) ? (float) $reservation['total_price'] : 0.0;
+        $newCouponId = isset($reservation['coupon_id']) ? (int) $reservation['coupon_id'] : 0;
+        $newCouponCode = (string) ($reservation['coupon_code'] ?? '');
+        $newCouponDiscountTotal = isset($reservation['coupon_discount_total']) ? (float) $reservation['coupon_discount_total'] : 0.0;
+
+        if (empty($errors)) {
+            $pricing = \MustHotelBooking\Engine\PricingEngine::calculateTotal(
+                $roomTypeId,
+                $form['checkin'],
+                $form['checkout'],
+                \max(1, (int) ($reservation['guests'] ?? 1)),
+                (string) ($reservation['coupon_code'] ?? ''),
+                (int) ($reservation['rate_plan_id'] ?? 0)
+            );
+
+            if (!\is_array($pricing) || empty($pricing['success']) || !isset($pricing['total_price'])) {
+                $errors[] = isset($pricing['message']) && \is_string($pricing['message']) && $pricing['message'] !== ''
+                    ? (string) $pricing['message']
+                    : \__('Unable to recalculate pricing for the updated stay dates.', 'must-hotel-booking');
+            } else {
+                $newTotalPrice = (float) $pricing['total_price'];
+                $newCouponId = isset($pricing['applied_coupon_id']) ? (int) $pricing['applied_coupon_id'] : 0;
+                $newCouponCode = isset($pricing['applied_coupon']) ? (string) $pricing['applied_coupon'] : '';
+                $newCouponDiscountTotal = isset($pricing['discount_total']) ? (float) $pricing['discount_total'] : 0.0;
+            }
+        }
+
+        if (!empty($errors)) {
+            return self::buildReservationActionState(
+                $reservationId,
+                ['stay' => $form],
+                $errors
+            );
+        }
+
+        $updatePayload = [
+            'checkin' => $form['checkin'],
+            'checkout' => $form['checkout'],
+            'total_price' => $newTotalPrice,
+            'coupon_id' => $newCouponId,
+            'coupon_code' => $newCouponCode,
+            'coupon_discount_total' => $newCouponDiscountTotal,
+        ];
+        $assignedRoomWasCleared = !empty($stayAvailability['clear_assigned_room']);
+
+        if ($assignedRoomWasCleared) {
+            $updatePayload['assigned_room_id'] = 0;
+        }
+
+        $updated = $reservationRepository->updateReservation($reservationId, $updatePayload);
+
+        if (!$updated) {
+            return self::buildReservationActionState(
+                $reservationId,
+                ['stay' => $form],
+                [\__('Unable to save the updated stay dates.', 'must-hotel-booking')]
+            );
+        }
+
+        $message = \sprintf(
+            /* translators: 1: previous check-in, 2: previous check-out, 3: updated check-in, 4: updated check-out */
+            \__('Stay updated from %1$s - %2$s to %3$s - %4$s.', 'must-hotel-booking'),
+            $currentCheckin,
+            $currentCheckout,
+            $form['checkin'],
+            $form['checkout']
+        );
+
+        if ($assignedRoomWasCleared) {
+            $message .= ' ' . \__('Assigned room cleared because the updated stay window no longer fits the current room assignment.', 'must-hotel-booking');
+        }
+
+        self::logReservationActivity(
+            $reservationId,
+            $reservation,
+            'reservation_stay_updated',
+            'info',
+            $message
+        );
+
+        self::redirectToPortalReservationDetail(
+            $reservationId,
+            $assignedRoomWasCleared ? 'reservation_stay_updated_room_unassigned' : 'reservation_stay_updated'
+        );
+    }
+
+    /**
+     * @param array<string, mixed> $reservation
+     * @return array<string, mixed>
+     */
+    private static function validateReservationStayAvailability(
+        int $reservationId,
+        array $reservation,
+        int $roomTypeId,
+        string $checkin,
+        string $checkout
+    ): array {
+        $nonBlockingStatuses = \MustHotelBooking\Core\ReservationStatus::getInventoryNonBlockingStatuses();
+        $reservationRepository = \MustHotelBooking\Engine\get_reservation_repository();
+
+        if (!\MustHotelBooking\Engine\InventoryEngine::hasInventoryForRoomType($roomTypeId)) {
+            if ($reservationRepository->hasReservationOverlapExcludingId($reservationId, $roomTypeId, $checkin, $checkout, $nonBlockingStatuses)) {
+                return [
+                    'clear_assigned_room' => false,
+                    'errors' => [\__('The selected stay dates are not available for this accommodation.', 'must-hotel-booking')],
+                ];
+            }
+
+            return [
+                'clear_assigned_room' => false,
+                'errors' => [],
+            ];
+        }
+
+        $inventoryRepository = \MustHotelBooking\Engine\get_inventory_repository();
+        $availableRooms = $inventoryRepository->getAvailableRooms(
+            $roomTypeId,
+            $checkin,
+            $checkout,
+            $nonBlockingStatuses,
+            \current_time('mysql')
+        );
+        $availableRoomIds = [];
+
+        foreach ($availableRooms as $availableRoom) {
+            if (!\is_array($availableRoom) || !isset($availableRoom['id'])) {
+                continue;
+            }
+
+            $availableRoomIds[] = (int) $availableRoom['id'];
+        }
+
+        $assignedRoomId = isset($reservation['assigned_room_id']) ? (int) $reservation['assigned_room_id'] : 0;
+        $selfOverlapsUpdatedWindow = self::reservationDatesOverlap(
+            (string) ($reservation['checkin'] ?? ''),
+            (string) ($reservation['checkout'] ?? ''),
+            $checkin,
+            $checkout
+        ) && \MustHotelBooking\Core\ReservationStatus::blocksInventory((string) ($reservation['status'] ?? ''));
+        $unassignedOverlapCount = $inventoryRepository->countUnassignedTypeReservationOverlaps(
+            $roomTypeId,
+            $checkin,
+            $checkout,
+            $nonBlockingStatuses
+        );
+
+        if ($selfOverlapsUpdatedWindow && $assignedRoomId <= 0) {
+            $unassignedOverlapCount = \max(0, $unassignedOverlapCount - 1);
+        }
+
+        $availableCount = \max(0, \count($availableRoomIds) - $unassignedOverlapCount);
+        $canKeepAssignedRoom = false;
+
+        if ($assignedRoomId > 0) {
+            if (\in_array($assignedRoomId, $availableRoomIds, true)) {
+                $canKeepAssignedRoom = true;
+            } elseif (
+                $selfOverlapsUpdatedWindow
+                && !$reservationRepository->hasAssignedRoomOverlapExcludingId($reservationId, $assignedRoomId, $checkin, $checkout, $nonBlockingStatuses)
+            ) {
+                $canKeepAssignedRoom = true;
+            }
+        }
+
+        if (!$canKeepAssignedRoom && $availableCount <= 0) {
+            return [
+                'clear_assigned_room' => false,
+                'errors' => [\__('The selected stay dates are not available for this accommodation.', 'must-hotel-booking')],
+            ];
+        }
+
+        return [
+            'clear_assigned_room' => $assignedRoomId > 0 && !$canKeepAssignedRoom,
+            'errors' => [],
+        ];
+    }
+
+    private static function reservationDatesOverlap(string $firstCheckin, string $firstCheckout, string $secondCheckin, string $secondCheckout): bool
+    {
+        if ($firstCheckin === '' || $firstCheckout === '' || $secondCheckin === '' || $secondCheckout === '') {
+            return false;
+        }
+
+        return $firstCheckin < $secondCheckout && $firstCheckout > $secondCheckin;
+    }
+
+    // -------------------------------------------------------------------------
+    // No-show
+    // -------------------------------------------------------------------------
+
+    private static function handleReservationMarkNoShow(): void
+    {
+        $reservationId = isset($_POST['reservation_id']) ? \absint(\wp_unslash($_POST['reservation_id'])) : 0;
+        $nonce = isset($_POST['must_portal_reservation_nonce']) ? (string) \wp_unslash($_POST['must_portal_reservation_nonce']) : '';
+
+        if ($reservationId <= 0 || !\wp_verify_nonce($nonce, 'must_portal_reservation_no_show_' . $reservationId)) {
+            self::redirectToPortalReservationDetail($reservationId, 'invalid_nonce');
+        }
+
+        if (!\current_user_can(StaffAccess::CAP_RESERVATION_NO_SHOW) && !\current_user_can('manage_options')) {
+            self::redirectToPortalReservationDetail($reservationId, 'access_denied');
+        }
+
+        $reservationRepository = \MustHotelBooking\Engine\get_reservation_repository();
+        $reservation = $reservationRepository->getReservation($reservationId);
+
+        if (!\is_array($reservation)) {
+            self::redirectToPortalReservationDetail($reservationId, 'reservation_not_found');
+        }
+
+        if (!self::canReservationBeMarkedNoShow($reservation)) {
+            self::redirectToPortalReservationDetail($reservationId, 'reservation_wrong_status');
+        }
+
+        BookingStatusEngine::updateReservationStatuses(
+            [$reservationId],
+            'cancelled',
+            \sanitize_key((string) ($reservation['payment_status'] ?? 'unpaid'))
+        );
+        self::clearReservationCancellationRequest($reservationId);
+        self::logReservationActivity(
+            $reservationId,
+            $reservation,
+            'reservation_marked_no_show',
+            'warning',
+            \sprintf(
+                /* translators: %s: staff member display name */
+                \__('Reservation marked as no-show by %s. Reservation cancelled.', 'must-hotel-booking'),
+                self::getCurrentPortalActorName()
+            )
+        );
+
+        self::redirectToPortalReservationDetail($reservationId, 'reservation_marked_no_show');
+    }
+
+    /**
+     * @param array<string, mixed> $reservation
+     */
+    private static function canReservationBeMarkedNoShow(array $reservation): bool
+    {
+        $status = \sanitize_key((string) ($reservation['status'] ?? ''));
+        $checkedInAt = \trim((string) ($reservation['checked_in_at'] ?? ''));
+        $checkedOutAt = \trim((string) ($reservation['checked_out_at'] ?? ''));
+        $checkinDate = (string) ($reservation['checkin'] ?? '');
+        $today = \current_time('Y-m-d');
+
+        if (!\in_array($status, ['pending', 'pending_payment', 'confirmed'], true)) {
+            return false;
+        }
+
+        if ($checkinDate === '' || $checkinDate > $today) {
+            return false;
+        }
+
+        if ($checkedInAt !== '' && $checkedInAt !== '0000-00-00 00:00:00') {
+            return false;
+        }
+
+        return $checkedOutAt === '' || $checkedOutAt === '0000-00-00 00:00:00';
     }
 
     // -------------------------------------------------------------------------
@@ -2519,6 +3020,17 @@ final class PortalController
                 continue;
             }
 
+            if (
+                !self::currentUserCanViewFinanceContext()
+                && (
+                    $key === 'payment_status'
+                    || $key === 'payment_method'
+                    || ($key === 'quick_filter' && \in_array(\sanitize_key((string) $rawValue), ['unpaid', 'paid', 'failed_payment'], true))
+                )
+            ) {
+                continue;
+            }
+
             if ($type === 'absint') {
                 $value = \absint($rawValue);
             } elseif ($type === 'int') {
@@ -2593,6 +3105,119 @@ final class PortalController
         self::redirectToPortalReservationDetail($reservationId, $notice);
     }
 
+    private static function currentUserCanViewFinanceContext(): bool
+    {
+        return \current_user_can(StaffAccess::CAP_PAYMENT_VIEW)
+            || \current_user_can(StaffAccess::CAP_REPORT_VIEW_FINANCE)
+            || \current_user_can(StaffAccess::CAP_REPORT_VIEW_MANAGEMENT)
+            || \current_user_can('manage_options');
+    }
+
+    /**
+     * @param array<string, mixed> $data
+     * @return array<string, mixed>
+     */
+    private static function filterDashboardDataForCurrentUser(array $data): array
+    {
+        $canViewFinance = self::currentUserCanViewFinanceContext();
+        $data['show_finance_details'] = $canViewFinance;
+
+        if ($canViewFinance) {
+            return $data;
+        }
+
+        $data['kpis'] = \array_values(
+            \array_filter(
+                isset($data['kpis']) && \is_array($data['kpis']) ? $data['kpis'] : [],
+                static function ($card): bool {
+                    if (!\is_array($card)) {
+                        return false;
+                    }
+
+                    return !\in_array(
+                        \sanitize_key((string) ($card['key'] ?? '')),
+                        ['unpaid_reservations', 'revenue_today'],
+                        true
+                    );
+                }
+            )
+        );
+
+        $data['attention_items'] = \array_values(
+            \array_filter(
+                isset($data['attention_items']) && \is_array($data['attention_items']) ? $data['attention_items'] : [],
+                static function ($item): bool {
+                    if (!\is_array($item)) {
+                        return false;
+                    }
+
+                    return !self::isPaymentDashboardActionUrl((string) ($item['action_url'] ?? ''));
+                }
+            )
+        );
+
+        $recentReservations = [];
+
+        foreach ((array) ($data['recent_reservations'] ?? []) as $row) {
+            if (!\is_array($row)) {
+                continue;
+            }
+
+            unset($row['payment'], $row['total']);
+            $recentReservations[] = $row;
+        }
+
+        $data['recent_reservations'] = $recentReservations;
+        $data['recent_activity'] = \array_values(
+            \array_filter(
+                isset($data['recent_activity']) && \is_array($data['recent_activity']) ? $data['recent_activity'] : [],
+                static function ($row): bool {
+                    if (!\is_array($row)) {
+                        return false;
+                    }
+
+                    $eventType = \sanitize_key((string) ($row['event_type'] ?? ''));
+
+                    return !\str_starts_with($eventType, 'payment_');
+                }
+            )
+        );
+
+        return $data;
+    }
+
+    private static function isPaymentDashboardActionUrl(string $url): bool
+    {
+        if ($url === '') {
+            return false;
+        }
+
+        $paymentsUrl = PortalRouter::getModuleUrl('payments');
+
+        if ($paymentsUrl !== '' && \strpos($url, $paymentsUrl) === 0) {
+            return true;
+        }
+
+        $parts = \wp_parse_url($url);
+
+        if (!\is_array($parts) || empty($parts['query'])) {
+            return false;
+        }
+
+        $queryArgs = [];
+        \parse_str((string) $parts['query'], $queryArgs);
+
+        return isset($queryArgs['page']) && \sanitize_key((string) $queryArgs['page']) === 'must-hotel-booking-payments';
+    }
+
+    private static function isFrontDeskRoomMoveRequest(): bool
+    {
+        $returnModule = isset($_POST['portal_return_module']) ? \sanitize_key((string) \wp_unslash($_POST['portal_return_module'])) : '';
+        $returnTab = isset($_POST['portal_return_tab']) ? \sanitize_key((string) \wp_unslash($_POST['portal_return_tab'])) : '';
+
+        return $returnModule === 'front_desk' && $returnTab === 'room-move';
+    }
+
     /**
      * @param array<int, string> $allowedTabs
      */
@@ -2617,6 +3242,21 @@ final class PortalController
 
         \wp_safe_redirect(PortalRouter::getModuleUrl('front_desk', $args));
         exit;
+    }
+
+    /**
+     * @param array<string, mixed> $forms
+     * @param array<int, string> $errors
+     * @return array<string, mixed>
+     */
+    private static function buildReservationActionState(int $reservationId, array $forms, array $errors): array
+    {
+        return [
+            'module_key' => 'reservations',
+            'errors' => $errors,
+            'forms' => $forms,
+            'selected_reservation_id' => $reservationId,
+        ];
     }
 
     /**
@@ -2660,6 +3300,17 @@ final class PortalController
 
         foreach ($queryKeys as $key => $type) {
             if (!isset($_GET[$key])) {
+                continue;
+            }
+
+            if (
+                !self::currentUserCanViewFinanceContext()
+                && (
+                    $key === 'payment_status'
+                    || $key === 'payment_method'
+                    || ($key === 'quick_filter' && \in_array(\sanitize_key((string) \wp_unslash($_GET[$key])), ['unpaid', 'paid', 'failed_payment'], true))
+                )
+            ) {
                 continue;
             }
 
@@ -2841,30 +3492,230 @@ final class PortalController
     }
 
     /**
+     * @return array<string, mixed>
+     */
+    private static function handleHousekeepingAssignRoom(): array
+    {
+        $roomId = isset($_POST['room_id']) ? \absint(\wp_unslash($_POST['room_id'])) : 0;
+        $assigneeId = isset($_POST['assigned_to_user_id']) ? \absint(\wp_unslash($_POST['assigned_to_user_id'])) : 0;
+        $nonce = isset($_POST['must_portal_housekeeping_nonce']) ? (string) \wp_unslash($_POST['must_portal_housekeeping_nonce']) : '';
+
+        if ($roomId <= 0 || !\wp_verify_nonce($nonce, 'must_portal_housekeeping_assign_' . $roomId)) {
+            self::redirectToPortalHousekeeping('invalid_nonce');
+        }
+
+        if (!\current_user_can(StaffAccess::CAP_HOUSEKEEPING_ASSIGN_STAFF) && !\current_user_can('manage_options')) {
+            self::redirectToPortalHousekeeping('access_denied');
+        }
+
+        $provider = new HousekeepingAdminDataProvider();
+        $roomBoardRow = $provider->getRoomBoardRoom($roomId);
+
+        if (!\is_array($roomBoardRow)) {
+            self::redirectToPortalHousekeeping('housekeeping_room_not_found');
+        }
+
+        $validAssigneeIds = [0];
+
+        foreach ($provider->getAssignableStaffOptions() as $option) {
+            if (!\is_array($option)) {
+                continue;
+            }
+
+            $optionId = isset($option['id']) ? (int) $option['id'] : 0;
+
+            if ($optionId > 0) {
+                $validAssigneeIds[] = $optionId;
+            }
+        }
+
+        if (!\in_array($assigneeId, $validAssigneeIds, true)) {
+            self::redirectToPortalHousekeeping('housekeeping_assignment_invalid');
+        }
+
+        $inventoryRepository = \MustHotelBooking\Engine\get_inventory_repository();
+        $room = $inventoryRepository->getInventoryRoomById($roomId);
+
+        if (!\is_array($room)) {
+            self::redirectToPortalHousekeeping('housekeeping_room_not_found');
+        }
+
+        if (!\MustHotelBooking\Engine\get_housekeeping_repository()->assignRoom($roomId, $assigneeId, \get_current_user_id())) {
+            self::redirectToPortalHousekeeping('portal_action_failed');
+        }
+
+        self::logHousekeepingAssignmentActivity($roomId, $room, $assigneeId);
+        self::redirectToPortalHousekeeping('housekeeping_assignment_updated');
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private static function handleHousekeepingCreateIssue(): array
+    {
+        $nonce = isset($_POST['must_portal_housekeeping_nonce']) ? (string) \wp_unslash($_POST['must_portal_housekeeping_nonce']) : '';
+        $roomId = isset($_POST['issue_room_id']) ? \absint(\wp_unslash($_POST['issue_room_id'])) : 0;
+        $title = isset($_POST['issue_title']) ? \sanitize_text_field((string) \wp_unslash($_POST['issue_title'])) : '';
+        $details = isset($_POST['issue_details']) ? \sanitize_textarea_field((string) \wp_unslash($_POST['issue_details'])) : '';
+
+        if (!\wp_verify_nonce($nonce, 'must_portal_housekeeping_create_issue')) {
+            self::redirectToPortalHousekeeping('invalid_nonce');
+        }
+
+        if (!\current_user_can(StaffAccess::CAP_HOUSEKEEPING_CREATE_ISSUE) && !\current_user_can('manage_options')) {
+            self::redirectToPortalHousekeeping('access_denied');
+        }
+
+        $errors = [];
+
+        if ($roomId <= 0) {
+            $errors[] = \__('Select a room before creating a maintenance issue.', 'must-hotel-booking');
+        }
+
+        if ($title === '') {
+            $errors[] = \__('Enter a short maintenance issue title.', 'must-hotel-booking');
+        }
+
+        $provider = new HousekeepingAdminDataProvider();
+        $roomBoardRow = $provider->getRoomBoardRoom($roomId);
+
+        if ($roomId > 0 && !\is_array($roomBoardRow)) {
+            $errors[] = \__('Room record not found.', 'must-hotel-booking');
+        }
+
+        if (!empty($errors)) {
+            return [
+                'module_key' => 'housekeeping',
+                'active_tab' => 'maintenance',
+                'errors' => $errors,
+                'issue_form' => [
+                    'issue_room_id' => $roomId,
+                    'issue_title' => $title,
+                    'issue_details' => $details,
+                ],
+            ];
+        }
+
+        $issueId = \MustHotelBooking\Engine\get_housekeeping_repository()->createIssue($roomId, $title, $details, \get_current_user_id());
+
+        if ($issueId <= 0) {
+            self::redirectToPortalHousekeeping('portal_action_failed');
+        }
+
+        $inventoryRepository = \MustHotelBooking\Engine\get_inventory_repository();
+        $room = $inventoryRepository->getInventoryRoomById($roomId);
+
+        if (\is_array($room)) {
+            self::logHousekeepingIssueActivity($issueId, $roomId, $room, $title, HousekeepingRepository::ISSUE_STATUS_OPEN);
+        }
+
+        self::redirectToPortalHousekeeping('housekeeping_issue_created');
+    }
+
+    private static function handleHousekeepingUpdateIssueStatus(): void
+    {
+        $issueId = isset($_POST['issue_id']) ? \absint(\wp_unslash($_POST['issue_id'])) : 0;
+        $rawStatus = isset($_POST['issue_status']) ? \sanitize_key((string) \wp_unslash($_POST['issue_status'])) : '';
+        $status = HousekeepingRepository::normalizeIssueStatus($rawStatus);
+        $nonce = isset($_POST['must_portal_housekeeping_nonce']) ? (string) \wp_unslash($_POST['must_portal_housekeeping_nonce']) : '';
+
+        if ($issueId <= 0 || !\wp_verify_nonce($nonce, 'must_portal_housekeeping_issue_status_' . $issueId)) {
+            self::redirectToPortalHousekeeping('invalid_nonce');
+        }
+
+        if ($rawStatus === '' || !\in_array($rawStatus, HousekeepingRepository::getAllowedIssueStatuses(), true)) {
+            self::redirectToPortalHousekeeping('portal_action_failed');
+        }
+
+        if (!\current_user_can(StaffAccess::CAP_HOUSEKEEPING_CREATE_ISSUE) && !\current_user_can('manage_options')) {
+            self::redirectToPortalHousekeeping('access_denied');
+        }
+
+        $issue = \MustHotelBooking\Engine\get_housekeeping_repository()->getIssue($issueId);
+
+        if (!\is_array($issue)) {
+            self::redirectToPortalHousekeeping('housekeeping_issue_not_found');
+        }
+
+        $roomId = isset($issue['inventory_room_id']) ? (int) $issue['inventory_room_id'] : 0;
+        $room = \MustHotelBooking\Engine\get_inventory_repository()->getInventoryRoomById($roomId);
+
+        if ($roomId <= 0 || !\is_array($room)) {
+            self::redirectToPortalHousekeeping('housekeeping_room_not_found');
+        }
+
+        if (!\MustHotelBooking\Engine\get_housekeeping_repository()->updateIssueStatus($issueId, $status, \get_current_user_id())) {
+            self::redirectToPortalHousekeeping('portal_action_failed');
+        }
+
+        self::logHousekeepingIssueActivity(
+            $issueId,
+            $roomId,
+            $room,
+            (string) ($issue['issue_title'] ?? ''),
+            $status
+        );
+
+        self::redirectToPortalHousekeeping('housekeeping_issue_updated');
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private static function handleHousekeepingCreateHandoff(): array
+    {
+        $nonce = isset($_POST['must_portal_housekeeping_nonce']) ? (string) \wp_unslash($_POST['must_portal_housekeeping_nonce']) : '';
+        $shiftLabel = isset($_POST['handoff_shift_label']) ? \sanitize_text_field((string) \wp_unslash($_POST['handoff_shift_label'])) : '';
+        $notes = isset($_POST['handoff_notes']) ? \sanitize_textarea_field((string) \wp_unslash($_POST['handoff_notes'])) : '';
+
+        if (!\wp_verify_nonce($nonce, 'must_portal_housekeeping_create_handoff')) {
+            self::redirectToPortalHousekeeping('invalid_nonce');
+        }
+
+        if (
+            !\current_user_can(StaffAccess::CAP_HOUSEKEEPING_UPDATE_STATUS)
+            && !\current_user_can(StaffAccess::CAP_HOUSEKEEPING_INSPECT)
+            && !\current_user_can('manage_options')
+        ) {
+            self::redirectToPortalHousekeeping('access_denied');
+        }
+
+        if ($shiftLabel === '') {
+            $shiftLabel = \sprintf(
+                /* translators: %s: current date and time */
+                \__('Shift handoff %s', 'must-hotel-booking'),
+                \wp_date(\get_option('date_format') . ' ' . \get_option('time_format'))
+            );
+        }
+
+        $provider = new HousekeepingAdminDataProvider();
+        $snapshot = $provider->getCurrentHandoffSnapshot();
+        $handoffId = \MustHotelBooking\Engine\get_housekeeping_repository()->createHandoff(
+            $shiftLabel,
+            $notes,
+            $snapshot,
+            \get_current_user_id()
+        );
+
+        if ($handoffId <= 0) {
+            self::redirectToPortalHousekeeping('portal_action_failed');
+        }
+
+        self::logHousekeepingHandoffActivity($handoffId, $shiftLabel, $snapshot);
+        self::redirectToPortalHousekeeping('housekeeping_handoff_created');
+    }
+
+    /**
      * @param array<string, mixed> $room
      */
     private static function logHousekeepingActivity(int $roomId, array $room, string $status): void
     {
-        $actorUserId = \get_current_user_id();
-        $actorRole = '';
-        $actorIp = '';
+        $actor = self::getCurrentPortalActorContext();
         $roomNumber = \trim((string) ($room['room_number'] ?? ''));
         $roomTitle = \trim((string) ($room['title'] ?? ''));
-        $reference = $roomNumber !== '' ? $roomNumber : ($roomTitle !== '' ? $roomTitle : ('ROOM-' . $roomId));
+        $reference = self::buildHousekeepingRoomReference($roomId, $room);
         $statusLabels = HousekeepingRepository::getStatusLabels();
         $statusLabel = isset($statusLabels[$status]) ? (string) $statusLabels[$status] : \ucwords(\str_replace('_', ' ', $status));
-
-        if ($actorUserId > 0) {
-            $actorUser = \wp_get_current_user();
-
-            if ($actorUser instanceof \WP_User && !empty($actorUser->roles)) {
-                $actorRole = (string) \reset($actorUser->roles);
-            }
-        }
-
-        if (isset($_SERVER['REMOTE_ADDR'])) {
-            $actorIp = \sanitize_text_field(\wp_unslash((string) $_SERVER['REMOTE_ADDR']));
-        }
 
         \MustHotelBooking\Engine\get_activity_repository()->createActivity(
             [
@@ -2879,20 +3730,174 @@ final class PortalController
                     $reference,
                     \strtolower($statusLabel)
                 ),
-                'actor_user_id' => $actorUserId,
-                'actor_role' => $actorRole,
-                'actor_ip' => $actorIp,
+                'actor_user_id' => (int) $actor['user_id'],
+                'actor_role' => (string) $actor['role'],
+                'actor_ip' => (string) $actor['ip'],
                 'context_json' => \wp_json_encode(
                     [
                         'inventory_room_id' => $roomId,
                         'room_number' => $roomNumber,
                         'room_title' => $roomTitle,
                         'housekeeping_status' => $status,
-                        'actor_user_id' => $actorUserId,
+                        'actor_user_id' => (int) $actor['user_id'],
                     ]
                 ),
             ]
         );
+    }
+
+    /**
+     * @param array<string, mixed> $room
+     */
+    private static function logHousekeepingAssignmentActivity(int $roomId, array $room, int $assigneeId): void
+    {
+        $actor = self::getCurrentPortalActorContext();
+        $reference = self::buildHousekeepingRoomReference($roomId, $room);
+        $assigneeLabel = $assigneeId > 0 ? self::formatAuditActorLabel(['actor_user_id' => $assigneeId]) : \__('Unassigned', 'must-hotel-booking');
+
+        \MustHotelBooking\Engine\get_activity_repository()->createActivity(
+            [
+                'event_type' => 'housekeeping_assignment_updated',
+                'severity' => 'info',
+                'entity_type' => 'inventory_room',
+                'entity_id' => $roomId,
+                'reference' => $reference,
+                'message' => \sprintf(
+                    /* translators: 1: room reference, 2: assignee label */
+                    \__('Room %1$s assigned to %2$s.', 'must-hotel-booking'),
+                    $reference,
+                    $assigneeLabel
+                ),
+                'actor_user_id' => (int) $actor['user_id'],
+                'actor_role' => (string) $actor['role'],
+                'actor_ip' => (string) $actor['ip'],
+                'context_json' => \wp_json_encode(
+                    [
+                        'inventory_room_id' => $roomId,
+                        'room_number' => (string) ($room['room_number'] ?? ''),
+                        'room_title' => (string) ($room['title'] ?? ''),
+                        'assigned_to_user_id' => $assigneeId,
+                        'actor_user_id' => (int) $actor['user_id'],
+                    ]
+                ),
+            ]
+        );
+    }
+
+    /**
+     * @param array<string, mixed> $room
+     */
+    private static function logHousekeepingIssueActivity(int $issueId, int $roomId, array $room, string $issueTitle, string $status): void
+    {
+        $actor = self::getCurrentPortalActorContext();
+        $reference = self::buildHousekeepingRoomReference($roomId, $room);
+        $statusLabels = HousekeepingRepository::getIssueStatusLabels();
+        $statusLabel = isset($statusLabels[$status]) ? (string) $statusLabels[$status] : \ucwords(\str_replace('_', ' ', $status));
+        $eventType = $status === HousekeepingRepository::ISSUE_STATUS_OPEN ? 'housekeeping_issue_created' : 'housekeeping_issue_updated';
+
+        \MustHotelBooking\Engine\get_activity_repository()->createActivity(
+            [
+                'event_type' => $eventType,
+                'severity' => $status === HousekeepingRepository::ISSUE_STATUS_RESOLVED ? 'info' : 'warning',
+                'entity_type' => 'housekeeping_issue',
+                'entity_id' => $issueId,
+                'reference' => $reference,
+                'message' => \sprintf(
+                    /* translators: 1: room reference, 2: issue title, 3: issue status */
+                    \__('Maintenance issue for %1$s: %2$s (%3$s).', 'must-hotel-booking'),
+                    $reference,
+                    $issueTitle !== '' ? $issueTitle : \__('Issue', 'must-hotel-booking'),
+                    \strtolower($statusLabel)
+                ),
+                'actor_user_id' => (int) $actor['user_id'],
+                'actor_role' => (string) $actor['role'],
+                'actor_ip' => (string) $actor['ip'],
+                'context_json' => \wp_json_encode(
+                    [
+                        'issue_id' => $issueId,
+                        'inventory_room_id' => $roomId,
+                        'room_number' => (string) ($room['room_number'] ?? ''),
+                        'room_title' => (string) ($room['title'] ?? ''),
+                        'issue_title' => $issueTitle,
+                        'issue_status' => $status,
+                        'actor_user_id' => (int) $actor['user_id'],
+                    ]
+                ),
+            ]
+        );
+    }
+
+    /**
+     * @param array<string, int> $snapshot
+     */
+    private static function logHousekeepingHandoffActivity(int $handoffId, string $shiftLabel, array $snapshot): void
+    {
+        $actor = self::getCurrentPortalActorContext();
+
+        \MustHotelBooking\Engine\get_activity_repository()->createActivity(
+            [
+                'event_type' => 'housekeeping_handoff_created',
+                'severity' => 'info',
+                'entity_type' => 'housekeeping_handoff',
+                'entity_id' => $handoffId,
+                'reference' => $shiftLabel,
+                'message' => \sprintf(
+                    /* translators: %s: shift handoff label */
+                    \__('Housekeeping handoff captured: %s.', 'must-hotel-booking'),
+                    $shiftLabel
+                ),
+                'actor_user_id' => (int) $actor['user_id'],
+                'actor_role' => (string) $actor['role'],
+                'actor_ip' => (string) $actor['ip'],
+                'context_json' => \wp_json_encode(
+                    [
+                        'handoff_id' => $handoffId,
+                        'shift_label' => $shiftLabel,
+                        'snapshot' => $snapshot,
+                        'actor_user_id' => (int) $actor['user_id'],
+                    ]
+                ),
+            ]
+        );
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private static function getCurrentPortalActorContext(): array
+    {
+        $actorUserId = \get_current_user_id();
+        $actorRole = '';
+        $actorIp = '';
+
+        if ($actorUserId > 0) {
+            $actorUser = \wp_get_current_user();
+
+            if ($actorUser instanceof \WP_User && !empty($actorUser->roles)) {
+                $actorRole = (string) \reset($actorUser->roles);
+            }
+        }
+
+        if (isset($_SERVER['REMOTE_ADDR'])) {
+            $actorIp = \sanitize_text_field(\wp_unslash((string) $_SERVER['REMOTE_ADDR']));
+        }
+
+        return [
+            'user_id' => $actorUserId,
+            'role' => $actorRole,
+            'ip' => $actorIp,
+        ];
+    }
+
+    /**
+     * @param array<string, mixed> $room
+     */
+    private static function buildHousekeepingRoomReference(int $roomId, array $room): string
+    {
+        $roomNumber = \trim((string) ($room['room_number'] ?? ''));
+        $roomTitle = \trim((string) ($room['title'] ?? ''));
+
+        return $roomNumber !== '' ? $roomNumber : ($roomTitle !== '' ? $roomTitle : ('ROOM-' . $roomId));
     }
 
     /**
@@ -3414,12 +4419,54 @@ final class PortalController
 
         if ($entityType === 'inventory_room') {
             if (StaffAccess::userCanAccessPortalModule('housekeeping')) {
-                return PortalRouter::getModuleUrl('housekeeping', ['tab' => 'room-board']);
+                $tab = $eventType === 'housekeeping_assignment_updated' ? 'assignments' : 'room-board';
+
+                return PortalRouter::getModuleUrl('housekeeping', ['tab' => $tab]);
             }
 
             if (StaffAccess::userCanAccessPortalModule('rooms_availability')) {
                 return PortalRouter::getModuleUrl('rooms_availability', ['tab' => 'statuses']);
             }
+        }
+
+        if ($entityType === 'availability_block' && StaffAccess::userCanAccessPortalModule('rooms_availability')) {
+            $roomId = isset($context['room_id']) ? (int) $context['room_id'] : 0;
+            $args = ['tab' => 'blocks'];
+
+            if ($roomId > 0) {
+                $args['room_id'] = $roomId;
+            }
+
+            if ($eventType !== 'availability_block_deleted' && $entityId > 0) {
+                $args['action'] = 'edit_block';
+                $args['block_id'] = $entityId;
+            }
+
+            return PortalRouter::getModuleUrl('rooms_availability', $args);
+        }
+
+        if ($entityType === 'availability_rule' && StaffAccess::userCanAccessPortalModule('rooms_availability')) {
+            $roomId = isset($context['room_id']) ? (int) $context['room_id'] : 0;
+            $args = ['tab' => 'rules'];
+
+            if ($roomId > 0) {
+                $args['room_id'] = $roomId;
+            }
+
+            if ($eventType !== 'availability_rule_deleted' && $entityId > 0) {
+                $args['action'] = 'edit_rule';
+                $args['rule_id'] = $entityId;
+            }
+
+            return PortalRouter::getModuleUrl('rooms_availability', $args);
+        }
+
+        if ($entityType === 'housekeeping_issue' && StaffAccess::userCanAccessPortalModule('housekeeping')) {
+            return PortalRouter::getModuleUrl('housekeeping', ['tab' => 'maintenance']);
+        }
+
+        if ($entityType === 'housekeeping_handoff' && StaffAccess::userCanAccessPortalModule('housekeeping')) {
+            return PortalRouter::getModuleUrl('housekeeping', ['tab' => 'handoff']);
         }
 
         return '';
@@ -3526,31 +4573,7 @@ final class PortalController
     }
 
     /**
-     * @return array<string, mixed>
-     */
-    private static function prepareAccommodationsData(): array
-    {
-        /** @var array<string, mixed> $request */
-        $request = \is_array($_GET) ? \wp_unslash($_GET) : [];
-        $query = AccommodationAdminQuery::fromRequest($request);
-
-        return (new AccommodationAdminDataProvider())->getPageData($query, []);
-    }
-
-    /**
-     * @return array<string, mixed>
-     */
-    private static function prepareAvailabilityRulesData(): array
-    {
-        /** @var array<string, mixed> $request */
-        $request = \is_array($_GET) ? \wp_unslash($_GET) : [];
-        $query = AvailabilityAdminQuery::fromRequest($request);
-
-        return (new AvailabilityAdminDataProvider())->getPageData($query, []);
-    }
-
-    /**
-     * Front Desk module — placeholder until Phase 1 Step 3 business logic is added.
+     * Front Desk workspace data.
      *
      * @param array<string, mixed> $actionState
      * @return array<string, mixed>
@@ -3582,14 +4605,16 @@ final class PortalController
     }
 
     /**
-     * Housekeeping module — placeholder until Phase 1 Step 4 data model and logic is added.
+     * Housekeeping workspace data.
      *
      * @return array<string, mixed>
      */
     private static function prepareHousekeepingData(array $actionState): array
     {
         $allowedTabs = ['room-board', 'assignments', 'inspection', 'maintenance', 'handoff'];
-        $activeTab = isset($_GET['tab']) ? \sanitize_key((string) \wp_unslash($_GET['tab'])) : 'room-board';
+        $activeTab = isset($actionState['active_tab'])
+            ? \sanitize_key((string) $actionState['active_tab'])
+            : (isset($_GET['tab']) ? \sanitize_key((string) \wp_unslash($_GET['tab'])) : 'room-board');
 
         if (!\in_array($activeTab, $allowedTabs, true)) {
             $activeTab = 'room-board';
@@ -3601,26 +4626,698 @@ final class PortalController
             $data['errors'] = $actionState['errors'];
         }
 
+        if (isset($actionState['issue_form']) && \is_array($actionState['issue_form'])) {
+            $data['issue_form'] = $actionState['issue_form'];
+        }
+
+        if (isset($actionState['handoff_form']) && \is_array($actionState['handoff_form'])) {
+            $data['handoff_form'] = $actionState['handoff_form'];
+        }
+
         return $data;
     }
 
     /**
-     * Rooms & Availability module — placeholder merging Accommodations + Availability Rules.
-     * Full data wiring happens in Phase 1 Step 4.
+     * @return array<string, scalar>
+     */
+    private static function getPortalRoomsAvailabilityRequestFromPost(): array
+    {
+        /** @var array<string, mixed> $source */
+        $source = \is_array($_POST) ? $_POST : [];
+
+        return [
+            'tab' => isset($source['portal_rooms_availability_tab']) ? \sanitize_key((string) \wp_unslash($source['portal_rooms_availability_tab'])) : '',
+            'action' => isset($source['portal_rooms_availability_action']) ? \sanitize_key((string) \wp_unslash($source['portal_rooms_availability_action'])) : '',
+            'rule_id' => isset($source['portal_rooms_availability_rule_id']) ? \absint(\wp_unslash($source['portal_rooms_availability_rule_id'])) : 0,
+            'block_id' => isset($source['portal_rooms_availability_block_id']) ? \absint(\wp_unslash($source['portal_rooms_availability_block_id'])) : 0,
+            'room_id' => isset($source['portal_rooms_availability_filter_room_id']) ? \absint(\wp_unslash($source['portal_rooms_availability_filter_room_id'])) : 0,
+            'status' => isset($source['portal_rooms_availability_filter_status']) ? \sanitize_key((string) \wp_unslash($source['portal_rooms_availability_filter_status'])) : '',
+            'timeline' => isset($source['portal_rooms_availability_filter_timeline']) ? \sanitize_key((string) \wp_unslash($source['portal_rooms_availability_filter_timeline'])) : '',
+            'rule_type' => isset($source['portal_rooms_availability_filter_rule_type']) ? \sanitize_key((string) \wp_unslash($source['portal_rooms_availability_filter_rule_type'])) : '',
+            'search' => isset($source['portal_rooms_availability_filter_search']) ? \sanitize_text_field((string) \wp_unslash($source['portal_rooms_availability_filter_search'])) : '',
+            'start_date' => isset($source['portal_rooms_availability_filter_start_date']) ? \sanitize_text_field((string) \wp_unslash($source['portal_rooms_availability_filter_start_date'])) : '',
+            'end_date' => isset($source['portal_rooms_availability_filter_end_date']) ? \sanitize_text_field((string) \wp_unslash($source['portal_rooms_availability_filter_end_date'])) : '',
+        ];
+    }
+
+    /**
+     * @param array<string, scalar> $overrides
+     * @return array<string, scalar>
+     */
+    private static function getPortalRoomsAvailabilityRedirectArgs(array $overrides = [], string $fallbackTab = 'rooms'): array
+    {
+        $request = self::getPortalRoomsAvailabilityRequestFromPost();
+        $tab = isset($request['tab']) ? (string) $request['tab'] : '';
+
+        if ($tab === '') {
+            $tab = $fallbackTab;
+        }
+
+        $allowedTabs = ['rooms', 'room-types', 'statuses', 'blocks', 'rules', 'maintenance'];
+
+        if (!\in_array($tab, $allowedTabs, true)) {
+            $tab = $fallbackTab;
+        }
+
+        $query = AvailabilityAdminQuery::fromRequest($request);
+        $args = \array_merge(['tab' => $tab], $query->buildUrlArgs());
+
+        foreach ($overrides as $key => $value) {
+            if ($value === '' || $value === 0 || $value === null || $value === 'all') {
+                unset($args[$key]);
+                continue;
+            }
+
+            $args[$key] = $value;
+        }
+
+        return $args;
+    }
+
+    /**
+     * @param array<string, scalar> $overrides
+     */
+    private static function redirectToPortalRoomsAvailability(string $fallbackTab, array $overrides = [], string $notice = ''): void
+    {
+        $args = self::getPortalRoomsAvailabilityRedirectArgs($overrides, $fallbackTab);
+
+        if ($notice !== '') {
+            $args['portal_notice'] = $notice;
+        }
+
+        \wp_safe_redirect(PortalRouter::getModuleUrl('rooms_availability', $args));
+        exit;
+    }
+
+    private static function canManageRoomsAvailabilityBlocks(): bool
+    {
+        return \current_user_can(StaffAccess::CAP_ROOM_BLOCK_MANAGE) || \current_user_can('manage_options');
+    }
+
+    private static function canEditRoomsAvailabilityRulesGlobally(): bool
+    {
+        return \current_user_can(StaffAccess::CAP_AVAILABILITY_RULES_EDIT) || \current_user_can('manage_options');
+    }
+
+    /**
+     * @param array<string, mixed> $rule
+     */
+    private static function canEditRoomsAvailabilityRule(array $rule): bool
+    {
+        if (self::canEditRoomsAvailabilityRulesGlobally()) {
+            return true;
+        }
+
+        return self::canManageRoomsAvailabilityBlocks() && (int) ($rule['room_id'] ?? 0) > 0;
+    }
+
+    /**
+     * @param array<string, mixed> $request
+     * @param array<int, string> $errors
+     * @param array<string, mixed> $forms
+     * @return array<string, mixed>
+     */
+    private static function buildRoomsAvailabilityActionState(string $tab, array $request, array $errors, array $forms = []): array
+    {
+        $request['tab'] = $tab;
+
+        return \array_merge(
+            [
+                'module_key' => 'rooms_availability',
+                'active_tab' => $tab,
+                'rooms_availability_request' => $request,
+                'errors' => $errors,
+            ],
+            $forms
+        );
+    }
+
+    /**
+     * @param array<string, mixed> $source
+     * @return array<string, mixed>
+     */
+    private static function sanitizeRoomsAvailabilityRuleValues(array $source): array
+    {
+        $roomRepository = \MustHotelBooking\Engine\get_room_repository();
+        $values = [
+            'id' => isset($source['rule_id']) ? \absint(\wp_unslash($source['rule_id'])) : 0,
+            'room_id' => isset($source['room_id']) ? \absint(\wp_unslash($source['room_id'])) : 0,
+            'name' => isset($source['name']) ? \sanitize_text_field((string) \wp_unslash($source['name'])) : '',
+            'availability_date' => isset($source['availability_date']) ? \sanitize_text_field((string) \wp_unslash($source['availability_date'])) : '',
+            'end_date' => isset($source['end_date']) ? \sanitize_text_field((string) \wp_unslash($source['end_date'])) : '',
+            'rule_type' => isset($source['rule_type']) ? \sanitize_key((string) \wp_unslash($source['rule_type'])) : '',
+            'rule_value' => isset($source['rule_value']) ? \absint(\wp_unslash($source['rule_value'])) : 0,
+            'is_active' => !empty($source['is_active']) ? 1 : 0,
+            'is_available' => 0,
+            'reason' => isset($source['reason']) ? \sanitize_text_field((string) \wp_unslash($source['reason'])) : '',
+            'errors' => [],
+        ];
+
+        if ($values['name'] === '') {
+            $values['errors'][] = \__('Rule name is required.', 'must-hotel-booking');
+        }
+
+        if (!\in_array($values['rule_type'], ['maintenance_block', 'minimum_stay', 'maximum_stay', 'closed_arrival', 'closed_departure'], true)) {
+            $values['errors'][] = \__('Select a valid availability rule type.', 'must-hotel-booking');
+        }
+
+        if (
+            !\preg_match('/^\d{4}-\d{2}-\d{2}$/', (string) $values['availability_date']) ||
+            !\preg_match('/^\d{4}-\d{2}-\d{2}$/', (string) $values['end_date'])
+        ) {
+            $values['errors'][] = \__('Start date and end date must use YYYY-MM-DD.', 'must-hotel-booking');
+        } elseif ((string) $values['availability_date'] > (string) $values['end_date']) {
+            $values['errors'][] = \__('End date must be on or after start date.', 'must-hotel-booking');
+        }
+
+        if ((int) $values['room_id'] > 0 && !$roomRepository->getRoomById((int) $values['room_id'])) {
+            $values['errors'][] = \__('Selected room listing could not be found.', 'must-hotel-booking');
+        }
+
+        if (\in_array($values['rule_type'], ['minimum_stay', 'maximum_stay'], true) && (int) $values['rule_value'] < 1) {
+            $values['errors'][] = \__('Stay rules require a value of at least 1 night.', 'must-hotel-booking');
+        }
+
+        if (!\in_array($values['rule_type'], ['minimum_stay', 'maximum_stay'], true)) {
+            $values['rule_value'] = 0;
+        }
+
+        if ($values['reason'] === '') {
+            $values['reason'] = $values['name'];
+        }
+
+        return $values;
+    }
+
+    /**
+     * @param array<string, mixed> $source
+     * @return array<string, mixed>
+     */
+    private static function sanitizeRoomsAvailabilityBlockValues(array $source): array
+    {
+        $roomRepository = \MustHotelBooking\Engine\get_room_repository();
+        $values = [
+            'id' => isset($source['block_id']) ? \absint(\wp_unslash($source['block_id'])) : 0,
+            'room_id' => isset($source['room_id']) ? \absint(\wp_unslash($source['room_id'])) : 0,
+            'checkin' => isset($source['checkin']) ? \sanitize_text_field((string) \wp_unslash($source['checkin'])) : '',
+            'checkout' => isset($source['checkout']) ? \sanitize_text_field((string) \wp_unslash($source['checkout'])) : '',
+            'notes' => isset($source['notes']) ? \sanitize_textarea_field((string) \wp_unslash($source['notes'])) : '',
+            'errors' => [],
+        ];
+
+        if ((int) $values['room_id'] <= 0 || !$roomRepository->getRoomById((int) $values['room_id'])) {
+            $values['errors'][] = \__('Select a valid room listing for the manual block.', 'must-hotel-booking');
+        }
+
+        if (
+            !\preg_match('/^\d{4}-\d{2}-\d{2}$/', (string) $values['checkin']) ||
+            !\preg_match('/^\d{4}-\d{2}-\d{2}$/', (string) $values['checkout'])
+        ) {
+            $values['errors'][] = \__('Start date and end date must use YYYY-MM-DD.', 'must-hotel-booking');
+        } elseif ((string) $values['checkin'] >= (string) $values['checkout']) {
+            $values['errors'][] = \__('The manual block end date must be after the start date.', 'must-hotel-booking');
+        }
+
+        return $values;
+    }
+
+    /**
+     * @param array<string, mixed> $request
+     * @return array<string, mixed>
+     */
+    private static function sanitizeRoomsAvailabilityEditRequest(array $request, string $mode): array
+    {
+        $action = isset($request['action']) ? \sanitize_key((string) $request['action']) : '';
+
+        if ($mode === 'blocked') {
+            if ($action !== 'edit_block') {
+                unset($request['action'], $request['block_id']);
+                return $request;
+            }
+
+            $blockId = isset($request['block_id']) ? (int) $request['block_id'] : 0;
+            $block = $blockId > 0 ? \MustHotelBooking\Engine\get_reservation_repository()->getReservation($blockId) : null;
+
+            if (!self::canManageRoomsAvailabilityBlocks() || !\is_array($block) || (string) ($block['status'] ?? '') !== 'blocked') {
+                unset($request['action'], $request['block_id']);
+            }
+
+            return $request;
+        }
+
+        if ($action !== 'edit_rule') {
+            unset($request['action'], $request['rule_id']);
+            return $request;
+        }
+
+        $ruleId = isset($request['rule_id']) ? (int) $request['rule_id'] : 0;
+        $rule = $ruleId > 0 ? \MustHotelBooking\Engine\get_availability_repository()->getRuleById($ruleId) : null;
+
+        if (!\is_array($rule) || !self::canEditRoomsAvailabilityRule($rule)) {
+            unset($request['action'], $request['rule_id']);
+        }
+
+        return $request;
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private static function handleRoomsAvailabilitySaveBlock(): array
+    {
+        /** @var array<string, mixed> $rawPost */
+        $rawPost = \is_array($_POST) ? $_POST : [];
+        $request = self::getPortalRoomsAvailabilityRequestFromPost();
+        $request['tab'] = 'blocks';
+        $request['action'] = 'edit_block';
+        $blockId = isset($rawPost['block_id']) ? \absint(\wp_unslash($rawPost['block_id'])) : 0;
+        $request['block_id'] = $blockId;
+        $nonce = isset($rawPost['must_availability_block_nonce']) ? (string) \wp_unslash($rawPost['must_availability_block_nonce']) : '';
+
+        if (!\wp_verify_nonce($nonce, 'must_availability_save_block')) {
+            self::redirectToPortalRoomsAvailability('blocks', ['action' => 'edit_block', 'block_id' => $blockId], 'invalid_nonce');
+        }
+
+        if (!self::canManageRoomsAvailabilityBlocks()) {
+            self::redirectToPortalRoomsAvailability('blocks', ['action' => 'edit_block', 'block_id' => $blockId], 'access_denied');
+        }
+
+        $reservationRepository = \MustHotelBooking\Engine\get_reservation_repository();
+        $current = $blockId > 0 ? $reservationRepository->getReservation($blockId) : null;
+
+        if (!\is_array($current) || (string) ($current['status'] ?? '') !== 'blocked') {
+            self::redirectToPortalRoomsAvailability('blocks', [], 'portal_action_failed');
+        }
+
+        $values = self::sanitizeRoomsAvailabilityBlockValues($rawPost);
+
+        if (!empty($values['errors'])) {
+            return self::buildRoomsAvailabilityActionState(
+                'blocks',
+                $request,
+                (array) $values['errors'],
+                [
+                    'block_errors' => (array) $values['errors'],
+                    'block_form' => $values,
+                ]
+            );
+        }
+
+        $conflicts = $reservationRepository->getBlockedReservationConflicts(
+            (int) $values['room_id'],
+            (string) $values['checkin'],
+            (string) $values['checkout'],
+            $blockId
+        );
+        $saved = $reservationRepository->updateReservation(
+            $blockId,
+            [
+                'room_id' => (int) $values['room_id'],
+                'checkin' => (string) $values['checkin'],
+                'checkout' => (string) $values['checkout'],
+                'notes' => (string) ($values['notes'] ?? ''),
+            ]
+        );
+
+        if (!$saved) {
+            return self::buildRoomsAvailabilityActionState(
+                'blocks',
+                $request,
+                [\__('Unable to save the manual block.', 'must-hotel-booking')],
+                [
+                    'block_errors' => [\__('Unable to save the manual block.', 'must-hotel-booking')],
+                    'block_form' => $values,
+                ]
+            );
+        }
+
+        $updatedBlock = $reservationRepository->getReservation($blockId);
+
+        if (\is_array($updatedBlock)) {
+            self::logRoomsAvailabilityBlockActivity($blockId, $updatedBlock, 'availability_block_updated');
+        }
+
+        self::redirectToPortalRoomsAvailability(
+            'blocks',
+            [
+                'action' => 'edit_block',
+                'block_id' => $blockId,
+                'room_id' => (int) $values['room_id'],
+            ],
+            !empty($conflicts) ? 'block_saved_with_conflict' : 'block_updated'
+        );
+    }
+
+    private static function handleRoomsAvailabilityDeleteBlock(): void
+    {
+        $request = self::getPortalRoomsAvailabilityRequestFromPost();
+        $blockId = isset($_POST['block_id']) ? \absint(\wp_unslash($_POST['block_id'])) : 0;
+        $nonce = isset($_POST['must_availability_block_delete_nonce']) ? (string) \wp_unslash($_POST['must_availability_block_delete_nonce']) : '';
+
+        if ($blockId <= 0 || !\wp_verify_nonce($nonce, 'must_availability_delete_block_' . $blockId)) {
+            self::redirectToPortalRoomsAvailability('blocks', [], 'invalid_nonce');
+        }
+
+        if (!self::canManageRoomsAvailabilityBlocks()) {
+            self::redirectToPortalRoomsAvailability('blocks', [], 'access_denied');
+        }
+
+        $reservationRepository = \MustHotelBooking\Engine\get_reservation_repository();
+        $block = $reservationRepository->getReservation($blockId);
+
+        if (!\is_array($block) || (string) ($block['status'] ?? '') !== 'blocked') {
+            self::redirectToPortalRoomsAvailability('blocks', [], 'portal_action_failed');
+        }
+
+        $deleted = $reservationRepository->deleteReservation($blockId, 'blocked');
+
+        if ($deleted) {
+            self::logRoomsAvailabilityBlockActivity($blockId, $block, 'availability_block_deleted');
+        }
+
+        $overrides = [];
+
+        if (!empty($request['action']) && (string) $request['action'] === 'edit_block' && (int) ($request['block_id'] ?? 0) === $blockId) {
+            $overrides['action'] = '';
+            $overrides['block_id'] = 0;
+        }
+
+        self::redirectToPortalRoomsAvailability('blocks', $overrides, $deleted ? 'block_deleted' : 'block_delete_failed');
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private static function handleRoomsAvailabilitySaveRule(): array
+    {
+        /** @var array<string, mixed> $rawPost */
+        $rawPost = \is_array($_POST) ? $_POST : [];
+        $request = self::getPortalRoomsAvailabilityRequestFromPost();
+        $request['tab'] = 'rules';
+        $request['action'] = 'edit_rule';
+        $ruleId = isset($rawPost['rule_id']) ? \absint(\wp_unslash($rawPost['rule_id'])) : 0;
+        $request['rule_id'] = $ruleId;
+        $nonce = isset($rawPost['must_availability_rule_nonce']) ? (string) \wp_unslash($rawPost['must_availability_rule_nonce']) : '';
+
+        if (!\wp_verify_nonce($nonce, 'must_availability_save_rule')) {
+            self::redirectToPortalRoomsAvailability('rules', ['action' => 'edit_rule', 'rule_id' => $ruleId], 'invalid_nonce');
+        }
+
+        $availabilityRepository = \MustHotelBooking\Engine\get_availability_repository();
+        $currentRule = $ruleId > 0 ? $availabilityRepository->getRuleById($ruleId) : null;
+
+        if (!\is_array($currentRule)) {
+            self::redirectToPortalRoomsAvailability('rules', [], 'portal_action_failed');
+        }
+
+        if (!self::canEditRoomsAvailabilityRule($currentRule)) {
+            self::redirectToPortalRoomsAvailability('rules', ['action' => 'edit_rule', 'rule_id' => $ruleId], 'access_denied');
+        }
+
+        $values = self::sanitizeRoomsAvailabilityRuleValues($rawPost);
+
+        if (!self::canEditRoomsAvailabilityRulesGlobally() && (int) ($values['room_id'] ?? 0) <= 0) {
+            $values['errors'][] = \__('Your role can only edit room-specific availability rules in the portal.', 'must-hotel-booking');
+        }
+
+        if (!empty($values['errors'])) {
+            return self::buildRoomsAvailabilityActionState(
+                'rules',
+                $request,
+                (array) $values['errors'],
+                [
+                    'rule_errors' => (array) $values['errors'],
+                    'rule_form' => $values,
+                ]
+            );
+        }
+
+        $conflicts = [];
+
+        if ((int) ($values['room_id'] ?? 0) > 0 && (string) ($values['availability_date'] ?? '') !== '' && (string) ($values['end_date'] ?? '') !== '') {
+            $conflicts = $availabilityRepository->getOverlappingReservationRows(
+                (int) $values['room_id'],
+                (string) $values['availability_date'],
+                (string) $values['end_date'],
+                0
+            );
+        }
+
+        $savedId = $availabilityRepository->saveRule($values);
+
+        if ($savedId <= 0) {
+            return self::buildRoomsAvailabilityActionState(
+                'rules',
+                $request,
+                [\__('Unable to save availability rule.', 'must-hotel-booking')],
+                [
+                    'rule_errors' => [\__('Unable to save availability rule.', 'must-hotel-booking')],
+                    'rule_form' => $values,
+                ]
+            );
+        }
+
+        $updatedRule = $availabilityRepository->getRuleById($savedId);
+
+        if (\is_array($updatedRule)) {
+            self::logRoomsAvailabilityRuleActivity($savedId, $updatedRule, 'availability_rule_updated');
+        }
+
+        self::redirectToPortalRoomsAvailability(
+            'rules',
+            [
+                'action' => 'edit_rule',
+                'rule_id' => $savedId,
+                'room_id' => (int) ($values['room_id'] ?? 0),
+            ],
+            !empty($conflicts) ? 'rule_saved_with_conflict' : 'rule_updated'
+        );
+    }
+
+    private static function handleRoomsAvailabilityDeleteRule(): void
+    {
+        $request = self::getPortalRoomsAvailabilityRequestFromPost();
+        $ruleId = isset($_POST['rule_id']) ? \absint(\wp_unslash($_POST['rule_id'])) : 0;
+        $nonce = isset($_POST['must_availability_rule_delete_nonce']) ? (string) \wp_unslash($_POST['must_availability_rule_delete_nonce']) : '';
+
+        if ($ruleId <= 0 || !\wp_verify_nonce($nonce, 'must_availability_delete_rule_' . $ruleId)) {
+            self::redirectToPortalRoomsAvailability('rules', [], 'invalid_nonce');
+        }
+
+        $availabilityRepository = \MustHotelBooking\Engine\get_availability_repository();
+        $rule = $availabilityRepository->getRuleById($ruleId);
+
+        if (!\is_array($rule)) {
+            self::redirectToPortalRoomsAvailability('rules', [], 'portal_action_failed');
+        }
+
+        if (!self::canEditRoomsAvailabilityRule($rule)) {
+            self::redirectToPortalRoomsAvailability('rules', [], 'access_denied');
+        }
+
+        $deleted = $availabilityRepository->deleteAvailabilityRule($ruleId);
+
+        if ($deleted) {
+            self::logRoomsAvailabilityRuleActivity($ruleId, $rule, 'availability_rule_deleted');
+        }
+
+        $overrides = [];
+
+        if (!empty($request['action']) && (string) $request['action'] === 'edit_rule' && (int) ($request['rule_id'] ?? 0) === $ruleId) {
+            $overrides['action'] = '';
+            $overrides['rule_id'] = 0;
+        }
+
+        self::redirectToPortalRoomsAvailability('rules', $overrides, $deleted ? 'rule_deleted' : 'rule_delete_failed');
+    }
+
+    private static function handleRoomsAvailabilityToggleRuleStatus(): void
+    {
+        $ruleId = isset($_POST['rule_id']) ? \absint(\wp_unslash($_POST['rule_id'])) : 0;
+        $target = isset($_POST['target']) ? \sanitize_key((string) \wp_unslash($_POST['target'])) : '';
+        $nonce = isset($_POST['must_availability_rule_toggle_nonce']) ? (string) \wp_unslash($_POST['must_availability_rule_toggle_nonce']) : '';
+
+        if ($ruleId <= 0 || !\wp_verify_nonce($nonce, 'must_availability_toggle_rule_' . $ruleId)) {
+            self::redirectToPortalRoomsAvailability('rules', [], 'invalid_nonce');
+        }
+
+        if (!\in_array($target, ['active', 'inactive'], true)) {
+            self::redirectToPortalRoomsAvailability('rules', [], 'portal_action_failed');
+        }
+
+        $availabilityRepository = \MustHotelBooking\Engine\get_availability_repository();
+        $rule = $availabilityRepository->getRuleById($ruleId);
+
+        if (!\is_array($rule)) {
+            self::redirectToPortalRoomsAvailability('rules', [], 'portal_action_failed');
+        }
+
+        if (!self::canEditRoomsAvailabilityRule($rule)) {
+            self::redirectToPortalRoomsAvailability('rules', [], 'access_denied');
+        }
+
+        $updated = $availabilityRepository->toggleRuleStatus($ruleId, $target === 'active');
+
+        if ($updated) {
+            $rule['is_active'] = $target === 'active' ? 1 : 0;
+            self::logRoomsAvailabilityRuleActivity(
+                $ruleId,
+                $rule,
+                $target === 'active' ? 'availability_rule_activated' : 'availability_rule_deactivated'
+            );
+        }
+
+        self::redirectToPortalRoomsAvailability(
+            'rules',
+            [],
+            $updated ? ($target === 'active' ? 'rule_activated' : 'rule_deactivated') : 'rule_update_failed'
+        );
+    }
+
+    /**
+     * @param array<string, mixed> $block
+     */
+    private static function logRoomsAvailabilityBlockActivity(int $blockId, array $block, string $eventType): void
+    {
+        $actor = self::getCurrentPortalActorContext();
+        $roomId = (int) ($block['room_id'] ?? 0);
+        $room = $roomId > 0 ? \MustHotelBooking\Engine\get_room_repository()->getRoomById($roomId) : null;
+        $roomName = \is_array($room) ? \trim((string) ($room['name'] ?? '')) : '';
+        $reference = $roomName !== '' ? $roomName : ('ROOM-' . $roomId);
+        $checkin = (string) ($block['checkin'] ?? '');
+        $checkout = (string) ($block['checkout'] ?? '');
+        $message = $eventType === 'availability_block_deleted'
+            ? \sprintf(
+                /* translators: 1: room listing, 2: check-in date, 3: check-out date */
+                \__('Manual block released for %1$s (%2$s to %3$s).', 'must-hotel-booking'),
+                $reference,
+                $checkin,
+                $checkout
+            )
+            : \sprintf(
+                /* translators: 1: room listing, 2: check-in date, 3: check-out date */
+                \__('Manual block updated for %1$s (%2$s to %3$s).', 'must-hotel-booking'),
+                $reference,
+                $checkin,
+                $checkout
+            );
+
+        \MustHotelBooking\Engine\get_activity_repository()->createActivity(
+            [
+                'event_type' => $eventType,
+                'severity' => $eventType === 'availability_block_deleted' ? 'warning' : 'info',
+                'entity_type' => 'availability_block',
+                'entity_id' => $blockId,
+                'reference' => $reference,
+                'message' => $message,
+                'actor_user_id' => (int) $actor['user_id'],
+                'actor_role' => (string) $actor['role'],
+                'actor_ip' => (string) $actor['ip'],
+                'context_json' => \wp_json_encode(
+                    [
+                        'block_id' => $blockId,
+                        'room_id' => $roomId,
+                        'room_name' => $roomName,
+                        'checkin' => $checkin,
+                        'checkout' => $checkout,
+                        'actor_user_id' => (int) $actor['user_id'],
+                    ]
+                ),
+            ]
+        );
+    }
+
+    /**
+     * @param array<string, mixed> $rule
+     */
+    private static function logRoomsAvailabilityRuleActivity(int $ruleId, array $rule, string $eventType): void
+    {
+        $actor = self::getCurrentPortalActorContext();
+        $roomId = (int) ($rule['room_id'] ?? 0);
+        $room = $roomId > 0 ? \MustHotelBooking\Engine\get_room_repository()->getRoomById($roomId) : null;
+        $roomName = \is_array($room) ? \trim((string) ($room['name'] ?? '')) : '';
+        $scopeLabel = $roomId > 0
+            ? ($roomName !== '' ? $roomName : ('ROOM-' . $roomId))
+            : \__('All room listings', 'must-hotel-booking');
+        $ruleName = \trim((string) ($rule['name'] ?? '')) !== ''
+            ? (string) $rule['name']
+            : (string) ($rule['rule_type'] ?? ('RULE-' . $ruleId));
+        $messages = [
+            'availability_rule_updated' => \sprintf(
+                /* translators: 1: rule name, 2: rule scope */
+                \__('Availability rule "%1$s" updated for %2$s.', 'must-hotel-booking'),
+                $ruleName,
+                $scopeLabel
+            ),
+            'availability_rule_deleted' => \sprintf(
+                /* translators: 1: rule name, 2: rule scope */
+                \__('Availability rule "%1$s" removed from %2$s.', 'must-hotel-booking'),
+                $ruleName,
+                $scopeLabel
+            ),
+            'availability_rule_activated' => \sprintf(
+                /* translators: 1: rule name, 2: rule scope */
+                \__('Availability rule "%1$s" activated for %2$s.', 'must-hotel-booking'),
+                $ruleName,
+                $scopeLabel
+            ),
+            'availability_rule_deactivated' => \sprintf(
+                /* translators: 1: rule name, 2: rule scope */
+                \__('Availability rule "%1$s" deactivated for %2$s.', 'must-hotel-booking'),
+                $ruleName,
+                $scopeLabel
+            ),
+        ];
+
+        \MustHotelBooking\Engine\get_activity_repository()->createActivity(
+            [
+                'event_type' => $eventType,
+                'severity' => $eventType === 'availability_rule_deleted' ? 'warning' : 'info',
+                'entity_type' => 'availability_rule',
+                'entity_id' => $ruleId,
+                'reference' => $ruleName,
+                'message' => isset($messages[$eventType]) ? $messages[$eventType] : $ruleName,
+                'actor_user_id' => (int) $actor['user_id'],
+                'actor_role' => (string) $actor['role'],
+                'actor_ip' => (string) $actor['ip'],
+                'context_json' => \wp_json_encode(
+                    [
+                        'rule_id' => $ruleId,
+                        'room_id' => $roomId,
+                        'room_name' => $roomName,
+                        'rule_type' => (string) ($rule['rule_type'] ?? ''),
+                        'availability_date' => (string) ($rule['availability_date'] ?? ''),
+                        'end_date' => (string) ($rule['end_date'] ?? ''),
+                        'actor_user_id' => (int) $actor['user_id'],
+                    ]
+                ),
+            ]
+        );
+    }
+
+    /**
+     * Rooms & Availability workspace data.
      *
      * @return array<string, mixed>
      */
-    private static function prepareRoomsAvailabilityData(): array
+    private static function prepareRoomsAvailabilityData(array $actionState = []): array
     {
         $allowedTabs = ['rooms', 'room-types', 'statuses', 'blocks', 'rules', 'maintenance'];
-        $activeTab = isset($_GET['tab']) ? \sanitize_key((string) \wp_unslash($_GET['tab'])) : 'rooms';
+        /** @var array<string, mixed> $request */
+        $request = \is_array($_GET) ? \wp_unslash($_GET) : [];
+
+        if (isset($actionState['rooms_availability_request']) && \is_array($actionState['rooms_availability_request'])) {
+            $request = \array_merge($request, $actionState['rooms_availability_request']);
+        }
+
+        $activeTab = isset($actionState['active_tab'])
+            ? \sanitize_key((string) $actionState['active_tab'])
+            : (isset($request['tab']) ? \sanitize_key((string) $request['tab']) : 'rooms');
 
         if (!\in_array($activeTab, $allowedTabs, true)) {
             $activeTab = 'rooms';
         }
 
-        /** @var array<string, mixed> $request */
-        $request = \is_array($_GET) ? \wp_unslash($_GET) : [];
         $data = [
             'active_tab' => $activeTab,
         ];
@@ -3648,11 +5345,11 @@ final class PortalController
         }
 
         if ($activeTab === 'blocks') {
-            $data['blocks_data'] = self::prepareRoomsAvailabilityRulesData($request, 'blocked');
+            $data['blocks_data'] = self::prepareRoomsAvailabilityRulesData($request, 'blocked', $actionState);
         }
 
         if ($activeTab === 'rules') {
-            $data['rules_data'] = self::prepareRoomsAvailabilityRulesData($request, 'restriction');
+            $data['rules_data'] = self::prepareRoomsAvailabilityRulesData($request, 'restriction', $actionState);
         }
 
         return $data;
@@ -3674,12 +5371,37 @@ final class PortalController
      * @param array<string, mixed> $request
      * @return array<string, mixed>
      */
-    private static function prepareRoomsAvailabilityRulesData(array $request, string $mode): array
+    private static function prepareRoomsAvailabilityRulesData(array $request, string $mode, array $actionState = []): array
     {
         $request['mode'] = $mode;
+        $request = self::sanitizeRoomsAvailabilityEditRequest($request, $mode);
         $query = AvailabilityAdminQuery::fromRequest($request);
+        $state = [];
 
-        return (new AvailabilityAdminDataProvider())->getPageData($query, []);
+        if ($mode === 'blocked') {
+            if (isset($actionState['block_form']) && \is_array($actionState['block_form'])) {
+                $state['block_form'] = $actionState['block_form'];
+            }
+
+            if (isset($actionState['block_errors']) && \is_array($actionState['block_errors'])) {
+                $state['block_errors'] = $actionState['block_errors'];
+            }
+        } else {
+            if (isset($actionState['rule_form']) && \is_array($actionState['rule_form'])) {
+                $state['rule_form'] = $actionState['rule_form'];
+            }
+
+            if (isset($actionState['rule_errors']) && \is_array($actionState['rule_errors'])) {
+                $state['rule_errors'] = $actionState['rule_errors'];
+            }
+        }
+
+        $data = (new AvailabilityAdminDataProvider())->getPageData($query, $state);
+        $data['current_action'] = $query->getAction();
+        $data['editing_id'] = $mode === 'blocked' ? $query->getBlockId() : $query->getRuleId();
+        $data['request'] = $request;
+
+        return $data;
     }
 
     /**
@@ -3954,6 +5676,9 @@ final class PortalController
             'reservation_checked_in' => \__('Guest checked in.', 'must-hotel-booking'),
             'reservation_checked_out' => \__('Guest checked out.', 'must-hotel-booking'),
             'reservation_room_assigned' => \__('Room assignment updated.', 'must-hotel-booking'),
+            'reservation_stay_updated' => \__('Stay dates updated successfully.', 'must-hotel-booking'),
+            'reservation_stay_updated_room_unassigned' => \__('Stay dates updated. The previous room assignment was cleared because it no longer matched the updated stay window.', 'must-hotel-booking'),
+            'reservation_marked_no_show' => \__('Reservation marked as no-show and cancelled.', 'must-hotel-booking'),
             'reservation_note_added' => \__('Internal note added.', 'must-hotel-booking'),
             'reservation_marked_pending' => \__('Reservation moved back to pending.', 'must-hotel-booking'),
             'reservation_marked_paid' => \__('Reservation marked as paid.', 'must-hotel-booking'),
@@ -3977,14 +5702,31 @@ final class PortalController
             'payment_marked_failed' => \__('Payment marked as failed.', 'must-hotel-booking'),
             'payment_refunded' => \__('Refund issued successfully.', 'must-hotel-booking'),
             'calendar_block_created' => \__('Manual block created from the calendar.', 'must-hotel-booking'),
+            'block_updated' => \__('Manual block updated.', 'must-hotel-booking'),
+            'block_saved_with_conflict' => \__('Manual block updated, but it still overlaps existing reservation activity.', 'must-hotel-booking'),
+            'block_deleted' => \__('Manual block released.', 'must-hotel-booking'),
+            'block_delete_failed' => \__('Unable to release the selected manual block.', 'must-hotel-booking'),
+            'rule_updated' => \__('Availability rule updated.', 'must-hotel-booking'),
+            'rule_saved_with_conflict' => \__('Availability rule updated, but it overlaps existing reservation activity.', 'must-hotel-booking'),
+            'rule_deleted' => \__('Availability rule removed.', 'must-hotel-booking'),
+            'rule_delete_failed' => \__('Unable to remove the selected availability rule.', 'must-hotel-booking'),
+            'rule_activated' => \__('Availability rule activated.', 'must-hotel-booking'),
+            'rule_deactivated' => \__('Availability rule deactivated.', 'must-hotel-booking'),
+            'rule_update_failed' => \__('Unable to update the selected availability rule.', 'must-hotel-booking'),
             'housekeeping_marked_dirty' => \__('Room marked dirty.', 'must-hotel-booking'),
             'housekeeping_marked_clean' => \__('Room marked clean.', 'must-hotel-booking'),
             'housekeeping_marked_inspected' => \__('Room marked inspected.', 'must-hotel-booking'),
+            'housekeeping_assignment_updated' => \__('Housekeeping assignment updated.', 'must-hotel-booking'),
+            'housekeeping_issue_created' => \__('Maintenance issue created.', 'must-hotel-booking'),
+            'housekeeping_issue_updated' => \__('Maintenance issue updated.', 'must-hotel-booking'),
+            'housekeeping_handoff_created' => \__('Shift handoff saved.', 'must-hotel-booking'),
             'invalid_nonce' => \__('Security check failed. Please try again.', 'must-hotel-booking'),
             'invalid_guest_email' => \__('Please enter a valid guest email address.', 'must-hotel-booking'),
             'guest_not_found' => \__('Guest record not found.', 'must-hotel-booking'),
             'reservation_not_found' => \__('Reservation not found.', 'must-hotel-booking'),
             'housekeeping_room_not_found' => \__('Room record not found.', 'must-hotel-booking'),
+            'housekeeping_issue_not_found' => \__('Maintenance issue not found.', 'must-hotel-booking'),
+            'housekeeping_assignment_invalid' => \__('That housekeeping assignment is not valid for the selected room or user.', 'must-hotel-booking'),
             'housekeeping_status_invalid' => \__('That housekeeping status change is not available from the current room state.', 'must-hotel-booking'),
             'reservation_wrong_status' => \__('That action is not available for the reservation in its current status.', 'must-hotel-booking'),
             'reservation_already_checked_in' => \__('This reservation is already checked in.', 'must-hotel-booking'),

@@ -1187,6 +1187,48 @@ final class ReservationRepository extends AbstractRepository
     }
 
     /**
+     * @param array<int, string> $nonBlockingStatuses
+     */
+    public function hasAssignedRoomOverlapExcludingId(
+        int $reservationId,
+        int $assignedRoomId,
+        string $checkin,
+        string $checkout,
+        array $nonBlockingStatuses = []
+    ): bool {
+        if (
+            $reservationId < 0 ||
+            $assignedRoomId <= 0 ||
+            $checkin === '' ||
+            $checkout === '' ||
+            !$this->reservationsTableExists()
+        ) {
+            return false;
+        }
+
+        $statuses = $this->normalizeNonBlockingStatuses($nonBlockingStatuses);
+        $sql = $this->wpdb->prepare(
+            'SELECT 1
+            FROM ' . $this->table('reservations') . '
+            WHERE assigned_room_id = %d
+                AND id <> %d
+                AND checkin < %s
+                AND checkout > %s
+                AND status NOT IN (%s, %s, %s)
+            LIMIT 1',
+            $assignedRoomId,
+            $reservationId,
+            $checkout,
+            $checkin,
+            $statuses[0],
+            $statuses[1],
+            $statuses[2]
+        );
+
+        return $this->wpdb->get_var($sql) !== null;
+    }
+
+    /**
      * @param array<string, mixed> $reservationData
      */
     public function updateReservation(int $reservationId, array $reservationData): bool
@@ -2158,8 +2200,8 @@ final class ReservationRepository extends AbstractRepository
      */
     private function resolveReservationFormats(array $reservationData): array
     {
-        $integerFields = ['room_id', 'room_type_id', 'assigned_room_id', 'rate_plan_id', 'guest_id', 'guests'];
-        $floatFields = ['total_price'];
+        $integerFields = ['room_id', 'room_type_id', 'assigned_room_id', 'rate_plan_id', 'guest_id', 'guests', 'coupon_id'];
+        $floatFields = ['total_price', 'coupon_discount_total'];
         $formats = [];
 
         foreach (\array_keys($reservationData) as $field) {

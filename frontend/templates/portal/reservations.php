@@ -12,10 +12,17 @@ $canEditGuestContact = \current_user_can(StaffAccess::CAP_GUEST_EDIT_CONTACT) ||
 $canCancelReservation = \current_user_can(StaffAccess::CAP_RESERVATION_CANCEL) || \current_user_can('manage_options');
 $canCheckInReservation = \current_user_can(StaffAccess::CAP_RESERVATION_CHECKIN) || \current_user_can('manage_options');
 $canCheckOutReservation = \current_user_can(StaffAccess::CAP_RESERVATION_CHECKOUT) || \current_user_can('manage_options');
+$canEditStay = \current_user_can(StaffAccess::CAP_RESERVATION_EDIT_STAY) || \current_user_can('manage_options');
+$canMarkNoShow = \current_user_can(StaffAccess::CAP_RESERVATION_NO_SHOW) || \current_user_can('manage_options');
 $canAssignRoom = \current_user_can(StaffAccess::CAP_RESERVATION_ASSIGN_ROOM) || \current_user_can('manage_options');
+$canMoveRoom = \current_user_can(StaffAccess::CAP_RESERVATION_MOVE_ROOM) || \current_user_can('manage_options');
 $canAddInternalNote = \current_user_can(StaffAccess::CAP_GUEST_ADD_NOTE) || \current_user_can('manage_options');
 $canRequestCancellation = (\current_user_can(StaffAccess::CAP_RESERVATION_EDIT_BASIC) || \current_user_can('manage_options')) && !$canCancelReservation;
 $canManagePayment = \current_user_can(StaffAccess::CAP_PAYMENT_MARK_PAID) || \current_user_can('manage_options');
+$canViewPaymentDetails = \current_user_can(StaffAccess::CAP_PAYMENT_VIEW)
+    || \current_user_can(StaffAccess::CAP_REPORT_VIEW_FINANCE)
+    || \current_user_can(StaffAccess::CAP_REPORT_VIEW_MANAGEMENT)
+    || \current_user_can('manage_options');
 $canOpenGuests = \current_user_can(StaffAccess::CAP_GUEST_VIEW) || \current_user_can('manage_options');
 $canOpenCalendar = \current_user_can(StaffAccess::CAP_CALENDAR_VIEW) || \current_user_can('manage_options');
 $canQuickBook = StaffAccess::userCanAccessPortalModule('front_desk') || \current_user_can('manage_options');
@@ -106,6 +113,7 @@ if (\is_array($detail)) {
     $timeline = isset($detail['timeline']) && \is_array($detail['timeline']) ? $detail['timeline'] : [];
     $emails = isset($detail['emails']) && \is_array($detail['emails']) ? $detail['emails'] : [];
     $assignableRooms = isset($detail['assignable_rooms']) && \is_array($detail['assignable_rooms']) ? $detail['assignable_rooms'] : [];
+    $detailForms = isset($detail['forms']) && \is_array($detail['forms']) ? $detail['forms'] : [];
     $statusKey = (string) ($summary['reservation_status_key'] ?? '');
     $paymentStatusKey = (string) ($summary['payment_status_key'] ?? '');
     $currency = (string) ($pricing['currency'] ?? '');
@@ -115,10 +123,18 @@ if (\is_array($detail)) {
     $checkedOutAtRaw = \trim((string) ($reservation['checked_out_at'] ?? ''));
     $hasCheckedIn = $checkedInAtRaw !== '' && $checkedInAtRaw !== '0000-00-00 00:00:00';
     $hasCheckedOut = $checkedOutAtRaw !== '' && $checkedOutAtRaw !== '0000-00-00 00:00:00';
+    $isInHouseReservation = $hasCheckedIn && !$hasCheckedOut;
     $hasCancellationRequest = !empty($reservation['cancellation_requested']);
     $canShowCheckIn = $canCheckInReservation && \in_array($statusKey, ['confirmed', 'pending', 'pending_payment'], true) && !$hasCheckedIn;
     $canShowCheckOut = $canCheckOutReservation && $statusKey === 'confirmed' && $hasCheckedIn && !$hasCheckedOut;
-    $canShowAssignRoom = $canAssignRoom && !\in_array($statusKey, ['cancelled', 'completed', 'blocked'], true);
+    $canShowStayEdit = $canEditStay && !\in_array($statusKey, ['cancelled', 'completed', 'blocked', 'expired', 'payment_failed'], true) && !$hasCheckedOut;
+    $canShowNoShow = $canMarkNoShow
+        && \in_array($statusKey, ['confirmed', 'pending', 'pending_payment'], true)
+        && !$hasCheckedIn
+        && !$hasCheckedOut
+        && (string) ($stay['checkin'] ?? '') !== ''
+        && (string) ($stay['checkin'] ?? '') <= \current_time('Y-m-d');
+    $canShowAssignRoom = ($isInHouseReservation ? $canMoveRoom : $canAssignRoom) && !\in_array($statusKey, ['cancelled', 'completed', 'blocked'], true);
     $hasPendingCancellationRequest = $hasCancellationRequest && !\in_array($statusKey, ['cancelled', 'completed', 'blocked'], true);
     $canApproveCancellation = $canCancelReservation && $hasPendingCancellationRequest;
     $canRejectCancellation = $canApproveCancellation;
@@ -144,6 +160,14 @@ if (\is_array($detail)) {
     $amountDue = isset($pricing['amount_due']) ? (float) $pricing['amount_due'] : 0.0;
     $storedTotal = isset($pricing['stored_total']) ? (float) $pricing['stored_total'] : 0.0;
     $amountPaid = isset($pricing['amount_paid']) ? (float) $pricing['amount_paid'] : 0.0;
+    $stayForm = isset($detailForms['stay']) && \is_array($detailForms['stay']) ? $detailForms['stay'] : [];
+    $stayFormCheckin = isset($stayForm['checkin']) ? (string) $stayForm['checkin'] : (string) ($stay['checkin'] ?? '');
+    $stayFormCheckout = isset($stayForm['checkout']) ? (string) $stayForm['checkout'] : (string) ($stay['checkout'] ?? '');
+
+    if ($hasCheckedIn) {
+        $stayFormCheckin = (string) ($stay['checkin'] ?? '');
+    }
+
     $attentionItems = [];
     $todayTs = \strtotime(\current_time('Y-m-d'));
     $checkoutTs = !empty($stay['checkout']) ? \strtotime((string) $stay['checkout']) : false;
@@ -173,7 +197,7 @@ if (\is_array($detail)) {
         ];
     }
 
-    if ($amountDue > 0.0) {
+    if ($canViewPaymentDetails && $amountDue > 0.0) {
         $attentionItems[] = [
             'title' => \__('Outstanding balance', 'must-hotel-booking'),
             'message' => \sprintf(
@@ -239,6 +263,15 @@ if (\is_array($detail)) {
         ];
     }
 
+    if ($canShowNoShow && (string) ($stay['checkin'] ?? '') < \current_time('Y-m-d')) {
+        $attentionItems[] = [
+            'title' => \__('Arrival is overdue without check-in', 'must-hotel-booking'),
+            'message' => \__('If the guest will not arrive, mark the reservation as a no-show from the immediate actions panel.', 'must-hotel-booking'),
+            'tone' => 'warning',
+            'badge' => \__('No-Show Review', 'must-hotel-booking'),
+        ];
+    }
+
     $renderActionForm = static function (
         string $action,
         string $label,
@@ -290,10 +323,14 @@ if (\is_array($detail)) {
     echo '<article class="must-portal-reservation-status-card"><span>' . \esc_html__('Reservation status', 'must-hotel-booking') . '</span><strong>' . \esc_html((string) ($summary['reservation_status'] ?? '')) . '</strong>';
     PortalRenderer::renderBadge($statusKey, (string) ($summary['reservation_status'] ?? ''));
     echo '</article>';
-    echo '<article class="must-portal-reservation-status-card"><span>' . \esc_html__('Payment status', 'must-hotel-booking') . '</span><strong>' . \esc_html((string) ($summary['payment_status'] ?? '')) . '</strong>';
-    PortalRenderer::renderBadge($paymentStatusKey, (string) ($summary['payment_status'] ?? ''));
-    echo '</article>';
-    echo '<article class="must-portal-reservation-status-card"><span>' . \esc_html__('Amount due', 'must-hotel-booking') . '</span><strong>' . \esc_html(\number_format_i18n($amountDue, 2) . ' ' . $currency) . '</strong><small>' . \esc_html__('Collected balance still outstanding.', 'must-hotel-booking') . '</small></article>';
+
+    if ($canViewPaymentDetails) {
+        echo '<article class="must-portal-reservation-status-card"><span>' . \esc_html__('Payment status', 'must-hotel-booking') . '</span><strong>' . \esc_html((string) ($summary['payment_status'] ?? '')) . '</strong>';
+        PortalRenderer::renderBadge($paymentStatusKey, (string) ($summary['payment_status'] ?? ''));
+        echo '</article>';
+        echo '<article class="must-portal-reservation-status-card"><span>' . \esc_html__('Amount due', 'must-hotel-booking') . '</span><strong>' . \esc_html(\number_format_i18n($amountDue, 2) . ' ' . $currency) . '</strong><small>' . \esc_html__('Collected balance still outstanding.', 'must-hotel-booking') . '</small></article>';
+    }
+
     echo '<article class="must-portal-reservation-status-card"><span>' . \esc_html__('Stay facts', 'must-hotel-booking') . '</span><strong>' . \esc_html(\sprintf(\_n('%d night', '%d nights', $nights, 'must-hotel-booking'), $nights)) . '</strong><small>' . \esc_html(\sprintf(\_n('%d guest', '%d guests', $guestsCount, 'must-hotel-booking'), $guestsCount)) . '</small></article>';
     echo '</div></section>';
 
@@ -310,6 +347,17 @@ if (\is_array($detail)) {
 
     if ($canShowCheckOut) {
         $renderActionForm('reservation_checkout', \__('Check out guest', 'must-hotel-booking'), 'dashicons-external', 'must-portal-reservation-action-button', 'must_portal_reservation_action_checkout_' . $reservationId);
+    }
+
+    if ($canShowNoShow) {
+        $renderActionForm(
+            'reservation_mark_no_show',
+            \__('Mark no-show', 'must-hotel-booking'),
+            'dashicons-warning',
+            'must-portal-reservation-action-button is-danger',
+            'must_portal_reservation_no_show_' . $reservationId,
+            \__('Mark this reservation as a no-show and cancel it?', 'must-hotel-booking')
+        );
     }
 
     if ($canManagePayment && !\in_array($statusKey, ['pending', 'pending_payment', 'cancelled', 'blocked'], true)) {
@@ -485,34 +533,36 @@ if (\is_array($detail)) {
 
     echo '</article>';
 
-    echo '<article class="must-portal-panel"><div class="must-portal-panel-header"><div><h2>' . \esc_html__('Payment records', 'must-hotel-booking') . '</h2><p>' . \esc_html__('Ledger rows and collected-state history for this reservation.', 'must-hotel-booking') . '</p></div></div>';
+    if ($canViewPaymentDetails) {
+        echo '<article class="must-portal-panel"><div class="must-portal-panel-header"><div><h2>' . \esc_html__('Payment records', 'must-hotel-booking') . '</h2><p>' . \esc_html__('Ledger rows and collected-state history for this reservation.', 'must-hotel-booking') . '</p></div></div>';
 
-    if (empty($payments)) {
-        PortalRenderer::renderEmptyState(\__('No payment ledger rows are linked to this reservation yet.', 'must-hotel-booking'));
-    } else {
-        foreach ($payments as $paymentRow) {
-            if (!\is_array($paymentRow)) {
-                continue;
+        if (empty($payments)) {
+            PortalRenderer::renderEmptyState(\__('No payment ledger rows are linked to this reservation yet.', 'must-hotel-booking'));
+        } else {
+            foreach ($payments as $paymentRow) {
+                if (!\is_array($paymentRow)) {
+                    continue;
+                }
+
+                $renderFeedItem(
+                    (string) ($paymentRow['amount'] ?? ''),
+                    \sprintf(
+                        \__('%1$s | Paid: %2$s | Created: %3$s', 'must-hotel-booking'),
+                        (string) ($paymentRow['method'] ?? ''),
+                        (string) ($paymentRow['paid_at'] ?? \__('Not paid yet', 'must-hotel-booking')),
+                        (string) ($paymentRow['created_at'] ?? '')
+                    ),
+                    (string) ($paymentRow['status_key'] ?? 'info'),
+                    (string) ($paymentRow['status'] ?? ''),
+                    (string) ($paymentRow['transaction_id'] ?? ''),
+                    $paymentsUrl,
+                    $paymentsUrl !== '' ? \__('Open payments', 'must-hotel-booking') : ''
+                );
             }
-
-            $renderFeedItem(
-                (string) ($paymentRow['amount'] ?? ''),
-                \sprintf(
-                    \__('%1$s | Paid: %2$s | Created: %3$s', 'must-hotel-booking'),
-                    (string) ($paymentRow['method'] ?? ''),
-                    (string) ($paymentRow['paid_at'] ?? \__('Not paid yet', 'must-hotel-booking')),
-                    (string) ($paymentRow['created_at'] ?? '')
-                ),
-                (string) ($paymentRow['status_key'] ?? 'info'),
-                (string) ($paymentRow['status'] ?? ''),
-                (string) ($paymentRow['transaction_id'] ?? ''),
-                $paymentsUrl,
-                $paymentsUrl !== '' ? \__('Open payments', 'must-hotel-booking') : ''
-            );
         }
-    }
 
-    echo '</article>';
+        echo '</article>';
+    }
     echo '<article class="must-portal-panel"><div class="must-portal-panel-header"><div><h2>' . \esc_html__('Timeline / Activity', 'must-hotel-booking') . '</h2><p>' . \esc_html__('Latest operational activity for this reservation.', 'must-hotel-booking') . '</p></div></div>';
 
     if (empty($timeline)) {
@@ -544,7 +594,30 @@ if (\is_array($detail)) {
     PortalRenderer::renderDefinitionRow(\__('Assigned room', 'must-hotel-booking'), (string) ($stay['assigned_room'] ?? \__('Not assigned yet', 'must-hotel-booking')));
     PortalRenderer::renderDefinitionRow(\__('Rate plan', 'must-hotel-booking'), (string) ($stay['rate_plan'] ?? \__('Not set', 'must-hotel-booking')));
     PortalRenderer::renderDefinitionRow(\__('Guests', 'must-hotel-booking'), (string) $guestsCount);
-    echo '</div><p class="must-portal-reservation-note">' . \esc_html((string) ($stay['edit_notice'] ?? '')) . '</p></article>';
+    echo '</div><p class="must-portal-reservation-note">' . \esc_html((string) ($stay['edit_notice'] ?? '')) . '</p>';
+
+    if ($canShowStayEdit) {
+        $checkinReadonly = $hasCheckedIn ? ' readonly' : '';
+        $checkinHint = $hasCheckedIn
+            ? \__('Guest is already checked in, so the arrival date is locked and only checkout can be corrected here.', 'must-hotel-booking')
+            : \__('Update the stay dates here and the reservation total will be revalidated using the current pricing/rule logic.', 'must-hotel-booking');
+        echo '<form method="post" action="' . \esc_url($detailUrl) . '" class="must-portal-form-grid must-portal-reservation-form">';
+        \wp_nonce_field('must_portal_reservation_update_stay_' . $reservationId, 'must_portal_reservation_nonce');
+        echo '<input type="hidden" name="must_portal_action" value="reservation_update_stay" />';
+        echo '<input type="hidden" name="reservation_id" value="' . \esc_attr((string) $reservationId) . '" />';
+
+        if ($returnMode === 'edit') {
+            echo '<input type="hidden" name="portal_return_mode" value="edit" />';
+        }
+
+        echo '<label><span>' . \esc_html__('Check-in', 'must-hotel-booking') . '</span><input type="date" name="stay_checkin" value="' . \esc_attr($stayFormCheckin) . '"' . $checkinReadonly . ' /></label>';
+        echo '<label><span>' . \esc_html__('Check-out', 'must-hotel-booking') . '</span><input type="date" name="stay_checkout" value="' . \esc_attr($stayFormCheckout) . '" /></label>';
+        echo '<p class="must-portal-form-full must-portal-reservation-note">' . \esc_html($checkinHint) . '</p>';
+        echo '<div class="must-portal-form-full must-portal-inline-actions"><button type="submit" class="must-portal-primary-button">' . \esc_html__('Save stay dates', 'must-hotel-booking') . '</button></div>';
+        echo '</form>';
+    }
+
+    echo '</article>';
 
     echo '<article class="must-portal-panel"><div class="must-portal-panel-header"><div><h2>' . \esc_html__('Room assignment', 'must-hotel-booking') . '</h2><p>' . \esc_html__('Assign or reassign the physical room for this stay using the supported reservation action.', 'must-hotel-booking') . '</p></div></div>';
 
@@ -562,7 +635,10 @@ if (\is_array($detail)) {
             }
 
             echo '<label class="must-portal-form-full"><span>' . \esc_html__('Assigned room', 'must-hotel-booking') . '</span><select name="assigned_room_id">';
-            echo '<option value="0">' . \esc_html__('Unassigned', 'must-hotel-booking') . '</option>';
+
+            if (!$isInHouseReservation) {
+                echo '<option value="0">' . \esc_html__('Unassigned', 'must-hotel-booking') . '</option>';
+            }
 
             foreach ($assignableRooms as $roomRow) {
                 if (!\is_array($roomRow)) {
@@ -578,6 +654,11 @@ if (\is_array($detail)) {
             }
 
             echo '</select></label>';
+            echo '<p class="must-portal-form-full must-portal-reservation-note">' . \esc_html(
+                $isInHouseReservation
+                    ? \__('Checked-in stays use the controlled room-move path and must be reassigned to another compatible room.', 'must-hotel-booking')
+                    : \__('Assign or update the physical room for this reservation.', 'must-hotel-booking')
+            ) . '</p>';
             echo '<div class="must-portal-form-full must-portal-inline-actions"><button type="submit" class="must-portal-primary-button">' . \esc_html__('Save room assignment', 'must-hotel-booking') . '</button></div>';
             echo '</form>';
         }
@@ -589,20 +670,24 @@ if (\is_array($detail)) {
 
     echo '</article>';
 
-    echo '<article class="must-portal-panel"><div class="must-portal-panel-header"><div><h2>' . \esc_html__('Pricing summary', 'must-hotel-booking') . '</h2><p>' . \esc_html__('Stored booking totals and coupon impact.', 'must-hotel-booking') . '</p></div></div><div class="must-portal-definition-list">';
-    PortalRenderer::renderDefinitionRow(\__('Final total', 'must-hotel-booking'), \number_format_i18n($storedTotal, 2) . ' ' . $currency);
-    PortalRenderer::renderDefinitionRow(\__('Amount paid', 'must-hotel-booking'), \number_format_i18n($amountPaid, 2) . ' ' . $currency);
-    PortalRenderer::renderDefinitionRow(\__('Amount due', 'must-hotel-booking'), \number_format_i18n($amountDue, 2) . ' ' . $currency);
-    PortalRenderer::renderDefinitionRow(\__('Coupon / Discount', 'must-hotel-booking'), !empty($pricing['coupon_code']) || !empty($pricing['coupon_discount_total'])
-        ? \trim((string) ($pricing['coupon_code'] ?? \__('Coupon applied', 'must-hotel-booking'))) . ' | -' . \number_format_i18n((float) ($pricing['coupon_discount_total'] ?? 0.0), 2) . ' ' . $currency
-        : \__('No coupon', 'must-hotel-booking'));
-    echo '</div></article>';
+    if ($canViewPaymentDetails) {
+        echo '<article class="must-portal-panel"><div class="must-portal-panel-header"><div><h2>' . \esc_html__('Pricing summary', 'must-hotel-booking') . '</h2><p>' . \esc_html__('Stored booking totals and coupon impact.', 'must-hotel-booking') . '</p></div></div><div class="must-portal-definition-list">';
+        PortalRenderer::renderDefinitionRow(\__('Final total', 'must-hotel-booking'), \number_format_i18n($storedTotal, 2) . ' ' . $currency);
+        PortalRenderer::renderDefinitionRow(\__('Amount paid', 'must-hotel-booking'), \number_format_i18n($amountPaid, 2) . ' ' . $currency);
+        PortalRenderer::renderDefinitionRow(\__('Amount due', 'must-hotel-booking'), \number_format_i18n($amountDue, 2) . ' ' . $currency);
+        PortalRenderer::renderDefinitionRow(\__('Coupon / Discount', 'must-hotel-booking'), !empty($pricing['coupon_code']) || !empty($pricing['coupon_discount_total'])
+            ? \trim((string) ($pricing['coupon_code'] ?? \__('Coupon applied', 'must-hotel-booking'))) . ' | -' . \number_format_i18n((float) ($pricing['coupon_discount_total'] ?? 0.0), 2) . ' ' . $currency
+            : \__('No coupon', 'must-hotel-booking'));
+        echo '</div></article>';
+    }
 
-    echo '<article class="must-portal-panel"><div class="must-portal-panel-header"><div><h2>' . \esc_html__('Reservation summary', 'must-hotel-booking') . '</h2><p>' . \esc_html__('Booking identity, payment method, and channel context.', 'must-hotel-booking') . '</p></div></div><div class="must-portal-definition-list">';
+    echo '<article class="must-portal-panel"><div class="must-portal-panel-header"><div><h2>' . \esc_html__('Reservation summary', 'must-hotel-booking') . '</h2><p>' . \esc_html__('Booking identity and channel context.', 'must-hotel-booking') . '</p></div></div><div class="must-portal-definition-list">';
     PortalRenderer::renderDefinitionRow(\__('Booking ID', 'must-hotel-booking'), (string) ($detail['booking_id'] ?? ''));
     PortalRenderer::renderDefinitionRow(\__('Reservation status', 'must-hotel-booking'), (string) ($summary['reservation_status'] ?? ''));
-    PortalRenderer::renderDefinitionRow(\__('Payment status', 'must-hotel-booking'), (string) ($summary['payment_status'] ?? ''));
-    PortalRenderer::renderDefinitionRow(\__('Payment method', 'must-hotel-booking'), (string) ($summary['payment_method'] ?? ''));
+    if ($canViewPaymentDetails) {
+        PortalRenderer::renderDefinitionRow(\__('Payment status', 'must-hotel-booking'), (string) ($summary['payment_status'] ?? ''));
+        PortalRenderer::renderDefinitionRow(\__('Payment method', 'must-hotel-booking'), (string) ($summary['payment_method'] ?? ''));
+    }
     PortalRenderer::renderDefinitionRow(\__('Created date', 'must-hotel-booking'), (string) ($summary['created_at'] ?? ''));
     PortalRenderer::renderDefinitionRow(\__('Source / Channel', 'must-hotel-booking'), (string) ($summary['source'] ?? ''));
     echo '</div></article>';
@@ -642,20 +727,24 @@ foreach ((array) ($moduleData['status_options'] ?? []) as $value => $label) {
 }
 
 echo '</select>';
-echo '<select name="payment_status"><option value="">' . \esc_html__('All payment states', 'must-hotel-booking') . '</option>';
 
-foreach ((array) ($moduleData['payment_status_options'] ?? []) as $value => $label) {
-    echo '<option value="' . \esc_attr((string) $value) . '"' . \selected((string) ($filters['payment_status'] ?? ''), (string) $value, false) . '>' . \esc_html((string) $label) . '</option>';
+if ($canViewPaymentDetails) {
+    echo '<select name="payment_status"><option value="">' . \esc_html__('All payment states', 'must-hotel-booking') . '</option>';
+
+    foreach ((array) ($moduleData['payment_status_options'] ?? []) as $value => $label) {
+        echo '<option value="' . \esc_attr((string) $value) . '"' . \selected((string) ($filters['payment_status'] ?? ''), (string) $value, false) . '>' . \esc_html((string) $label) . '</option>';
+    }
+
+    echo '</select>';
+    echo '<select name="payment_method"><option value="">' . \esc_html__('All payment methods', 'must-hotel-booking') . '</option>';
+
+    foreach ((array) ($moduleData['payment_method_options'] ?? []) as $value => $label) {
+        echo '<option value="' . \esc_attr((string) $value) . '"' . \selected((string) ($filters['payment_method'] ?? ''), (string) $value, false) . '>' . \esc_html((string) $label) . '</option>';
+    }
+
+    echo '</select>';
 }
 
-echo '</select>';
-echo '<select name="payment_method"><option value="">' . \esc_html__('All payment methods', 'must-hotel-booking') . '</option>';
-
-foreach ((array) ($moduleData['payment_method_options'] ?? []) as $value => $label) {
-    echo '<option value="' . \esc_attr((string) $value) . '"' . \selected((string) ($filters['payment_method'] ?? ''), (string) $value, false) . '>' . \esc_html((string) $label) . '</option>';
-}
-
-echo '</select>';
 echo '<button type="submit" class="must-portal-secondary-button">' . \esc_html__('Apply filters', 'must-hotel-booking') . '</button>';
 echo '<a class="must-portal-secondary-button" href="' . \esc_url(PortalRouter::getModuleUrl('reservations')) . '">' . \esc_html__('Reset', 'must-hotel-booking') . '</a>';
 echo '</form>';
@@ -680,7 +769,13 @@ echo '</div>';
 if (empty($moduleData['rows'])) {
     PortalRenderer::renderEmptyState(\__('No reservations matched the current filters.', 'must-hotel-booking'));
 } else {
-    echo '<div class="must-portal-table-wrap"><table class="must-portal-table"><thead><tr><th>' . \esc_html__('Reservation', 'must-hotel-booking') . '</th><th>' . \esc_html__('Stay', 'must-hotel-booking') . '</th><th>' . \esc_html__('Guest', 'must-hotel-booking') . '</th><th>' . \esc_html__('Status', 'must-hotel-booking') . '</th><th>' . \esc_html__('Payment', 'must-hotel-booking') . '</th><th>' . \esc_html__('Total', 'must-hotel-booking') . '</th><th></th></tr></thead><tbody>';
+    echo '<div class="must-portal-table-wrap"><table class="must-portal-table"><thead><tr><th>' . \esc_html__('Reservation', 'must-hotel-booking') . '</th><th>' . \esc_html__('Stay', 'must-hotel-booking') . '</th><th>' . \esc_html__('Guest', 'must-hotel-booking') . '</th><th>' . \esc_html__('Status', 'must-hotel-booking') . '</th>';
+
+    if ($canViewPaymentDetails) {
+        echo '<th>' . \esc_html__('Payment', 'must-hotel-booking') . '</th><th>' . \esc_html__('Total', 'must-hotel-booking') . '</th>';
+    }
+
+    echo '<th></th></tr></thead><tbody>';
 
     foreach ((array) ($moduleData['rows'] ?? []) as $row) {
         if (!\is_array($row)) {
@@ -709,10 +804,16 @@ if (empty($moduleData['rows'])) {
             echo '<br />';
             PortalRenderer::renderBadge('warning', \__('Approval Needed', 'must-hotel-booking'));
         }
-        echo '</td><td>';
-        PortalRenderer::renderBadge((string) ($row['payment_status_key'] ?? 'info'), (string) ($row['payment_status'] ?? ''));
-        echo '<br /><span class="must-portal-muted">' . \esc_html((string) ($row['payment_method'] ?? '')) . '</span>';
-        echo '</td><td>' . \esc_html((string) ($row['total'] ?? '')) . '</td><td><div class="must-portal-inline-actions">';
+        echo '</td>';
+
+        if ($canViewPaymentDetails) {
+            echo '<td>';
+            PortalRenderer::renderBadge((string) ($row['payment_status_key'] ?? 'info'), (string) ($row['payment_status'] ?? ''));
+            echo '<br /><span class="must-portal-muted">' . \esc_html((string) ($row['payment_method'] ?? '')) . '</span>';
+            echo '</td><td>' . \esc_html((string) ($row['total'] ?? '')) . '</td>';
+        }
+
+        echo '<td><div class="must-portal-inline-actions">';
         echo '<a class="must-portal-inline-link" href="' . \esc_url($rowDetailUrl) . '">' . \esc_html(!empty($row['cancellation_requested']) && !\in_array((string) ($row['reservation_status_key'] ?? ''), ['cancelled', 'completed', 'blocked'], true) ? \__('Review request', 'must-hotel-booking') : \__('Open workspace', 'must-hotel-booking')) . '</a>';
 
         if ($rowGuestUrl !== '') {

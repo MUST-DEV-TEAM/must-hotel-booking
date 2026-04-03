@@ -562,6 +562,7 @@ final class DashboardDataProvider
                 $context = $this->decodeContext((string) ($activity['context_json'] ?? ''));
                 $reservationId = isset($context['reservation_id']) ? (int) $context['reservation_id'] : 0;
                 $rows[] = [
+                    'event_type' => (string) ($activity['event_type'] ?? ''),
                     'created_at' => (string) ($activity['created_at'] ?? ''),
                     'severity' => (string) ($activity['severity'] ?? 'info'),
                     'message' => (string) ($activity['message'] ?? ''),
@@ -577,6 +578,7 @@ final class DashboardDataProvider
 
         foreach ($this->reservationRepository->getRecentReservationRows(4) as $reservation) {
             $rows[] = [
+                'event_type' => 'reservation_created',
                 'created_at' => (string) ($reservation['created_at'] ?? ''),
                 'severity' => 'info',
                 'message' => \sprintf(
@@ -598,6 +600,7 @@ final class DashboardDataProvider
             $status = (string) ($payment['status'] ?? '');
             $method = (string) ($payment['method'] ?? '');
             $rows[] = [
+                'event_type' => $status === 'failed' ? 'payment_failed' : 'payment_recorded',
                 'created_at' => isset($payment['paid_at']) && (string) $payment['paid_at'] !== ''
                     ? (string) $payment['paid_at']
                     : (string) ($payment['created_at'] ?? ''),

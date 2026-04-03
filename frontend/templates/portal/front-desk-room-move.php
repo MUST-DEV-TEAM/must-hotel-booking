@@ -15,7 +15,7 @@ $queueTitle = isset($roomMoveData['queue_title']) ? (string) $roomMoveData['queu
 $queueDescription = isset($roomMoveData['queue_description']) ? (string) $roomMoveData['queue_description'] : '';
 $emptyMessage = isset($roomMoveData['empty_message']) ? (string) $roomMoveData['empty_message'] : \__('No room moves are available right now.', 'must-hotel-booking');
 $formAction = PortalRouter::getModuleUrl('front_desk', ['tab' => 'room-move']);
-$canAssignRoom = \current_user_can(StaffAccess::CAP_RESERVATION_ASSIGN_ROOM) || \current_user_can('manage_options');
+$canMoveRoom = \current_user_can(StaffAccess::CAP_RESERVATION_MOVE_ROOM) || \current_user_can('manage_options');
 
 PortalRenderer::renderSummaryCards($summaryCards);
 
@@ -66,8 +66,8 @@ if (empty($rows)) {
             echo '<div class="must-portal-inline-actions"><a class="must-portal-inline-link" href="' . \esc_url($reservationUrl) . '">' . \esc_html__('Open reservation', 'must-hotel-booking') . '</a></div>';
         }
 
-        if (!$canAssignRoom) {
-            echo '<span class="must-portal-muted">' . \esc_html__('Room moves require room assignment access.', 'must-hotel-booking') . '</span>';
+        if (!$canMoveRoom) {
+            echo '<span class="must-portal-muted">' . \esc_html__('Room moves require room-move authority.', 'must-hotel-booking') . '</span>';
         } elseif (empty($moveOptions)) {
             echo '<span class="must-portal-muted">' . \esc_html__('No compatible room is currently available.', 'must-hotel-booking') . '</span>';
         } elseif ($reservationId > 0) {

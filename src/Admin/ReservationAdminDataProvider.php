@@ -173,7 +173,7 @@ final class ReservationAdminDataProvider
                 'rate_plan' => \is_array($ratePlan) ? (string) ($ratePlan['name'] ?? '') : '',
                 'booking_source' => (string) ($reservation['booking_source'] ?? ''),
                 'notes' => (string) ($reservation['notes'] ?? ''),
-                'edit_notice' => \__('Stay dates and accommodation are currently managed from booking/calendar workflows until reservation revalidation is promoted into a dedicated admin edit service.', 'must-hotel-booking'),
+                'edit_notice' => \__('Authorized staff can correct stay dates here. Once the guest is checked in, only the checkout date should be adjusted from this workspace.', 'must-hotel-booking'),
             ],
             'pricing' => [
                 'currency' => MustBookingConfig::get_currency(),

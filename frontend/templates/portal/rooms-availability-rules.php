@@ -7,6 +7,8 @@ $currentAvailabilityRoomId = isset($_GET['room_id']) ? \absint(\wp_unslash($_GET
 $currentTimeline = isset($_GET['timeline']) && !\is_array($_GET['timeline']) ? \sanitize_key((string) \wp_unslash($_GET['timeline'])) : '';
 $currentAvailabilityStatus = isset($_GET['status']) && !\is_array($_GET['status']) ? \sanitize_key((string) \wp_unslash($_GET['status'])) : '';
 $currentRuleType = isset($_GET['rule_type']) && !\is_array($_GET['rule_type']) ? \sanitize_key((string) \wp_unslash($_GET['rule_type'])) : '';
+$currentStartDate = isset($_GET['start_date']) && !\is_array($_GET['start_date']) ? \sanitize_text_field((string) \wp_unslash($_GET['start_date'])) : '';
+$currentEndDate = isset($_GET['end_date']) && !\is_array($_GET['end_date']) ? \sanitize_text_field((string) \wp_unslash($_GET['end_date'])) : '';
 $ruleTypeOptions = [
     'all' => \__('All rule types', 'must-hotel-booking'),
     'maintenance_block' => \__('Blocked date range', 'must-hotel-booking'),
@@ -25,6 +27,40 @@ $rulesData = isset($moduleData['rules_data']) && \is_array($moduleData['rules_da
 $entryRows = isset($rulesData['entry_rows']) && \is_array($rulesData['entry_rows']) ? $rulesData['entry_rows'] : [];
 $roomRows = isset($rulesData['room_rows']) && \is_array($rulesData['room_rows']) ? $rulesData['room_rows'] : [];
 $roomOptions = isset($rulesData['room_options']) && \is_array($rulesData['room_options']) ? $rulesData['room_options'] : [];
+$ruleForm = isset($rulesData['rule_form']) && \is_array($rulesData['rule_form']) ? $rulesData['rule_form'] : [];
+$ruleErrors = isset($rulesData['rule_errors']) && \is_array($rulesData['rule_errors']) ? $rulesData['rule_errors'] : [];
+$currentAction = isset($rulesData['current_action']) ? (string) $rulesData['current_action'] : '';
+$editingRuleId = isset($rulesData['editing_id']) ? (int) $rulesData['editing_id'] : 0;
+$requestState = isset($rulesData['request']) && \is_array($rulesData['request']) ? $rulesData['request'] : [];
+$filters = isset($rulesData['filters']) && \is_array($rulesData['filters']) ? $rulesData['filters'] : [];
+$currentSearch = isset($filters['search']) ? (string) $filters['search'] : $currentSearch;
+$currentAvailabilityRoomId = isset($filters['room_id']) ? (int) $filters['room_id'] : $currentAvailabilityRoomId;
+$currentTimeline = isset($filters['timeline']) ? (string) $filters['timeline'] : $currentTimeline;
+$currentAvailabilityStatus = isset($filters['status']) ? (string) $filters['status'] : $currentAvailabilityStatus;
+$currentRuleType = isset($filters['rule_type']) ? (string) $filters['rule_type'] : $currentRuleType;
+$currentStartDate = isset($requestState['start_date']) ? (string) $requestState['start_date'] : $currentStartDate;
+$currentEndDate = isset($requestState['end_date']) ? (string) $requestState['end_date'] : $currentEndDate;
+$currentFilterArgs = [
+    'search' => $currentSearch,
+    'room_id' => $currentAvailabilityRoomId,
+    'timeline' => $currentTimeline,
+    'status' => $currentAvailabilityStatus,
+    'rule_type' => $currentRuleType,
+    'start_date' => $currentStartDate,
+    'end_date' => $currentEndDate,
+];
+$renderStateInputs = static function (string $action = '', int $ruleId = 0) use ($currentSearch, $currentAvailabilityRoomId, $currentTimeline, $currentAvailabilityStatus, $currentRuleType, $currentStartDate, $currentEndDate): void {
+    echo '<input type="hidden" name="portal_rooms_availability_tab" value="rules" />';
+    echo '<input type="hidden" name="portal_rooms_availability_action" value="' . \esc_attr($action) . '" />';
+    echo '<input type="hidden" name="portal_rooms_availability_rule_id" value="' . \esc_attr((string) $ruleId) . '" />';
+    echo '<input type="hidden" name="portal_rooms_availability_filter_room_id" value="' . \esc_attr((string) $currentAvailabilityRoomId) . '" />';
+    echo '<input type="hidden" name="portal_rooms_availability_filter_status" value="' . \esc_attr($currentAvailabilityStatus) . '" />';
+    echo '<input type="hidden" name="portal_rooms_availability_filter_timeline" value="' . \esc_attr($currentTimeline) . '" />';
+    echo '<input type="hidden" name="portal_rooms_availability_filter_rule_type" value="' . \esc_attr($currentRuleType) . '" />';
+    echo '<input type="hidden" name="portal_rooms_availability_filter_search" value="' . \esc_attr($currentSearch) . '" />';
+    echo '<input type="hidden" name="portal_rooms_availability_filter_start_date" value="' . \esc_attr($currentStartDate) . '" />';
+    echo '<input type="hidden" name="portal_rooms_availability_filter_end_date" value="' . \esc_attr($currentEndDate) . '" />';
+};
 ?>
 <form class="must-portal-filter-bar" method="get" action="<?php echo \esc_url($moduleUrl); ?>">
     <input type="hidden" name="tab" value="rules" />
@@ -54,35 +90,202 @@ $roomOptions = isset($rulesData['room_options']) && \is_array($rulesData['room_o
     </select>
     <button type="submit" class="must-portal-secondary-button"><?php echo \esc_html__('Apply', 'must-hotel-booking'); ?></button>
 </form>
+
 <section class="must-portal-grid must-portal-grid--2">
     <article class="must-portal-panel">
-        <div class="must-portal-panel-header"><div><h2><?php echo \esc_html__('Availability Rules', 'must-hotel-booking'); ?></h2><p><?php echo \esc_html((string) ($rulesData['booking_note'] ?? __('Restriction rules are still resolved at the room-listing level.', 'must-hotel-booking'))); ?></p></div></div>
+        <div class="must-portal-panel-header">
+            <div>
+                <h2><?php echo \esc_html__('Availability Rules', 'must-hotel-booking'); ?></h2>
+                <p><?php echo \esc_html((string) ($rulesData['booking_note'] ?? __('Restriction rules are still resolved at the room-listing level.', 'must-hotel-booking'))); ?></p>
+            </div>
+        </div>
         <?php if (empty($entryRows)) : ?>
             <?php PortalRenderer::renderEmptyState(\__('No availability rules matched the current filters.', 'must-hotel-booking')); ?>
         <?php else : ?>
-            <div class="must-portal-table-wrap"><table class="must-portal-table"><thead><tr><th><?php echo \esc_html__('Rule', 'must-hotel-booking'); ?></th><th><?php echo \esc_html__('Room Listing', 'must-hotel-booking'); ?></th><th><?php echo \esc_html__('Dates', 'must-hotel-booking'); ?></th><th><?php echo \esc_html__('Arrival / Departure', 'must-hotel-booking'); ?></th><th><?php echo \esc_html__('State', 'must-hotel-booking'); ?></th></tr></thead><tbody>
-            <?php foreach ($entryRows as $row) : ?>
-                <?php if (!\is_array($row)) { continue; } ?>
-                <tr>
-                    <td><strong><?php echo \esc_html((string) ($row['rule_type_label'] ?? '')); ?></strong><?php if (!empty($row['name'])) : ?><br /><span class="must-portal-muted"><?php echo \esc_html((string) $row['name']); ?></span><?php endif; ?></td>
-                    <td><a class="must-portal-inline-link" href="<?php echo \esc_url($buildWorkspaceUrl('rules', ['room_id' => (int) ($row['room_id'] ?? 0)])); ?>"><?php echo \esc_html((string) ($row['room_name'] ?? '')); ?></a></td>
-                    <td><?php echo \esc_html((string) ($row['availability_date'] ?? '') . ' - ' . (string) ($row['end_date'] ?? '')); ?></td>
-                    <td><?php echo \esc_html((string) ($row['checkin'] ?? '')) . ' / ' . \esc_html((string) ($row['checkout'] ?? '')); ?></td>
-                    <td><?php PortalRenderer::renderBadge(!empty($row['is_active']) ? 'ok' : 'disabled', (string) ($row['status_label'] ?? '')); ?></td>
-                </tr>
-            <?php endforeach; ?>
-            </tbody></table></div>
+            <div class="must-portal-table-wrap">
+                <table class="must-portal-table">
+                    <thead>
+                        <tr>
+                            <th><?php echo \esc_html__('Rule', 'must-hotel-booking'); ?></th>
+                            <th><?php echo \esc_html__('Room Listing', 'must-hotel-booking'); ?></th>
+                            <th><?php echo \esc_html__('Dates', 'must-hotel-booking'); ?></th>
+                            <th><?php echo \esc_html__('Arrival / Departure', 'must-hotel-booking'); ?></th>
+                            <th><?php echo \esc_html__('State', 'must-hotel-booking'); ?></th>
+                            <?php if ($canEditRulesGlobally || $canManageBlocks) : ?>
+                                <th><?php echo \esc_html__('Actions', 'must-hotel-booking'); ?></th>
+                            <?php endif; ?>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <?php foreach ($entryRows as $row) : ?>
+                            <?php if (!\is_array($row)) { continue; } ?>
+                            <?php $rowCanEdit = $canEditRuleRow($row); ?>
+                            <tr>
+                                <td>
+                                    <strong><?php echo \esc_html((string) ($row['rule_type_label'] ?? '')); ?></strong>
+                                    <?php if (!empty($row['name'])) : ?>
+                                        <br /><span class="must-portal-muted"><?php echo \esc_html((string) $row['name']); ?></span>
+                                    <?php endif; ?>
+                                </td>
+                                <td>
+                                    <?php if ((int) ($row['room_id'] ?? 0) > 0) : ?>
+                                        <a class="must-portal-inline-link" href="<?php echo \esc_url($buildWorkspaceUrl('rules', ['room_id' => (int) ($row['room_id'] ?? 0)])); ?>"><?php echo \esc_html((string) ($row['room_name'] ?? '')); ?></a>
+                                    <?php else : ?>
+                                        <?php echo \esc_html__('All room listings', 'must-hotel-booking'); ?>
+                                    <?php endif; ?>
+                                </td>
+                                <td><?php echo \esc_html((string) ($row['availability_date'] ?? '') . ' - ' . (string) ($row['end_date'] ?? '')); ?></td>
+                                <td><?php echo \esc_html((string) ($row['checkin'] ?? '')) . ' / ' . \esc_html((string) ($row['checkout'] ?? '')); ?></td>
+                                <td><?php PortalRenderer::renderBadge(!empty($row['is_active']) ? 'ok' : 'disabled', (string) ($row['status_label'] ?? '')); ?></td>
+                                <?php if ($canEditRulesGlobally || $canManageBlocks) : ?>
+                                    <td>
+                                        <?php if ($rowCanEdit) : ?>
+                                            <div class="must-portal-inline-actions">
+                                                <a class="must-portal-secondary-button" href="<?php echo \esc_url($buildWorkspaceUrl('rules', \array_merge($currentFilterArgs, ['action' => 'edit_rule', 'rule_id' => (int) ($row['id'] ?? 0)]))); ?>">
+                                                    <?php echo \esc_html__('Edit', 'must-hotel-booking'); ?>
+                                                </a>
+                                                <form method="post" action="<?php echo \esc_url($moduleUrl); ?>">
+                                                    <input type="hidden" name="must_portal_action" value="rooms_availability_toggle_rule_status" />
+                                                    <input type="hidden" name="rule_id" value="<?php echo \esc_attr((string) ((int) ($row['id'] ?? 0))); ?>" />
+                                                    <input type="hidden" name="target" value="<?php echo \esc_attr(!empty($row['is_active']) ? 'inactive' : 'active'); ?>" />
+                                                    <?php \wp_nonce_field('must_availability_toggle_rule_' . (int) ($row['id'] ?? 0), 'must_availability_rule_toggle_nonce'); ?>
+                                                    <?php $renderStateInputs($currentAction, $editingRuleId); ?>
+                                                    <button type="submit" class="must-portal-secondary-button">
+                                                        <?php echo \esc_html(!empty($row['is_active']) ? __('Deactivate', 'must-hotel-booking') : __('Activate', 'must-hotel-booking')); ?>
+                                                    </button>
+                                                </form>
+                                                <form method="post" action="<?php echo \esc_url($moduleUrl); ?>">
+                                                    <input type="hidden" name="must_portal_action" value="rooms_availability_delete_rule" />
+                                                    <input type="hidden" name="rule_id" value="<?php echo \esc_attr((string) ((int) ($row['id'] ?? 0))); ?>" />
+                                                    <?php \wp_nonce_field('must_availability_delete_rule_' . (int) ($row['id'] ?? 0), 'must_availability_rule_delete_nonce'); ?>
+                                                    <?php $renderStateInputs($currentAction, $editingRuleId); ?>
+                                                    <button type="submit" class="must-portal-danger-button" onclick="return window.confirm('<?php echo \esc_js(__('Remove this availability rule?', 'must-hotel-booking')); ?>');">
+                                                        <?php echo \esc_html__('Remove', 'must-hotel-booking'); ?>
+                                                    </button>
+                                                </form>
+                                            </div>
+                                        <?php else : ?>
+                                            <span class="must-portal-muted"><?php echo \esc_html__('View only', 'must-hotel-booking'); ?></span>
+                                        <?php endif; ?>
+                                    </td>
+                                <?php endif; ?>
+                            </tr>
+                        <?php endforeach; ?>
+                    </tbody>
+                </table>
+            </div>
         <?php endif; ?>
     </article>
+
     <article class="must-portal-panel">
-        <div class="must-portal-panel-header"><div><h2><?php echo \esc_html__('Rule Health by Listing', 'must-hotel-booking'); ?></h2><p><?php echo \esc_html__('The merged workspace still surfaces listing-level restriction health so operations staff can see conflicts before they become front-desk problems.', 'must-hotel-booking'); ?></p></div></div>
-        <?php if (empty($roomRows)) : ?>
-            <?php PortalRenderer::renderEmptyState(\__('No room-listing rule data matched the current filters.', 'must-hotel-booking')); ?>
+        <div class="must-portal-panel-header">
+            <div>
+                <h2><?php echo \esc_html__('Edit Rule', 'must-hotel-booking'); ?></h2>
+                <p><?php echo \esc_html__('Update an existing sellability rule without leaving the portal. Global rules remain limited to operations-manager and admin authority.', 'must-hotel-booking'); ?></p>
+            </div>
+        </div>
+
+        <?php if (!($canEditRulesGlobally || $canManageBlocks)) : ?>
+            <?php PortalRenderer::renderEmptyState(\__('You can review rules here, but your role does not have rule-edit authority in the portal.', 'must-hotel-booking')); ?>
+        <?php elseif ($currentAction !== 'edit_rule' || $editingRuleId <= 0) : ?>
+            <?php PortalRenderer::renderEmptyState(\__('Select a rule from the table to edit its dates, conditions, or active state.', 'must-hotel-booking')); ?>
         <?php else : ?>
-            <?php foreach ($roomRows as $row) : ?>
-                <?php if (!\is_array($row)) { continue; } ?>
-                <div class="must-portal-feed-item"><div><strong><?php echo \esc_html((string) ($row['name'] ?? '')); ?></strong><span><?php echo \esc_html(\sprintf(__('Rules: %1$d | Current blocks: %2$d | Future blocks: %3$d', 'must-hotel-booking'), (int) ($row['rule_count'] ?? 0), (int) ($row['current_block_count'] ?? 0), (int) ($row['future_block_count'] ?? 0))); ?></span><?php if (!empty($row['warnings']) && \is_array($row['warnings'])) : ?><small class="must-portal-muted"><?php echo \esc_html((string) $row['warnings'][0]); ?></small><?php endif; ?></div><?php PortalRenderer::renderBadge(!empty($row['warnings']) ? 'warning' : 'ok', !empty($row['warnings']) ? __('Attention', 'must-hotel-booking') : __('Healthy', 'must-hotel-booking')); ?></div>
+            <?php foreach ($ruleErrors as $error) : ?>
+                <div class="must-portal-flash is-error"><?php echo \esc_html((string) $error); ?></div>
             <?php endforeach; ?>
+
+            <?php if (!empty($ruleForm['warnings']) && \is_array($ruleForm['warnings'])) : ?>
+                <?php foreach ($ruleForm['warnings'] as $warning) : ?>
+                    <p class="must-portal-muted"><?php echo \esc_html((string) $warning); ?></p>
+                <?php endforeach; ?>
+            <?php endif; ?>
+
+            <form method="post" action="<?php echo \esc_url($moduleUrl); ?>">
+                <input type="hidden" name="must_portal_action" value="rooms_availability_save_rule" />
+                <input type="hidden" name="rule_id" value="<?php echo \esc_attr((string) ((int) ($ruleForm['id'] ?? 0))); ?>" />
+                <?php \wp_nonce_field('must_availability_save_rule', 'must_availability_rule_nonce'); ?>
+                <?php $renderStateInputs('edit_rule', (int) ($ruleForm['id'] ?? 0)); ?>
+                <div class="must-portal-form-grid">
+                    <label>
+                        <span><?php echo \esc_html__('Rule name', 'must-hotel-booking'); ?></span>
+                        <input type="text" name="name" value="<?php echo \esc_attr((string) ($ruleForm['name'] ?? '')); ?>" />
+                    </label>
+                    <label>
+                        <span><?php echo \esc_html__('Room listing', 'must-hotel-booking'); ?></span>
+                        <select name="room_id">
+                            <?php if ($canEditRulesGlobally) : ?>
+                                <option value="0"<?php echo \selected((int) ($ruleForm['room_id'] ?? 0), 0, false); ?>><?php echo \esc_html__('All room listings', 'must-hotel-booking'); ?></option>
+                            <?php endif; ?>
+                            <?php foreach ($roomOptions as $roomOption) : ?>
+                                <?php if (!\is_array($roomOption)) { continue; } ?>
+                                <option value="<?php echo \esc_attr((string) ($roomOption['id'] ?? 0)); ?>"<?php echo \selected((int) ($ruleForm['room_id'] ?? 0), (int) ($roomOption['id'] ?? 0), false); ?>><?php echo \esc_html((string) ($roomOption['label'] ?? '')); ?></option>
+                            <?php endforeach; ?>
+                        </select>
+                    </label>
+                    <label>
+                        <span><?php echo \esc_html__('Start date', 'must-hotel-booking'); ?></span>
+                        <input type="date" name="availability_date" value="<?php echo \esc_attr((string) ($ruleForm['availability_date'] ?? '')); ?>" />
+                    </label>
+                    <label>
+                        <span><?php echo \esc_html__('End date', 'must-hotel-booking'); ?></span>
+                        <input type="date" name="end_date" value="<?php echo \esc_attr((string) ($ruleForm['end_date'] ?? '')); ?>" />
+                    </label>
+                    <label>
+                        <span><?php echo \esc_html__('Rule type', 'must-hotel-booking'); ?></span>
+                        <select name="rule_type">
+                            <?php foreach ($ruleTypeOptions as $ruleTypeKey => $ruleTypeLabel) : ?>
+                                <?php if ($ruleTypeKey === 'all') { continue; } ?>
+                                <option value="<?php echo \esc_attr((string) $ruleTypeKey); ?>"<?php echo \selected((string) ($ruleForm['rule_type'] ?? ''), (string) $ruleTypeKey, false); ?>><?php echo \esc_html((string) $ruleTypeLabel); ?></option>
+                            <?php endforeach; ?>
+                        </select>
+                    </label>
+                    <label>
+                        <span><?php echo \esc_html__('Rule value', 'must-hotel-booking'); ?></span>
+                        <input type="number" min="0" step="1" name="rule_value" value="<?php echo \esc_attr((string) ((int) ($ruleForm['rule_value'] ?? 0))); ?>" />
+                    </label>
+                    <label class="must-portal-form-full">
+                        <span><?php echo \esc_html__('Reason / internal note', 'must-hotel-booking'); ?></span>
+                        <input type="text" name="reason" value="<?php echo \esc_attr((string) ($ruleForm['reason'] ?? '')); ?>" />
+                    </label>
+                    <label class="must-portal-form-full">
+                        <span><?php echo \esc_html__('Rule state', 'must-hotel-booking'); ?></span>
+                        <span class="must-portal-inline-actions">
+                            <input type="checkbox" name="is_active" value="1"<?php checked(!empty($ruleForm['is_active'])); ?> />
+                            <span><?php echo \esc_html__('Rule is active', 'must-hotel-booking'); ?></span>
+                        </span>
+                    </label>
+                </div>
+                <div class="must-portal-inline-actions">
+                    <button type="submit" class="must-portal-primary-button"><?php echo \esc_html__('Save rule', 'must-hotel-booking'); ?></button>
+                    <a class="must-portal-secondary-button" href="<?php echo \esc_url($buildWorkspaceUrl('rules', $currentFilterArgs)); ?>"><?php echo \esc_html__('Done', 'must-hotel-booking'); ?></a>
+                </div>
+            </form>
         <?php endif; ?>
     </article>
+</section>
+
+<section class="must-portal-panel">
+    <div class="must-portal-panel-header">
+        <div>
+            <h2><?php echo \esc_html__('Rule Health by Listing', 'must-hotel-booking'); ?></h2>
+            <p><?php echo \esc_html__('The merged workspace still surfaces listing-level restriction health so operations staff can see conflicts before they become front-desk problems.', 'must-hotel-booking'); ?></p>
+        </div>
+    </div>
+    <?php if (empty($roomRows)) : ?>
+        <?php PortalRenderer::renderEmptyState(\__('No room-listing rule data matched the current filters.', 'must-hotel-booking')); ?>
+    <?php else : ?>
+        <?php foreach ($roomRows as $row) : ?>
+            <?php if (!\is_array($row)) { continue; } ?>
+            <div class="must-portal-feed-item">
+                <div>
+                    <strong><?php echo \esc_html((string) ($row['name'] ?? '')); ?></strong>
+                    <span><?php echo \esc_html(\sprintf(__('Rules: %1$d | Current blocks: %2$d | Future blocks: %3$d', 'must-hotel-booking'), (int) ($row['rule_count'] ?? 0), (int) ($row['current_block_count'] ?? 0), (int) ($row['future_block_count'] ?? 0))); ?></span>
+                    <?php if (!empty($row['warnings']) && \is_array($row['warnings'])) : ?>
+                        <small class="must-portal-muted"><?php echo \esc_html((string) $row['warnings'][0]); ?></small>
+                    <?php endif; ?>
+                </div>
+                <?php PortalRenderer::renderBadge(!empty($row['warnings']) ? 'warning' : 'ok', !empty($row['warnings']) ? __('Attention', 'must-hotel-booking') : __('Healthy', 'must-hotel-booking')); ?>
+            </div>
+        <?php endforeach; ?>
+    <?php endif; ?>
 </section>

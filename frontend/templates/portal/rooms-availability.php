@@ -19,6 +19,15 @@ $tabs = [
 ];
 $moduleUrl = PortalRouter::getModuleUrl('rooms_availability');
 $canViewAvailability = \current_user_can(StaffAccess::CAP_AVAILABILITY_RULES_VIEW) || \current_user_can(StaffAccess::CAP_ROOM_BLOCK_MANAGE) || \current_user_can('manage_options');
+$canManageBlocks = \current_user_can(StaffAccess::CAP_ROOM_BLOCK_MANAGE) || \current_user_can('manage_options');
+$canEditRulesGlobally = \current_user_can(StaffAccess::CAP_AVAILABILITY_RULES_EDIT) || \current_user_can('manage_options');
+$canEditRuleRow = static function (array $row) use ($canManageBlocks, $canEditRulesGlobally): bool {
+    if ($canEditRulesGlobally) {
+        return true;
+    }
+
+    return $canManageBlocks && (int) ($row['room_id'] ?? 0) > 0;
+};
 $canOpenHousekeeping = StaffAccess::userCanAccessPortalModule('housekeeping') || \current_user_can('manage_options');
 
 $buildWorkspaceUrl = static function (string $tab, array $args = []) use ($moduleUrl): string {

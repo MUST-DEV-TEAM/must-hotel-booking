@@ -10,6 +10,7 @@ $recentActivity = isset($moduleData['recent_activity']) && \is_array($moduleData
 $quickActions = isset($moduleData['quick_actions']) && \is_array($moduleData['quick_actions']) ? $moduleData['quick_actions'] : [];
 $counts = isset($moduleData['portal_counts']) && \is_array($moduleData['portal_counts']) ? $moduleData['portal_counts'] : [];
 $showHealth = !empty($moduleData['show_health']);
+$showFinanceDetails = !empty($moduleData['show_finance_details']);
 
 echo '<section class="must-portal-dashboard-hero">';
 echo '<div class="must-portal-dashboard-hero-copy">';
@@ -123,7 +124,13 @@ if (empty($recentReservations)) {
 
         echo '<div class="must-portal-feed-item must-portal-feed-item--stacked">';
         echo '<div class="must-portal-feed-body">';
-        echo '<div class="must-portal-feed-meta"><strong>' . \esc_html((string) ($row['booking_id'] ?? '')) . ' - ' . \esc_html((string) ($row['guest'] ?? '')) . '</strong><span>' . \esc_html((string) ($row['accommodation'] ?? '')) . ' - ' . \esc_html((string) ($row['checkin'] ?? '')) . ' - ' . \esc_html((string) ($row['checkout'] ?? '')) . '</span><small class="must-portal-feed-reference">' . \esc_html((string) ($row['payment'] ?? '')) . ' - ' . \esc_html((string) ($row['total'] ?? '')) . '</small></div>';
+        echo '<div class="must-portal-feed-meta"><strong>' . \esc_html((string) ($row['booking_id'] ?? '')) . ' - ' . \esc_html((string) ($row['guest'] ?? '')) . '</strong><span>' . \esc_html((string) ($row['accommodation'] ?? '')) . ' - ' . \esc_html((string) ($row['checkin'] ?? '')) . ' - ' . \esc_html((string) ($row['checkout'] ?? '')) . '</span>';
+
+        if ($showFinanceDetails && (((string) ($row['payment'] ?? '')) !== '' || ((string) ($row['total'] ?? '')) !== '')) {
+            echo '<small class="must-portal-feed-reference">' . \esc_html((string) ($row['payment'] ?? '')) . ' - ' . \esc_html((string) ($row['total'] ?? '')) . '</small>';
+        }
+
+        echo '</div>';
         echo '<div class="must-portal-feed-actions">';
         PortalRenderer::renderBadge((string) ($row['status'] ?? 'info'));
         echo '<div class="must-portal-inline-actions">';
@@ -140,7 +147,11 @@ if (empty($recentReservations)) {
     }
 }
 
-echo '</article><article class="must-portal-panel"><div class="must-portal-panel-header"><div><h2>' . \esc_html__('Recent activity', 'must-hotel-booking') . '</h2><p>' . \esc_html__('Payment, reservation, and email events that have happened most recently.', 'must-hotel-booking') . '</p></div></div>';
+echo '</article><article class="must-portal-panel"><div class="must-portal-panel-header"><div><h2>' . \esc_html__('Recent activity', 'must-hotel-booking') . '</h2><p>' . \esc_html(
+    $showFinanceDetails
+        ? \__('Payment, reservation, and email events that have happened most recently.', 'must-hotel-booking')
+        : \__('Reservation, housekeeping, guest, and email events that have happened most recently.', 'must-hotel-booking')
+) . '</p></div></div>';
 
 if (empty($recentActivity)) {
     PortalRenderer::renderEmptyState(\__('No recent activity is available.', 'must-hotel-booking'));

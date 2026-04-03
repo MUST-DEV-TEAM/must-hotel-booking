@@ -4,7 +4,7 @@ Tags: hotel, booking, reservation, accommodation
 Requires at least: 5.0
 Tested up to: 6.0
 Requires PHP: 7.4
-Stable tag: 0.3.41
+Stable tag: 0.3.43
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -31,6 +31,16 @@ Main features include:
 5. When updating, upload the new release ZIP or use the configured updater, then review **Diagnostics & Maintenance** after the update completes.
 
 == Changelog ==
+
+= 0.3.43 =
+* Completed the next portal-operations milestone by adding stay-date correction and no-show handling in Reservations, supervisor and manager block/rule control in Rooms & Availability, and a fuller Housekeeping workflow with assignments, maintenance issues, and shift handoff.
+* Hardened the live staff portal for release by enforcing move-room authority for in-house stays, hiding finance-heavy reservation and dashboard data from roles without payment visibility, and aligning the default role matrix so Housekeeping assignment authority follows the intended Supervisor-led workflow.
+* Cleaned portal release safety by shipping the active Housekeeping partial templates, removing dead portal compatibility leftovers after the module merges, and tightening release hygiene for future GitHub ZIP packaging.
+
+= 0.3.42 =
+* Expanded the `/staff/housekeeping/` portal module beyond the first room board by adding room assignment tracking, room-linked maintenance issues, and a first shift handoff workflow on top of the existing housekeeping status foundation.
+* Added portal-safe housekeeping oversight so staff can assign rooms to housekeeping users, track open and resolved maintenance issues, and capture handoff snapshots with unresolved issue visibility for the next shift.
+* Extended housekeeping activity and schema support so assignment, issue, and handoff actions stay inside the staff portal with actor-attributed audit history.
 
 = 0.3.41 =
 * Turned the `/staff/` portal into a real hotel operations workspace with role-based access across Dashboard, Reservations, Calendar, Front Desk, Guests, Payments, Housekeeping, Rooms & Availability, and Reports.

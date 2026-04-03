@@ -138,6 +138,8 @@ final class StaffAccess
 
     private const LEGACY_ROLE_MIGRATION_OPTION = 'must_hotel_booking_staff_role_schema_version';
     private const LEGACY_ROLE_SCHEMA_VERSION = 2;
+    private const CAPABILITY_ALIGNMENT_OPTION = 'must_hotel_booking_staff_capability_alignment_version';
+    private const CAPABILITY_ALIGNMENT_VERSION = 2;
 
     /**
      * @return array<string, string>
@@ -401,7 +403,7 @@ final class StaffAccess
                 'calendar_edit_block'        => true,
                 'housekeeping_view'          => true,
                 'housekeeping_update_status' => false,
-                'housekeeping_assign_staff'  => false,
+                'housekeeping_assign_staff'  => true,
                 'housekeeping_inspect_room'  => true,
                 'housekeeping_create_issue'  => true,
                 'inventory_view'             => true,
@@ -727,6 +729,7 @@ final class StaffAccess
     {
         self::ensurePortalRolesExist();
         self::maybeMigrateLegacyRolesAndSettings();
+        self::maybeApplyCapabilityAlignment();
 
         $roles = self::getRoleLabels();
         $matrix = self::getCapabilityMatrix();
@@ -907,6 +910,40 @@ final class StaffAccess
                 \remove_role($legacyRole);
             }
         }
+    }
+
+    private static function maybeApplyCapabilityAlignment(): void
+    {
+        $version = (int) \get_option(self::CAPABILITY_ALIGNMENT_OPTION, 0);
+
+        if ($version >= self::CAPABILITY_ALIGNMENT_VERSION) {
+            return;
+        }
+
+        $matrix = self::getCapabilityMatrix();
+
+        if (
+            isset($matrix[self::ROLE_FRONT_DESK])
+            && \is_array($matrix[self::ROLE_FRONT_DESK])
+        ) {
+            $matrix[self::ROLE_FRONT_DESK]['housekeeping_assign_staff'] = false;
+        }
+
+        if (
+            isset($matrix[self::ROLE_SUPERVISOR])
+            && \is_array($matrix[self::ROLE_SUPERVISOR])
+        ) {
+            $matrix[self::ROLE_SUPERVISOR]['housekeeping_assign_staff'] = true;
+        }
+
+        MustBookingConfig::set_group_settings(
+            'staff_access',
+            [
+                'capability_matrix' => $matrix,
+            ]
+        );
+
+        \update_option(self::CAPABILITY_ALIGNMENT_OPTION, self::CAPABILITY_ALIGNMENT_VERSION);
     }
 
     private static function normalizeRoleSlug(string $role): string
