@@ -978,6 +978,7 @@
 
         var params = new URLSearchParams();
         params.append('action', String(config.disabledDatesAction));
+        params.append('nonce', String(config.availabilityNonce || ''));
         params.append('guests', String(context.guests));
         params.append('room_count', String(context.roomCount || 0));
         params.append('accommodation_type', String(context.accommodationType || getAccommodationTypeValue()));
@@ -1081,6 +1082,7 @@
 
         var params = new URLSearchParams();
         params.append('action', String(config.availabilityAction));
+        params.append('nonce', String(config.availabilityNonce || ''));
         params.append('checkin', context.checkin);
         params.append('checkout', context.checkout);
         params.append('guests', String(context.guests));

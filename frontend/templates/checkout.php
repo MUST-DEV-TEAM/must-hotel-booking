@@ -460,7 +460,7 @@ $format_display_date = static function (string $date): string {
                                                     <span class="must-checkout-picker-label" data-picker-selected-label="1"><?php echo \esc_html($phone_picker_display_label); ?></span>
                                                 </span>
                                                 <?php if ($dropdown_icon_url !== '') : ?>
-                                                    <img src="<?php echo \esc_url($dropdown_icon_url); ?>" alt="" aria-hidden="true" />
+                                                    <img class="must-picker-chevron" src="<?php echo \esc_url($dropdown_icon_url); ?>" alt="" aria-hidden="true" />
                                                 <?php endif; ?>
                                             </button>
                                             <div class="must-checkout-picker-panel" data-picker-panel="1" hidden>
@@ -534,7 +534,7 @@ $format_display_date = static function (string $date): string {
                                                 <span class="must-checkout-picker-label" data-picker-selected-label="1"><?php echo \esc_html($country_picker_display_label); ?></span>
                                             </span>
                                             <?php if ($dropdown_icon_url !== '') : ?>
-                                                <img src="<?php echo \esc_url($dropdown_icon_url); ?>" alt="" aria-hidden="true" />
+                                                <img class="must-picker-chevron" src="<?php echo \esc_url($dropdown_icon_url); ?>" alt="" aria-hidden="true" />
                                             <?php endif; ?>
                                         </button>
                                         <div class="must-checkout-picker-panel" data-picker-panel="1" hidden>

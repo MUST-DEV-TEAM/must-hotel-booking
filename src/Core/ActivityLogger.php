@@ -44,24 +44,27 @@ final class ActivityLogger
         $message = self::buildPaymentMessage($status, $method, $reference, $amount);
 
         self::persistActivity(
-            [
-                'event_type' => $status === 'failed' ? 'payment_failed' : 'payment_recorded',
-                'severity' => self::resolvePaymentSeverity($status),
-                'entity_type' => 'payment',
-                'entity_id' => isset($payment['payment_id']) ? (int) $payment['payment_id'] : 0,
-                'reference' => $reference,
-                'message' => $message,
-                'context_json' => self::encodeContext(
-                    [
-                        'reservation_id' => $reservationId,
-                        'payment_id' => isset($payment['payment_id']) ? (int) $payment['payment_id'] : 0,
-                        'method' => $method,
-                        'status' => $status,
-                        'amount' => $amount,
-                        'transaction_id' => isset($payment['transaction_id']) ? (string) $payment['transaction_id'] : '',
-                    ]
-                ),
-            ]
+            \array_merge(
+                self::buildActorContext(),
+                [
+                    'event_type'   => $status === 'failed' ? 'payment_failed' : 'payment_recorded',
+                    'severity'     => self::resolvePaymentSeverity($status),
+                    'entity_type'  => 'payment',
+                    'entity_id'    => isset($payment['payment_id']) ? (int) $payment['payment_id'] : 0,
+                    'reference'    => $reference,
+                    'message'      => $message,
+                    'context_json' => self::encodeContext(
+                        [
+                            'reservation_id' => $reservationId,
+                            'payment_id'     => isset($payment['payment_id']) ? (int) $payment['payment_id'] : 0,
+                            'method'         => $method,
+                            'status'         => $status,
+                            'amount'         => $amount,
+                            'transaction_id' => isset($payment['transaction_id']) ? (string) $payment['transaction_id'] : '',
+                        ]
+                    ),
+                ]
+            )
         );
     }
 
@@ -97,22 +100,25 @@ final class ActivityLogger
             );
 
         self::persistActivity(
-            [
-                'event_type' => $success ? 'email_sent' : 'email_failed',
-                'severity' => $success ? 'info' : 'error',
-                'entity_type' => 'reservation',
-                'entity_id' => $reservationId,
-                'reference' => $reference,
-                'message' => $message,
-                'context_json' => self::encodeContext(
-                    [
-                        'reservation_id' => $reservationId,
-                        'template_key' => $templateKey,
-                        'recipient_email' => $recipientEmail,
-                        'email_mode' => $emailMode,
-                    ]
-                ),
-            ]
+            \array_merge(
+                self::buildActorContext(),
+                [
+                    'event_type'   => $success ? 'email_sent' : 'email_failed',
+                    'severity'     => $success ? 'info' : 'error',
+                    'entity_type'  => 'reservation',
+                    'entity_id'    => $reservationId,
+                    'reference'    => $reference,
+                    'message'      => $message,
+                    'context_json' => self::encodeContext(
+                        [
+                            'reservation_id'  => $reservationId,
+                            'template_key'    => $templateKey,
+                            'recipient_email' => $recipientEmail,
+                            'email_mode'      => $emailMode,
+                        ]
+                    ),
+                ]
+            )
         );
     }
 
@@ -126,26 +132,60 @@ final class ActivityLogger
         $reference = self::resolveReservationReference($reservationId, $reservation);
 
         self::persistActivity(
-            [
-                'event_type' => $eventType,
-                'severity' => $severity,
-                'entity_type' => 'reservation',
-                'entity_id' => $reservationId,
-                'reference' => $reference,
-                'message' => \sprintf(
-                    /* translators: 1: booking reference, 2: action verb. */
-                    \__('Reservation %1$s %2$s.', 'must-hotel-booking'),
-                    $reference,
-                    $verb
-                ),
-                'context_json' => self::encodeContext(
-                    [
-                        'reservation_id' => $reservationId,
-                        'booking_id' => isset($reservation['booking_id']) ? (string) $reservation['booking_id'] : '',
-                    ]
-                ),
-            ]
+            \array_merge(
+                self::buildActorContext(),
+                [
+                    'event_type'   => $eventType,
+                    'severity'     => $severity,
+                    'entity_type'  => 'reservation',
+                    'entity_id'    => $reservationId,
+                    'reference'    => $reference,
+                    'message'      => \sprintf(
+                        /* translators: 1: booking reference, 2: action verb. */
+                        \__('Reservation %1$s %2$s.', 'must-hotel-booking'),
+                        $reference,
+                        $verb
+                    ),
+                    'context_json' => self::encodeContext(
+                        [
+                            'reservation_id' => $reservationId,
+                            'booking_id'     => isset($reservation['booking_id']) ? (string) $reservation['booking_id'] : '',
+                        ]
+                    ),
+                ]
+            )
         );
+    }
+
+    /**
+     * Builds actor attribution fields for the current request.
+     *
+     * @return array<string, mixed>
+     */
+    private static function buildActorContext(): array
+    {
+        $userId = \get_current_user_id();
+        $role   = '';
+
+        if ($userId > 0) {
+            $user = \wp_get_current_user();
+
+            if ($user instanceof \WP_User && !empty($user->roles)) {
+                $role = (string) \reset($user->roles);
+            }
+        }
+
+        $ip = '';
+
+        if (isset($_SERVER['REMOTE_ADDR'])) {
+            $ip = \sanitize_text_field(\wp_unslash((string) $_SERVER['REMOTE_ADDR']));
+        }
+
+        return [
+            'actor_user_id' => $userId,
+            'actor_role'    => $role,
+            'actor_ip'      => $ip,
+        ];
     }
 
     /**
@@ -172,6 +212,10 @@ final class ActivityLogger
     {
         if ($status === 'failed') {
             return 'error';
+        }
+
+        if ($status === 'refunded') {
+            return 'warning';
         }
 
         if ($status === 'pending') {
@@ -202,6 +246,16 @@ final class ActivityLogger
                 \__('%1$s payment failed for %2$s.', 'must-hotel-booking'),
                 $methodLabel,
                 $reference
+            );
+        }
+
+        if ($status === 'refunded') {
+            return \sprintf(
+                /* translators: 1: payment method label, 2: booking reference, 3: amount. */
+                \__('%1$s refund issued for %2$s (%3$s).', 'must-hotel-booking'),
+                $methodLabel,
+                $reference,
+                $amountLabel
             );
         }
 

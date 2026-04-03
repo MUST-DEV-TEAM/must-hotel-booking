@@ -7,6 +7,7 @@ use MustHotelBooking\Database\ActivityRepository;
 use MustHotelBooking\Database\CancellationPolicyRepository;
 use MustHotelBooking\Database\CouponRepository;
 use MustHotelBooking\Database\GuestRepository;
+use MustHotelBooking\Database\HousekeepingRepository;
 use MustHotelBooking\Database\InventoryRepository;
 use MustHotelBooking\Database\PaymentRepository;
 use MustHotelBooking\Database\ReportRepository;
@@ -65,6 +66,17 @@ function get_inventory_repository(): InventoryRepository
 
     if (!$repository instanceof InventoryRepository) {
         $repository = new InventoryRepository();
+    }
+
+    return $repository;
+}
+
+function get_housekeeping_repository(): HousekeepingRepository
+{
+    static $repository = null;
+
+    if (!$repository instanceof HousekeepingRepository) {
+        $repository = new HousekeepingRepository();
     }
 
     return $repository;

@@ -2,6 +2,7 @@
 
 use MustHotelBooking\Portal\PortalRenderer;
 
+$approvalItems = isset($moduleData['approval_items']) && \is_array($moduleData['approval_items']) ? $moduleData['approval_items'] : [];
 $attentionItems = isset($moduleData['attention_items']) && \is_array($moduleData['attention_items']) ? $moduleData['attention_items'] : [];
 $healthItems = isset($moduleData['health_items']) && \is_array($moduleData['health_items']) ? $moduleData['health_items'] : [];
 $recentReservations = isset($moduleData['recent_reservations']) && \is_array($moduleData['recent_reservations']) ? $moduleData['recent_reservations'] : [];
@@ -29,6 +30,37 @@ echo '</div>';
 echo '</section>';
 
 PortalRenderer::renderSummaryCards((array) ($moduleData['kpis'] ?? []));
+
+if (!empty($approvalItems)) {
+    echo '<section class="must-portal-panel"><div class="must-portal-panel-header"><div><h2>' . \esc_html__('Approval queue', 'must-hotel-booking') . '</h2><p>' . \esc_html__('Pending reservation cancellation requests that need a supervisor or manager decision.', 'must-hotel-booking') . '</p></div></div>';
+
+    foreach ($approvalItems as $item) {
+        if (!\is_array($item)) {
+            continue;
+        }
+
+        $reference = (string) ($item['reference'] ?? '');
+        $actionUrl = (string) ($item['action_url'] ?? '');
+        echo '<div class="must-portal-feed-item must-portal-feed-item--stacked">';
+        echo '<div class="must-portal-feed-body">';
+        echo '<div class="must-portal-feed-meta"><strong>' . \esc_html((string) ($item['label'] ?? '')) . '</strong><span>' . \esc_html((string) ($item['message'] ?? '')) . '</span>';
+
+        if ($reference !== '') {
+            echo '<small class="must-portal-feed-reference">' . \esc_html($reference) . '</small>';
+        }
+
+        echo '</div><div class="must-portal-feed-actions">';
+        PortalRenderer::renderBadge((string) ($item['severity'] ?? 'warning'), \__('Approval Needed', 'must-hotel-booking'));
+
+        if ($actionUrl !== '') {
+            echo '<a class="must-portal-inline-link" href="' . \esc_url($actionUrl) . '">' . \esc_html__('Open decision', 'must-hotel-booking') . '</a>';
+        }
+
+        echo '</div></div></div>';
+    }
+
+    echo '</section>';
+}
 
 echo '<section class="must-portal-grid must-portal-grid--2">';
 echo '<article class="must-portal-panel"><div class="must-portal-panel-header"><div><h2>' . \esc_html__('Needs action now', 'must-hotel-booking') . '</h2><p>' . \esc_html__('Operational items that should be reviewed before they become guest-facing problems.', 'must-hotel-booking') . '</p></div></div>';

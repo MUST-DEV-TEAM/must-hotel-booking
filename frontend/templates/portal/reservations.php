@@ -7,12 +7,18 @@ use MustHotelBooking\Portal\PortalRouter;
 $filters = isset($moduleData['filters']) && \is_array($moduleData['filters']) ? $moduleData['filters'] : [];
 $detail = isset($moduleData['detail']) && \is_array($moduleData['detail']) ? $moduleData['detail'] : null;
 $sourceOptions = isset($moduleData['source_options']) && \is_array($moduleData['source_options']) ? $moduleData['source_options'] : [];
-$canEditReservation = \current_user_can(StaffAccess::CAP_EDIT_RESERVATIONS) || \current_user_can('manage_options');
-$canCancelReservation = \current_user_can(StaffAccess::CAP_CANCEL_RESERVATION) || \current_user_can('manage_options');
-$canManagePayment = \current_user_can(StaffAccess::CAP_MARK_PAYMENT_AS_PAID) || \current_user_can('manage_options');
-$canOpenGuests = \current_user_can(StaffAccess::CAP_VIEW_GUESTS) || \current_user_can('manage_options');
-$canOpenCalendar = \current_user_can(StaffAccess::CAP_VIEW_CALENDAR) || \current_user_can('manage_options');
-$canQuickBook = \current_user_can(StaffAccess::CAP_CREATE_QUICK_BOOKING) || \current_user_can('manage_options');
+$canEditReservation = \current_user_can(StaffAccess::CAP_RESERVATION_EDIT_BASIC) || \current_user_can('manage_options');
+$canEditGuestContact = \current_user_can(StaffAccess::CAP_GUEST_EDIT_CONTACT) || \current_user_can('manage_options');
+$canCancelReservation = \current_user_can(StaffAccess::CAP_RESERVATION_CANCEL) || \current_user_can('manage_options');
+$canCheckInReservation = \current_user_can(StaffAccess::CAP_RESERVATION_CHECKIN) || \current_user_can('manage_options');
+$canCheckOutReservation = \current_user_can(StaffAccess::CAP_RESERVATION_CHECKOUT) || \current_user_can('manage_options');
+$canAssignRoom = \current_user_can(StaffAccess::CAP_RESERVATION_ASSIGN_ROOM) || \current_user_can('manage_options');
+$canAddInternalNote = \current_user_can(StaffAccess::CAP_GUEST_ADD_NOTE) || \current_user_can('manage_options');
+$canRequestCancellation = (\current_user_can(StaffAccess::CAP_RESERVATION_EDIT_BASIC) || \current_user_can('manage_options')) && !$canCancelReservation;
+$canManagePayment = \current_user_can(StaffAccess::CAP_PAYMENT_MARK_PAID) || \current_user_can('manage_options');
+$canOpenGuests = \current_user_can(StaffAccess::CAP_GUEST_VIEW) || \current_user_can('manage_options');
+$canOpenCalendar = \current_user_can(StaffAccess::CAP_CALENDAR_VIEW) || \current_user_can('manage_options');
+$canQuickBook = StaffAccess::userCanAccessPortalModule('front_desk') || \current_user_can('manage_options');
 $returnMode = isset($_GET['mode']) ? \sanitize_key((string) \wp_unslash($_GET['mode'])) : '';
 
 $renderFeedItem = static function (
@@ -91,6 +97,7 @@ $buildReservationUrl = static function (array $overrides = []) use ($filters): s
 
 if (\is_array($detail)) {
     $reservationId = isset($detail['id']) ? (int) $detail['id'] : 0;
+    $reservation = isset($detail['reservation']) && \is_array($detail['reservation']) ? $detail['reservation'] : [];
     $summary = isset($detail['summary']) && \is_array($detail['summary']) ? $detail['summary'] : [];
     $guest = isset($detail['guest']) && \is_array($detail['guest']) ? $detail['guest'] : [];
     $stay = isset($detail['stay']) && \is_array($detail['stay']) ? $detail['stay'] : [];
@@ -98,10 +105,25 @@ if (\is_array($detail)) {
     $payments = isset($detail['payments']) && \is_array($detail['payments']) ? $detail['payments'] : [];
     $timeline = isset($detail['timeline']) && \is_array($detail['timeline']) ? $detail['timeline'] : [];
     $emails = isset($detail['emails']) && \is_array($detail['emails']) ? $detail['emails'] : [];
+    $assignableRooms = isset($detail['assignable_rooms']) && \is_array($detail['assignable_rooms']) ? $detail['assignable_rooms'] : [];
     $statusKey = (string) ($summary['reservation_status_key'] ?? '');
     $paymentStatusKey = (string) ($summary['payment_status_key'] ?? '');
     $currency = (string) ($pricing['currency'] ?? '');
     $guestId = isset($guest['id']) ? (int) $guest['id'] : 0;
+    $assignedRoomId = isset($reservation['assigned_room_id']) ? (int) $reservation['assigned_room_id'] : 0;
+    $checkedInAtRaw = \trim((string) ($reservation['checked_in_at'] ?? ''));
+    $checkedOutAtRaw = \trim((string) ($reservation['checked_out_at'] ?? ''));
+    $hasCheckedIn = $checkedInAtRaw !== '' && $checkedInAtRaw !== '0000-00-00 00:00:00';
+    $hasCheckedOut = $checkedOutAtRaw !== '' && $checkedOutAtRaw !== '0000-00-00 00:00:00';
+    $hasCancellationRequest = !empty($reservation['cancellation_requested']);
+    $canShowCheckIn = $canCheckInReservation && \in_array($statusKey, ['confirmed', 'pending', 'pending_payment'], true) && !$hasCheckedIn;
+    $canShowCheckOut = $canCheckOutReservation && $statusKey === 'confirmed' && $hasCheckedIn && !$hasCheckedOut;
+    $canShowAssignRoom = $canAssignRoom && !\in_array($statusKey, ['cancelled', 'completed', 'blocked'], true);
+    $hasPendingCancellationRequest = $hasCancellationRequest && !\in_array($statusKey, ['cancelled', 'completed', 'blocked'], true);
+    $canApproveCancellation = $canCancelReservation && $hasPendingCancellationRequest;
+    $canRejectCancellation = $canApproveCancellation;
+    $canShowDirectCancellation = $canCancelReservation && !\in_array($statusKey, ['cancelled', 'completed', 'blocked'], true) && !$hasPendingCancellationRequest;
+    $canShowCancellationRequest = $canRequestCancellation && !\in_array($statusKey, ['cancelled', 'completed', 'blocked'], true) && !$hasPendingCancellationRequest;
     $detailUrl = $buildReservationUrl(['reservation_id' => $reservationId]);
     $queueUrl = $buildReservationUrl();
     $guestWorkspaceUrl = $canOpenGuests && $guestId > 0 ? PortalRouter::getModuleUrl('guests', ['guest_id' => $guestId]) : '';
@@ -115,7 +137,7 @@ if (\is_array($detail)) {
             ]
         )
         : '';
-    $quickBookingUrl = $canQuickBook ? PortalRouter::getModuleUrl('quick_booking') : '';
+    $quickBookingUrl = $canQuickBook ? PortalRouter::getModuleUrl('front_desk', ['tab' => 'new-booking']) : '';
     $paymentsUrl = StaffAccess::userCanAccessPortalModule('payments') ? PortalRouter::getModuleUrl('payments', ['reservation_id' => $reservationId]) : '';
     $nights = isset($stay['nights']) ? (int) $stay['nights'] : 0;
     $guestsCount = isset($stay['guests']) ? (int) $stay['guests'] : 0;
@@ -125,6 +147,22 @@ if (\is_array($detail)) {
     $attentionItems = [];
     $todayTs = \strtotime(\current_time('Y-m-d'));
     $checkoutTs = !empty($stay['checkout']) ? \strtotime((string) $stay['checkout']) : false;
+    $cancellationRequestedById = isset($reservation['cancellation_requested_by']) ? (int) $reservation['cancellation_requested_by'] : 0;
+    $cancellationRequestedAtRaw = \trim((string) ($reservation['cancellation_requested_at'] ?? ''));
+    $cancellationRequesterName = '';
+    $cancellationRequestedAtLabel = '';
+
+    if ($cancellationRequestedById > 0) {
+        $cancellationRequester = \get_userdata($cancellationRequestedById);
+
+        if ($cancellationRequester instanceof \WP_User && $cancellationRequester->display_name !== '') {
+            $cancellationRequesterName = (string) $cancellationRequester->display_name;
+        }
+    }
+
+    if ($cancellationRequestedAtRaw !== '' && $cancellationRequestedAtRaw !== '0000-00-00 00:00:00') {
+        $cancellationRequestedAtLabel = \mysql2date(\get_option('date_format') . ' ' . \get_option('time_format'), $cancellationRequestedAtRaw);
+    }
 
     if ($statusKey === 'pending' || $statusKey === 'pending_payment') {
         $attentionItems[] = [
@@ -163,6 +201,32 @@ if (\is_array($detail)) {
             'message' => \__('Keep an eye on the room plan so this reservation is ready for check-in operations.', 'must-hotel-booking'),
             'tone' => 'info',
             'badge' => \__('Unassigned', 'must-hotel-booking'),
+        ];
+    }
+
+    if ($hasPendingCancellationRequest) {
+        $cancellationRequestMessage = \__('A staff member requested cancellation and this reservation now needs supervisor follow-up.', 'must-hotel-booking');
+
+        if ($cancellationRequesterName !== '' && $cancellationRequestedAtLabel !== '') {
+            $cancellationRequestMessage = \sprintf(
+                /* translators: 1: staff member name, 2: request time */
+                \__('Requested by %1$s on %2$s. Supervisor follow-up is required before the reservation can be cancelled.', 'must-hotel-booking'),
+                $cancellationRequesterName,
+                $cancellationRequestedAtLabel
+            );
+        } elseif ($cancellationRequesterName !== '') {
+            $cancellationRequestMessage = \sprintf(
+                /* translators: %s: staff member name */
+                \__('Requested by %s. Supervisor follow-up is required before the reservation can be cancelled.', 'must-hotel-booking'),
+                $cancellationRequesterName
+            );
+        }
+
+        $attentionItems[] = [
+            'title' => \__('Cancellation request is pending', 'must-hotel-booking'),
+            'message' => $cancellationRequestMessage,
+            'tone' => 'warning',
+            'badge' => \__('Approval Needed', 'must-hotel-booking'),
         ];
     }
 
@@ -240,6 +304,14 @@ if (\is_array($detail)) {
         $renderActionForm('reservation_confirm', \__('Confirm reservation', 'must-hotel-booking'), 'dashicons-yes-alt', 'must-portal-reservation-action-button is-primary', 'must_portal_reservation_action_confirm_' . $reservationId);
     }
 
+    if ($canShowCheckIn) {
+        $renderActionForm('reservation_checkin', \__('Check in guest', 'must-hotel-booking'), 'dashicons-admin-home', 'must-portal-reservation-action-button is-primary', 'must_portal_reservation_action_checkin_' . $reservationId);
+    }
+
+    if ($canShowCheckOut) {
+        $renderActionForm('reservation_checkout', \__('Check out guest', 'must-hotel-booking'), 'dashicons-external', 'must-portal-reservation-action-button', 'must_portal_reservation_action_checkout_' . $reservationId);
+    }
+
     if ($canManagePayment && !\in_array($statusKey, ['pending', 'pending_payment', 'cancelled', 'blocked'], true)) {
         $renderActionForm('reservation_mark_pending', \__('Mark pending', 'must-hotel-booking'), 'dashicons-clock', 'must-portal-reservation-action-button', 'must_portal_reservation_action_mark_pending_' . $reservationId);
     }
@@ -260,7 +332,40 @@ if (\is_array($detail)) {
         $renderActionForm('reservation_resend_admin_email', \__('Resend admin email', 'must-hotel-booking'), 'dashicons-email', 'must-portal-reservation-action-button', 'must_portal_reservation_action_resend_admin_email_' . $reservationId);
     }
 
-    if ($canCancelReservation && !\in_array($statusKey, ['cancelled', 'completed', 'blocked'], true)) {
+    if ($canShowCancellationRequest) {
+        $renderActionForm(
+            'reservation_request_cancel',
+            \__('Request cancellation', 'must-hotel-booking'),
+            'dashicons-warning',
+            'must-portal-reservation-action-button',
+            'must_portal_reservation_request_cancel_' . $reservationId,
+            \__('Submit a cancellation request for supervisor approval?', 'must-hotel-booking')
+        );
+    }
+
+    if ($canApproveCancellation) {
+        $renderActionForm(
+            'reservation_approve_cancel',
+            \__('Approve cancellation', 'must-hotel-booking'),
+            'dashicons-yes-alt',
+            'must-portal-reservation-action-button is-danger',
+            'must_portal_reservation_approve_cancel_' . $reservationId,
+            \__('Approve the pending cancellation request and cancel this reservation?', 'must-hotel-booking')
+        );
+    }
+
+    if ($canRejectCancellation) {
+        $renderActionForm(
+            'reservation_reject_cancel',
+            \__('Reject cancellation request', 'must-hotel-booking'),
+            'dashicons-undo',
+            'must-portal-reservation-action-button',
+            'must_portal_reservation_reject_cancel_' . $reservationId,
+            \__('Reject the pending cancellation request for this reservation?', 'must-hotel-booking')
+        );
+    }
+
+    if ($canShowDirectCancellation) {
         $renderActionForm(
             'reservation_cancel',
             \__('Cancel reservation', 'must-hotel-booking'),
@@ -300,7 +405,7 @@ if (\is_array($detail)) {
     echo '<div class="must-portal-reservation-main">';
     echo '<article class="must-portal-panel"><div class="must-portal-panel-header"><div><h2>' . \esc_html__('Guest details', 'must-hotel-booking') . '</h2><p>' . \esc_html__('Keep guest contact details accurate so check-in and email follow-up stay reliable.', 'must-hotel-booking') . '</p></div></div>';
 
-    if ($canEditReservation) {
+    if ($canEditGuestContact) {
         echo '<form method="post" action="' . \esc_url($detailUrl) . '" class="must-portal-form-grid must-portal-reservation-form">';
         \wp_nonce_field('must_portal_reservation_save_guest_' . $reservationId, 'must_portal_reservation_nonce');
         echo '<input type="hidden" name="must_portal_action" value="reservation_save_guest" />';
@@ -328,7 +433,7 @@ if (\is_array($detail)) {
 
     echo '</article>';
 
-    echo '<article class="must-portal-panel"><div class="must-portal-panel-header"><div><h2>' . \esc_html__('Reservation notes', 'must-hotel-booking') . '</h2><p>' . \esc_html__('Internal source and notes stay here so staff can capture context without leaving the portal.', 'must-hotel-booking') . '</p></div></div>';
+    echo '<article class="must-portal-panel"><div class="must-portal-panel-header"><div><h2>' . \esc_html__('Reservation notes', 'must-hotel-booking') . '</h2><p>' . \esc_html__('Booking source can be updated here, and internal notes are appended instead of overwritten.', 'must-hotel-booking') . '</p></div></div>';
 
     if ($canEditReservation) {
         echo '<form method="post" action="' . \esc_url($detailUrl) . '" class="must-portal-form-grid must-portal-reservation-form">';
@@ -347,14 +452,35 @@ if (\is_array($detail)) {
         }
 
         echo '</select></label>';
-        echo '<label class="must-portal-form-full"><span>' . \esc_html__('Internal notes', 'must-hotel-booking') . '</span><textarea name="notes" rows="5">' . \esc_textarea((string) ($stay['notes'] ?? '')) . '</textarea></label>';
-        echo '<div class="must-portal-form-full must-portal-inline-actions"><button type="submit" class="must-portal-primary-button">' . \esc_html__('Save notes', 'must-hotel-booking') . '</button></div>';
+        echo '<div class="must-portal-form-full must-portal-inline-actions"><button type="submit" class="must-portal-primary-button">' . \esc_html__('Save source', 'must-hotel-booking') . '</button></div>';
         echo '</form>';
     } else {
         echo '<div class="must-portal-definition-list">';
         PortalRenderer::renderDefinitionRow(\__('Source / Channel', 'must-hotel-booking'), (string) ($summary['source'] ?? ''));
-        PortalRenderer::renderDefinitionRow(\__('Internal notes', 'must-hotel-booking'), (string) ($stay['notes'] ?? \__('No internal notes saved.', 'must-hotel-booking')));
         echo '</div>';
+    }
+
+    if ((string) ($stay['notes'] ?? '') !== '') {
+        echo '<div class="must-portal-form-grid must-portal-reservation-form">';
+        echo '<label class="must-portal-form-full"><span>' . \esc_html__('Internal notes', 'must-hotel-booking') . '</span><textarea rows="6" readonly>' . \esc_textarea((string) ($stay['notes'] ?? '')) . '</textarea></label>';
+        echo '</div>';
+    } else {
+        PortalRenderer::renderEmptyState(\__('No internal notes saved yet.', 'must-hotel-booking'));
+    }
+
+    if ($canAddInternalNote) {
+        echo '<form method="post" action="' . \esc_url($detailUrl) . '" class="must-portal-form-grid must-portal-reservation-form">';
+        \wp_nonce_field('must_portal_reservation_add_note_' . $reservationId, 'must_portal_reservation_nonce');
+        echo '<input type="hidden" name="must_portal_action" value="reservation_add_note" />';
+        echo '<input type="hidden" name="reservation_id" value="' . \esc_attr((string) $reservationId) . '" />';
+
+        if ($returnMode === 'edit') {
+            echo '<input type="hidden" name="portal_return_mode" value="edit" />';
+        }
+
+        echo '<label class="must-portal-form-full"><span>' . \esc_html__('Add internal note', 'must-hotel-booking') . '</span><textarea name="internal_note" rows="4" placeholder="' . \esc_attr__('Add an operational note for the next staff member.', 'must-hotel-booking') . '"></textarea></label>';
+        echo '<div class="must-portal-form-full must-portal-inline-actions"><button type="submit" class="must-portal-primary-button">' . \esc_html__('Add note', 'must-hotel-booking') . '</button></div>';
+        echo '</form>';
     }
 
     echo '</article>';
@@ -419,6 +545,49 @@ if (\is_array($detail)) {
     PortalRenderer::renderDefinitionRow(\__('Rate plan', 'must-hotel-booking'), (string) ($stay['rate_plan'] ?? \__('Not set', 'must-hotel-booking')));
     PortalRenderer::renderDefinitionRow(\__('Guests', 'must-hotel-booking'), (string) $guestsCount);
     echo '</div><p class="must-portal-reservation-note">' . \esc_html((string) ($stay['edit_notice'] ?? '')) . '</p></article>';
+
+    echo '<article class="must-portal-panel"><div class="must-portal-panel-header"><div><h2>' . \esc_html__('Room assignment', 'must-hotel-booking') . '</h2><p>' . \esc_html__('Assign or reassign the physical room for this stay using the supported reservation action.', 'must-hotel-booking') . '</p></div></div>';
+
+    if ($canShowAssignRoom) {
+        if (empty($assignableRooms)) {
+            PortalRenderer::renderEmptyState(\__('No inventory room options are available for this reservation yet.', 'must-hotel-booking'));
+        } else {
+            echo '<form method="post" action="' . \esc_url($detailUrl) . '" class="must-portal-form-grid must-portal-reservation-form">';
+            \wp_nonce_field('must_portal_reservation_assign_room_' . $reservationId, 'must_portal_reservation_nonce');
+            echo '<input type="hidden" name="must_portal_action" value="reservation_assign_room" />';
+            echo '<input type="hidden" name="reservation_id" value="' . \esc_attr((string) $reservationId) . '" />';
+
+            if ($returnMode === 'edit') {
+                echo '<input type="hidden" name="portal_return_mode" value="edit" />';
+            }
+
+            echo '<label class="must-portal-form-full"><span>' . \esc_html__('Assigned room', 'must-hotel-booking') . '</span><select name="assigned_room_id">';
+            echo '<option value="0">' . \esc_html__('Unassigned', 'must-hotel-booking') . '</option>';
+
+            foreach ($assignableRooms as $roomRow) {
+                if (!\is_array($roomRow)) {
+                    continue;
+                }
+
+                $inventoryRoomId = isset($roomRow['id']) ? (int) $roomRow['id'] : 0;
+                $roomNumber = \trim((string) ($roomRow['room_number'] ?? ''));
+                $roomTitle = \trim((string) ($roomRow['title'] ?? ''));
+                $roomLabel = $roomNumber !== '' ? $roomNumber : ($roomTitle !== '' ? $roomTitle : ('#' . $inventoryRoomId));
+
+                echo '<option value="' . \esc_attr((string) $inventoryRoomId) . '"' . \selected($assignedRoomId, $inventoryRoomId, false) . '>' . \esc_html($roomLabel) . '</option>';
+            }
+
+            echo '</select></label>';
+            echo '<div class="must-portal-form-full must-portal-inline-actions"><button type="submit" class="must-portal-primary-button">' . \esc_html__('Save room assignment', 'must-hotel-booking') . '</button></div>';
+            echo '</form>';
+        }
+    } else {
+        echo '<div class="must-portal-definition-list">';
+        PortalRenderer::renderDefinitionRow(\__('Assigned room', 'must-hotel-booking'), (string) ($stay['assigned_room'] ?? \__('Not assigned yet', 'must-hotel-booking')));
+        echo '</div>';
+    }
+
+    echo '</article>';
 
     echo '<article class="must-portal-panel"><div class="must-portal-panel-header"><div><h2>' . \esc_html__('Pricing summary', 'must-hotel-booking') . '</h2><p>' . \esc_html__('Stored booking totals and coupon impact.', 'must-hotel-booking') . '</p></div></div><div class="must-portal-definition-list">';
     PortalRenderer::renderDefinitionRow(\__('Final total', 'must-hotel-booking'), \number_format_i18n($storedTotal, 2) . ' ' . $currency);
@@ -536,11 +705,15 @@ if (empty($moduleData['rows'])) {
 
         echo '</td><td>';
         PortalRenderer::renderBadge((string) ($row['reservation_status_key'] ?? 'info'), (string) ($row['reservation_status'] ?? ''));
+        if (!empty($row['cancellation_requested']) && !\in_array((string) ($row['reservation_status_key'] ?? ''), ['cancelled', 'completed', 'blocked'], true)) {
+            echo '<br />';
+            PortalRenderer::renderBadge('warning', \__('Approval Needed', 'must-hotel-booking'));
+        }
         echo '</td><td>';
         PortalRenderer::renderBadge((string) ($row['payment_status_key'] ?? 'info'), (string) ($row['payment_status'] ?? ''));
         echo '<br /><span class="must-portal-muted">' . \esc_html((string) ($row['payment_method'] ?? '')) . '</span>';
         echo '</td><td>' . \esc_html((string) ($row['total'] ?? '')) . '</td><td><div class="must-portal-inline-actions">';
-        echo '<a class="must-portal-inline-link" href="' . \esc_url($rowDetailUrl) . '">' . \esc_html__('Open workspace', 'must-hotel-booking') . '</a>';
+        echo '<a class="must-portal-inline-link" href="' . \esc_url($rowDetailUrl) . '">' . \esc_html(!empty($row['cancellation_requested']) && !\in_array((string) ($row['reservation_status_key'] ?? ''), ['cancelled', 'completed', 'blocked'], true) ? \__('Review request', 'must-hotel-booking') : \__('Open workspace', 'must-hotel-booking')) . '</a>';
 
         if ($rowGuestUrl !== '') {
             echo '<a class="must-portal-inline-link" href="' . \esc_url($rowGuestUrl) . '">' . \esc_html__('Guest', 'must-hotel-booking') . '</a>';

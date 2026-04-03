@@ -107,8 +107,10 @@ final class ReservationAdminDataProvider
         $paymentRows = $this->paymentRepository->getPaymentsForReservation($reservationId);
         $paymentSummary = $this->paymentRepository->getReservationPaymentSummary($reservationId);
         $paymentState = PaymentStatusService::buildReservationPaymentState($reservation, $paymentRows);
+        $roomTypeId = isset($reservation['room_type_id']) ? (int) $reservation['room_type_id'] : (int) ($reservation['room_id'] ?? 0);
         $assignedRoomId = isset($reservation['assigned_room_id']) ? (int) $reservation['assigned_room_id'] : 0;
         $assignedRoom = $assignedRoomId > 0 ? $this->inventoryRepository->getInventoryRoomById($assignedRoomId) : null;
+        $assignableRooms = $roomTypeId > 0 ? $this->inventoryRepository->getRoomsByType($roomTypeId) : [];
         $ratePlanId = isset($reservation['rate_plan_id']) ? (int) $reservation['rate_plan_id'] : 0;
         $ratePlan = $ratePlanId > 0 ? $this->ratePlanRepository->getRatePlanById($ratePlanId) : null;
         $timelineRows = $this->buildTimelineRows($reservation, $paymentRows);
@@ -186,6 +188,195 @@ final class ReservationAdminDataProvider
             'payment_state' => $paymentState,
             'emails' => $emailRows,
             'timeline' => $timelineRows,
+            'assignable_rooms' => $assignableRooms,
+        ];
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    public function getFrontDeskQueueData(string $queueKey): array
+    {
+        $queueKey = \sanitize_key($queueKey);
+        $today = \current_time('Y-m-d');
+        $baseRows = $queueKey === 'checkout'
+            ? $this->reservationRepository->getFrontDeskCheckoutQueueRows($today, 50)
+            : $this->reservationRepository->getFrontDeskCheckinQueueRows($today, 50);
+        $rows = $this->decorateRowsWithPaymentState($baseRows);
+        $assignedRoomMap = $this->loadAssignedRoomsForFrontDeskQueue($rows);
+        $formattedRows = [];
+
+        foreach ($rows as $row) {
+            if (!\is_array($row)) {
+                continue;
+            }
+
+            $paymentState = isset($row['payment_state']) && \is_array($row['payment_state']) ? $row['payment_state'] : [];
+            $assignedRoomId = isset($row['assigned_room_id']) ? (int) $row['assigned_room_id'] : 0;
+            $assignedRoom = $assignedRoomId > 0 && isset($assignedRoomMap[$assignedRoomId]) && \is_array($assignedRoomMap[$assignedRoomId])
+                ? $assignedRoomMap[$assignedRoomId]
+                : null;
+            $assignedRoomNumber = \is_array($assignedRoom) ? \trim((string) ($assignedRoom['room_number'] ?? '')) : '';
+            $assignedRoomTitle = \is_array($assignedRoom) ? \trim((string) ($assignedRoom['title'] ?? '')) : '';
+            $assignedRoomLabel = $assignedRoomNumber !== ''
+                ? $assignedRoomNumber
+                : ($assignedRoomTitle !== '' ? $assignedRoomTitle : '');
+            $amountDueRaw = isset($paymentState['amount_due']) ? (float) $paymentState['amount_due'] : 0.0;
+            $paymentStatusKey = (string) ($paymentState['derived_status'] ?? (string) ($row['payment_status'] ?? ''));
+            $queueDate = $queueKey === 'checkout'
+                ? (string) ($row['checkout'] ?? '')
+                : (string) ($row['checkin'] ?? '');
+            $isOverdue = $queueDate !== '' && $queueDate < $today;
+            $formattedRows[] = [
+                'id' => isset($row['id']) ? (int) $row['id'] : 0,
+                'booking_id' => $this->formatReservationReference($row),
+                'guest' => $this->formatGuestName($row),
+                'guest_email' => (string) ($row['guest_email'] ?? ''),
+                'accommodation' => isset($row['room_name']) && (string) $row['room_name'] !== ''
+                    ? (string) $row['room_name']
+                    : \__('Unassigned', 'must-hotel-booking'),
+                'assigned_room' => $assignedRoomLabel,
+                'checkin' => (string) ($row['checkin'] ?? ''),
+                'checkout' => (string) ($row['checkout'] ?? ''),
+                'reservation_status' => $this->formatReservationStatusLabel((string) ($row['status'] ?? '')),
+                'reservation_status_key' => (string) ($row['status'] ?? ''),
+                'payment_status' => $this->formatPaymentStatusLabel($paymentStatusKey),
+                'payment_status_key' => $paymentStatusKey,
+                'amount_due' => $this->formatMoney($amountDueRaw),
+                'amount_due_raw' => $amountDueRaw,
+                'has_due' => $amountDueRaw > 0.0,
+                'queue_label' => $queueKey === 'checkout'
+                    ? ($isOverdue ? \__('Overdue checkout', 'must-hotel-booking') : \__('Due today', 'must-hotel-booking'))
+                    : ($isOverdue ? \__('Overdue arrival', 'must-hotel-booking') : \__('Arriving today', 'must-hotel-booking')),
+                'queue_tone' => $isOverdue ? 'error' : 'warning',
+                'payment_workspace_needed' => $amountDueRaw > 0.0 || \in_array($paymentStatusKey, ['failed', 'pending', 'partially_paid', 'pay_at_hotel'], true),
+            ];
+        }
+
+        return [
+            'queue_key' => $queueKey,
+            'queue_title' => $queueKey === 'checkout'
+                ? \__('Check-out Queue', 'must-hotel-booking')
+                : \__('Check-in Queue', 'must-hotel-booking'),
+            'queue_description' => $queueKey === 'checkout'
+                ? \__('Review departures and finish guest stays using the existing reservation and payment workspaces.', 'must-hotel-booking')
+                : \__('Review arriving reservations and move guests into house using the existing reservation workspace.', 'must-hotel-booking'),
+            'empty_message' => $queueKey === 'checkout'
+                ? \__('No reservations are currently waiting for checkout.', 'must-hotel-booking')
+                : \__('No reservations are currently waiting for check-in.', 'must-hotel-booking'),
+            'summary_cards' => $this->buildFrontDeskQueueSummaryCards($formattedRows, $queueKey),
+            'rows' => $formattedRows,
+        ];
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    public function getFrontDeskRoomMoveData(): array
+    {
+        $today = \current_time('Y-m-d');
+        $now = \current_time('mysql');
+        $baseRows = $this->reservationRepository->getFrontDeskRoomMoveRows(50);
+        $assignedRoomMap = $this->loadAssignedRoomsForFrontDeskQueue($baseRows);
+        $formattedRows = [];
+        $moveableCount = 0;
+        $overdueCount = 0;
+
+        foreach ($baseRows as $row) {
+            if (!\is_array($row)) {
+                continue;
+            }
+
+            $reservationId = isset($row['id']) ? (int) $row['id'] : 0;
+            $assignedRoomId = isset($row['assigned_room_id']) ? (int) $row['assigned_room_id'] : 0;
+            $roomTypeId = isset($row['room_type_id']) ? (int) $row['room_type_id'] : (int) ($row['room_id'] ?? 0);
+            $assignedRoom = $assignedRoomId > 0 && isset($assignedRoomMap[$assignedRoomId]) && \is_array($assignedRoomMap[$assignedRoomId])
+                ? $assignedRoomMap[$assignedRoomId]
+                : null;
+            $candidateRooms = [];
+
+            if ($roomTypeId > 0 && $reservationId > 0) {
+                $window = $this->resolveFrontDeskMoveWindow((string) ($row['checkin'] ?? ''), (string) ($row['checkout'] ?? ''), $today);
+                $candidateRooms = $this->inventoryRepository->getAvailableRooms(
+                    $roomTypeId,
+                    $window['checkin'],
+                    $window['checkout'],
+                    ['cancelled', 'expired', 'payment_failed'],
+                    $now
+                );
+            }
+
+            $moveOptions = [];
+
+            foreach ($candidateRooms as $candidateRoom) {
+                if (!\is_array($candidateRoom)) {
+                    continue;
+                }
+
+                $candidateId = isset($candidateRoom['id']) ? (int) $candidateRoom['id'] : 0;
+
+                if ($candidateId <= 0 || $candidateId === $assignedRoomId) {
+                    continue;
+                }
+
+                $moveOptions[] = [
+                    'id' => $candidateId,
+                    'label' => $this->formatInventoryRoomLabel($candidateRoom),
+                ];
+            }
+
+            if (!empty($moveOptions)) {
+                $moveableCount++;
+            }
+
+            if ((string) ($row['checkout'] ?? '') !== '' && (string) ($row['checkout'] ?? '') <= $today) {
+                $overdueCount++;
+            }
+
+            $formattedRows[] = [
+                'id' => $reservationId,
+                'booking_id' => $this->formatReservationReference($row),
+                'guest' => $this->formatGuestName($row),
+                'guest_email' => (string) ($row['guest_email'] ?? ''),
+                'accommodation' => isset($row['room_name']) && (string) $row['room_name'] !== ''
+                    ? (string) $row['room_name']
+                    : \__('Unassigned', 'must-hotel-booking'),
+                'assigned_room' => \is_array($assignedRoom)
+                    ? $this->formatInventoryRoomLabel($assignedRoom)
+                    : \__('No room assigned', 'must-hotel-booking'),
+                'checkin' => (string) ($row['checkin'] ?? ''),
+                'checkout' => (string) ($row['checkout'] ?? ''),
+                'reservation_status' => $this->formatReservationStatusLabel((string) ($row['status'] ?? '')),
+                'reservation_status_key' => (string) ($row['status'] ?? ''),
+                'desk_state' => \__('In house', 'must-hotel-booking'),
+                'desk_state_key' => ((string) ($row['checkout'] ?? '') !== '' && (string) ($row['checkout'] ?? '') <= $today) ? 'warning' : 'success',
+                'move_options' => $moveOptions,
+                'can_move' => !empty($moveOptions),
+            ];
+        }
+
+        return [
+            'queue_title' => \__('Room Move / Upgrade', 'must-hotel-booking'),
+            'queue_description' => \__('Reassign checked-in guests to another compatible room without leaving the Front Desk workspace.', 'must-hotel-booking'),
+            'empty_message' => \__('No checked-in reservations are currently ready for room reassignment.', 'must-hotel-booking'),
+            'summary_cards' => [
+                [
+                    'label' => \__('In-house stays', 'must-hotel-booking'),
+                    'value' => (string) \count($formattedRows),
+                    'meta' => \__('Checked-in reservations currently eligible for desk review.', 'must-hotel-booking'),
+                ],
+                [
+                    'label' => \__('Move options ready', 'must-hotel-booking'),
+                    'value' => (string) $moveableCount,
+                    'meta' => \__('Reservations with at least one compatible room available now.', 'must-hotel-booking'),
+                ],
+                [
+                    'label' => \__('Due out today', 'must-hotel-booking'),
+                    'value' => (string) $overdueCount,
+                    'meta' => \__('Checked-in stays whose checkout date is today or earlier.', 'must-hotel-booking'),
+                ],
+            ],
+            'rows' => $formattedRows,
         ];
     }
 
@@ -563,6 +754,9 @@ final class ReservationAdminDataProvider
                 'guests' => isset($row['guests']) ? (int) $row['guests'] : 0,
                 'reservation_status' => $this->formatReservationStatusLabel((string) ($row['status'] ?? '')),
                 'reservation_status_key' => (string) ($row['status'] ?? ''),
+                'cancellation_requested' => !empty($row['cancellation_requested']),
+                'cancellation_requested_at' => (string) ($row['cancellation_requested_at'] ?? ''),
+                'cancellation_requested_by' => isset($row['cancellation_requested_by']) ? (int) $row['cancellation_requested_by'] : 0,
                 'payment_status' => $this->formatPaymentStatusLabel($paymentStatusKey),
                 'payment_status_key' => $paymentStatusKey,
                 'payment_method' => $this->formatPaymentMethodLabel($paymentMethodKey),
@@ -573,6 +767,140 @@ final class ReservationAdminDataProvider
         }
 
         return $formatted;
+    }
+
+    /**
+     * @param array<int, array<string, mixed>> $rows
+     * @return array<int, array<string, mixed>>
+     */
+    private function loadAssignedRoomsForFrontDeskQueue(array $rows): array
+    {
+        $assignedRooms = [];
+
+        foreach ($rows as $row) {
+            if (!\is_array($row)) {
+                continue;
+            }
+
+            $assignedRoomId = isset($row['assigned_room_id']) ? (int) $row['assigned_room_id'] : 0;
+
+            if ($assignedRoomId <= 0 || isset($assignedRooms[$assignedRoomId])) {
+                continue;
+            }
+
+            $assignedRoom = $this->inventoryRepository->getInventoryRoomById($assignedRoomId);
+
+            if (\is_array($assignedRoom)) {
+                $assignedRooms[$assignedRoomId] = $assignedRoom;
+            }
+        }
+
+        return $assignedRooms;
+    }
+
+    /**
+     * @param array<int, array<string, mixed>> $rows
+     * @return array<int, array<string, string>>
+     */
+    private function buildFrontDeskQueueSummaryCards(array $rows, string $queueKey): array
+    {
+        $totalRows = \count($rows);
+        $overdueCount = 0;
+        $assignedCount = 0;
+        $dueCount = 0;
+        $dueAmount = 0.0;
+
+        foreach ($rows as $row) {
+            if (!\is_array($row)) {
+                continue;
+            }
+
+            if ((string) ($row['queue_tone'] ?? '') === 'error') {
+                $overdueCount++;
+            }
+
+            if (\trim((string) ($row['assigned_room'] ?? '')) !== '') {
+                $assignedCount++;
+            }
+
+            if (!empty($row['has_due'])) {
+                $dueCount++;
+                $dueAmount += isset($row['amount_due_raw']) ? (float) $row['amount_due_raw'] : 0.0;
+            }
+        }
+
+        return [
+            [
+                'label' => $queueKey === 'checkout' ? \__('Awaiting checkout', 'must-hotel-booking') : \__('Awaiting check-in', 'must-hotel-booking'),
+                'value' => (string) $totalRows,
+                'meta' => $queueKey === 'checkout'
+                    ? \__('Confirmed stays still open at the desk.', 'must-hotel-booking')
+                    : \__('Arrivals ready for front-desk follow-up.', 'must-hotel-booking'),
+            ],
+            [
+                'label' => \__('Overdue', 'must-hotel-booking'),
+                'value' => (string) $overdueCount,
+                'meta' => $queueKey === 'checkout'
+                    ? \__('Departures that should already be closed out.', 'must-hotel-booking')
+                    : \__('Arrivals that were not checked in on time.', 'must-hotel-booking'),
+            ],
+            [
+                'label' => \__('Assigned rooms', 'must-hotel-booking'),
+                'value' => (string) $assignedCount,
+                'meta' => \__('Queue items with a physical room already linked.', 'must-hotel-booking'),
+            ],
+            [
+                'label' => \__('Balance due', 'must-hotel-booking'),
+                'value' => (string) $dueCount,
+                'meta' => \sprintf(
+                    /* translators: %s: formatted due amount */
+                    \__('Outstanding total: %s', 'must-hotel-booking'),
+                    $this->formatMoney($dueAmount)
+                ),
+            ],
+        ];
+    }
+
+    /**
+     * @return array{checkin: string, checkout: string}
+     */
+    private function resolveFrontDeskMoveWindow(string $checkin, string $checkout, string $today): array
+    {
+        $effectiveCheckin = $checkin !== '' && $checkin > $today ? $checkin : $today;
+        $effectiveCheckout = $checkout;
+
+        if ($effectiveCheckout === '' || $effectiveCheckout <= $effectiveCheckin) {
+            $timestamp = \strtotime($effectiveCheckin . ' +1 day');
+            $effectiveCheckout = $timestamp !== false ? \wp_date('Y-m-d', $timestamp) : $effectiveCheckin;
+        }
+
+        return [
+            'checkin' => $effectiveCheckin,
+            'checkout' => $effectiveCheckout,
+        ];
+    }
+
+    /**
+     * @param array<string, mixed> $room
+     */
+    private function formatInventoryRoomLabel(array $room): string
+    {
+        $roomNumber = \trim((string) ($room['room_number'] ?? ''));
+        $title = \trim((string) ($room['title'] ?? ''));
+
+        if ($roomNumber !== '' && $title !== '') {
+            return $roomNumber . ' - ' . $title;
+        }
+
+        if ($roomNumber !== '') {
+            return $roomNumber;
+        }
+
+        if ($title !== '') {
+            return $title;
+        }
+
+        return isset($room['id']) ? '#' . (int) $room['id'] : \__('Room', 'must-hotel-booking');
     }
 
     /**

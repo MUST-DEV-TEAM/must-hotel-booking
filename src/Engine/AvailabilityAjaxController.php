@@ -439,6 +439,12 @@ final class AvailabilityAjaxController
 
     public static function ajax_must_get_disabled_dates(): void
     {
+        $nonce = isset($_REQUEST['nonce']) ? (string) \wp_unslash($_REQUEST['nonce']) : '';
+
+        if (!\wp_verify_nonce($nonce, 'must_availability_check')) {
+            \wp_send_json_error(['message' => \__('Security check failed.', 'must-hotel-booking')], 403);
+        }
+
         $maxBookingGuests = BookingRules::getMaxBookingGuestsLimit();
         $guests = isset($_REQUEST['guests']) ? \max(1, \min($maxBookingGuests, \absint(\wp_unslash($_REQUEST['guests'])))) : 1;
         $roomCount = BookingRules::normalizeRoomCount($_REQUEST['room_count'] ?? 0);
@@ -489,6 +495,12 @@ final class AvailabilityAjaxController
 
     public static function ajax_must_check_availability(): void
     {
+        $nonce = isset($_REQUEST['nonce']) ? (string) \wp_unslash($_REQUEST['nonce']) : '';
+
+        if (!\wp_verify_nonce($nonce, 'must_availability_check')) {
+            \wp_send_json_error(['message' => \__('Security check failed.', 'must-hotel-booking')], 403);
+        }
+
         $checkin = isset($_REQUEST['checkin']) ? \sanitize_text_field((string) \wp_unslash($_REQUEST['checkin'])) : '';
         $checkout = isset($_REQUEST['checkout']) ? \sanitize_text_field((string) \wp_unslash($_REQUEST['checkout'])) : '';
         $maxBookingGuests = BookingRules::getMaxBookingGuestsLimit();

@@ -180,29 +180,14 @@ final class GuestAdminDataProvider
      */
     private function buildGuestWarnings(array $row): array
     {
-        $warnings = [];
-
-        if ((string) ($row['email'] ?? '') === '') {
-            $warnings[] = \__('Missing guest email.', 'must-hotel-booking');
-        }
-
-        if ((string) ($row['phone'] ?? '') === '' || (string) ($row['country'] ?? '') === '') {
-            $warnings[] = \__('Guest contact profile is incomplete.', 'must-hotel-booking');
-        }
-
-        if ((int) ($row['upcoming_unpaid_count'] ?? 0) > 0) {
-            $warnings[] = \__('Guest has unpaid upcoming reservations.', 'must-hotel-booking');
-        }
-
-        if ((int) ($row['upcoming_failed_count'] ?? 0) > 0) {
-            $warnings[] = \__('Guest has failed payment history on upcoming bookings.', 'must-hotel-booking');
-        }
-
-        if ((int) ($row['email_duplicates'] ?? 0) > 1) {
-            $warnings[] = \__('Possible duplicate guest records share this email.', 'must-hotel-booking');
-        }
-
-        return $warnings;
+        return \array_values(
+            \array_unique(
+                \array_merge(
+                    $this->buildOperationalWarnings($row),
+                    $this->buildPaymentWarnings($row)
+                )
+            )
+        );
     }
 
     /**
@@ -299,14 +284,15 @@ final class GuestAdminDataProvider
         $preferredMethod = !empty($methodCounts) ? (string) \array_key_first($methodCounts) : '';
         $duplicates = $this->guestRepository->findPossibleDuplicateGuests($guestId);
         $emailRows = $this->buildGuestEmailRows((string) ($guest['email'] ?? ''), $reservationIds);
-        $warnings = $this->buildGuestWarnings($guest);
+        $operationalWarnings = $this->buildOperationalWarnings($guest);
+        $paymentWarnings = $this->buildPaymentWarnings($guest);
 
         if (!empty($duplicates)) {
-            $warnings[] = \__('Possible duplicate guest profiles were found.', 'must-hotel-booking');
+            $operationalWarnings[] = \__('Possible duplicate guest profiles were found.', 'must-hotel-booking');
         }
 
         if (!empty($guest['admin_notes'])) {
-            $warnings[] = \__('Guest profile contains internal notes.', 'must-hotel-booking');
+            $operationalWarnings[] = \__('Guest profile contains internal notes.', 'must-hotel-booking');
         }
 
         return [
@@ -337,8 +323,52 @@ final class GuestAdminDataProvider
             ],
             'emails' => $emailRows,
             'duplicates' => $this->formatDuplicateRows($duplicates),
-            'warnings' => \array_values(\array_unique($warnings)),
+            'operational_warnings' => \array_values(\array_unique($operationalWarnings)),
+            'payment_warnings' => \array_values(\array_unique($paymentWarnings)),
+            'warnings' => \array_values(\array_unique(\array_merge($operationalWarnings, $paymentWarnings))),
         ];
+    }
+
+    /**
+     * @param array<string, mixed> $row
+     * @return array<int, string>
+     */
+    private function buildOperationalWarnings(array $row): array
+    {
+        $warnings = [];
+
+        if ((string) ($row['email'] ?? '') === '') {
+            $warnings[] = \__('Missing guest email.', 'must-hotel-booking');
+        }
+
+        if ((string) ($row['phone'] ?? '') === '' || (string) ($row['country'] ?? '') === '') {
+            $warnings[] = \__('Guest contact profile is incomplete.', 'must-hotel-booking');
+        }
+
+        if ((int) ($row['email_duplicates'] ?? 0) > 1) {
+            $warnings[] = \__('Possible duplicate guest records share this email.', 'must-hotel-booking');
+        }
+
+        return $warnings;
+    }
+
+    /**
+     * @param array<string, mixed> $row
+     * @return array<int, string>
+     */
+    private function buildPaymentWarnings(array $row): array
+    {
+        $warnings = [];
+
+        if ((int) ($row['upcoming_unpaid_count'] ?? 0) > 0) {
+            $warnings[] = \__('Guest has unpaid upcoming reservations.', 'must-hotel-booking');
+        }
+
+        if ((int) ($row['upcoming_failed_count'] ?? 0) > 0) {
+            $warnings[] = \__('Guest has failed payment history on upcoming bookings.', 'must-hotel-booking');
+        }
+
+        return $warnings;
     }
 
     /**

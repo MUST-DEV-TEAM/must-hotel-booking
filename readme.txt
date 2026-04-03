@@ -4,7 +4,7 @@ Tags: hotel, booking, reservation, accommodation
 Requires at least: 5.0
 Tested up to: 6.0
 Requires PHP: 7.4
-Stable tag: 0.3.38
+Stable tag: 0.3.41
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -31,6 +31,13 @@ Main features include:
 5. When updating, upload the new release ZIP or use the configured updater, then review **Diagnostics & Maintenance** after the update completes.
 
 == Changelog ==
+
+= 0.3.41 =
+* Turned the `/staff/` portal into a real hotel operations workspace with role-based access across Dashboard, Reservations, Calendar, Front Desk, Guests, Payments, Housekeeping, Rooms & Availability, and Reports.
+* Replaced standalone quick booking with the Front Desk workspace, including real new-booking flow, check-in and check-out queues, room move handling, and a front-desk activity log.
+* Expanded reservation operations inside the portal with check-in, check-out, room assignment and reassignment, internal note append, cancellation request approval, and a dashboard approval queue for supervisors and managers.
+* Added operational guest editing, payment posting and partial payments, Stripe refund handling, receipt and invoice generation, a first housekeeping room board, a merged rooms and availability workspace, an actionable calendar, and role-scoped reports with audit visibility.
+* Improved activity logging, actor attribution, capability alignment, deprecated portal route handling, and updater metadata consistency for GitHub release packaging.
 
 = 0.3.38 =
 * Reworked the staff portal entry flow with a redesigned login experience, clearer staff-only messaging, stronger responsive behavior, and admin access that stays inside the same portal flow used by managers and workers.

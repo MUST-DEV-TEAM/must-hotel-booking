@@ -269,7 +269,7 @@ class MustBookingConfig
             'booking_rules' => ['booking_window' => 365, 'same_day_booking_allowed' => true, 'same_day_booking_cutoff_time' => '18:00', 'minimum_nights' => 1, 'maximum_nights' => 30, 'max_booking_guests' => 12, 'max_booking_rooms' => 3, 'allow_multi_room_booking' => true, 'default_reservation_source' => 'website', 'pending_reservation_expiration_minutes' => 35, 'require_phone' => true, 'require_country' => true, 'enable_special_requests' => true, 'require_terms_acceptance' => true, 'default_reservation_status' => 'confirmed', 'default_payment_mode' => 'guest_choice', 'cancellation_allowed' => true, 'cancellation_notice_hours' => 48],
             'checkin_checkout' => ['checkin_time' => '14:00', 'checkout_time' => '11:00', 'allow_early_checkin_request' => true, 'allow_late_checkout_request' => true, 'arrival_instructions' => '', 'departure_instructions' => '', 'guest_checkin_label' => \__('Check-in', 'must-hotel-booking'), 'guest_checkout_label' => \__('Check-out', 'must-hotel-booking')],
             'payments_summary' => ['payment_methods' => ['pay_at_hotel' => true, 'stripe' => false], 'deposit_required' => false, 'deposit_type' => 'percentage', 'deposit_value' => 0.0, 'tax_rate' => 0.0, 'stripe_publishable_key' => '', 'stripe_secret_key' => '', 'stripe_webhook_secret' => '', 'stripe_local_publishable_key' => '', 'stripe_local_secret_key' => '', 'stripe_local_webhook_secret' => '', 'stripe_staging_publishable_key' => '', 'stripe_staging_secret_key' => '', 'stripe_staging_webhook_secret' => '', 'stripe_production_publishable_key' => '', 'stripe_production_secret_key' => '', 'stripe_production_webhook_secret' => ''],
-            'staff_access' => ['enable_staff_portal' => false, 'redirect_worker_after_login' => 'dashboard', 'hide_wp_admin_for_workers' => true, 'portal_access_roles' => [StaffAccess::ROLE_WORKER, StaffAccess::ROLE_MANAGER], 'capability_matrix' => self::staff_matrix_defaults(), 'portal_module_visibility' => self::portal_module_visibility_defaults()],
+            'staff_access' => ['enable_staff_portal' => false, 'redirect_worker_after_login' => 'dashboard', 'hide_wp_admin_for_workers' => true, 'portal_access_roles' => self::staff_access_role_defaults(), 'capability_matrix' => self::staff_matrix_defaults(), 'portal_module_visibility' => self::portal_module_visibility_defaults()],
             'branding' => ['primary_color' => '#0f766e', 'secondary_color' => '#155e75', 'accent_color' => '#f59e0b', 'text_color' => '#16212b', 'border_radius' => 18, 'font_family' => 'Instrument Sans', 'inherit_elementor_colors' => false, 'inherit_elementor_typography' => false, 'portal_welcome_title' => \__('Welcome back', 'must-hotel-booking'), 'portal_welcome_text' => \__('Manage arrivals, departures, guest requests, and stay operations from one place.', 'must-hotel-booking'), 'booking_form_style_preset' => 'balanced'],
             'managed_pages' => ['page_rooms_id' => 0, 'page_booking_id' => 0, 'page_booking_accommodation_id' => 0, 'page_checkout_id' => 0, 'page_booking_confirmation_id' => 0, 'portal_page_id' => 0, 'portal_login_page_id' => 0],
             'notifications_summary' => ['booking_notification_email' => '', 'email_from_name' => '', 'email_from_email' => '', 'email_reply_to' => '', 'email_logo_url' => '', 'email_button_color' => '#141414', 'email_footer_text' => \__('We look forward to welcoming you.', 'must-hotel-booking'), 'email_layout_type' => 'classic', 'custom_email_layout_html' => '', 'email_templates' => []],
@@ -380,10 +380,7 @@ class MustBookingConfig
     /** @return array<string, array<string, bool>> */
     private static function staff_matrix_defaults(): array
     {
-        return \class_exists(StaffAccess::class) ? StaffAccess::getDefaultCapabilityMatrix() : [
-            'mhb_worker' => ['view_dashboard' => true, 'view_reservations' => true, 'edit_reservations' => true, 'view_calendar' => true, 'create_quick_booking' => true, 'view_guests' => true, 'view_payments' => true, 'mark_payment_as_paid' => true, 'cancel_reservation' => false, 'view_reports' => false, 'view_accommodations' => false, 'view_availability_rules' => false, 'access_settings' => false],
-            'mhb_manager' => ['view_dashboard' => true, 'view_reservations' => true, 'edit_reservations' => true, 'view_calendar' => true, 'create_quick_booking' => true, 'view_guests' => true, 'view_payments' => true, 'mark_payment_as_paid' => true, 'cancel_reservation' => true, 'view_reports' => true, 'view_accommodations' => true, 'view_availability_rules' => true, 'access_settings' => false],
-        ];
+        return \class_exists(StaffAccess::class) ? StaffAccess::getDefaultCapabilityMatrix() : [];
     }
 
     /** @param array<string, mixed> $matrix @return array<string, array<string, bool>> */
@@ -423,6 +420,18 @@ class MustBookingConfig
         return $defaults;
     }
 
+    /** @return array<int, string> */
+    private static function staff_access_role_defaults(): array
+    {
+        return [
+            StaffAccess::ROLE_FRONT_DESK,
+            StaffAccess::ROLE_SUPERVISOR,
+            StaffAccess::ROLE_HOUSEKEEPING,
+            StaffAccess::ROLE_FINANCE,
+            StaffAccess::ROLE_OPS_MANAGER,
+        ];
+    }
+
     /** @return array<string, bool> */
     private static function portal_module_visibility_defaults(): array
     {
@@ -430,12 +439,12 @@ class MustBookingConfig
             'dashboard' => true,
             'reservations' => true,
             'calendar' => true,
-            'quick_booking' => true,
+            'front_desk' => true,
             'guests' => true,
             'payments' => true,
+            'housekeeping' => true,
             'reports' => true,
-            'accommodations' => true,
-            'availability_rules' => true,
+            'rooms_availability' => true,
         ];
 
         if (\class_exists(\MustHotelBooking\Portal\PortalRegistry::class)) {
@@ -461,10 +470,12 @@ class MustBookingConfig
     {
         $role = \sanitize_key($role);
         $legacyMap = [
-            'receptionist' => StaffAccess::ROLE_WORKER,
-            'housekeeping' => StaffAccess::ROLE_WORKER,
-            'accountant' => StaffAccess::ROLE_WORKER,
-            'manager' => StaffAccess::ROLE_MANAGER,
+            'receptionist' => StaffAccess::ROLE_FRONT_DESK,
+            'accountant'   => StaffAccess::ROLE_FINANCE,
+            'manager'      => StaffAccess::ROLE_SUPERVISOR,
+            'housekeeping' => StaffAccess::ROLE_HOUSEKEEPING,
+            'mhb_worker'   => StaffAccess::ROLE_FRONT_DESK,
+            'mhb_manager'  => StaffAccess::ROLE_SUPERVISOR,
         ];
 
         return isset($legacyMap[$role]) ? $legacyMap[$role] : $role;

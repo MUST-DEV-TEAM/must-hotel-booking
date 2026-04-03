@@ -296,6 +296,9 @@ final class ReservationRepository extends AbstractRepository
                 r.checkout,
                 r.guests,
                 r.status,
+                r.cancellation_requested,
+                r.cancellation_requested_at,
+                r.cancellation_requested_by,
                 r.total_price,
                 r.coupon_id,
                 r.coupon_code,
@@ -331,6 +334,156 @@ final class ReservationRepository extends AbstractRepository
                 ARRAY_A
             );
         }
+
+        return \is_array($rows) ? $rows : [];
+    }
+
+    /**
+     * @return array<int, array<string, mixed>>
+     */
+    public function getPendingCancellationRequestRows(int $limit = 5): array
+    {
+        if (!$this->reservationsTableExists()) {
+            return [];
+        }
+
+        $limit = \max(1, \min(20, $limit));
+        $hasRoomsTable = $this->tableExists('rooms');
+        $hasGuestsTable = $this->tableExists('guests');
+        $roomSelect = '\'\' AS room_name';
+        $roomJoin = '';
+        $guestSelect = '\'\' AS guest_name';
+        $guestJoin = '';
+
+        if ($hasRoomsTable) {
+            $roomSelect = 'COALESCE(rm.name, \'\') AS room_name';
+            $roomJoin = ' LEFT JOIN ' . $this->table('rooms') . ' rm ON rm.id = r.room_id';
+        }
+
+        if ($hasGuestsTable) {
+            $guestSelect = 'CONCAT_WS(\' \', g.first_name, g.last_name) AS guest_name';
+            $guestJoin = ' LEFT JOIN ' . $this->table('guests') . ' g ON g.id = r.guest_id';
+        }
+
+        $rows = $this->wpdb->get_results(
+            $this->wpdb->prepare(
+                'SELECT
+                    r.id,
+                    r.booking_id,
+                    r.room_id,
+                    r.guest_id,
+                    r.checkin,
+                    r.checkout,
+                    r.status,
+                    r.cancellation_requested,
+                    r.cancellation_requested_at,
+                    r.cancellation_requested_by,
+                    ' . $roomSelect . ',
+                    ' . $guestSelect . '
+                FROM ' . $this->table('reservations') . ' r
+                ' . $roomJoin . '
+                ' . $guestJoin . '
+                WHERE r.cancellation_requested = 1
+                    AND r.status NOT IN (%s, %s, %s)
+                ORDER BY COALESCE(NULLIF(r.cancellation_requested_at, \'\'), r.created_at) ASC, r.id ASC
+                LIMIT %d',
+                'cancelled',
+                'completed',
+                'blocked',
+                $limit
+            ),
+            ARRAY_A
+        );
+
+        return \is_array($rows) ? $rows : [];
+    }
+
+    /**
+     * @return array<int, array<string, mixed>>
+     */
+    public function getFrontDeskCheckinQueueRows(string $today, int $limit = 50): array
+    {
+        return $this->getFrontDeskQueueRows($today, 'checkin', $limit);
+    }
+
+    /**
+     * @return array<int, array<string, mixed>>
+     */
+    public function getFrontDeskCheckoutQueueRows(string $today, int $limit = 50): array
+    {
+        return $this->getFrontDeskQueueRows($today, 'checkout', $limit);
+    }
+
+    /**
+     * @return array<int, array<string, mixed>>
+     */
+    public function getFrontDeskRoomMoveRows(int $limit = 50): array
+    {
+        if (!$this->reservationsTableExists()) {
+            return [];
+        }
+
+        $limit = \max(1, \min(100, $limit));
+        $hasRoomsTable = $this->tableExists('rooms');
+        $hasGuestsTable = $this->tableExists('guests');
+        $roomSelect = '\'\' AS room_name';
+        $roomJoin = '';
+        $guestSelect = '\'\' AS guest_name';
+        $guestEmailSelect = '\'\' AS guest_email';
+        $guestJoin = '';
+
+        if ($hasRoomsTable) {
+            $roomSelect = 'COALESCE(rm.name, \'\') AS room_name';
+            $roomJoin = ' LEFT JOIN ' . $this->table('rooms') . ' rm ON rm.id = r.room_id';
+        }
+
+        if ($hasGuestsTable) {
+            $guestSelect = 'CONCAT_WS(\' \', g.first_name, g.last_name) AS guest_name';
+            $guestEmailSelect = 'COALESCE(g.email, \'\') AS guest_email';
+            $guestJoin = ' LEFT JOIN ' . $this->table('guests') . ' g ON g.id = r.guest_id';
+        }
+
+        $rows = $this->wpdb->get_results(
+            $this->wpdb->prepare(
+                'SELECT
+                    r.id,
+                    r.booking_id,
+                    r.room_id,
+                    r.room_type_id,
+                    r.assigned_room_id,
+                    r.guest_id,
+                    r.checkin,
+                    r.checkout,
+                    r.guests,
+                    r.status,
+                    r.total_price,
+                    r.payment_status,
+                    r.created_at,
+                    r.checked_in_at,
+                    r.checked_out_at,
+                    ' . $roomSelect . ',
+                    ' . $guestSelect . ',
+                    ' . $guestEmailSelect . '
+                FROM ' . $this->table('reservations') . ' r
+                ' . $roomJoin . '
+                ' . $guestJoin . '
+                WHERE r.status = %s
+                    AND r.assigned_room_id > 0
+                    AND r.checked_in_at IS NOT NULL
+                    AND r.checked_in_at <> %s
+                    AND r.checked_in_at <> %s
+                    AND (r.checked_out_at IS NULL OR r.checked_out_at = %s OR r.checked_out_at = %s)
+                ORDER BY r.checkout ASC, r.id ASC
+                LIMIT %d',
+                'confirmed',
+                '',
+                '0000-00-00 00:00:00',
+                '',
+                '0000-00-00 00:00:00',
+                $limit
+            ),
+            ARRAY_A
+        );
 
         return \is_array($rows) ? $rows : [];
     }
@@ -490,6 +643,124 @@ final class ReservationRepository extends AbstractRepository
             ORDER BY id ASC',
             ARRAY_A
         );
+
+        return \is_array($rows) ? $rows : [];
+    }
+
+    /**
+     * @return array<int, array<string, mixed>>
+     */
+    private function getFrontDeskQueueRows(string $today, string $mode, int $limit): array
+    {
+        if ($today === '' || !$this->reservationsTableExists()) {
+            return [];
+        }
+
+        $limit = \max(1, \min(100, $limit));
+        $hasRoomsTable = $this->tableExists('rooms');
+        $hasGuestsTable = $this->tableExists('guests');
+        $roomSelect = '\'\' AS room_name';
+        $roomJoin = '';
+        $guestSelect = '\'\' AS guest_name';
+        $guestEmailSelect = '\'\' AS guest_email';
+        $guestJoin = '';
+
+        if ($hasRoomsTable) {
+            $roomSelect = 'COALESCE(rm.name, \'\') AS room_name';
+            $roomJoin = ' LEFT JOIN ' . $this->table('rooms') . ' rm ON rm.id = r.room_id';
+        }
+
+        if ($hasGuestsTable) {
+            $guestSelect = 'CONCAT_WS(\' \', g.first_name, g.last_name) AS guest_name';
+            $guestEmailSelect = 'COALESCE(g.email, \'\') AS guest_email';
+            $guestJoin = ' LEFT JOIN ' . $this->table('guests') . ' g ON g.id = r.guest_id';
+        }
+
+        if ($mode === 'checkout') {
+            $sql = $this->wpdb->prepare(
+                'SELECT
+                    r.id,
+                    r.booking_id,
+                    r.room_id,
+                    r.room_type_id,
+                    r.assigned_room_id,
+                    r.guest_id,
+                    r.checkin,
+                    r.checkout,
+                    r.guests,
+                    r.status,
+                    r.total_price,
+                    r.payment_status,
+                    r.created_at,
+                    r.checked_in_at,
+                    r.checked_out_at,
+                    ' . $roomSelect . ',
+                    ' . $guestSelect . ',
+                    ' . $guestEmailSelect . '
+                FROM ' . $this->table('reservations') . ' r
+                ' . $roomJoin . '
+                ' . $guestJoin . '
+                WHERE r.checkout <= %s
+                    AND r.status = %s
+                    AND r.checked_in_at IS NOT NULL
+                    AND r.checked_in_at <> %s
+                    AND r.checked_in_at <> %s
+                    AND (r.checked_out_at IS NULL OR r.checked_out_at = %s OR r.checked_out_at = %s)
+                ORDER BY r.checkout ASC, r.id ASC
+                LIMIT %d',
+                $today,
+                'confirmed',
+                '',
+                '0000-00-00 00:00:00',
+                '',
+                '0000-00-00 00:00:00',
+                $limit
+            );
+        } else {
+            $sql = $this->wpdb->prepare(
+                'SELECT
+                    r.id,
+                    r.booking_id,
+                    r.room_id,
+                    r.room_type_id,
+                    r.assigned_room_id,
+                    r.guest_id,
+                    r.checkin,
+                    r.checkout,
+                    r.guests,
+                    r.status,
+                    r.total_price,
+                    r.payment_status,
+                    r.created_at,
+                    r.checked_in_at,
+                    r.checked_out_at,
+                    ' . $roomSelect . ',
+                    ' . $guestSelect . ',
+                    ' . $guestEmailSelect . '
+                FROM ' . $this->table('reservations') . ' r
+                ' . $roomJoin . '
+                ' . $guestJoin . '
+                WHERE r.checkin <= %s
+                    AND r.checkout >= %s
+                    AND r.status IN (%s, %s, %s)
+                    AND (r.checked_in_at IS NULL OR r.checked_in_at = %s OR r.checked_in_at = %s)
+                    AND (r.checked_out_at IS NULL OR r.checked_out_at = %s OR r.checked_out_at = %s)
+                ORDER BY r.checkin ASC, r.id ASC
+                LIMIT %d',
+                $today,
+                $today,
+                'pending',
+                'pending_payment',
+                'confirmed',
+                '',
+                '0000-00-00 00:00:00',
+                '',
+                '0000-00-00 00:00:00',
+                $limit
+            );
+        }
+
+        $rows = $this->wpdb->get_results($sql, ARRAY_A);
 
         return \is_array($rows) ? $rows : [];
     }

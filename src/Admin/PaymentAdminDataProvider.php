@@ -70,9 +70,18 @@ final class PaymentAdminDataProvider
             'reservation_status_options' => get_reservation_status_options(),
             'method_options' => $this->getMethodOptions(),
             'payment_group_options' => $this->getPaymentGroupOptions(),
+            'forms' => isset($saveState['forms']) && \is_array($saveState['forms']) ? $saveState['forms'] : [],
             'settings' => $this->getSettingsData(),
             'settings_errors' => isset($saveState['settings_errors']) && \is_array($saveState['settings_errors']) ? $saveState['settings_errors'] : [],
         ];
+    }
+
+    /**
+     * @return array<string, mixed>|null
+     */
+    public function getDetailDataForReservation(int $reservationId): ?array
+    {
+        return $this->getDetailData($reservationId);
     }
 
     /**

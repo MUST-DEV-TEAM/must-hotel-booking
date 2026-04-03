@@ -401,7 +401,36 @@ final class CalendarDataProvider
             );
         }
 
+        $primaryReservationId = 0;
+        $primaryBlockedReservationId = 0;
+
+        foreach ($stays as $reservation) {
+            if (!\is_array($reservation)) {
+                continue;
+            }
+
+            $reservationId = isset($reservation['id']) ? (int) $reservation['id'] : 0;
+            $reservationStatus = \sanitize_key((string) ($reservation['status'] ?? ''));
+
+            if ($reservationId <= 0) {
+                continue;
+            }
+
+            if ($reservationStatus === 'blocked') {
+                if ($primaryBlockedReservationId <= 0) {
+                    $primaryBlockedReservationId = $reservationId;
+                }
+
+                continue;
+            }
+
+            if ($primaryReservationId <= 0) {
+                $primaryReservationId = $reservationId;
+            }
+        }
+
         return [
+            'room_id' => $roomId,
             'date' => $date,
             'state' => $state,
             'actual_state' => $actualState,
@@ -411,6 +440,11 @@ final class CalendarDataProvider
             'headline' => $this->buildCellHeadline($state, $availableUnits, $totalUnits, $counts),
             'indicators' => \array_slice($indicators, 0, 2),
             'available_units' => $availableUnits,
+            'stay_count' => \count($stays),
+            'rule_count' => \count($restrictions),
+            'lock_count' => \count($locks),
+            'primary_reservation_id' => $primaryReservationId,
+            'primary_block_reservation_id' => $primaryBlockedReservationId,
             'counts' => $counts,
             'flags' => $flags,
             'arrivals_count' => \count($arrivals),

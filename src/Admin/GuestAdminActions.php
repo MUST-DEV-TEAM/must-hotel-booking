@@ -5,6 +5,43 @@ namespace MustHotelBooking\Admin;
 final class GuestAdminActions
 {
     /**
+     * @param array<string, mixed> $source
+     * @return array<string, mixed>
+     */
+    public static function sanitizeGuestForm(array $source): array
+    {
+        return [
+            'first_name' => isset($source['first_name']) ? \sanitize_text_field((string) \wp_unslash($source['first_name'])) : '',
+            'last_name' => isset($source['last_name']) ? \sanitize_text_field((string) \wp_unslash($source['last_name'])) : '',
+            'email' => isset($source['email']) ? \sanitize_email((string) \wp_unslash($source['email'])) : '',
+            'phone' => isset($source['phone']) ? \sanitize_text_field((string) \wp_unslash($source['phone'])) : '',
+            'country' => isset($source['country']) ? \sanitize_text_field((string) \wp_unslash($source['country'])) : '',
+            'admin_notes' => isset($source['admin_notes']) ? \sanitize_textarea_field((string) \wp_unslash($source['admin_notes'])) : '',
+            'vip_flag' => !empty($source['vip_flag']) ? 1 : 0,
+            'problem_flag' => !empty($source['problem_flag']) ? 1 : 0,
+        ];
+    }
+
+    /**
+     * @param array<string, mixed> $form
+     * @return array<int, string>
+     */
+    public static function validateGuestForm(array $form): array
+    {
+        $errors = [];
+
+        if (($form['email'] ?? '') !== '' && !\is_email((string) $form['email'])) {
+            $errors[] = \__('Please enter a valid guest email address.', 'must-hotel-booking');
+        }
+
+        if (($form['first_name'] ?? '') === '' && ($form['last_name'] ?? '') === '' && ($form['email'] ?? '') === '') {
+            $errors[] = \__('At least a guest name or email is required.', 'must-hotel-booking');
+        }
+
+        return $errors;
+    }
+
+    /**
      * @return array<string, mixed>
      */
     public function handleSaveRequest(GuestAdminQuery $query): array
@@ -30,7 +67,7 @@ final class GuestAdminActions
         }
 
         $guestId = isset($_POST['guest_id']) ? \absint(\wp_unslash($_POST['guest_id'])) : 0;
-        $form = $this->buildGuestForm($_POST);
+        $form = self::sanitizeGuestForm($_POST);
         $state['form'] = $form;
         $state['selected_guest_id'] = $guestId;
 
@@ -40,13 +77,7 @@ final class GuestAdminActions
             return $state;
         }
 
-        if ($form['email'] !== '' && !\is_email($form['email'])) {
-            $state['errors'][] = \__('Please enter a valid guest email address.', 'must-hotel-booking');
-        }
-
-        if ($form['first_name'] === '' && $form['last_name'] === '' && $form['email'] === '') {
-            $state['errors'][] = \__('At least a guest name or email is required.', 'must-hotel-booking');
-        }
+        $state['errors'] = self::validateGuestForm($form);
 
         if (!empty($state['errors'])) {
             return $state;
@@ -88,23 +119,5 @@ final class GuestAdminActions
     public function handleGetAction(GuestAdminQuery $query): void
     {
         unset($query);
-    }
-
-    /**
-     * @param array<string, mixed> $source
-     * @return array<string, mixed>
-     */
-    private function buildGuestForm(array $source): array
-    {
-        return [
-            'first_name' => isset($source['first_name']) ? \sanitize_text_field((string) \wp_unslash($source['first_name'])) : '',
-            'last_name' => isset($source['last_name']) ? \sanitize_text_field((string) \wp_unslash($source['last_name'])) : '',
-            'email' => isset($source['email']) ? \sanitize_email((string) \wp_unslash($source['email'])) : '',
-            'phone' => isset($source['phone']) ? \sanitize_text_field((string) \wp_unslash($source['phone'])) : '',
-            'country' => isset($source['country']) ? \sanitize_text_field((string) \wp_unslash($source['country'])) : '',
-            'admin_notes' => isset($source['admin_notes']) ? \sanitize_textarea_field((string) \wp_unslash($source['admin_notes'])) : '',
-            'vip_flag' => !empty($source['vip_flag']) ? 1 : 0,
-            'problem_flag' => !empty($source['problem_flag']) ? 1 : 0,
-        ];
     }
 }

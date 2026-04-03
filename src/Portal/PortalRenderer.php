@@ -71,82 +71,126 @@ final class PortalRenderer
         $welcomeTitle = (string) ($branding['welcome_title'] ?? \__('Welcome back', 'must-hotel-booking'));
         $welcomeText = !empty($branding['welcome_text'])
             ? (string) $branding['welcome_text']
-            : \__('Sign in to manage arrivals, reservations, payments, and daily operational work from one focused workspace.', 'must-hotel-booking');
-        $arrowIconUrl = MUST_HOTEL_BOOKING_URL . 'assets/img/ArrowRight.svg';
-        $highlights = [
-            [
-                'icon' => 'dashicons-calendar-alt',
-                'eyebrow' => \__('Front desk flow', 'must-hotel-booking'),
-                'title' => \__('Stay on top of arrivals and departures', 'must-hotel-booking'),
-                'text' => \__('Open the live reservation queue, calendar, and room activity from the same staff workspace.', 'must-hotel-booking'),
-            ],
-            [
-                'icon' => 'dashicons-money-alt',
-                'eyebrow' => \__('Payments', 'must-hotel-booking'),
-                'title' => \__('Review due balances without admin clutter', 'must-hotel-booking'),
-                'text' => \__('Move directly from guest context to payment follow-up and booking status updates.', 'must-hotel-booking'),
-            ],
-            [
-                'icon' => 'dashicons-shield-alt',
-                'eyebrow' => \__('Access model', 'must-hotel-booking'),
-                'title' => \__('Portal entry follows account permissions', 'must-hotel-booking'),
-                'text' => \__('Worker and Manager access follows the configured portal rules, and administrators can enter the same workspace when needed.', 'must-hotel-booking'),
-            ],
-        ];
+            : \__('Your operations workspace for reservations, arrivals, and guest management.', 'must-hotel-booking');
+        $todayLabel = \date_i18n('l, F j', \current_time('timestamp'));
+        $hasErrors = !empty($state['errors']);
 
         self::renderDocumentStart(\__('Staff Login', 'must-hotel-booking'), $branding, 'must-portal-login-page');
 
         echo '<div class="must-portal-login-shell">';
         echo '<div class="must-portal-login-stage">';
-        echo '<section class="must-portal-login-showcase">';
+
+        // Left showcase panel
+        echo '<section class="must-portal-login-showcase" aria-hidden="true">';
         echo '<div class="must-portal-login-showcase-inner">';
         echo '<div class="must-portal-login-brand">';
 
         if (!empty($branding['logo_url'])) {
             echo '<img src="' . \esc_url((string) $branding['logo_url']) . '" alt="' . \esc_attr($hotelName) . '" />';
+        } else {
+            echo '<span class="must-portal-login-brand-icon dashicons dashicons-building" aria-hidden="true"></span>';
         }
 
-        echo '<div><strong>' . \esc_html($hotelName) . '</strong><span>' . \esc_html__('Staff operations portal', 'must-hotel-booking') . '</span></div></div>';
+        echo '<div><strong>' . \esc_html($hotelName) . '</strong><span>' . \esc_html__('Staff Portal', 'must-hotel-booking') . '</span></div></div>';
+
         echo '<div class="must-portal-login-hero">';
-        echo '<span class="must-portal-eyebrow">' . \esc_html__('Staff Access', 'must-hotel-booking') . '</span>';
+        echo '<span class="must-portal-eyebrow">' . \esc_html__('Staff Portal', 'must-hotel-booking') . '</span>';
+        echo '<div class="must-portal-login-ornament"><span class="must-portal-login-ornament-diamond"></span></div>';
         echo '<h1>' . \esc_html($welcomeTitle) . '</h1>';
         echo '<p class="must-portal-login-copy">' . \esc_html($welcomeText) . '</p>';
         echo '</div>';
-        echo '<div class="must-portal-login-highlight-grid">';
 
-        foreach ($highlights as $highlight) {
-            echo '<article class="must-portal-login-highlight">';
-            echo '<span class="dashicons ' . \esc_attr((string) $highlight['icon']) . '" aria-hidden="true"></span>';
-            echo '<div>';
-            echo '<small>' . \esc_html((string) $highlight['eyebrow']) . '</small>';
-            echo '<strong>' . \esc_html((string) $highlight['title']) . '</strong>';
-            echo '<p>' . \esc_html((string) $highlight['text']) . '</p>';
-            echo '</div>';
-            echo '</article>';
-        }
+        echo '<div class="must-portal-login-meta-grid">';
+        echo '<div class="must-portal-login-meta-item"><span class="dashicons dashicons-calendar-alt" aria-hidden="true"></span><div><small>' . \esc_html__('Today', 'must-hotel-booking') . '</small><strong>' . \esc_html($todayLabel) . '</strong></div></div>';
+        echo '<div class="must-portal-login-meta-item"><span class="dashicons dashicons-shield-alt" aria-hidden="true"></span><div><small>' . \esc_html__('Access', 'must-hotel-booking') . '</small><strong>' . \esc_html__('Approved staff only', 'must-hotel-booking') . '</strong></div></div>';
+        echo '</div>';
 
-        echo '</div><div class="must-portal-login-note"><span class="dashicons dashicons-admin-network" aria-hidden="true"></span><p>' . \esc_html__('Portal access is limited to approved staff accounts. If you cannot enter, ask an administrator to verify your role and portal permissions.', 'must-hotel-booking') . '</p></div>';
+        echo '<p class="must-portal-login-access-note">' . \esc_html__('Access is limited to approved staff accounts. Contact an administrator if you need help with your credentials.', 'must-hotel-booking') . '</p>';
+
         echo '</div>';
         echo '</section>';
+
+        // Right form panel
         echo '<section class="must-portal-login-panel">';
         echo '<div class="must-portal-login-panel-head">';
-        echo '<h2>' . \esc_html__('Staff sign in', 'must-hotel-booking') . '</h2>';
-        echo '<p>' . \esc_html__('Use your assigned account to access the portal.', 'must-hotel-booking') . '</p>';
+
+        if (!empty($branding['logo_url'])) {
+            echo '<img class="must-portal-login-panel-logo" src="' . \esc_url((string) $branding['logo_url']) . '" alt="' . \esc_attr($hotelName) . '" />';
+        }
+
+        echo '<h2>' . \esc_html__('Sign in', 'must-hotel-booking') . '</h2>';
+        echo '<p>' . \esc_html__('Enter your staff credentials to continue.', 'must-hotel-booking') . '</p>';
         echo '</div>';
 
         self::renderFlashMessages((array) ($state['notices'] ?? []), (array) ($state['errors'] ?? []));
 
-        echo '<form method="post" action="' . \esc_url((string) ($state['action_url'] ?? PortalRouter::getLoginUrl())) . '" class="must-portal-login-form">';
+        echo '<form method="post" action="' . \esc_url((string) ($state['action_url'] ?? PortalRouter::getLoginUrl())) . '" class="must-portal-login-form" novalidate>';
         \wp_nonce_field('must_portal_login', 'must_portal_login_nonce');
         echo '<input type="hidden" name="must_portal_action" value="portal_login" />';
-        echo '<label class="must-portal-login-field"><span>' . \esc_html__('Username or email', 'must-hotel-booking') . '</span><div class="must-portal-login-input"><span class="dashicons dashicons-admin-users" aria-hidden="true"></span><input type="text" name="portal_identifier" value="' . \esc_attr((string) (($state['values']['identifier'] ?? ''))) . '" autocomplete="username" placeholder="' . \esc_attr__('name@example.com', 'must-hotel-booking') . '" autofocus required /></div></label>';
-        echo '<label class="must-portal-login-field"><span>' . \esc_html__('Password', 'must-hotel-booking') . '</span><div class="must-portal-login-input"><span class="dashicons dashicons-lock" aria-hidden="true"></span><input type="password" name="portal_password" autocomplete="current-password" placeholder="' . \esc_attr__('Enter password', 'must-hotel-booking') . '" required /></div></label>';
-        echo '<div class="must-portal-login-row"><label class="must-portal-login-toggle"><input type="checkbox" name="portal_remember" value="1"' . \checked(!empty($state['values']['remember']), true, false) . ' /><span class="must-portal-login-toggle-ui" aria-hidden="true"></span><span class="must-portal-login-toggle-copy"><strong>' . \esc_html__('Remember me', 'must-hotel-booking') . '</strong><small>' . \esc_html__('Keep this device signed in for faster access.', 'must-hotel-booking') . '</small></span></label></div>';
-        echo '<button type="submit" class="must-portal-primary-button"><span>' . \esc_html__('Sign in to portal', 'must-hotel-booking') . '</span><img src="' . \esc_url($arrowIconUrl) . '" alt="" aria-hidden="true" /></button>';
+
+        // Username / email field
+        $identifierVal = \esc_attr((string) ($state['values']['identifier'] ?? ''));
+        echo '<div class="must-portal-login-field">';
+        echo '<label for="must-portal-identifier">' . \esc_html__('Username or email address', 'must-hotel-booking') . '</label>';
+        echo '<div class="must-portal-login-input' . ($hasErrors ? ' is-error' : '') . '">';
+        echo '<span class="dashicons dashicons-admin-users" aria-hidden="true"></span>';
+        echo '<input type="text" id="must-portal-identifier" name="portal_identifier" value="' . $identifierVal . '" autocomplete="username" spellcheck="false" autocapitalize="none" placeholder="' . \esc_attr__('name@example.com', 'must-hotel-booking') . '" autofocus required />';
+        echo '</div></div>';
+
+        // Password field with show/hide toggle
+        echo '<div class="must-portal-login-field">';
+        echo '<label for="must-portal-password">' . \esc_html__('Password', 'must-hotel-booking') . '</label>';
+        echo '<div class="must-portal-login-input must-portal-login-input--password' . ($hasErrors ? ' is-error' : '') . '">';
+        echo '<span class="dashicons dashicons-lock" aria-hidden="true"></span>';
+        echo '<input type="password" id="must-portal-password" name="portal_password" autocomplete="current-password" placeholder="' . \esc_attr__('••••••••', 'must-hotel-booking') . '" required />';
+        echo '<button type="button" id="must-portal-pw-toggle" class="must-portal-login-pw-toggle" aria-label="' . \esc_attr__('Show password', 'must-hotel-booking') . '" aria-pressed="false" tabindex="0">';
+        echo '<span class="must-portal-login-pw-toggle-show dashicons dashicons-visibility" aria-hidden="true"></span>';
+        echo '<span class="must-portal-login-pw-toggle-hide dashicons dashicons-hidden" aria-hidden="true" style="display:none"></span>';
+        echo '</button>';
+        echo '</div></div>';
+
+        // Remember me toggle
+        echo '<div class="must-portal-login-row">';
+        echo '<label class="must-portal-login-toggle">';
+        echo '<input type="checkbox" name="portal_remember" value="1"' . \checked(!empty($state['values']['remember']), true, false) . ' />';
+        echo '<span class="must-portal-login-toggle-ui" aria-hidden="true"></span>';
+        echo '<span class="must-portal-login-toggle-copy"><strong>' . \esc_html__('Stay signed in', 'must-hotel-booking') . '</strong><small>' . \esc_html__('Keep me signed in on this device', 'must-hotel-booking') . '</small></span>';
+        echo '</label>';
+        echo '</div>';
+
+        // Submit
+        echo '<button type="submit" id="must-portal-submit" class="must-portal-login-submit">';
+        echo '<span>' . \esc_html__('Sign in to portal', 'must-hotel-booking') . '</span>';
+        echo '<span class="dashicons dashicons-arrow-right-alt" aria-hidden="true"></span>';
+        echo '</button>';
+
         echo '</form>';
+
+        echo '<p class="must-portal-login-footer-note">' . \esc_html__('Having trouble? Contact your administrator to reset your password or verify your portal access.', 'must-hotel-booking') . '</p>';
+
         echo '</section>';
         echo '</div>';
         echo '</div>';
+
+        // Inline JS for password toggle
+        echo '<script>';
+        echo '(function(){';
+        echo 'var btn=document.getElementById("must-portal-pw-toggle")||document.querySelector(".must-portal-login-pw-toggle");';
+        echo 'if(!btn)return;';
+        echo 'btn.addEventListener("click",function(){';
+        echo 'var inp=document.getElementById("must-portal-password");';
+        echo 'var show=btn.querySelector(".must-portal-login-pw-toggle-show");';
+        echo 'var hide=btn.querySelector(".must-portal-login-pw-toggle-hide");';
+        echo 'if(!inp)return;';
+        echo 'var isHidden=inp.type==="password";';
+        echo 'inp.type=isHidden?"text":"password";';
+        echo 'btn.setAttribute("aria-pressed",isHidden?"true":"false");';
+        echo 'btn.setAttribute("aria-label",isHidden?' . \json_encode(\__('Hide password', 'must-hotel-booking')) . ':' . \json_encode(\__('Show password', 'must-hotel-booking')) . ');';
+        echo 'if(show)show.style.display=isHidden?"none":"";';
+        echo 'if(hide)hide.style.display=isHidden?"":"none";';
+        echo '});';
+        echo '})();';
+        echo '</script>';
 
         self::renderDocumentEnd();
     }
@@ -283,11 +327,11 @@ final class PortalRenderer
         $label = $label !== '' ? $label : \ucwords(\str_replace('_', ' ', $status));
         $tone = 'info';
 
-        if (\in_array($status, ['ok', 'healthy', 'active', 'confirmed', 'paid', 'success', 'completed', 'available'], true)) {
+        if (\in_array($status, ['ok', 'healthy', 'active', 'confirmed', 'paid', 'success', 'completed', 'available', 'clean', 'inspected'], true)) {
             $tone = 'ok';
-        } elseif (\in_array($status, ['warning', 'pending', 'pending_payment', 'partially_paid', 'unpaid', 'pay_at_hotel', 'maintenance'], true)) {
+        } elseif (\in_array($status, ['warning', 'pending', 'pending_payment', 'partially_paid', 'unpaid', 'pay_at_hotel', 'maintenance', 'dirty', 'hold'], true)) {
             $tone = 'warning';
-        } elseif (\in_array($status, ['error', 'failed', 'payment_failed', 'cancelled', 'invalid', 'missing', 'blocked', 'out_of_service', 'expired'], true)) {
+        } elseif (\in_array($status, ['error', 'failed', 'payment_failed', 'cancelled', 'invalid', 'missing', 'blocked', 'out_of_service', 'expired', 'out_of_order'], true)) {
             $tone = 'error';
         } elseif (\in_array($status, ['disabled', 'inactive'], true)) {
             $tone = 'disabled';

@@ -625,6 +625,7 @@ function enqueue_booking_page_assets(): void
             'checkoutUrl' => get_checkout_context_url($context, $fixed_room_id),
             'availabilityAction' => 'must_check_availability',
             'disabledDatesAction' => 'must_get_disabled_dates',
+            'availabilityNonce' => \wp_create_nonce('must_availability_check'),
             'selectRoomNonce' => \wp_create_nonce('must_booking_select_room'),
             'windowDays' => 180,
             'today' => \current_time('Y-m-d'),

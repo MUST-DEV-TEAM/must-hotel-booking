@@ -133,20 +133,36 @@ if (!empty($selected_rooms[0]['room']) && \is_array($selected_rooms[0]['room']) 
 $format_money = static function (float $amount, string $currency = 'USD'): string {
     return \must_hotel_booking\format_frontend_money($amount, $currency);
 };
-$render_payment_method_icon = static function (string $payment_method_key): string {
-    if ($payment_method_key === 'stripe') {
-        return '<svg viewBox="0 0 64 40" aria-hidden="true" focusable="false"><rect x="4" y="6" width="56" height="28" rx="10" fill="none" stroke="currentColor" stroke-width="3"/><path d="M18 25.5c2.4 1.4 5.5 2.1 8.5 2.1 6.2 0 10.2-3 10.2-7.6 0-3.8-2.2-5.8-7.4-7.1l-2.3-.6c-2.2-.5-3.1-1.2-3.1-2.4 0-1.6 1.5-2.7 4.1-2.7 2.7 0 5 .7 7.4 1.9l1.7-4.4C34.8 3.5 31.7 2.6 28 2.6c-6 0-10 3.1-10 7.7 0 3.7 2.1 5.8 7 7.1l2.1.5c2.6.7 3.7 1.3 3.7 2.7 0 1.7-1.6 2.7-4.6 2.7-3 0-5.8-.8-8.2-2.2l-2 4.4z" fill="currentColor"/></svg>';
+$payment_method_icon_urls = \defined('MUST_HOTEL_BOOKING_URL')
+    ? [
+        'stripe' => MUST_HOTEL_BOOKING_URL . 'assets/img/stripe.svg',
+        'pay_at_hotel' => MUST_HOTEL_BOOKING_URL . 'assets/img/CashStack.svg',
+    ]
+    : [];
+$render_payment_method_icon = static function (string $payment_method_key, string $payment_method_label) use ($payment_method_icon_urls): string {
+    $payment_method_fallback_letter = \function_exists('mb_substr')
+        ? (string) \mb_substr($payment_method_label, 0, 1)
+        : (string) \substr($payment_method_label, 0, 1);
+    $payment_method_fallback_letter = \function_exists('mb_strtoupper')
+        ? (string) \mb_strtoupper($payment_method_fallback_letter)
+        : \strtoupper($payment_method_fallback_letter);
+
+    if (isset($payment_method_icon_urls[$payment_method_key]) && $payment_method_icon_urls[$payment_method_key] !== '') {
+        return \sprintf(
+            '<img class="must-confirmation-payment-option-icon-image must-confirmation-payment-option-icon-image--%1$s" src="%2$s" alt="" aria-hidden="true" />',
+            \esc_attr($payment_method_key),
+            \esc_url($payment_method_icon_urls[$payment_method_key])
+        );
     }
 
     if ($payment_method_key === 'bank_transfer') {
-        return '<svg viewBox="0 0 64 40" aria-hidden="true" focusable="false"><path d="M8 16 32 6l24 10v4H8v-4Z" fill="none" stroke="currentColor" stroke-width="3" stroke-linejoin="round"/><path d="M14 22v10M26 22v10M38 22v10M50 22v10" stroke="currentColor" stroke-width="3" stroke-linecap="round"/><path d="M8 34h48" stroke="currentColor" stroke-width="3" stroke-linecap="round"/></svg>';
+        return '<svg class="must-confirmation-payment-option-icon-fallback-svg" viewBox="0 0 64 40" aria-hidden="true" focusable="false"><path d="M8 16 32 6l24 10v4H8v-4Z" fill="none" stroke="currentColor" stroke-width="3" stroke-linejoin="round"/><path d="M14 22v10M26 22v10M38 22v10M50 22v10" stroke="currentColor" stroke-width="3" stroke-linecap="round"/><path d="M8 34h48" stroke="currentColor" stroke-width="3" stroke-linecap="round"/></svg>';
     }
 
-    if ($payment_method_key === 'pay_at_hotel') {
-        return '<svg viewBox="0 0 64 40" aria-hidden="true" focusable="false"><path d="M10 30V14c0-2.2 1.8-4 4-4h36c2.2 0 4 1.8 4 4v16" fill="none" stroke="currentColor" stroke-width="3"/><path d="M10 22h44M16 18h12" stroke="currentColor" stroke-width="3" stroke-linecap="round"/><path d="M10 30h44M14 34v-4M50 34v-4" stroke="currentColor" stroke-width="3" stroke-linecap="round"/></svg>';
-    }
-
-    return '<svg viewBox="0 0 64 40" aria-hidden="true" focusable="false"><rect x="10" y="10" width="44" height="20" rx="10" fill="none" stroke="currentColor" stroke-width="3"/></svg>';
+    return \sprintf(
+        '<span class="must-confirmation-payment-option-icon-fallback" aria-hidden="true">%s</span>',
+        \esc_html($payment_method_fallback_letter)
+    );
 };
 ?>
 <?php \get_header(); ?>
@@ -310,7 +326,7 @@ $render_payment_method_icon = static function (string $payment_method_key): stri
                                                         <span class="must-confirmation-picker-label" data-picker-selected-label="1"><?php echo \esc_html($country_picker_display_label); ?></span>
                                                     </span>
                                                     <?php if ($dropdown_icon_url !== '') : ?>
-                                                        <img src="<?php echo \esc_url($dropdown_icon_url); ?>" alt="" aria-hidden="true" />
+                                                        <img class="must-picker-chevron" src="<?php echo \esc_url($dropdown_icon_url); ?>" alt="" aria-hidden="true" />
                                                     <?php endif; ?>
                                                 </button>
                                                 <div class="must-confirmation-picker-panel" data-picker-panel="1" hidden>
@@ -406,7 +422,7 @@ $render_payment_method_icon = static function (string $payment_method_key): stri
                                                             <span class="must-confirmation-picker-label" data-picker-selected-label="1"><?php echo \esc_html($phone_picker_display_label); ?></span>
                                                         </span>
                                                         <?php if ($dropdown_icon_url !== '') : ?>
-                                                            <img src="<?php echo \esc_url($dropdown_icon_url); ?>" alt="" aria-hidden="true" />
+                                                            <img class="must-picker-chevron" src="<?php echo \esc_url($dropdown_icon_url); ?>" alt="" aria-hidden="true" />
                                                         <?php endif; ?>
                                                     </button>
                                                     <div class="must-confirmation-picker-panel" data-picker-panel="1" hidden>
@@ -537,15 +553,20 @@ $render_payment_method_icon = static function (string $payment_method_key): stri
                                             <?php
                                             $payment_method_label = isset($payment_method_meta['label']) ? (string) $payment_method_meta['label'] : $payment_method_key;
                                             $payment_method_cta = \MustHotelBooking\Engine\PaymentEngine::getCheckoutPaymentCtaLabel($payment_method_key);
+                                            $payment_method_tooltip = $payment_method_key === 'stripe'
+                                                ? \__('Pay with Stripe', 'must-hotel-booking')
+                                                : ($payment_method_key === 'pay_at_hotel'
+                                                    ? \__('Pay with cash at hotel', 'must-hotel-booking')
+                                                    : \sprintf(\__('Pay with %s', 'must-hotel-booking'), $payment_method_label));
                                             ?>
-                                            <label class="must-confirmation-payment-option must-confirmation-payment-option--<?php echo \esc_attr($payment_method_key); ?>" title="<?php echo \esc_attr($payment_method_label); ?>">
-                                                <input type="radio" name="payment_method" value="<?php echo \esc_attr($payment_method_key); ?>" data-cta-label="<?php echo \esc_attr($payment_method_cta); ?>"<?php checked($payment_method_key, $payment_method); ?> />
+                                            <label class="must-confirmation-payment-option must-confirmation-payment-option--<?php echo \esc_attr($payment_method_key); ?>" title="<?php echo \esc_attr($payment_method_tooltip); ?>">
+                                                <input type="radio" name="payment_method" value="<?php echo \esc_attr($payment_method_key); ?>" data-cta-label="<?php echo \esc_attr($payment_method_cta); ?>" aria-label="<?php echo \esc_attr($payment_method_tooltip); ?>"<?php checked($payment_method_key, $payment_method); ?> />
                                                 <span class="must-confirmation-payment-option-visual" aria-hidden="true">
                                                     <span class="must-confirmation-payment-option-icon">
-                                                        <?php echo $render_payment_method_icon($payment_method_key); ?>
+                                                        <?php echo $render_payment_method_icon($payment_method_key, $payment_method_label); ?>
                                                     </span>
                                                 </span>
-                                                <span class="screen-reader-text"><?php echo \esc_html($payment_method_label); ?></span>
+                                                <span class="screen-reader-text"><?php echo \esc_html($payment_method_tooltip); ?></span>
                                             </label>
                                         <?php endforeach; ?>
                                     </div>

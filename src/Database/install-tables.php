@@ -246,6 +246,19 @@ function install_tables(): void
         UNIQUE KEY room_number (room_number)
     ) {$charset_collate};";
 
+    $tables[] = "CREATE TABLE {$prefix}must_room_housekeeping_statuses (
+        id BIGINT(20) UNSIGNED NOT NULL AUTO_INCREMENT,
+        inventory_room_id BIGINT(20) UNSIGNED NOT NULL,
+        status VARCHAR(30) NOT NULL DEFAULT 'dirty',
+        updated_by BIGINT(20) UNSIGNED NOT NULL DEFAULT 0,
+        updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        PRIMARY KEY  (id),
+        UNIQUE KEY inventory_room_id (inventory_room_id),
+        KEY status (status),
+        KEY updated_by (updated_by),
+        KEY updated_at (updated_at)
+    ) {$charset_collate};";
+
     $tables[] = "CREATE TABLE {$prefix}must_guests (
         id BIGINT(20) UNSIGNED NOT NULL AUTO_INCREMENT,
         first_name VARCHAR(100) NOT NULL DEFAULT '',
@@ -281,6 +294,11 @@ function install_tables(): void
         coupon_code VARCHAR(100) NOT NULL DEFAULT '',
         coupon_discount_total DECIMAL(12,2) NOT NULL DEFAULT 0.00,
         payment_status VARCHAR(50) NOT NULL DEFAULT 'unpaid',
+        checked_in_at DATETIME NULL,
+        checked_out_at DATETIME NULL,
+        cancellation_requested TINYINT(1) NOT NULL DEFAULT 0,
+        cancellation_requested_at DATETIME NULL,
+        cancellation_requested_by BIGINT(20) UNSIGNED NOT NULL DEFAULT 0,
         created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
         PRIMARY KEY  (id),
         KEY room_id (room_id),
@@ -295,7 +313,8 @@ function install_tables(): void
         KEY booking_source (booking_source),
         KEY payment_status (payment_status),
         KEY coupon_id (coupon_id),
-        KEY coupon_code (coupon_code)
+        KEY coupon_code (coupon_code),
+        KEY cancellation_requested (cancellation_requested)
     ) {$charset_collate};";
 
     $tables[] = "CREATE TABLE {$prefix}must_pricing (
@@ -413,11 +432,15 @@ function install_tables(): void
         reference VARCHAR(191) NOT NULL DEFAULT '',
         message VARCHAR(255) NOT NULL DEFAULT '',
         context_json LONGTEXT NULL,
+        actor_user_id BIGINT(20) UNSIGNED NOT NULL DEFAULT 0,
+        actor_role VARCHAR(60) NOT NULL DEFAULT '',
+        actor_ip VARCHAR(45) NOT NULL DEFAULT '',
         created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
         PRIMARY KEY  (id),
         KEY event_type (event_type),
         KEY severity (severity),
         KEY entity_lookup (entity_type, entity_id),
+        KEY actor_user_id (actor_user_id),
         KEY created_at (created_at)
     ) {$charset_collate};";
 

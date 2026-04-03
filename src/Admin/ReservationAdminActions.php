@@ -355,21 +355,41 @@ final class ReservationAdminActions
         string $severity,
         string $message
     ): void {
-        $bookingId = isset($reservation['booking_id']) ? \trim((string) $reservation['booking_id']) : '';
-        $reference = $bookingId !== '' ? $bookingId : ('RES-' . $reservationId);
+        $bookingId   = isset($reservation['booking_id']) ? \trim((string) $reservation['booking_id']) : '';
+        $reference   = $bookingId !== '' ? $bookingId : ('RES-' . $reservationId);
+        $actorUserId = \get_current_user_id();
+        $actorRole   = '';
+        $actorIp     = '';
+
+        if ($actorUserId > 0) {
+            $actorUser = \wp_get_current_user();
+
+            if ($actorUser instanceof \WP_User && !empty($actorUser->roles)) {
+                $actorRole = (string) \reset($actorUser->roles);
+            }
+        }
+
+        if (isset($_SERVER['REMOTE_ADDR'])) {
+            $actorIp = \sanitize_text_field(\wp_unslash((string) $_SERVER['REMOTE_ADDR']));
+        }
 
         $this->activityRepository->createActivity(
             [
-                'event_type' => $eventType,
-                'severity' => $severity,
-                'entity_type' => 'reservation',
-                'entity_id' => $reservationId,
-                'reference' => $reference,
-                'message' => $message,
-                'context_json' => \wp_json_encode(
+                'event_type'    => $eventType,
+                'severity'      => $severity,
+                'entity_type'   => 'reservation',
+                'entity_id'     => $reservationId,
+                'reference'     => $reference,
+                'message'       => $message,
+                'actor_user_id' => $actorUserId,
+                'actor_role'    => $actorRole,
+                'actor_ip'      => $actorIp,
+                'context_json'  => \wp_json_encode(
                     [
                         'reservation_id' => $reservationId,
-                        'booking_id' => $bookingId,
+                        'booking_id'     => $bookingId,
+                        'actor_user_id'  => $actorUserId,
+                        'actor_role'     => $actorRole,
                     ]
                 ),
             ]

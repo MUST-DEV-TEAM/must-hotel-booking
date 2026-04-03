@@ -21,6 +21,7 @@ final class PaymentStatusService
         $reservationStatus = \sanitize_key((string) ($reservation['status'] ?? ''));
         $storedPaymentStatus = \sanitize_key((string) ($reservation['payment_status'] ?? ''));
         $amountPaid = 0.0;
+        $amountRefunded = 0.0;
         $latestPayment = null;
 
         foreach ($paymentRows as $paymentRow) {
@@ -32,8 +33,15 @@ final class PaymentStatusService
                 $latestPayment = $paymentRow;
             }
 
-            if (\sanitize_key((string) ($paymentRow['status'] ?? '')) === 'paid') {
+            $paymentStatus = \sanitize_key((string) ($paymentRow['status'] ?? ''));
+
+            if ($paymentStatus === 'paid') {
                 $amountPaid += (float) ($paymentRow['amount'] ?? 0.0);
+                continue;
+            }
+
+            if ($paymentStatus === 'refunded') {
+                $amountRefunded += (float) ($paymentRow['amount'] ?? 0.0);
             }
         }
 
@@ -42,9 +50,10 @@ final class PaymentStatusService
         $transactionId = (string) ($latestPayment['transaction_id'] ?? '');
         $paidAt = (string) ($latestPayment['paid_at'] ?? '');
         $createdAt = (string) ($latestPayment['created_at'] ?? '');
-        $amountDue = \max(0.0, $total - $amountPaid);
-        $derivedStatus = self::deriveStatus($reservationStatus, $storedPaymentStatus, $latestMethod, $latestStatus, $total, $amountPaid, $amountDue);
-        $warnings = self::buildWarnings($reservationStatus, $storedPaymentStatus, $latestMethod, $latestStatus, $total, $amountPaid, $amountDue, $transactionId, $paidAt, $paymentRows);
+        $netPaid = \max(0.0, $amountPaid - $amountRefunded);
+        $amountDue = \max(0.0, $total - $netPaid);
+        $derivedStatus = self::deriveStatus($reservationStatus, $storedPaymentStatus, $latestMethod, $latestStatus, $total, $netPaid, $amountDue);
+        $warnings = self::buildWarnings($reservationStatus, $storedPaymentStatus, $latestMethod, $latestStatus, $total, $netPaid, $amountDue, $transactionId, $paidAt, $paymentRows);
 
         return [
             'reservation_id' => $reservationId,
@@ -53,7 +62,9 @@ final class PaymentStatusService
             'payment_rows' => $paymentRows,
             'payment_count' => \count($paymentRows),
             'total' => $total,
-            'amount_paid' => \round($amountPaid, 2),
+            'gross_amount_paid' => \round($amountPaid, 2),
+            'amount_refunded' => \round($amountRefunded, 2),
+            'amount_paid' => \round($netPaid, 2),
             'amount_due' => \round($amountDue, 2),
             'method' => $latestMethod,
             'latest_payment_status' => $latestStatus,
@@ -120,7 +131,13 @@ final class PaymentStatusService
     private static function deriveStatus(string $reservationStatus, string $storedPaymentStatus, string $method, string $latestStatus, float $total, float $amountPaid, float $amountDue): string
     {
         if ($storedPaymentStatus === 'refunded' || $latestStatus === 'refunded') {
-            return 'refunded';
+            if ($amountPaid <= 0.0) {
+                return 'refunded';
+            }
+
+            if ($amountDue > 0.0) {
+                return 'partially_paid';
+            }
         }
 
         if ($total <= 0.0) {

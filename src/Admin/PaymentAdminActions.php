@@ -119,6 +119,184 @@ final class PaymentAdminActions
         }
     }
 
+    /**
+     * @return array<string, mixed>
+     */
+    public function recordPostedPayment(int $reservationId, float $amount, string $method = 'pay_at_hotel', string $transactionId = ''): array
+    {
+        $reservation = $this->reservationRepository->getReservation($reservationId);
+
+        if (!\is_array($reservation)) {
+            return [
+                'success' => false,
+                'message' => \__('Reservation not found.', 'must-hotel-booking'),
+            ];
+        }
+
+        $paymentRows = $this->paymentRepository->getPaymentsForReservation($reservationId);
+        $state = PaymentStatusService::buildReservationPaymentState($reservation, $paymentRows);
+        $amount = \round($amount, 2);
+        $amountDue = (float) ($state['amount_due'] ?? 0.0);
+        $reservationStatus = \sanitize_key((string) ($reservation['status'] ?? ''));
+        $method = $this->resolvePortalPostingMethod($method);
+        $transactionId = \sanitize_text_field($transactionId);
+
+        if ($reservationId <= 0) {
+            return [
+                'success' => false,
+                'message' => \__('Reservation not found.', 'must-hotel-booking'),
+            ];
+        }
+
+        if ($amount <= 0.0) {
+            return [
+                'success' => false,
+                'message' => \__('Payment amount must be greater than zero.', 'must-hotel-booking'),
+            ];
+        }
+
+        if ($amountDue <= 0.0) {
+            return [
+                'success' => false,
+                'message' => \__('This reservation does not have an outstanding balance to collect.', 'must-hotel-booking'),
+            ];
+        }
+
+        if ($amount > $amountDue) {
+            return [
+                'success' => false,
+                'message' => \__('Payment amount cannot exceed the current balance due.', 'must-hotel-booking'),
+            ];
+        }
+
+        if (\in_array($reservationStatus, ['cancelled', 'blocked'], true)) {
+            return [
+                'success' => false,
+                'message' => \__('Payments cannot be posted for blocked or cancelled reservations.', 'must-hotel-booking'),
+            ];
+        }
+
+        $paymentId = $this->createLedgerPaymentRow($reservationId, $amount, $method, 'paid', $transactionId);
+
+        if ($paymentId <= 0) {
+            return [
+                'success' => false,
+                'message' => \__('Unable to record the payment ledger row.', 'must-hotel-booking'),
+            ];
+        }
+
+        $updatedAmountPaid = (float) ($state['amount_paid'] ?? 0.0) + $amount;
+        $updatedAmountDue = \max(0.0, (float) ($state['total'] ?? 0.0) - $updatedAmountPaid);
+        $paymentStatus = $updatedAmountDue > 0.0 ? 'partially_paid' : 'paid';
+        $targetReservationStatus = $this->resolveCollectedReservationStatus($reservationStatus);
+
+        BookingStatusEngine::updateReservationStatuses([$reservationId], $targetReservationStatus, $paymentStatus);
+        $this->dispatchPaymentRecordedEvent($paymentId, $reservationId, $amount, $method, 'paid', $transactionId);
+
+        return [
+            'success' => true,
+            'notice' => $paymentStatus === 'paid' ? 'payment_posted' : 'payment_partially_posted',
+            'payment_id' => $paymentId,
+            'payment_status' => $paymentStatus,
+        ];
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    public function refundRecordedPayment(int $reservationId, float $amount): array
+    {
+        $reservation = $this->reservationRepository->getReservation($reservationId);
+
+        if (!\is_array($reservation)) {
+            return [
+                'success' => false,
+                'message' => \__('Reservation not found.', 'must-hotel-booking'),
+            ];
+        }
+
+        $paymentRows = $this->paymentRepository->getPaymentsForReservation($reservationId);
+        $state = PaymentStatusService::buildReservationPaymentState($reservation, $paymentRows);
+        $amount = \round($amount, 2);
+        $amountPaid = (float) ($state['amount_paid'] ?? 0.0);
+        $method = \sanitize_key((string) ($state['method'] ?? ''));
+        $transactionId = \sanitize_text_field((string) ($state['transaction_id'] ?? ''));
+
+        if ($amount <= 0.0) {
+            return [
+                'success' => false,
+                'message' => \__('Refund amount must be greater than zero.', 'must-hotel-booking'),
+            ];
+        }
+
+        if ($amountPaid <= 0.0) {
+            return [
+                'success' => false,
+                'message' => \__('There is no recorded paid balance available to refund.', 'must-hotel-booking'),
+            ];
+        }
+
+        if ($amount > $amountPaid) {
+            return [
+                'success' => false,
+                'message' => \__('Refund amount cannot exceed the recorded paid balance.', 'must-hotel-booking'),
+            ];
+        }
+
+        if ($method !== 'stripe') {
+            return [
+                'success' => false,
+                'message' => \__('Manual pay-at-hotel refunds must still be handled outside the plugin.', 'must-hotel-booking'),
+            ];
+        }
+
+        if ($transactionId === '') {
+            return [
+                'success' => false,
+                'message' => \__('This Stripe payment is missing its transaction reference and cannot be refunded from the portal.', 'must-hotel-booking'),
+            ];
+        }
+
+        $refundResult = PaymentEngine::refundPayment(
+            $method,
+            [$reservationId],
+            $amount,
+            [
+                'transaction_id' => $transactionId,
+                'currency' => MustBookingConfig::get_currency(),
+            ]
+        );
+
+        if (empty($refundResult['success'])) {
+            return [
+                'success' => false,
+                'message' => isset($refundResult['message']) && (string) $refundResult['message'] !== ''
+                    ? (string) $refundResult['message']
+                    : \__('Unable to issue the refund.', 'must-hotel-booking'),
+            ];
+        }
+
+        $paymentId = $this->createLedgerPaymentRow($reservationId, $amount, $method, 'refunded', $transactionId);
+
+        $updatedAmountPaid = \max(0.0, $amountPaid - $amount);
+        $updatedAmountDue = \max(0.0, (float) ($state['total'] ?? 0.0) - $updatedAmountPaid);
+        $paymentStatus = $updatedAmountPaid <= 0.0 ? 'refunded' : ($updatedAmountDue > 0.0 ? 'partially_paid' : 'paid');
+        $currentStatus = \sanitize_key((string) ($reservation['status'] ?? 'confirmed'));
+
+        $this->reservationRepository->updateReservationStatus($reservationId, $currentStatus, $paymentStatus);
+
+        if ($paymentId > 0) {
+            $this->dispatchPaymentRecordedEvent($paymentId, $reservationId, $amount, $method, 'refunded', $transactionId);
+        }
+
+        return [
+            'success' => true,
+            'notice' => 'payment_refunded',
+            'payment_id' => $paymentId,
+            'payment_status' => $paymentStatus,
+        ];
+    }
+
     private function markPaid(int $reservationId, array $reservation, array $state): bool
     {
         $currentStatus = \sanitize_key((string) ($reservation['status'] ?? ''));
@@ -200,6 +378,58 @@ final class PaymentAdminActions
         }
 
         return $fallback;
+    }
+
+    private function resolvePortalPostingMethod(string $method): string
+    {
+        $method = \sanitize_key($method);
+
+        return $method === 'pay_at_hotel' ? 'pay_at_hotel' : 'pay_at_hotel';
+    }
+
+    private function resolveCollectedReservationStatus(string $currentStatus): string
+    {
+        if (\in_array($currentStatus, ['pending', 'pending_payment', 'payment_failed', 'expired'], true)) {
+            return 'confirmed';
+        }
+
+        return $currentStatus !== '' ? $currentStatus : 'confirmed';
+    }
+
+    private function createLedgerPaymentRow(int $reservationId, float $amount, string $method, string $status, string $transactionId = ''): int
+    {
+        $now = \current_time('mysql');
+
+        return $this->paymentRepository->createPayment(
+            [
+                'reservation_id' => $reservationId,
+                'amount' => \round($amount, 2),
+                'currency' => MustBookingConfig::get_currency(),
+                'method' => $method,
+                'status' => $status,
+                'transaction_id' => $transactionId,
+                'paid_at' => $now,
+                'created_at' => $now,
+            ]
+        );
+    }
+
+    private function dispatchPaymentRecordedEvent(int $paymentId, int $reservationId, float $amount, string $method, string $status, string $transactionId = ''): void
+    {
+        \do_action(
+            'must_hotel_booking/payment_recorded',
+            [
+                'payment_id' => $paymentId,
+                'reservation_id' => $reservationId,
+                'method' => $method,
+                'status' => $status,
+                'amount' => \round($amount, 2),
+                'transaction_id' => $transactionId,
+                'paid_at' => \current_time('mysql'),
+                'created_at' => \current_time('mysql'),
+                'is_update' => false,
+            ]
+        );
     }
 
     /**

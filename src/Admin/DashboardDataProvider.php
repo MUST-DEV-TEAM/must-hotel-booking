@@ -4,6 +4,7 @@ namespace MustHotelBooking\Admin;
 
 use MustHotelBooking\Core\MustBookingConfig;
 use MustHotelBooking\Core\PaymentMethodRegistry;
+use MustHotelBooking\Core\StaffAccess;
 use MustHotelBooking\Engine\EmailEngine;
 use MustHotelBooking\Engine\PaymentEngine;
 
@@ -80,6 +81,7 @@ final class DashboardDataProvider
         return [
             'generated_at' => $now->format('Y-m-d H:i:s'),
             'kpis' => $this->buildKpis($summary, $blockedUnits, $occupancyPercent, $unitCount, $currency, $revenueAmount, $revenueDescriptor),
+            'approval_items' => $this->buildApprovalItems(),
             'attention_items' => $this->buildAttentionItems($today, $now),
             'health_items' => $this->buildHealthItems(),
             'recent_reservations' => $this->buildRecentReservations($currency),
@@ -350,6 +352,68 @@ final class DashboardDataProvider
         );
 
         return \array_slice($items, 0, 12);
+    }
+
+    /**
+     * @return array<int, array<string, string>>
+     */
+    private function buildApprovalItems(): array
+    {
+        if (!\current_user_can(StaffAccess::CAP_RESERVATION_CANCEL) && !\current_user_can('manage_options')) {
+            return [];
+        }
+
+        $items = [];
+
+        foreach ($this->reservationRepository->getPendingCancellationRequestRows(5) as $reservation) {
+            $reservationId = isset($reservation['id']) ? (int) $reservation['id'] : 0;
+            $requesterName = \__('Staff', 'must-hotel-booking');
+            $requesterId = isset($reservation['cancellation_requested_by']) ? (int) $reservation['cancellation_requested_by'] : 0;
+
+            if ($requesterId > 0) {
+                $requester = \get_userdata($requesterId);
+
+                if ($requester instanceof \WP_User && $requester->display_name !== '') {
+                    $requesterName = (string) $requester->display_name;
+                }
+            }
+
+            $requestedAt = \trim((string) ($reservation['cancellation_requested_at'] ?? ''));
+            $requestedAtLabel = $requestedAt !== ''
+                ? \mysql2date(\get_option('date_format') . ' ' . \get_option('time_format'), $requestedAt)
+                : '';
+            $guestName = $this->formatGuestName($reservation);
+            $roomName = isset($reservation['room_name']) && (string) $reservation['room_name'] !== ''
+                ? (string) $reservation['room_name']
+                : \__('Unassigned', 'must-hotel-booking');
+            $stayRange = \trim((string) ($reservation['checkin'] ?? '') . ' - ' . (string) ($reservation['checkout'] ?? ''));
+            $message = \sprintf(
+                /* translators: 1: staff member name, 2: request time, 3: guest name, 4: room name */
+                \__('Requested by %1$s%2$s for %3$s in %4$s.', 'must-hotel-booking'),
+                $requesterName,
+                $requestedAtLabel !== '' ? \sprintf(\__(' on %s', 'must-hotel-booking'), $requestedAtLabel) : '',
+                $guestName,
+                $roomName
+            );
+
+            if ($stayRange !== '-') {
+                $message .= ' ' . \sprintf(
+                    /* translators: %s: stay date range */
+                    \__('Stay: %s.', 'must-hotel-booking'),
+                    $stayRange
+                );
+            }
+
+            $items[] = [
+                'severity' => 'warning',
+                'label' => \__('Cancellation approval needed', 'must-hotel-booking'),
+                'message' => $message,
+                'reference' => $this->formatReservationReference($reservation),
+                'action_url' => $reservationId > 0 ? $this->getReservationViewUrl($reservationId) : get_admin_reservations_page_url(),
+            ];
+        }
+
+        return $items;
     }
 
     /**
