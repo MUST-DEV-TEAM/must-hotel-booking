@@ -4,7 +4,7 @@ Tags: hotel, booking, reservation, accommodation
 Requires at least: 5.0
 Tested up to: 6.0
 Requires PHP: 7.4
-Stable tag: 0.3.43
+Stable tag: 0.3.44
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -31,6 +31,12 @@ Main features include:
 5. When updating, upload the new release ZIP or use the configured updater, then review **Diagnostics & Maintenance** after the update completes.
 
 == Changelog ==
+
+
+= 0.3.44 =
+* Added an admin-only Staff Users settings tab for creating, activating, deactivating, and deleting staff portal accounts without leaving the plugin settings workspace.
+* Added plugin-managed staff account disable handling so disabled staff users are blocked from logging into the /staff/ portal and are signed out cleanly with a clear message.
+* Improved staff-access management internals for portal-controlled user status, while keeping administrator accounts outside the staff-disable path.
 
 = 0.3.43 =
 * Completed the next portal-operations milestone by adding stay-date correction and no-show handling in Reservations, supervisor and manager block/rule control in Rooms & Availability, and a fuller Housekeeping workflow with assignments, maintenance issues, and shift handoff.

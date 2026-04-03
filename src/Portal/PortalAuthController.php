@@ -24,6 +24,10 @@ final class PortalAuthController
             $notices[] = \__('You have been signed out of the staff portal.', 'must-hotel-booking');
         }
 
+        if (!empty($_GET['mhb_disabled'])) {
+            $errors[] = \__('Your staff account has been disabled. Please contact an administrator.', 'must-hotel-booking');
+        }
+
         if (isset($_POST['must_portal_action']) && (string) \wp_unslash($_POST['must_portal_action']) === 'portal_login') {
             $values['identifier'] = \sanitize_text_field((string) \wp_unslash($_POST['portal_identifier'] ?? ''));
             $values['remember'] = !empty($_POST['portal_remember']);
@@ -62,6 +66,9 @@ final class PortalAuthController
                 } elseif (!$portalEnabled && !\user_can($user, 'manage_options')) {
                     \wp_logout();
                     $errors[] = \__('The staff portal is currently disabled.', 'must-hotel-booking');
+                } elseif (StaffAccess::userHasPortalRole($user) && StaffAccess::isStaffUserDisabled($user)) {
+                    \wp_logout();
+                    $errors[] = \__('Your staff account has been disabled. Please contact an administrator.', 'must-hotel-booking');
                 } elseif (!StaffAccess::userCanAccessPortal($user)) {
                     \wp_logout();
                     $errors[] = \__('Your account does not have staff portal access.', 'must-hotel-booking');

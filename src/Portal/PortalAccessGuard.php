@@ -25,6 +25,12 @@ final class PortalAccessGuard
                 exit;
             }
 
+            if (StaffAccess::isStaffUserDisabled()) {
+                \wp_logout();
+                \wp_safe_redirect(\add_query_arg('mhb_disabled', '1', PortalRouter::getLoginUrl()));
+                exit;
+            }
+
             if (!StaffAccess::userCanAccessPortal()) {
                 \wp_die(\esc_html__('Your account does not have access to the staff portal.', 'must-hotel-booking'));
             }

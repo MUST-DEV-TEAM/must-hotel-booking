@@ -26,6 +26,7 @@ final class SettingsPage
             'checkin_checkout' => ['label' => \__('Check-in / Check-out', 'must-hotel-booking'), 'icon' => 'dashicons-clock'],
             'payments_summary' => ['label' => \__('Payments Summary', 'must-hotel-booking'), 'icon' => 'dashicons-money-alt'],
             'staff_access' => ['label' => \__('Staff & Access', 'must-hotel-booking'), 'icon' => 'dashicons-groups'],
+            'staff_users' => ['label' => \__('Staff Users', 'must-hotel-booking'), 'icon' => 'dashicons-admin-users'],
             'branding' => ['label' => \__('Frontend & Branding', 'must-hotel-booking'), 'icon' => 'dashicons-art'],
             'managed_pages' => ['label' => \__('Managed Pages', 'must-hotel-booking'), 'icon' => 'dashicons-admin-page'],
             'notifications_summary' => ['label' => \__('Notifications & Emails Summary', 'must-hotel-booking'), 'icon' => 'dashicons-email-alt'],
@@ -230,6 +231,10 @@ final class SettingsPage
             return self::processMaintenanceAction($source, $persist);
         }
 
+        if ($action === 'staff_user_action') {
+            return self::processStaffUserAction($source, $persist);
+        }
+
         if ($action === 'dangerous_reset_action') {
             return self::processDangerousResetAction($source, $persist);
         }
@@ -416,6 +421,172 @@ final class SettingsPage
             'errors' => [],
             'forms' => [],
         ];
+    }
+
+    /**
+     * Handle create / activate / deactivate / delete actions for plugin staff users.
+     *
+     * @param array<string, mixed> $source
+     * @return array<string, mixed>
+     */
+    private static function processStaffUserAction(array $source, bool $persist): array
+    {
+        $tab = 'staff_users';
+
+        if (!\current_user_can('manage_options')) {
+            return [
+                'tab' => $tab,
+                'notice' => '',
+                'errors' => [\__('You do not have permission to manage staff users.', 'must-hotel-booking')],
+                'forms' => [],
+            ];
+        }
+
+        $nonce = isset($source['must_settings_nonce']) ? (string) \wp_unslash($source['must_settings_nonce']) : '';
+
+        if (!\wp_verify_nonce($nonce, 'must_settings_staff_users_action')) {
+            return [
+                'tab' => $tab,
+                'notice' => '',
+                'errors' => [\__('Security check failed. Please try again.', 'must-hotel-booking')],
+                'forms' => [],
+            ];
+        }
+
+        $subAction = isset($source['staff_user_sub_action']) ? \sanitize_key((string) \wp_unslash($source['staff_user_sub_action'])) : '';
+        $currentUserId = (int) \get_current_user_id();
+
+        if ($subAction === 'create') {
+            $username  = isset($source['new_staff_username']) ? \sanitize_user((string) \wp_unslash($source['new_staff_username'])) : '';
+            $email     = isset($source['new_staff_email']) ? \sanitize_email((string) \wp_unslash($source['new_staff_email'])) : '';
+            $password  = isset($source['new_staff_password']) ? (string) \wp_unslash($source['new_staff_password']) : '';
+            $roleSlug  = isset($source['new_staff_role']) ? \sanitize_key((string) \wp_unslash($source['new_staff_role'])) : '';
+
+            $validRoles = StaffAccess::getPortalRoleSlugs();
+
+            if ($username === '') {
+                return ['tab' => $tab, 'notice' => '', 'errors' => [\__('Username is required.', 'must-hotel-booking')], 'forms' => []];
+            }
+
+            if ($email === '' || !\is_email($email)) {
+                return ['tab' => $tab, 'notice' => '', 'errors' => [\__('A valid email address is required.', 'must-hotel-booking')], 'forms' => []];
+            }
+
+            if (\strlen($password) < 8) {
+                return ['tab' => $tab, 'notice' => '', 'errors' => [\__('Password must be at least 8 characters.', 'must-hotel-booking')], 'forms' => []];
+            }
+
+            if (!\in_array($roleSlug, $validRoles, true)) {
+                return ['tab' => $tab, 'notice' => '', 'errors' => [\__('Please select a valid staff role.', 'must-hotel-booking')], 'forms' => []];
+            }
+
+            if (\username_exists($username)) {
+                return ['tab' => $tab, 'notice' => '', 'errors' => [\__('That username is already taken. Please choose another.', 'must-hotel-booking')], 'forms' => []];
+            }
+
+            if (\email_exists($email)) {
+                return ['tab' => $tab, 'notice' => '', 'errors' => [\__('That email address is already registered.', 'must-hotel-booking')], 'forms' => []];
+            }
+
+            if ($persist) {
+                $userId = \wp_create_user($username, $password, $email);
+
+                if (\is_wp_error($userId)) {
+                    return ['tab' => $tab, 'notice' => '', 'errors' => [$userId->get_error_message()], 'forms' => []];
+                }
+
+                $newUser = \get_user_by('ID', $userId);
+
+                if ($newUser instanceof \WP_User) {
+                    $newUser->set_role($roleSlug);
+                }
+            }
+
+            if ($persist) {
+                // Store credentials in a short-lived, admin-scoped transient for one-time display.
+                // Nothing sensitive goes into the redirect URL.
+                $transientKey = 'mhb_staff_created_creds_' . \get_current_user_id();
+                \set_transient($transientKey, [
+                    'username' => $username,
+                    'email'    => $email,
+                    'role'     => $roleSlug,
+                    'password' => $password,
+                ], 120);
+            }
+
+            return [
+                'tab'    => $tab,
+                'notice' => 'staff_user_created',
+                'errors' => [],
+                'forms'  => [],
+            ];
+        }
+
+        if ($subAction === 'activate' || $subAction === 'deactivate') {
+            $targetId = isset($source['staff_user_id']) ? (int) $source['staff_user_id'] : 0;
+            $targetUser = $targetId > 0 ? \get_user_by('ID', $targetId) : false;
+
+            if (!$targetUser instanceof \WP_User) {
+                return ['tab' => $tab, 'notice' => '', 'errors' => [\__('Staff user not found.', 'must-hotel-booking')], 'forms' => []];
+            }
+
+            if (!StaffAccess::userHasPortalRole($targetUser)) {
+                return ['tab' => $tab, 'notice' => '', 'errors' => [\__('This user is not a plugin staff user.', 'must-hotel-booking')], 'forms' => []];
+            }
+
+            if ($subAction === 'deactivate' && $targetId === $currentUserId) {
+                return ['tab' => $tab, 'notice' => '', 'errors' => [\__('You cannot deactivate your own account.', 'must-hotel-booking')], 'forms' => []];
+            }
+
+            if ($persist) {
+                if ($subAction === 'deactivate') {
+                    \update_user_meta($targetId, StaffAccess::USERMETA_STAFF_DISABLED, '1');
+                } else {
+                    \delete_user_meta($targetId, StaffAccess::USERMETA_STAFF_DISABLED);
+                }
+            }
+
+            return [
+                'tab' => $tab,
+                'notice' => $subAction === 'deactivate' ? 'staff_user_deactivated' : 'staff_user_activated',
+                'errors' => [],
+                'forms' => [],
+            ];
+        }
+
+        if ($subAction === 'delete') {
+            $targetId = isset($source['staff_user_id']) ? (int) $source['staff_user_id'] : 0;
+            $targetUser = $targetId > 0 ? \get_user_by('ID', $targetId) : false;
+
+            if (!$targetUser instanceof \WP_User) {
+                return ['tab' => $tab, 'notice' => '', 'errors' => [\__('Staff user not found.', 'must-hotel-booking')], 'forms' => []];
+            }
+
+            if (\user_can($targetUser, 'manage_options')) {
+                return ['tab' => $tab, 'notice' => '', 'errors' => [\__('Administrator accounts cannot be deleted through this tool.', 'must-hotel-booking')], 'forms' => []];
+            }
+
+            if (!StaffAccess::userHasPortalRole($targetUser)) {
+                return ['tab' => $tab, 'notice' => '', 'errors' => [\__('This user does not have a plugin staff role and cannot be deleted here.', 'must-hotel-booking')], 'forms' => []];
+            }
+
+            if ($targetId === $currentUserId) {
+                return ['tab' => $tab, 'notice' => '', 'errors' => [\__('You cannot delete your own account.', 'must-hotel-booking')], 'forms' => []];
+            }
+
+            if ($persist) {
+                \wp_delete_user($targetId);
+            }
+
+            return [
+                'tab' => $tab,
+                'notice' => 'staff_user_deleted',
+                'errors' => [],
+                'forms' => [],
+            ];
+        }
+
+        return ['tab' => $tab, 'notice' => '', 'errors' => [\__('Unknown action.', 'must-hotel-booking')], 'forms' => []];
     }
 
     /**
@@ -1245,6 +1416,9 @@ final class SettingsPage
             'checkin_checkout_saved' => \__('Check-in and check-out settings saved.', 'must-hotel-booking'),
             'payments_summary_saved' => \__('Payment summary settings saved.', 'must-hotel-booking'),
             'staff_access_saved' => \__('Staff access settings saved and role capabilities synced.', 'must-hotel-booking'),
+            'staff_user_activated' => \__('Staff user activated. They can now log in to the staff portal.', 'must-hotel-booking'),
+            'staff_user_deactivated' => \__('Staff user deactivated. They are blocked from the staff portal.', 'must-hotel-booking'),
+            'staff_user_deleted' => \__('Staff user deleted.', 'must-hotel-booking'),
             'branding_saved' => \__('Branding settings saved.', 'must-hotel-booking'),
             'managed_pages_saved' => \__('Managed page assignments saved.', 'must-hotel-booking'),
             'notifications_summary_saved' => \__('Notification and email summary settings saved.', 'must-hotel-booking'),
@@ -1253,6 +1427,37 @@ final class SettingsPage
             'hotel_operational_reset_completed' => \__('Hotel operational data reset completed.', 'must-hotel-booking'),
             'plugin_factory_reset_completed' => \__('Full plugin factory reset completed.', 'must-hotel-booking'),
         ];
+
+        if ($notice === 'staff_user_created') {
+            // Read credentials from the short-lived transient, then delete it immediately
+            // so they are shown exactly once and never appear in the URL.
+            $transientKey = 'mhb_staff_created_creds_' . \get_current_user_id();
+
+            /** @var array<string, string>|false $creds */
+            $creds = \get_transient($transientKey);
+            \delete_transient($transientKey);
+
+            if (\is_array($creds) && isset($creds['username'], $creds['password'])) {
+                $roleLabels = StaffAccess::getRoleLabels();
+                $roleLabel  = $roleLabels[$creds['role'] ?? ''] ?? (string) ($creds['role'] ?? '');
+
+                echo '<div class="notice notice-success">';
+                echo '<p><strong>' . \esc_html__('Staff user created successfully.', 'must-hotel-booking') . '</strong></p>';
+                echo '<table style="border-collapse:collapse;margin-bottom:8px;">';
+                echo '<tr><td style="padding:2px 12px 2px 0;font-weight:600;">' . \esc_html__('Username', 'must-hotel-booking') . '</td><td><code>' . \esc_html($creds['username']) . '</code></td></tr>';
+                echo '<tr><td style="padding:2px 12px 2px 0;font-weight:600;">' . \esc_html__('Email', 'must-hotel-booking') . '</td><td><code>' . \esc_html($creds['email'] ?? '') . '</code></td></tr>';
+                echo '<tr><td style="padding:2px 12px 2px 0;font-weight:600;">' . \esc_html__('Role', 'must-hotel-booking') . '</td><td>' . \esc_html($roleLabel) . '</td></tr>';
+                echo '<tr><td style="padding:2px 12px 2px 0;font-weight:600;">' . \esc_html__('Password', 'must-hotel-booking') . '</td><td><code>' . \esc_html($creds['password']) . '</code></td></tr>';
+                echo '</table>';
+                echo '<p style="color:#666;font-size:12px;">' . \esc_html__('Save these credentials — the password will not be shown again here.', 'must-hotel-booking') . '</p>';
+                echo '</div>';
+            } else {
+                // Transient expired or already consumed (e.g. page refresh after creation).
+                echo '<div class="notice notice-success"><p>' . \esc_html__('Staff user created successfully. Credentials were shown once and are no longer available here.', 'must-hotel-booking') . '</p></div>';
+            }
+
+            return;
+        }
 
         if ($notice === 'inventory_mirror_repaired') {
             $legacyTypes = isset($_GET['legacy_types']) ? \absint(\wp_unslash($_GET['legacy_types'])) : 0;
@@ -1436,6 +1641,11 @@ final class SettingsPage
 
         if ($activeTab === 'staff_access') {
             self::renderStaffAccessTab($forms['staff_access']);
+            return;
+        }
+
+        if ($activeTab === 'staff_users') {
+            self::renderStaffUsersTab();
             return;
         }
 
@@ -1873,6 +2083,134 @@ final class SettingsPage
         echo '</tbody></table></div>';
         self::renderPanelEnd();
         self::renderFormEnd(\__('Save Staff Access Settings', 'must-hotel-booking'));
+    }
+
+    private static function renderStaffUsersTab(): void
+    {
+        $actionUrl = get_admin_settings_page_url(['tab' => 'staff_users']);
+        $roleLabels = StaffAccess::getRoleLabels();
+
+        // ---- Create staff user panel ----------------------------------------
+        self::renderPanelStart(
+            \__('Create Staff User', 'must-hotel-booking'),
+            \__('Create a WordPress user and assign a plugin staff role. This is for plugin portal access only — it does not affect general WordPress user management.', 'must-hotel-booking')
+        );
+
+        echo '<form method="post" action="' . \esc_url($actionUrl) . '" class="must-settings-form">';
+        \wp_nonce_field('must_settings_staff_users_action', 'must_settings_nonce');
+        echo '<input type="hidden" name="must_settings_action" value="staff_user_action" />';
+        echo '<input type="hidden" name="staff_user_sub_action" value="create" />';
+
+        echo '<table class="form-table" role="presentation">';
+        echo '<tr><th scope="row"><label for="new_staff_username">' . \esc_html__('Username', 'must-hotel-booking') . '</label></th>';
+        echo '<td><input type="text" id="new_staff_username" name="new_staff_username" class="regular-text" required autocomplete="off" /></td></tr>';
+
+        echo '<tr><th scope="row"><label for="new_staff_email">' . \esc_html__('Email', 'must-hotel-booking') . '</label></th>';
+        echo '<td><input type="email" id="new_staff_email" name="new_staff_email" class="regular-text" required autocomplete="off" /></td></tr>';
+
+        echo '<tr><th scope="row"><label for="new_staff_password">' . \esc_html__('Password', 'must-hotel-booking') . '</label></th>';
+        echo '<td><input type="text" id="new_staff_password" name="new_staff_password" class="regular-text" required autocomplete="off" placeholder="' . \esc_attr__('Min. 8 characters', 'must-hotel-booking') . '" /></td></tr>';
+
+        echo '<tr><th scope="row"><label for="new_staff_role">' . \esc_html__('Role', 'must-hotel-booking') . '</label></th>';
+        echo '<td><select id="new_staff_role" name="new_staff_role">';
+
+        foreach ($roleLabels as $slug => $label) {
+            echo '<option value="' . \esc_attr($slug) . '">' . \esc_html($label) . '</option>';
+        }
+
+        echo '</select></td></tr>';
+        echo '</table>';
+
+        echo '<p class="submit"><button type="submit" class="button button-primary">' . \esc_html__('Create Staff User', 'must-hotel-booking') . '</button></p>';
+        echo '</form>';
+        self::renderPanelEnd();
+
+        // ---- Existing staff users panel --------------------------------------
+        $staffUsers = \get_users(['role__in' => StaffAccess::getPortalRoleSlugs(), 'orderby' => 'login', 'order' => 'ASC']);
+
+        self::renderPanelStart(
+            \__('Plugin Staff Users', 'must-hotel-booking'),
+            \__('These are WordPress accounts that hold a plugin staff role. Deactivating a user blocks them from the staff portal only — it does not deactivate their WordPress account. Delete permanently removes the WordPress user.', 'must-hotel-booking')
+        );
+
+        if (empty($staffUsers)) {
+            echo '<p>' . \esc_html__('No staff users found. Create one above.', 'must-hotel-booking') . '</p>';
+        } else {
+            echo '<table class="wp-list-table widefat fixed striped" style="margin-top:12px;">';
+            echo '<thead><tr>';
+            echo '<th>' . \esc_html__('Username', 'must-hotel-booking') . '</th>';
+            echo '<th>' . \esc_html__('Display Name', 'must-hotel-booking') . '</th>';
+            echo '<th>' . \esc_html__('Email', 'must-hotel-booking') . '</th>';
+            echo '<th>' . \esc_html__('Role', 'must-hotel-booking') . '</th>';
+            echo '<th>' . \esc_html__('Status', 'must-hotel-booking') . '</th>';
+            echo '<th>' . \esc_html__('Actions', 'must-hotel-booking') . '</th>';
+            echo '</tr></thead><tbody>';
+
+            $currentUserId = (int) \get_current_user_id();
+
+            foreach ($staffUsers as $staffUser) {
+                $userId   = (int) $staffUser->ID;
+                $disabled = StaffAccess::isStaffUserDisabled($staffUser);
+                $userRole = '';
+
+                foreach ($staffUser->roles as $roleSlug) {
+                    if (isset($roleLabels[$roleSlug])) {
+                        $userRole = $roleLabels[$roleSlug];
+                        break;
+                    }
+                }
+
+                echo '<tr>';
+                echo '<td><strong>' . \esc_html($staffUser->user_login) . '</strong></td>';
+                echo '<td>' . \esc_html($staffUser->display_name) . '</td>';
+                echo '<td>' . \esc_html($staffUser->user_email) . '</td>';
+                echo '<td>' . \esc_html($userRole) . '</td>';
+                echo '<td>';
+                self::renderBadge($disabled ? 'disabled' : 'active');
+                echo '</td>';
+                echo '<td>';
+
+                $isSelf = $userId === $currentUserId;
+
+                // Activate / Deactivate
+                $toggleAction = $disabled ? 'activate' : 'deactivate';
+                $toggleLabel  = $disabled ? \__('Activate', 'must-hotel-booking') : \__('Deactivate', 'must-hotel-booking');
+
+                if ($isSelf && !$disabled) {
+                    echo '<span style="color:#999;">' . \esc_html__('(current user)', 'must-hotel-booking') . '</span> ';
+                } else {
+                    echo '<form method="post" action="' . \esc_url($actionUrl) . '" style="display:inline;">';
+                    \wp_nonce_field('must_settings_staff_users_action', 'must_settings_nonce');
+                    echo '<input type="hidden" name="must_settings_action" value="staff_user_action" />';
+                    echo '<input type="hidden" name="staff_user_sub_action" value="' . \esc_attr($toggleAction) . '" />';
+                    echo '<input type="hidden" name="staff_user_id" value="' . \esc_attr((string) $userId) . '" />';
+                    echo '<button type="submit" class="button button-small">' . \esc_html($toggleLabel) . '</button>';
+                    echo '</form> ';
+                }
+
+                // Delete
+                if (!$isSelf) {
+                    $deleteConfirm = \sprintf(
+                        /* translators: %s: username */
+                        \__('Permanently delete user "%s"? This will remove their WordPress account. This cannot be undone.', 'must-hotel-booking'),
+                        $staffUser->user_login
+                    );
+                    echo '<form method="post" action="' . \esc_url($actionUrl) . '" style="display:inline;">';
+                    \wp_nonce_field('must_settings_staff_users_action', 'must_settings_nonce');
+                    echo '<input type="hidden" name="must_settings_action" value="staff_user_action" />';
+                    echo '<input type="hidden" name="staff_user_sub_action" value="delete" />';
+                    echo '<input type="hidden" name="staff_user_id" value="' . \esc_attr((string) $userId) . '" />';
+                    echo '<button type="submit" class="button button-small" style="color:#b32d2e;" onclick="return confirm(\'' . \esc_js($deleteConfirm) . '\')">' . \esc_html__('Delete', 'must-hotel-booking') . '</button>';
+                    echo '</form>';
+                }
+
+                echo '</td></tr>';
+            }
+
+            echo '</tbody></table>';
+        }
+
+        self::renderPanelEnd();
     }
 
     /**

@@ -4,6 +4,9 @@ namespace MustHotelBooking\Core;
 
 final class StaffAccess
 {
+    // User meta key used to disable individual staff portal access (plugin-managed, not WP deactivation)
+    public const USERMETA_STAFF_DISABLED = 'mhb_staff_disabled';
+
     // Current roles
     public const ROLE_FRONT_DESK  = 'mhb_front_desk';
     public const ROLE_SUPERVISOR  = 'mhb_supervisor';
@@ -661,7 +664,30 @@ final class StaffAccess
             return true;
         }
 
+        if (self::isStaffUserDisabled($user)) {
+            return false;
+        }
+
         return \user_can($user, self::CAP_ACCESS_PORTAL);
+    }
+
+    /**
+     * Returns true if this staff user has been plugin-disabled for portal access.
+     * Admins (manage_options) are never considered disabled by this check.
+     */
+    public static function isStaffUserDisabled(?\WP_User $user = null): bool
+    {
+        $user = $user instanceof \WP_User ? $user : \wp_get_current_user();
+
+        if (!$user instanceof \WP_User || $user->ID <= 0) {
+            return false;
+        }
+
+        if (\user_can($user, 'manage_options')) {
+            return false;
+        }
+
+        return (bool) \get_user_meta($user->ID, self::USERMETA_STAFF_DISABLED, true);
     }
 
     public static function userCanAccessPortalModule(string $moduleKey, ?\WP_User $user = null): bool

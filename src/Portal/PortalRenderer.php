@@ -219,12 +219,21 @@ final class PortalRenderer
     private static function renderDocumentStart(string $title, array $branding, string $bodyClass): void
     {
         $styles = [
+            // Configurable brand tokens (user-editable via branding settings)
             '--must-portal-primary:' . \esc_attr((string) ($branding['primary_color'] ?? '#0f766e')),
             '--must-portal-secondary:' . \esc_attr((string) ($branding['secondary_color'] ?? '#155e75')),
             '--must-portal-accent:' . \esc_attr((string) ($branding['accent_color'] ?? '#f59e0b')),
             '--must-portal-text:' . \esc_attr((string) ($branding['text_color'] ?? '#16212b')),
             '--must-portal-radius:' . \esc_attr((string) ($branding['border_radius'] ?? '18')) . 'px',
             '--must-portal-font:' . \esc_attr((string) ($branding['font_family'] ?? 'Instrument Sans')) . ', system-ui, sans-serif',
+            // Shell design tokens — fixed, not user-configurable
+            '--must-portal-shell-bg:#060c1e',
+            '--must-portal-gold:#c9a254',
+            '--must-portal-gold-faint:rgba(201,162,84,0.12)',
+            '--must-portal-gold-border:rgba(201,162,84,0.25)',
+            '--must-portal-canvas:#f6f7f9',
+            '--must-portal-border:#e4e8ed',
+            '--must-portal-navy:#0e1d3a',
         ];
 
         echo '<!DOCTYPE html><html ' . \get_language_attributes() . '><head>';
