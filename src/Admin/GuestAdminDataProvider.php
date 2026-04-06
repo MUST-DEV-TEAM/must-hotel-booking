@@ -433,6 +433,7 @@ final class GuestAdminDataProvider
                 'name' => get_admin_guest_full_name($row),
                 'email' => (string) ($row['email'] ?? ''),
                 'phone' => (string) ($row['phone'] ?? ''),
+                'match_type' => (string) ($row['match_type'] ?? 'suspected'),
                 'detail_url' => get_admin_guests_page_url(['guest_id' => (int) ($row['id'] ?? 0)]),
             ];
         }

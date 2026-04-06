@@ -50,7 +50,7 @@ if ($activeTab === 'new-booking') {
     echo '<h2>' . \esc_html__('Walk-in', 'must-hotel-booking') . '</h2>';
     echo '<p>' . \esc_html__('Walk-in is inactive for now. Use New Booking for manual desk reservations.', 'must-hotel-booking') . '</p>';
     echo '</div>';
-    echo '<div class="must-portal-header-actions"><a class="must-portal-button must-portal-button-primary" href="' . \esc_url(\add_query_arg('tab', 'new-booking', $moduleUrl)) . '">' . \esc_html__('Open New Booking', 'must-hotel-booking') . '</a></div>';
+    echo '<div class="must-portal-inline-actions"><a class="must-portal-primary-button" href="' . \esc_url(\add_query_arg('tab', 'new-booking', $moduleUrl)) . '">' . \esc_html__('Open New Booking', 'must-hotel-booking') . '</a></div>';
     echo '</div></div>';
 } else {
     echo '<p class="must-portal-coming-soon">';

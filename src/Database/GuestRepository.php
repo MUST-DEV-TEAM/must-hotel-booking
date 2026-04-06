@@ -462,7 +462,7 @@ final class GuestRepository extends AbstractRepository
             $params[] = $email;
         }
 
-        if ($email === '' && $phone !== '' && ($firstName !== '' || $lastName !== '')) {
+        if ($phone !== '' && ($firstName !== '' || $lastName !== '')) {
             $clauses[] = '(TRIM(phone) = TRIM(%s) AND LOWER(TRIM(first_name)) = LOWER(TRIM(%s)) AND LOWER(TRIM(last_name)) = LOWER(TRIM(%s)))';
             $params[] = $phone;
             $params[] = $firstName;
@@ -486,7 +486,98 @@ final class GuestRepository extends AbstractRepository
             ARRAY_A
         );
 
-        return \is_array($rows) ? $rows : [];
+        if (!\is_array($rows)) {
+            return [];
+        }
+
+        foreach ($rows as &$row) {
+            if (!\is_array($row)) {
+                continue;
+            }
+
+            $rowEmail = \trim((string) ($row['email'] ?? ''));
+            $rowPhone = \trim((string) ($row['phone'] ?? ''));
+            $rowFirst = \trim((string) ($row['first_name'] ?? ''));
+            $rowLast  = \trim((string) ($row['last_name'] ?? ''));
+
+            $sameEmail = $email !== '' && \strcasecmp($email, $rowEmail) === 0;
+            $samePhone = $phone !== '' && $phone === $rowPhone;
+            $sameName  = \strcasecmp($firstName, $rowFirst) === 0 && \strcasecmp($lastName, $rowLast) === 0;
+
+            if ($sameName && $sameEmail && $samePhone) {
+                $row['match_type'] = 'exact';
+            } else {
+                $row['match_type'] = 'suspected';
+            }
+        }
+
+        unset($row);
+
+        return $rows;
+    }
+
+    /**
+     * Merge $secondaryId into $primaryId:
+     * re-links all reservations, merges notes and flags, then deletes the secondary guest.
+     */
+    public function mergeGuests(int $primaryId, int $secondaryId): bool
+    {
+        if ($primaryId <= 0 || $secondaryId <= 0 || $primaryId === $secondaryId) {
+            return false;
+        }
+
+        if (!$this->guestsTableExists()) {
+            return false;
+        }
+
+        $primary   = $this->getGuestById($primaryId);
+        $secondary = $this->getGuestById($secondaryId);
+
+        if (!\is_array($primary) || !\is_array($secondary)) {
+            return false;
+        }
+
+        if ($this->tableExists('reservations')) {
+            $this->wpdb->update(
+                $this->table('reservations'),
+                ['guest_id' => $primaryId],
+                ['guest_id' => $secondaryId],
+                ['%d'],
+                ['%d']
+            );
+        }
+
+        $primaryNotes   = \trim((string) ($primary['admin_notes'] ?? ''));
+        $secondaryNotes = \trim((string) ($secondary['admin_notes'] ?? ''));
+        $mergedNotes    = $primaryNotes;
+
+        if ($secondaryNotes !== '' && $secondaryNotes !== $primaryNotes) {
+            $suffix      = '[Merged from guest #' . $secondaryId . '] ' . $secondaryNotes;
+            $mergedNotes = $primaryNotes !== '' ? $primaryNotes . "\n\n" . $suffix : $suffix;
+        }
+
+        $mergedVip     = (!empty($primary['vip_flag']) || !empty($secondary['vip_flag'])) ? 1 : 0;
+        $mergedProblem = (!empty($primary['problem_flag']) || !empty($secondary['problem_flag'])) ? 1 : 0;
+
+        $this->wpdb->update(
+            $this->table('guests'),
+            [
+                'admin_notes'  => $mergedNotes,
+                'vip_flag'     => $mergedVip,
+                'problem_flag' => $mergedProblem,
+            ],
+            ['id' => $primaryId],
+            ['%s', '%d', '%d'],
+            ['%d']
+        );
+
+        $deleted = $this->wpdb->delete(
+            $this->table('guests'),
+            ['id' => $secondaryId],
+            ['%d']
+        );
+
+        return $deleted !== false;
     }
 
     /**

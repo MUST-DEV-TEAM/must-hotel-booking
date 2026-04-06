@@ -775,7 +775,7 @@ if (empty($moduleData['rows'])) {
         echo '<th>' . \esc_html__('Payment', 'must-hotel-booking') . '</th><th>' . \esc_html__('Total', 'must-hotel-booking') . '</th>';
     }
 
-    echo '<th></th></tr></thead><tbody>';
+    echo '</tr></thead><tbody>';
 
     foreach ((array) ($moduleData['rows'] ?? []) as $row) {
         if (!\is_array($row)) {
@@ -790,15 +790,33 @@ if (empty($moduleData['rows'])) {
             : '';
 
         echo '<tr' . $rowClasses . '>';
-        echo '<td><strong>' . \esc_html((string) ($row['booking_id'] ?? '')) . '</strong><br /><span class="must-portal-muted">' . \esc_html((string) ($row['created'] ?? '')) . '</span></td>';
-        echo '<td><strong>' . \esc_html((string) ($row['accommodation'] ?? '')) . '</strong><br /><span class="must-portal-muted">' . \esc_html((string) ($row['checkin'] ?? '')) . ' - ' . \esc_html((string) ($row['checkout'] ?? '')) . '</span></td>';
-        echo '<td><strong>' . \esc_html((string) ($row['guest'] ?? '')) . '</strong>';
 
-        if ((string) ($row['guest_email'] ?? '') !== '') {
-            echo '<br /><span class="must-portal-muted">' . \esc_html((string) ($row['guest_email'] ?? '')) . '</span>';
+        echo '<td><a class="must-portal-table-cell-link" href="' . \esc_url($rowDetailUrl) . '">';
+        echo '<strong>' . \esc_html((string) ($row['booking_id'] ?? '')) . '</strong>';
+        echo '<span class="must-portal-muted">' . \esc_html((string) ($row['created'] ?? '')) . '</span>';
+        echo '</a></td>';
+
+        echo '<td><a class="must-portal-table-cell-link" href="' . \esc_url($rowDetailUrl) . '">';
+        echo '<strong>' . \esc_html((string) ($row['accommodation'] ?? '')) . '</strong>';
+        echo '<span class="must-portal-muted">' . \esc_html((string) ($row['checkin'] ?? '')) . ' – ' . \esc_html((string) ($row['checkout'] ?? '')) . '</span>';
+        echo '</a></td>';
+
+        if ($rowGuestUrl !== '') {
+            echo '<td><a class="must-portal-table-cell-link" href="' . \esc_url($rowGuestUrl) . '">';
+            echo '<strong>' . \esc_html((string) ($row['guest'] ?? '')) . '</strong>';
+            if ((string) ($row['guest_email'] ?? '') !== '') {
+                echo '<span class="must-portal-muted">' . \esc_html((string) ($row['guest_email'] ?? '')) . '</span>';
+            }
+            echo '</a></td>';
+        } else {
+            echo '<td><strong>' . \esc_html((string) ($row['guest'] ?? '')) . '</strong>';
+            if ((string) ($row['guest_email'] ?? '') !== '') {
+                echo '<span class="must-portal-muted">' . \esc_html((string) ($row['guest_email'] ?? '')) . '</span>';
+            }
+            echo '</td>';
         }
 
-        echo '</td><td>';
+        echo '<td>';
         PortalRenderer::renderBadge((string) ($row['reservation_status_key'] ?? 'info'), (string) ($row['reservation_status'] ?? ''));
         if (!empty($row['cancellation_requested']) && !\in_array((string) ($row['reservation_status_key'] ?? ''), ['cancelled', 'completed', 'blocked'], true)) {
             echo '<br />';
@@ -809,18 +827,11 @@ if (empty($moduleData['rows'])) {
         if ($canViewPaymentDetails) {
             echo '<td>';
             PortalRenderer::renderBadge((string) ($row['payment_status_key'] ?? 'info'), (string) ($row['payment_status'] ?? ''));
-            echo '<br /><span class="must-portal-muted">' . \esc_html((string) ($row['payment_method'] ?? '')) . '</span>';
+            echo '<span class="must-portal-muted">' . \esc_html((string) ($row['payment_method'] ?? '')) . '</span>';
             echo '</td><td>' . \esc_html((string) ($row['total'] ?? '')) . '</td>';
         }
 
-        echo '<td><div class="must-portal-inline-actions">';
-        echo '<a class="must-portal-inline-link" href="' . \esc_url($rowDetailUrl) . '">' . \esc_html(!empty($row['cancellation_requested']) && !\in_array((string) ($row['reservation_status_key'] ?? ''), ['cancelled', 'completed', 'blocked'], true) ? \__('Review request', 'must-hotel-booking') : \__('Open workspace', 'must-hotel-booking')) . '</a>';
-
-        if ($rowGuestUrl !== '') {
-            echo '<a class="must-portal-inline-link" href="' . \esc_url($rowGuestUrl) . '">' . \esc_html__('Guest', 'must-hotel-booking') . '</a>';
-        }
-
-        echo '</div></td></tr>';
+        echo '</tr>';
     }
 
     echo '</tbody></table></div>';

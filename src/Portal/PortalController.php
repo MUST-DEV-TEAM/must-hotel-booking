@@ -191,6 +191,10 @@ final class PortalController
             return self::handleGuestAddNote();
         }
 
+        if ($action === 'guest_merge') {
+            return self::handleGuestMerge();
+        }
+
         if ($action === 'payment_post') {
             return self::handlePaymentPost(false);
         }
@@ -784,6 +788,60 @@ final class PortalController
         );
 
         self::redirectToPortalGuestDetail($guestId, 'guest_note_added');
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private static function handleGuestMerge(): array
+    {
+        $primaryId   = isset($_POST['guest_id']) ? \absint(\wp_unslash($_POST['guest_id'])) : 0;
+        $secondaryId = isset($_POST['merge_guest_id']) ? \absint(\wp_unslash($_POST['merge_guest_id'])) : 0;
+        $nonce       = isset($_POST['must_portal_guest_nonce']) ? (string) \wp_unslash($_POST['must_portal_guest_nonce']) : '';
+
+        if ($primaryId <= 0 || $secondaryId <= 0 || !\wp_verify_nonce($nonce, 'must_portal_guest_merge_' . $primaryId . '_' . $secondaryId)) {
+            self::redirectToPortalGuestDetail($primaryId, 'invalid_nonce');
+        }
+
+        if (!\current_user_can(StaffAccess::CAP_GUEST_EDIT_CONTACT) && !\current_user_can('manage_options')) {
+            self::redirectToPortalGuestDetail($primaryId, 'access_denied');
+        }
+
+        $guestRepository = \MustHotelBooking\Engine\get_guest_repository();
+        $primary         = $guestRepository->getGuestById($primaryId);
+        $secondary       = $guestRepository->getGuestById($secondaryId);
+
+        if (!\is_array($primary)) {
+            self::redirectToPortalGuestDetail($primaryId, 'guest_not_found');
+        }
+
+        if (!\is_array($secondary)) {
+            self::redirectToPortalGuestDetail($primaryId, 'guest_not_found');
+        }
+
+        $merged = $guestRepository->mergeGuests($primaryId, $secondaryId);
+
+        if (!$merged) {
+            return self::buildGuestActionState(
+                $primaryId,
+                [],
+                [\__('Unable to merge the guest profiles. Please try again.', 'must-hotel-booking')]
+            );
+        }
+
+        self::logGuestActivity(
+            $primaryId,
+            $primary,
+            'guest_merged',
+            'info',
+            \sprintf(
+                /* translators: %d: secondary guest ID that was deleted */
+                \__('Guest profile merged. Duplicate guest #%d was removed and all reservations were re-linked.', 'must-hotel-booking'),
+                $secondaryId
+            )
+        );
+
+        self::redirectToPortalGuestDetail($primaryId, 'guest_merged');
     }
 
     /**
@@ -5688,6 +5746,7 @@ final class PortalController
             'guest_contact_updated' => \__('Guest contact details updated.', 'must-hotel-booking'),
             'guest_flags_updated' => \__('Guest flags updated.', 'must-hotel-booking'),
             'guest_note_added' => \__('Guest service note added.', 'must-hotel-booking'),
+            'guest_merged' => \__('Guest profiles merged. The duplicate record has been removed and all reservations re-linked.', 'must-hotel-booking'),
             'cancellation_request_submitted' => \__('Cancellation request submitted for approval.', 'must-hotel-booking'),
             'cancellation_request_approved' => \__('Cancellation request approved and reservation cancelled.', 'must-hotel-booking'),
             'cancellation_request_rejected' => \__('Cancellation request rejected.', 'must-hotel-booking'),

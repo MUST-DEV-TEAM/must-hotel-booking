@@ -155,41 +155,43 @@ if (\is_array($detail)) {
 
     echo '</article>';
 
-    echo '<article class="must-portal-panel"><div class="must-portal-panel-header"><div><h2>' . \esc_html__('Guest status', 'must-hotel-booking') . '</h2><p>' . \esc_html__('Operational flags and warnings for the current guest profile.', 'must-hotel-booking') . '</p></div></div>';
+    echo '<article class="must-portal-panel">';
+    echo '<div class="must-portal-panel-header"><div><h2>' . \esc_html__('Guest status', 'must-hotel-booking') . '</h2><p>' . \esc_html__('Operational flags and warnings for the current guest profile.', 'must-hotel-booking') . '</p></div>';
 
     if ($hasVipFlag || $hasProblemFlag) {
         echo '<div class="must-portal-inline-actions">';
 
         if ($hasVipFlag) {
-            PortalRenderer::renderBadge('info', \__('VIP', 'must-hotel-booking'));
+            PortalRenderer::renderBadge('warning', \__('VIP', 'must-hotel-booking'));
         }
 
         if ($hasProblemFlag) {
-            PortalRenderer::renderBadge('warning', \__('Problem', 'must-hotel-booking'));
+            PortalRenderer::renderBadge('error', \__('Problem guest', 'must-hotel-booking'));
         }
 
         echo '</div>';
     }
 
+    echo '</div>';
+
     if (empty($visibleWarnings) && !$hasVipFlag && !$hasProblemFlag) {
         PortalRenderer::renderEmptyState(\__('No guest warnings were detected.', 'must-hotel-booking'));
     } else {
         foreach ($visibleWarnings as $warning) {
-            echo '<div class="must-portal-feed-item"><div><strong>' . \esc_html((string) $warning) . '</strong></div>';
-            PortalRenderer::renderBadge('warning', \__('Attention', 'must-hotel-booking'));
-            echo '</div>';
+            echo '<div class="must-portal-status-notice is-warning"><span class="dashicons dashicons-warning"></span><span>' . \esc_html((string) $warning) . '</span></div>';
         }
     }
 
     if ($canEditGuestFlags) {
-        echo '<form method="post" action="' . \esc_url($detailUrl) . '" class="must-portal-form-grid must-portal-reservation-form">';
+        echo '<form method="post" action="' . \esc_url($detailUrl) . '">';
         \wp_nonce_field('must_portal_guest_save_flags_' . $guestId, 'must_portal_guest_nonce');
         echo '<input type="hidden" name="must_portal_action" value="guest_save_flags" />';
         echo '<input type="hidden" name="guest_id" value="' . \esc_attr((string) $guestId) . '" />';
-        echo '<label><span>' . \esc_html__('Profile flags', 'must-hotel-booking') . '</span><span class="must-portal-muted">' . \esc_html__('Use only for operationally relevant guest status.', 'must-hotel-booking') . '</span></label>';
-        echo '<label><input type="checkbox" name="vip_flag" value="1"' . \checked(!empty($form['vip_flag']) || $hasVipFlag, true, false) . ' /> ' . \esc_html__('VIP guest', 'must-hotel-booking') . '</label>';
-        echo '<label><input type="checkbox" name="problem_flag" value="1"' . \checked(!empty($form['problem_flag']) || $hasProblemFlag, true, false) . ' /> ' . \esc_html__('Problem guest', 'must-hotel-booking') . '</label>';
-        echo '<div class="must-portal-form-full must-portal-inline-actions"><button type="submit" class="must-portal-primary-button">' . \esc_html__('Save flags', 'must-hotel-booking') . '</button></div>';
+        echo '<div class="must-portal-flag-rows">';
+        echo '<label class="must-portal-flag-row"><input type="checkbox" name="vip_flag" value="1"' . \checked(!empty($form['vip_flag']) || $hasVipFlag, true, false) . ' /><div class="must-portal-flag-row-text"><strong>' . \esc_html__('VIP guest', 'must-hotel-booking') . '</strong><span>' . \esc_html__('Priority handling, upgraded service, and VIP recognition during stay.', 'must-hotel-booking') . '</span></div></label>';
+        echo '<label class="must-portal-flag-row"><input type="checkbox" name="problem_flag" value="1"' . \checked(!empty($form['problem_flag']) || $hasProblemFlag, true, false) . ' /><div class="must-portal-flag-row-text"><strong>' . \esc_html__('Problem guest', 'must-hotel-booking') . '</strong><span>' . \esc_html__('Flag this profile so staff are aware of past incidents or concerns.', 'must-hotel-booking') . '</span></div></label>';
+        echo '</div>';
+        echo '<div class="must-portal-inline-actions" style="margin-top:16px"><button type="submit" class="must-portal-primary-button">' . \esc_html__('Save flags', 'must-hotel-booking') . '</button></div>';
         echo '</form>';
     }
 
@@ -330,12 +332,18 @@ if (\is_array($detail)) {
     }
 
     if ($canViewDuplicates) {
-        echo '<article class="must-portal-panel"><div class="must-portal-panel-header"><div><h2>' . \esc_html__('Possible duplicates', 'must-hotel-booking') . '</h2><p>' . \esc_html__('Likely matching guest profiles based on the current duplicate rules.', 'must-hotel-booking') . '</p></div></div>';
+        echo '<article class="must-portal-panel"><div class="must-portal-panel-header"><div><h2>' . \esc_html__('Possible duplicates', 'must-hotel-booking') . '</h2><p>' . \esc_html__('Likely matching guest profiles based on name, email, and phone. Exact matches share all three; suspected matches share name plus email or phone.', 'must-hotel-booking') . '</p></div></div>';
 
         if (empty($duplicates)) {
             PortalRenderer::renderEmptyState(\__('No likely duplicate guest profiles were detected.', 'must-hotel-booking'));
         } else {
-            echo '<div class="must-portal-table-wrap"><table class="must-portal-table"><thead><tr><th>' . \esc_html__('Guest', 'must-hotel-booking') . '</th><th>' . \esc_html__('Email', 'must-hotel-booking') . '</th><th>' . \esc_html__('Phone', 'must-hotel-booking') . '</th><th></th></tr></thead><tbody>';
+            echo '<div class="must-portal-table-wrap"><table class="must-portal-table"><thead><tr>';
+            echo '<th>' . \esc_html__('Guest', 'must-hotel-booking') . '</th>';
+            echo '<th>' . \esc_html__('Email', 'must-hotel-booking') . '</th>';
+            echo '<th>' . \esc_html__('Phone', 'must-hotel-booking') . '</th>';
+            echo '<th>' . \esc_html__('Match', 'must-hotel-booking') . '</th>';
+            echo '<th></th>';
+            echo '</tr></thead><tbody>';
 
             foreach ($duplicates as $duplicateRow) {
                 if (!\is_array($duplicateRow)) {
@@ -343,12 +351,35 @@ if (\is_array($detail)) {
                 }
 
                 $duplicateGuestId = isset($duplicateRow['id']) ? (int) $duplicateRow['id'] : 0;
+                $matchType = (string) ($duplicateRow['match_type'] ?? 'suspected');
 
                 echo '<tr>';
-                echo '<td>' . \esc_html((string) ($duplicateRow['name'] ?? '')) . '</td>';
+                echo '<td><strong>' . \esc_html((string) ($duplicateRow['name'] ?? '')) . '</strong></td>';
                 echo '<td>' . \esc_html((string) ($duplicateRow['email'] ?? '')) . '</td>';
                 echo '<td>' . \esc_html((string) ($duplicateRow['phone'] ?? '')) . '</td>';
-                echo '<td><a class="must-portal-inline-link" href="' . \esc_url($buildGuestUrl(['guest_id' => $duplicateGuestId])) . '">' . \esc_html__('Open guest', 'must-hotel-booking') . '</a></td>';
+                echo '<td>';
+
+                if ($matchType === 'exact') {
+                    PortalRenderer::renderBadge('error', \__('Exact match', 'must-hotel-booking'));
+                } else {
+                    PortalRenderer::renderBadge('warning', \__('Suspected', 'must-hotel-booking'));
+                }
+
+                echo '</td>';
+                echo '<td><div class="must-portal-inline-actions">';
+                echo '<a class="must-portal-inline-link" href="' . \esc_url($buildGuestUrl(['guest_id' => $duplicateGuestId])) . '">' . \esc_html__('Open profile', 'must-hotel-booking') . '</a>';
+
+                if ($canEditGuestContact && $duplicateGuestId > 0) {
+                    echo '<form method="post" action="' . \esc_url($detailUrl) . '" style="display:inline" onsubmit="return confirm(\'' . \esc_js(\__('Merge this duplicate into the current profile? The duplicate record will be deleted and all its reservations re-linked here. This cannot be undone.', 'must-hotel-booking')) . '\')">';
+                    \wp_nonce_field('must_portal_guest_merge_' . $guestId . '_' . $duplicateGuestId, 'must_portal_guest_nonce');
+                    echo '<input type="hidden" name="must_portal_action" value="guest_merge" />';
+                    echo '<input type="hidden" name="guest_id" value="' . \esc_attr((string) $guestId) . '" />';
+                    echo '<input type="hidden" name="merge_guest_id" value="' . \esc_attr((string) $duplicateGuestId) . '" />';
+                    echo '<button type="submit" class="must-portal-inline-link" style="background:none;border:none;padding:0;cursor:pointer;font:inherit;color:#bb3c25">' . \esc_html__('Merge into this profile', 'must-hotel-booking') . '</button>';
+                    echo '</form>';
+                }
+
+                echo '</div></td>';
                 echo '</tr>';
             }
 
