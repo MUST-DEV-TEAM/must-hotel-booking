@@ -19,8 +19,8 @@
 }
 
 .must-hotel-booking-page-single-room .must-hotel-booking-single-room {
-    --must-single-room-gutter-x: 150px;
-    --must-single-room-gutter-y: 150px;
+    --must-single-room-gutter-x: 140px;
+    --must-single-room-gutter-y: 140px;
     width: 100%;
     box-sizing: border-box;
     margin: 0 auto;
@@ -278,7 +278,7 @@
     box-sizing: border-box;
     width: 100%;
     margin: 0 auto;
-    padding: 150px;
+    padding: 140px;
     display: flex;
     flex-direction: column;
     gap: 80px;
@@ -312,7 +312,7 @@
 .must-hotel-booking-single-room .must-hotel-booking-related-rooms-grid {
     display: grid;
     grid-template-columns: repeat(3, minmax(0, 1fr));
-    gap: 85px;
+    gap: 80px;
     align-items: start;
 }
 
@@ -415,25 +415,24 @@
     display: flex;
     flex-direction: row;
     justify-content: space-between;
-    width: min(100%, 486px);
+    width: 100%;
     min-height: 50px;
     flex-wrap: wrap;
+    gap: 10px;
 }
 
 .must-hotel-booking-single-room .must-hotel-booking-related-room-book {
     display: inline-flex;
     align-items: center;
-    gap: 9px;
-    min-width: 164px;
-    flex: 0 0 auto;
+    gap: clamp(6px, 0.6vw, 10px);
     color: #141414;
     text-decoration: none;
     border-bottom: 1.5px solid #141414;
-    padding-bottom: 2px;
+    padding-bottom: 1px;
     font-family: 'PP Neue Montreal', sans-serif;
     font-style: normal;
     font-weight: 400;
-    font-size: 28px;
+    font-size: clamp(20px, 2vw, 24px);
     line-height: 1;
     letter-spacing: -0.011em;
     white-space: nowrap;
@@ -446,8 +445,8 @@
 }
 
 .must-hotel-booking-single-room .must-hotel-booking-related-room-book img {
-    width: 26px;
-    height: 26px;
+    width: clamp(20px, 1.8vw, 26px);
+    height: clamp(20px, 1.8vw, 26px);
     object-fit: contain;
     filter: brightness(0) saturate(100%);
 }
@@ -457,10 +456,10 @@
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    gap: 20px;
-    height: 50px;
-    width: 250px;
-    padding: 10px 36px;
+    gap: clamp(10px, 1.2vw, 20px);
+    height: clamp(42px, 3.5vw, 50px);
+    width: clamp(185px, 16vw, 225px);
+    padding: clamp(8px, 0.6vw, 10px) clamp(16px, 2vw, 36px);
     border: 1px solid #141414;
     background: transparent;
     color: #141414;
@@ -468,7 +467,7 @@
     font-family: 'PP Neue Montreal', sans-serif;
     font-style: normal;
     font-weight: 500;
-    font-size: 20px;
+    font-size: clamp(15px, 1.3vw, 20px);
     line-height: 1.5;
     letter-spacing: -0.011em;
     white-space: nowrap;
@@ -477,8 +476,8 @@
 }
 
 .must-hotel-booking-single-room .must-hotel-booking-related-room-details img {
-    width: 21px;
-    height: 15px;
+    width: clamp(16px, 1.4vw, 21px);
+    height: clamp(11px, 1vw, 15px);
     object-fit: contain;
 }
 
@@ -504,7 +503,7 @@
     box-sizing: border-box;
     width: 100%;
     margin: 0 auto;
-    padding: 60px 150px;
+    padding: 60px 140px;
     display: flex;
     flex-direction: column;
     gap: 60px;
@@ -705,7 +704,7 @@ body.must-hotel-booking-single-room-lightbox-open {
     }
 
     .must-hotel-booking-single-room .must-hotel-booking-related-rooms-grid {
-        gap: 64px;
+        gap: 60px;
     }
 
     .must-hotel-booking-single-room .must-hotel-booking-related-room-media {
@@ -943,8 +942,9 @@ body.must-hotel-booking-single-room-lightbox-open {
     .must-hotel-booking-single-room .must-hotel-booking-related-room-actions {
         width: 100%;
         gap: 12px;
-        align-items: flex-start;
-        flex-direction: column;
+        align-items: center;
+        flex-direction: row;
+        flex-wrap: wrap;
     }
 
     .must-hotel-booking-single-room .must-hotel-booking-related-room-book {

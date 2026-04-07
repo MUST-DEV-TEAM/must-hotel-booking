@@ -1230,7 +1230,7 @@
             });
 
             if (!isValidDateString(checkoutInput.value)) {
-                state.checkoutPicker.changeMonth(1, false);
+                state.checkoutPicker.changeMonth(1);
             }
 
             if (state.checkinPicker && state.checkinPicker.calendarContainer) {

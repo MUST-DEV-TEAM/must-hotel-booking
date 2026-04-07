@@ -4,7 +4,7 @@ Tags: hotel, booking, reservation, accommodation
 Requires at least: 5.0
 Tested up to: 6.0
 Requires PHP: 7.4
-Stable tag: 0.3.45
+Stable tag: 0.3.46
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -32,6 +32,11 @@ Main features include:
 
 == Changelog ==
 
+
+= 0.3.46 =
+* Refined the booking and accommodation page shell with 140px gutters, a more structured desktop booking layout, improved contact-band placement, and clearer expanded-room visual feedback.
+* Improved related-room presentation with tighter grid spacing, fluid CTA and icon sizing, and better action wrapping across desktop and mobile layouts.
+* Cleaned the booking calendar UX by hiding the disabled previous-month control and fixing checkout month advancement when the checkout date starts empty.
 
 = 0.3.44 =
 * Added an admin-only Staff Users settings tab for creating, activating, deactivating, and deleting staff portal accounts without leaving the plugin settings workspace.

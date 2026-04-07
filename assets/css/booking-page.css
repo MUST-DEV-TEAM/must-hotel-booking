@@ -7,11 +7,16 @@
 .must-booking-process-page .must-hotel-booking-container {
     width: 100%;
     margin: 0 auto;
-    padding: 150px 60px;
+    padding: 140px 60px;
     box-sizing: border-box;
-    display: flex;
-    flex-direction: column;
-    gap: 85px;
+    display: grid;
+    grid-template-columns: minmax(0, 1170px) minmax(0, 592px);
+    column-gap: 42px;
+    row-gap: 85px;
+}
+
+.must-booking-process-page .must-hotel-booking-container > * {
+    grid-column: 1 / -1;
 }
 
 .must-booking-process-page .must-booking-step-header {
@@ -257,6 +262,10 @@
 .must-hotel-booking-page-booking .must-booking-cal-shift.is-disabled {
     opacity: 0.35;
     cursor: default;
+}
+
+.must-hotel-booking-page-booking .must-booking-cal-shift-prev.is-disabled {
+    visibility: hidden;
 }
 
 .must-hotel-booking-page-booking .must-booking-cal-shift-prev {
@@ -916,7 +925,6 @@
     gap: 10px;
     padding: 10px 22px;
     border: 1px solid #141414;
-    border-radius: 18px;
     background: #141414;
     color: #f5f3ec;
     text-decoration: none;
@@ -1068,7 +1076,6 @@
 .must-hotel-booking-page-booking .must-booking-results-filter-apply {
     min-height: 58px;
     border: 1px solid rgba(20, 20, 20, 0.16);
-    border-radius: 16px;
     background: #fff;
     color: #141414;
     font-family: 'PP Neue Montreal', sans-serif;
@@ -1968,7 +1975,8 @@ body .must-booking-room-modal .must-booking-room-modal-close:active {
 }
 
 .must-hotel-booking-page-booking .must-booking-contact-band {
-    width: 1170px;
+    grid-column: 1;
+    width: auto;
     height: 182px;
     max-width: 100%;
     background: #141414;
@@ -1977,7 +1985,6 @@ body .must-booking-room-modal .must-booking-room-modal-close:active {
     display: flex;
     align-items: center;
     justify-content: space-between;
-    gap: 422px;
 }
 
 .must-hotel-booking-page-booking .must-booking-contact-copy {
@@ -3839,6 +3846,8 @@ div.must-confirmation-picker:nth-child(1) > div:nth-child(3) > div:nth-child(1) 
 @media (max-width: 1650px) {
     .must-booking-process-page .must-hotel-booking-container {
         padding: 120px 36px 70px;
+        grid-template-columns: minmax(0, 1fr) minmax(320px, 360px);
+        column-gap: 24px;
     }
 
     .must-booking-process-page .must-booking-step-header {
@@ -4187,6 +4196,14 @@ div.must-confirmation-picker:nth-child(1) > div:nth-child(3) > div:nth-child(1) 
 }
 
 @media (max-width: 1024px) {
+    .must-booking-process-page .must-hotel-booking-container {
+        grid-template-columns: 1fr;
+    }
+
+    .must-hotel-booking-page-booking .must-booking-contact-band {
+        grid-column: 1 / -1;
+    }
+
     .must-hotel-booking-page-booking .must-booking-calendar-step-grid {
         grid-template-columns: 1fr;
         gap: 28px;
@@ -4726,6 +4743,10 @@ div.must-confirmation-picker:nth-child(1) > div:nth-child(3) > div:nth-child(1) 
     gap: 45px;
 }
 
+.must-hotel-booking-page-accommodation .must-booking-room-content:has(.must-booking-room-modal-trigger.is-expanded) {
+    background-color: #bababa;
+}
+
 .must-hotel-booking-page-accommodation .must-booking-room-section-media {
     margin-top: 0;
 }
@@ -4750,7 +4771,6 @@ div.must-confirmation-picker:nth-child(1) > div:nth-child(3) > div:nth-child(1) 
     width: auto;
     height: auto;
     aspect-ratio: auto;
-    border-radius: 12px;
 }
 
 .must-hotel-booking-page-accommodation .must-booking-room-actions {
@@ -4977,7 +4997,7 @@ div.must-confirmation-picker:nth-child(1) > div:nth-child(3) > div:nth-child(1) 
     justify-content: center;
     min-height: 0;
     max-width: none;
-    padding: 150px 150px 96px;
+    padding: 140px 140px 96px;
     box-sizing: border-box;
 }
 
@@ -5354,7 +5374,7 @@ div.must-confirmation-picker:nth-child(1) > div:nth-child(3) > div:nth-child(1) 
 @media (min-width: 1200px) {
     .must-hotel-booking-page-accommodation .must-hotel-booking-container,
     .must-hotel-booking-page-checkout .must-hotel-booking-container {
-        padding: 150px 160px;
+        padding: 140px 160px;
     }
 
     .must-hotel-booking-page-accommodation .must-booking-step-header h1 {
