@@ -4,7 +4,7 @@ Tags: hotel, booking, reservation, accommodation
 Requires at least: 5.0
 Tested up to: 6.0
 Requires PHP: 7.4
-Stable tag: 0.3.47
+Stable tag: 0.3.48
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -31,6 +31,10 @@ Main features include:
 5. When updating, upload the new release ZIP or use the configured updater, then review **Diagnostics & Maintenance** after the update completes.
 
 == Changelog ==
+
+= 0.3.48 =
+* Fixed booking-flow mobile shell behavior when the active theme or page builder wraps the managed booking pages in a narrow content container, so the booking layout can expand to the full viewport instead of rendering as a squeezed left column.
+* Switched the booking-process container to a simple mobile flex-column stack at the narrowest breakpoint to avoid the desktop grid contributing to compressed phone layouts.
 
 = 0.3.47 =
 * Improved booking-page responsiveness on tablet and mobile so the calendar step header, stepper, summary controls, and dual-calendar layout fit smaller screens without horizontal overflow.

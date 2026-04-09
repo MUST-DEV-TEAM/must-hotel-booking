@@ -187,6 +187,51 @@ function get_frontend_page_url(string $setting_key, string $fallback_path): stri
 }
 
 /**
+ * Determine whether the current request is for a managed booking-flow page.
+ */
+function is_managed_booking_flow_page(): bool
+{
+    if (\is_admin()) {
+        return false;
+    }
+
+    $settings = get_plugin_settings();
+    $booking_flow_page_keys = [
+        'page_booking_id',
+        'page_booking_accommodation_id',
+        'page_checkout_id',
+        'page_booking_confirmation_id',
+    ];
+
+    foreach ($booking_flow_page_keys as $setting_key) {
+        $page_id = isset($settings[$setting_key]) ? (int) $settings[$setting_key] : 0;
+
+        if ($page_id > 0 && \is_page($page_id)) {
+            return true;
+        }
+    }
+
+    return false;
+}
+
+/**
+ * Add body classes for managed booking flow pages so page-shell CSS can escape theme wrappers.
+ *
+ * @param array<int, string> $classes
+ * @return array<int, string>
+ */
+function add_booking_flow_body_classes(array $classes): array
+{
+    if (!is_managed_booking_flow_page()) {
+        return $classes;
+    }
+
+    $classes[] = 'must-hotel-booking-flow-page';
+
+    return \array_values(\array_unique($classes));
+}
+
+/**
  * Get booking page URL.
  */
 function get_booking_page_url(): string
@@ -682,3 +727,4 @@ function enqueue_booking_page_assets(): void
 
 \add_action('wp_enqueue_scripts', __NAMESPACE__ . '\enqueue_booking_page_assets');
 \add_filter('template_include', __NAMESPACE__ . '\maybe_load_frontend_template', 99);
+\add_filter('body_class', __NAMESPACE__ . '\add_booking_flow_body_classes');
