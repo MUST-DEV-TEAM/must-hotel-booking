@@ -415,9 +415,7 @@ body.must-hotel-booking-lightbox-open {
         flex: none;
         max-width: 100%;
         min-height: clamp(220px, 48vw, 360px);
-        border-top-left-radius: 24px;
-        border-top-right-radius: 24px;
-        border-bottom-left-radius: 0;
+        
     }
 
     .must-hotel-booking-rooms-list-widget .must-hotel-booking-rooms-list-content {

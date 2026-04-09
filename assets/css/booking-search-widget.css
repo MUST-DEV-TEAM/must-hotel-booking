@@ -110,9 +110,6 @@
     opacity: 1;
 }
 
-.must-hotel-booking-widget-booking-search .must-hotel-booking-field input[type='number'] {
-    -moz-appearance: textfield;
-}
 
 .must-hotel-booking-widget-booking-search .must-hotel-booking-field input[type='number']::-webkit-outer-spin-button,
 .must-hotel-booking-widget-booking-search .must-hotel-booking-field input[type='number']::-webkit-inner-spin-button {
@@ -215,7 +212,7 @@
         display: grid !important;
         grid-template-columns: 1fr;
         align-items: stretch;
-        gap: 16px;
+        gap: 25px;
         padding: 26px 24px;
     }
 
