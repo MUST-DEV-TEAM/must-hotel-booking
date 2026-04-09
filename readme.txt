@@ -4,7 +4,7 @@ Tags: hotel, booking, reservation, accommodation
 Requires at least: 5.0
 Tested up to: 6.0
 Requires PHP: 7.4
-Stable tag: 0.3.48
+Stable tag: 0.3.49
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -31,6 +31,10 @@ Main features include:
 5. When updating, upload the new release ZIP or use the configured updater, then review **Diagnostics & Maintenance** after the update completes.
 
 == Changelog ==
+
+= 0.3.49 =
+* Standardized booking-flow mobile shell spacing so the managed booking, accommodation, checkout, and confirmation views use `120px` top/bottom padding and `20px` left/right padding on phones.
+* Matched the mobile booking-confirmation success copy block to the same `120px 20px` spacing so the flow feels consistent across the managed frontend pages.
 
 = 0.3.48 =
 * Fixed booking-flow mobile shell behavior when the active theme or page builder wraps the managed booking pages in a narrow content container, so the booking layout can expand to the full viewport instead of rendering as a squeezed left column.
