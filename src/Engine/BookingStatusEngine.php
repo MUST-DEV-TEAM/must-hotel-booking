@@ -160,6 +160,10 @@ final class BookingStatusEngine
 
         self::updateReservationStatuses($reservationIds, $reservationStatus, 'cancelled');
         self::createPaymentRows($reservationIds, 'stripe', 'failed');
+
+        if (\class_exists(\MustHotelBooking\Provider\Clock\ClockPaymentReconciliationService::class)) {
+            (new \MustHotelBooking\Provider\Clock\ClockPaymentReconciliationService())->reconcilePaymentFailed($reservationIds, $reservationStatus, 'stripe');
+        }
     }
 
     /**

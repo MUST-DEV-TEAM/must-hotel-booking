@@ -8,6 +8,7 @@ use MustHotelBooking\Engine\BookingStatusEngine;
 use MustHotelBooking\Engine\EmailEngine;
 use MustHotelBooking\Engine\PaymentEngine;
 use MustHotelBooking\Engine\PaymentStatusService;
+use MustHotelBooking\Provider\ProviderReservationView;
 
 final class PaymentAdminActions
 {
@@ -53,6 +54,16 @@ final class PaymentAdminActions
             $this->redirectToPaymentsPage($query->buildUrlArgs(['notice' => 'invalid_nonce']));
         }
 
+        $reservation = $this->reservationRepository->getReservation($reservationId);
+
+        if (\is_array($reservation) && ProviderReservationView::isProviderBacked($reservation)) {
+            $this->redirectToPaymentsPage($query->buildUrlArgs([
+                'notice' => 'provider_backed_read_only',
+                'action' => 'view',
+                'reservation_id' => $reservationId,
+            ]));
+        }
+
         $notice = $this->applyAdminPaymentAction($reservationId, $action)
             ? $this->mapActionNotice($action)
             : 'action_failed';
@@ -89,6 +100,10 @@ final class PaymentAdminActions
         $reservation = $this->reservationRepository->getReservation($reservationId);
 
         if (!\is_array($reservation)) {
+            return false;
+        }
+
+        if (ProviderReservationView::isProviderBacked($reservation)) {
             return false;
         }
 
@@ -130,6 +145,13 @@ final class PaymentAdminActions
             return [
                 'success' => false,
                 'message' => \__('Reservation not found.', 'must-hotel-booking'),
+            ];
+        }
+
+        if (ProviderReservationView::isProviderBacked($reservation)) {
+            return [
+                'success' => false,
+                'message' => \__('Provider-backed reservations are read-only in local payment actions until provider-aware payment operations are implemented.', 'must-hotel-booking'),
             ];
         }
 
@@ -212,6 +234,13 @@ final class PaymentAdminActions
             return [
                 'success' => false,
                 'message' => \__('Reservation not found.', 'must-hotel-booking'),
+            ];
+        }
+
+        if (ProviderReservationView::isProviderBacked($reservation)) {
+            return [
+                'success' => false,
+                'message' => \__('Provider-backed reservations are read-only in local payment actions until provider-aware payment operations are implemented.', 'must-hotel-booking'),
             ];
         }
 

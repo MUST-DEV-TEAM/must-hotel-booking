@@ -24,6 +24,9 @@ use MustHotelBooking\Core\ManagedPages;
 use MustHotelBooking\Core\MustBookingConfig;
 use MustHotelBooking\Core\StaffAccess;
 use MustHotelBooking\Engine\BookingStatusEngine;
+use MustHotelBooking\Provider\Clock\ClockPaymentReconciliationService;
+use MustHotelBooking\Provider\ProviderReservationActionPolicy;
+use MustHotelBooking\Provider\ProviderReservationView;
 
 final class PortalController
 {
@@ -83,6 +86,11 @@ final class PortalController
         $action = isset($_POST['must_portal_action']) ? \sanitize_key((string) \wp_unslash($_POST['must_portal_action'])) : '';
 
         if ($action === '') {
+            return [];
+        }
+
+        if (self::shouldBlockProviderBackedPortalAction($action)) {
+            self::redirectToPortalReservationDetail(self::getPostedReservationId(), 'provider_backed_read_only');
             return [];
         }
 
@@ -314,6 +322,36 @@ final class PortalController
         ];
     }
 
+    private static function getPostedReservationId(): int
+    {
+        return isset($_POST['reservation_id']) ? \absint(\wp_unslash($_POST['reservation_id'])) : 0;
+    }
+
+    private static function getPostedReservationProviderMetadata(): array
+    {
+        $reservationId = self::getPostedReservationId();
+
+        if ($reservationId <= 0) {
+            return [];
+        }
+
+        $reservation = \MustHotelBooking\Engine\get_reservation_repository()->getProviderMetadata($reservationId);
+
+        return \is_array($reservation) ? $reservation : [];
+    }
+
+    private static function shouldBlockProviderBackedPortalAction(string $action): bool
+    {
+        $reservation = self::getPostedReservationProviderMetadata();
+
+        return !empty($reservation)
+            && ProviderReservationActionPolicy::shouldBlockProviderBackedAction(
+                $reservation,
+                $action,
+                ProviderReservationActionPolicy::SURFACE_PORTAL
+            );
+    }
+
     /**
      * @return array<string, mixed>
      */
@@ -391,6 +429,49 @@ final class PortalController
         $reservation = $reservationRepository->getReservation($reservationId);
 
         if (\is_array($reservation)) {
+            $providerContext = ProviderReservationView::metadata($reservation);
+
+            if (!empty($providerContext['is_provider_backed'])) {
+                if (
+                    $transition !== 'cancel'
+                    || !ProviderReservationActionPolicy::supportsProviderAction(
+                        $providerContext,
+                        'reservation_cancel',
+                        ProviderReservationActionPolicy::SURFACE_PORTAL
+                    )
+                ) {
+                    self::redirectToPortalReservationDetail($reservationId, 'provider_backed_read_only');
+                }
+
+                $result = (new ClockPaymentReconciliationService())->cancelReservation($reservationId, 'portal_cancelled', 'portal');
+
+                if (!empty($result['success'])) {
+                    self::logReservationActivity(
+                        $reservationId,
+                        $reservation,
+                        'reservation_cancelled',
+                        'warning',
+                        \__('Clock reservation cancellation completed.', 'must-hotel-booking')
+                    );
+
+                    self::redirectToPortalReservationDetail($reservationId, 'reservation_cancelled');
+                }
+
+                if (!empty($result['queued'])) {
+                    self::logReservationActivity(
+                        $reservationId,
+                        $reservation,
+                        'reservation_cancellation_queued',
+                        'warning',
+                        \__('Clock reservation cancellation was queued for provider retry.', 'must-hotel-booking')
+                    );
+
+                    self::redirectToPortalReservationDetail($reservationId, 'reservation_cancellation_queued');
+                }
+
+                self::redirectToPortalReservationDetail($reservationId, 'reservation_cancellation_failed');
+            }
+
             $status = \sanitize_key((string) ($reservation['status'] ?? ''));
             $paymentStatus = \sanitize_key((string) ($reservation['payment_status'] ?? ''));
 
@@ -493,6 +574,52 @@ final class PortalController
 
         if ($email !== '' && !\is_email($email)) {
             self::redirectToPortalReservationDetail($reservationId, 'invalid_guest_email');
+        }
+
+        $providerContext = ProviderReservationView::metadata($reservation);
+
+        if (!empty($providerContext['is_provider_backed'])) {
+            if (!ProviderReservationActionPolicy::supportsProviderAction($providerContext, 'reservation_save_guest', ProviderReservationActionPolicy::SURFACE_PORTAL)) {
+                self::redirectToPortalReservationDetail($reservationId, 'provider_backed_read_only');
+            }
+
+            $result = (new ClockPaymentReconciliationService())->updateGuestDetails(
+                $reservationId,
+                [
+                    'first_name' => $firstName,
+                    'last_name' => $lastName,
+                    'email' => $email,
+                    'phone' => $phone,
+                    'country' => $country,
+                ],
+                'portal'
+            );
+
+            if (!empty($result['success'])) {
+                self::logReservationActivity(
+                    $reservationId,
+                    $reservation,
+                    'guest_updated',
+                    'info',
+                    \__('Clock guest details updated.', 'must-hotel-booking')
+                );
+
+                self::redirectToPortalReservationDetail($reservationId, 'reservation_guest_updated');
+            }
+
+            if (!empty($result['queued'])) {
+                self::logReservationActivity(
+                    $reservationId,
+                    $reservation,
+                    'reservation_guest_update_queued',
+                    'warning',
+                    \__('Clock guest detail edit was queued for provider retry.', 'must-hotel-booking')
+                );
+
+                self::redirectToPortalReservationDetail($reservationId, 'reservation_guest_update_queued');
+            }
+
+            self::redirectToPortalReservationDetail($reservationId, 'reservation_guest_update_failed');
         }
 
         $guestId = $guestRepository->saveAdminGuestProfile(
@@ -2207,6 +2334,42 @@ final class PortalController
             self::redirectToPortalReservationDetail($reservationId, 'reservation_not_found');
         }
 
+        $providerContext = ProviderReservationView::metadata($reservation);
+
+        if (!empty($providerContext['is_provider_backed'])) {
+            if (!ProviderReservationActionPolicy::supportsProviderAction($providerContext, 'reservation_checkin', ProviderReservationActionPolicy::SURFACE_PORTAL)) {
+                self::redirectToPortalReservationDetail($reservationId, 'provider_backed_read_only');
+            }
+
+            $result = (new ClockPaymentReconciliationService())->checkInReservation($reservationId, 'portal');
+
+            if (!empty($result['success'])) {
+                self::logReservationActivity(
+                    $reservationId,
+                    $reservation,
+                    'reservation_checked_in',
+                    'info',
+                    \__('Clock guest check-in completed.', 'must-hotel-booking')
+                );
+
+                self::redirectToPortalReservationDetail($reservationId, 'reservation_checked_in');
+            }
+
+            if (!empty($result['queued'])) {
+                self::logReservationActivity(
+                    $reservationId,
+                    $reservation,
+                    'reservation_checkin_queued',
+                    'warning',
+                    \__('Clock guest check-in was queued for provider retry.', 'must-hotel-booking')
+                );
+
+                self::redirectToPortalReservationDetail($reservationId, 'reservation_checkin_queued');
+            }
+
+            self::redirectToPortalReservationDetail($reservationId, 'reservation_checkin_failed');
+        }
+
         $status      = \sanitize_key((string) ($reservation['status'] ?? ''));
         $checkedInAt = \trim((string) ($reservation['checked_in_at'] ?? ''));
 
@@ -2254,6 +2417,42 @@ final class PortalController
 
         if (!\is_array($reservation)) {
             self::redirectToPortalReservationDetail($reservationId, 'reservation_not_found');
+        }
+
+        $providerContext = ProviderReservationView::metadata($reservation);
+
+        if (!empty($providerContext['is_provider_backed'])) {
+            if (!ProviderReservationActionPolicy::supportsProviderAction($providerContext, 'reservation_checkout', ProviderReservationActionPolicy::SURFACE_PORTAL)) {
+                self::redirectToPortalReservationDetail($reservationId, 'provider_backed_read_only');
+            }
+
+            $result = (new ClockPaymentReconciliationService())->checkOutReservation($reservationId, 'portal');
+
+            if (!empty($result['success'])) {
+                self::logReservationActivity(
+                    $reservationId,
+                    $reservation,
+                    'reservation_checked_out',
+                    'info',
+                    \__('Clock guest check-out completed.', 'must-hotel-booking')
+                );
+
+                self::redirectToPortalReservationDetail($reservationId, 'reservation_checked_out');
+            }
+
+            if (!empty($result['queued'])) {
+                self::logReservationActivity(
+                    $reservationId,
+                    $reservation,
+                    'reservation_checkout_queued',
+                    'warning',
+                    \__('Clock guest check-out was queued for provider retry.', 'must-hotel-booking')
+                );
+
+                self::redirectToPortalReservationDetail($reservationId, 'reservation_checkout_queued');
+            }
+
+            self::redirectToPortalReservationDetail($reservationId, 'reservation_checkout_failed');
         }
 
         $status        = \sanitize_key((string) ($reservation['status'] ?? ''));
@@ -2345,13 +2544,50 @@ final class PortalController
         $newRoomId            = isset($_POST['assigned_room_id']) ? \absint(\wp_unslash($_POST['assigned_room_id'])) : 0;
         $roomTypeId           = isset($reservation['room_type_id']) ? (int) $reservation['room_type_id'] : (int) ($reservation['room_id'] ?? 0);
         $currentAssignedRoomId = isset($reservation['assigned_room_id']) ? (int) $reservation['assigned_room_id'] : 0;
-        $inventoryRepository  = \MustHotelBooking\Engine\get_inventory_repository();
-        $roomLabel            = \__('Unassigned', 'must-hotel-booking');
-        $updated              = false;
 
         if ($requiresMoveCapability && $newRoomId <= 0) {
             self::redirectAfterReservationAssignRoom($reservationId, 'portal_action_failed');
         }
+
+        $providerContext = ProviderReservationView::metadata($reservation);
+
+        if (!empty($providerContext['is_provider_backed'])) {
+            if (!ProviderReservationActionPolicy::supportsProviderAction($providerContext, 'reservation_assign_room', ProviderReservationActionPolicy::SURFACE_PORTAL)) {
+                self::redirectAfterReservationAssignRoom($reservationId, 'provider_backed_read_only');
+            }
+
+            $result = (new ClockPaymentReconciliationService())->assignRoom($reservationId, $newRoomId, 'portal');
+
+            if (!empty($result['success'])) {
+                self::logReservationActivity(
+                    $reservationId,
+                    $reservation,
+                    'room_assigned',
+                    'info',
+                    \__('Clock room assignment completed.', 'must-hotel-booking')
+                );
+
+                self::redirectAfterReservationAssignRoom($reservationId, 'reservation_room_assigned');
+            }
+
+            if (!empty($result['queued'])) {
+                self::logReservationActivity(
+                    $reservationId,
+                    $reservation,
+                    'reservation_room_assignment_queued',
+                    'warning',
+                    \__('Clock room assignment was queued for provider retry.', 'must-hotel-booking')
+                );
+
+                self::redirectAfterReservationAssignRoom($reservationId, 'reservation_room_assignment_queued');
+            }
+
+            self::redirectAfterReservationAssignRoom($reservationId, 'reservation_room_assignment_failed');
+        }
+
+        $inventoryRepository  = \MustHotelBooking\Engine\get_inventory_repository();
+        $roomLabel            = \__('Unassigned', 'must-hotel-booking');
+        $updated              = false;
 
         if ($newRoomId > 0) {
             $inventoryRoom = $inventoryRepository->getInventoryRoomById($newRoomId);
@@ -2503,6 +2739,70 @@ final class PortalController
             && $form['checkin'] !== $currentCheckin
         ) {
             $errors[] = \__('Check-in date cannot be changed after the guest has already checked in.', 'must-hotel-booking');
+        }
+
+        if (!empty($errors)) {
+            return self::buildReservationActionState(
+                $reservationId,
+                ['stay' => $form],
+                $errors
+            );
+        }
+
+        $providerContext = ProviderReservationView::metadata($reservation);
+
+        if (!empty($providerContext['is_provider_backed'])) {
+            if (!ProviderReservationActionPolicy::supportsProviderAction($providerContext, 'reservation_update_stay', ProviderReservationActionPolicy::SURFACE_PORTAL)) {
+                self::redirectToPortalReservationDetail($reservationId, 'provider_backed_read_only');
+            }
+
+            $result = (new ClockPaymentReconciliationService())->updateStayDates(
+                $reservationId,
+                $form['checkin'],
+                $form['checkout'],
+                'portal'
+            );
+
+            if (!empty($result['success']) && !empty($result['pricing_pending'])) {
+                self::logReservationActivity(
+                    $reservationId,
+                    $reservation,
+                    !empty($result['queued']) ? 'reservation_stay_pricing_queued' : 'reservation_stay_pricing_pending',
+                    'warning',
+                    \__('Clock stay dates updated, but pricing reconciliation is pending.', 'must-hotel-booking')
+                );
+
+                self::redirectToPortalReservationDetail(
+                    $reservationId,
+                    !empty($result['queued']) ? 'reservation_stay_pricing_queued' : 'reservation_stay_pricing_pending'
+                );
+            }
+
+            if (!empty($result['success'])) {
+                self::logReservationActivity(
+                    $reservationId,
+                    $reservation,
+                    'reservation_stay_updated',
+                    'info',
+                    \__('Clock stay dates updated.', 'must-hotel-booking')
+                );
+
+                self::redirectToPortalReservationDetail($reservationId, 'reservation_stay_updated');
+            }
+
+            if (!empty($result['queued'])) {
+                self::logReservationActivity(
+                    $reservationId,
+                    $reservation,
+                    'reservation_stay_update_queued',
+                    'warning',
+                    \__('Clock stay-date edit was queued for provider retry.', 'must-hotel-booking')
+                );
+
+                self::redirectToPortalReservationDetail($reservationId, 'reservation_stay_update_queued');
+            }
+
+            self::redirectToPortalReservationDetail($reservationId, 'reservation_stay_update_failed');
         }
 
         $roomTypeId = isset($reservation['room_type_id']) ? (int) $reservation['room_type_id'] : (int) ($reservation['room_id'] ?? 0);
@@ -4191,6 +4491,36 @@ final class PortalController
             $query->getDateTo(),
             100
         );
+
+        // Batch-load provider info for reservation-type entities so audit rows can show provider context.
+        $reservationEntityIds = [];
+
+        foreach ($activityRows as $activityRow) {
+            if (!\is_array($activityRow)) {
+                continue;
+            }
+
+            if (\sanitize_key((string) ($activityRow['entity_type'] ?? '')) === 'reservation') {
+                $eid = isset($activityRow['entity_id']) ? (int) $activityRow['entity_id'] : 0;
+
+                if ($eid > 0) {
+                    $reservationEntityIds[$eid] = $eid;
+                }
+            }
+        }
+
+        $providerInfoByReservation = [];
+
+        if (!empty($reservationEntityIds)) {
+            $reservationRepo = \MustHotelBooking\Engine\get_reservation_repository();
+
+            foreach ($reservationRepo->getProviderReservationRowsByIds(\array_values($reservationEntityIds)) as $provRow) {
+                if (\is_array($provRow) && isset($provRow['id'])) {
+                    $providerInfoByReservation[(int) $provRow['id']] = $provRow;
+                }
+            }
+        }
+
         $rows = [];
 
         foreach ($activityRows as $activityRow) {
@@ -4200,6 +4530,16 @@ final class PortalController
 
             $context = self::decodeActivityContext((string) ($activityRow['context_json'] ?? ''));
             $entityType = \sanitize_key((string) ($activityRow['entity_type'] ?? ''));
+            $entityId = isset($activityRow['entity_id']) ? (int) $activityRow['entity_id'] : 0;
+            $providerKey = '';
+            $isProviderBacked = false;
+
+            if ($entityType === 'reservation' && isset($providerInfoByReservation[$entityId])) {
+                $provRow = $providerInfoByReservation[$entityId];
+                $providerKey = \sanitize_key((string) ($provRow['provider'] ?? ''));
+                $isProviderBacked = $providerKey !== '' && $providerKey !== 'local';
+            }
+
             $rows[] = [
                 'created_at' => self::formatPortalDateTime((string) ($activityRow['created_at'] ?? '')),
                 'severity' => (string) ($activityRow['severity'] ?? 'info'),
@@ -4211,6 +4551,9 @@ final class PortalController
                 'message' => (string) ($activityRow['message'] ?? ''),
                 'actor_label' => self::formatAuditActorLabel($activityRow),
                 'action_url' => self::buildAuditActionUrl($activityRow, $context),
+                'provider_key' => $isProviderBacked ? $providerKey : '',
+                'provider_label' => $isProviderBacked ? ProviderReservationView::providerLabel($providerKey) : '',
+                'is_provider_backed' => $isProviderBacked,
             ];
         }
 
@@ -4299,6 +4642,7 @@ final class PortalController
                 'Actor',
                 'Reference',
                 'Message',
+                'Provider',
                 'Action URL',
             ]];
 
@@ -4311,6 +4655,7 @@ final class PortalController
                     (string) ($row['actor_label'] ?? ''),
                     (string) ($row['reference'] ?? ''),
                     (string) ($row['message'] ?? ''),
+                    !empty($row['is_provider_backed']) ? (string) ($row['provider_label'] ?? '') : 'Local',
                     (string) ($row['action_url'] ?? ''),
                 ];
             }
@@ -4352,6 +4697,14 @@ final class PortalController
                 }
 
                 $rows[] = ['issues', (string) ($row['label'] ?? ''), (string) ($row['value'] ?? ''), ''];
+            }
+
+            foreach ((array) ($reportData['provider_breakdown'] ?? []) as $row) {
+                if (!\is_array($row)) {
+                    continue;
+                }
+
+                $rows[] = ['provider_source', (string) ($row['label'] ?? ''), (string) ($row['value'] ?? ''), ''];
             }
 
             return $rows;
@@ -4397,6 +4750,14 @@ final class PortalController
                 }
 
                 $rows[] = ['issues', (string) ($row['label'] ?? ''), (string) ($row['value'] ?? ''), ''];
+            }
+
+            foreach ((array) ($reportData['provider_breakdown'] ?? []) as $row) {
+                if (!\is_array($row)) {
+                    continue;
+                }
+
+                $rows[] = ['provider_source', (string) ($row['label'] ?? ''), (string) ($row['value'] ?? ''), ''];
             }
 
             return $rows;
@@ -5731,17 +6092,31 @@ final class PortalController
             'quick_booking_created' => \__('Reservation created from the Front Desk booking flow.', 'must-hotel-booking'),
             'reservation_confirmed' => \__('Reservation confirmed.', 'must-hotel-booking'),
             'reservation_cancelled' => \__('Reservation cancelled.', 'must-hotel-booking'),
+            'reservation_cancellation_queued' => \__('Clock cancellation could not be completed immediately. A provider sync job was queued for retry.', 'must-hotel-booking'),
+            'reservation_cancellation_failed' => \__('Clock cancellation could not be completed or queued. Check provider diagnostics before retrying.', 'must-hotel-booking'),
             'reservation_checked_in' => \__('Guest checked in.', 'must-hotel-booking'),
             'reservation_checked_out' => \__('Guest checked out.', 'must-hotel-booking'),
+            'reservation_checkin_queued' => \__('Clock check-in could not be completed immediately. A provider sync job was queued for retry.', 'must-hotel-booking'),
+            'reservation_checkout_queued' => \__('Clock check-out could not be completed immediately. A provider sync job was queued for retry.', 'must-hotel-booking'),
+            'reservation_checkin_failed' => \__('Clock check-in could not be completed or queued. Check provider diagnostics before retrying.', 'must-hotel-booking'),
+            'reservation_checkout_failed' => \__('Clock check-out could not be completed or queued. Check provider diagnostics before retrying.', 'must-hotel-booking'),
             'reservation_room_assigned' => \__('Room assignment updated.', 'must-hotel-booking'),
+            'reservation_room_assignment_queued' => \__('Clock room assignment could not be completed immediately. A provider sync job was queued for retry.', 'must-hotel-booking'),
+            'reservation_room_assignment_failed' => \__('Clock room assignment could not be completed or queued. Check provider room mapping and diagnostics before retrying.', 'must-hotel-booking'),
             'reservation_stay_updated' => \__('Stay dates updated successfully.', 'must-hotel-booking'),
             'reservation_stay_updated_room_unassigned' => \__('Stay dates updated. The previous room assignment was cleared because it no longer matched the updated stay window.', 'must-hotel-booking'),
+            'reservation_stay_pricing_queued' => \__('Clock stay dates were updated, but pricing reconciliation is pending. A provider sync job will retry the pricing refresh.', 'must-hotel-booking'),
+            'reservation_stay_pricing_pending' => \__('Clock stay dates were updated, but pricing reconciliation is still pending. Check provider diagnostics before relying on mirror totals.', 'must-hotel-booking'),
+            'reservation_stay_update_queued' => \__('Clock stay-date edit could not be completed immediately. A provider sync job was queued for retry.', 'must-hotel-booking'),
+            'reservation_stay_update_failed' => \__('Clock stay-date edit could not be completed or queued. Check provider diagnostics before retrying.', 'must-hotel-booking'),
             'reservation_marked_no_show' => \__('Reservation marked as no-show and cancelled.', 'must-hotel-booking'),
             'reservation_note_added' => \__('Internal note added.', 'must-hotel-booking'),
             'reservation_marked_pending' => \__('Reservation moved back to pending.', 'must-hotel-booking'),
             'reservation_marked_paid' => \__('Reservation marked as paid.', 'must-hotel-booking'),
             'reservation_marked_unpaid' => \__('Reservation marked as unpaid.', 'must-hotel-booking'),
             'reservation_guest_updated' => \__('Guest details updated successfully.', 'must-hotel-booking'),
+            'reservation_guest_update_queued' => \__('Clock guest detail edit could not be completed immediately. A provider sync job was queued for retry.', 'must-hotel-booking'),
+            'reservation_guest_update_failed' => \__('Clock guest detail edit could not be completed or queued. Check provider diagnostics before retrying.', 'must-hotel-booking'),
             'reservation_updated' => \__('Reservation source updated successfully.', 'must-hotel-booking'),
             'guest_contact_updated' => \__('Guest contact details updated.', 'must-hotel-booking'),
             'guest_flags_updated' => \__('Guest flags updated.', 'must-hotel-booking'),
@@ -5783,6 +6158,7 @@ final class PortalController
             'invalid_guest_email' => \__('Please enter a valid guest email address.', 'must-hotel-booking'),
             'guest_not_found' => \__('Guest record not found.', 'must-hotel-booking'),
             'reservation_not_found' => \__('Reservation not found.', 'must-hotel-booking'),
+            'provider_backed_read_only' => \__('That provider-backed action is not available from this surface. Use the provider-aware controls shown on the reservation workspace.', 'must-hotel-booking'),
             'housekeeping_room_not_found' => \__('Room record not found.', 'must-hotel-booking'),
             'housekeeping_issue_not_found' => \__('Maintenance issue not found.', 'must-hotel-booking'),
             'housekeeping_assignment_invalid' => \__('That housekeeping assignment is not valid for the selected room or user.', 'must-hotel-booking'),

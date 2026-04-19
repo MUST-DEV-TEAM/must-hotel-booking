@@ -75,6 +75,16 @@ final class ReportRepository extends AbstractRepository
                 r.coupon_code,
                 r.coupon_discount_total,
                 r.payment_status,
+                r.provider,
+                r.provider_booking_id,
+                r.provider_reservation_id,
+                r.provider_status,
+                r.provider_payment_status,
+                r.provider_sync_status,
+                r.provider_synced_at,
+                r.provider_sync_error,
+                r.provider_payload_ref,
+                r.provider_metadata,
                 r.created_at,
                 ' . $roomSelect . '
             FROM ' . $this->table('reservations') . ' r
@@ -141,6 +151,16 @@ final class ReportRepository extends AbstractRepository
                 r.coupon_code,
                 r.coupon_discount_total,
                 r.payment_status,
+                r.provider,
+                r.provider_booking_id,
+                r.provider_reservation_id,
+                r.provider_status,
+                r.provider_payment_status,
+                r.provider_sync_status,
+                r.provider_synced_at,
+                r.provider_sync_error,
+                r.provider_payload_ref,
+                r.provider_metadata,
                 r.created_at,
                 ' . $roomSelect . '
             FROM ' . $this->table('reservations') . ' r

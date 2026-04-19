@@ -5,6 +5,9 @@ namespace MustHotelBooking\Admin;
 use MustHotelBooking\Core\ReservationStatus;
 use MustHotelBooking\Engine\BookingStatusEngine;
 use MustHotelBooking\Engine\EmailEngine;
+use MustHotelBooking\Provider\Clock\ClockPaymentReconciliationService;
+use MustHotelBooking\Provider\ProviderReservationActionPolicy;
+use MustHotelBooking\Provider\ProviderReservationView;
 
 final class ReservationAdminActions
 {
@@ -77,6 +80,10 @@ final class ReservationAdminActions
             $this->redirectToReturnUrl($page, ['notice' => 'reservation_not_found']);
         }
 
+        if ($this->shouldBlockProviderBackedAction($reservationId, $action, ProviderReservationActionPolicy::SURFACE_ADMIN_POST)) {
+            $this->redirectToReturnUrl($page, ['notice' => 'provider_backed_read_only']);
+        }
+
         switch ($action) {
             case 'save_guest':
                 $notice = $this->saveGuestDetails($reservationId);
@@ -97,7 +104,19 @@ final class ReservationAdminActions
                 $notice = $this->markReservationUnpaid($reservationId) ? 'reservation_marked_unpaid' : 'action_failed';
                 break;
             case 'cancel':
-                $notice = $this->cancelReservation($reservationId) ? 'reservation_cancelled' : 'action_failed';
+                $notice = $this->cancelReservationNotice($reservationId);
+                break;
+            case 'checkin':
+                $notice = $this->checkInReservationNotice($reservationId);
+                break;
+            case 'checkout':
+                $notice = $this->checkOutReservationNotice($reservationId);
+                break;
+            case 'assign_room':
+                $notice = $this->assignRoomNotice($reservationId);
+                break;
+            case 'update_stay':
+                $notice = $this->updateStayNotice($reservationId);
                 break;
             case 'resend_guest_email':
                 $notice = EmailEngine::resendGuestReservationEmail($reservationId) ? 'reservation_guest_email_resent' : 'action_failed';
@@ -130,6 +149,10 @@ final class ReservationAdminActions
             $this->redirectToReturnUrl($page, ['notice' => 'invalid_nonce']);
         }
 
+        if ($this->shouldBlockProviderBackedAction($reservationId, $action, ProviderReservationActionPolicy::SURFACE_ADMIN_GET)) {
+            $this->redirectToReturnUrl($page, ['notice' => 'provider_backed_read_only']);
+        }
+
         switch ($action) {
             case 'confirm':
                 $notice = $this->confirmReservation($reservationId) ? 'reservation_confirmed' : 'action_failed';
@@ -141,7 +164,7 @@ final class ReservationAdminActions
                 $notice = EmailEngine::resendGuestReservationEmail($reservationId) ? 'reservation_guest_email_resent' : 'action_failed';
                 break;
             case 'cancel':
-                $notice = $this->cancelReservation($reservationId) ? 'reservation_cancelled' : 'action_failed';
+                $notice = $this->cancelReservationNotice($reservationId);
                 break;
             default:
                 return false;
@@ -171,7 +194,9 @@ final class ReservationAdminActions
         foreach (\array_unique($reservationIds) as $reservationId) {
             $success = false;
 
-            if ($bulkAction === 'confirm') {
+            if ($this->isProviderBackedReservation((int) $reservationId)) {
+                $success = false;
+            } elseif ($bulkAction === 'confirm') {
                 $success = $this->confirmReservation((int) $reservationId);
             } elseif ($bulkAction === 'mark_paid') {
                 $success = $this->markReservationPaid((int) $reservationId);
@@ -195,6 +220,21 @@ final class ReservationAdminActions
                 'failed_count' => $failed,
             ]
         );
+    }
+
+    private function isProviderBackedReservation(int $reservationId): bool
+    {
+        $reservation = $this->reservationRepository->getProviderMetadata($reservationId);
+
+        return \is_array($reservation) && ProviderReservationView::isProviderBacked($reservation);
+    }
+
+    private function shouldBlockProviderBackedAction(int $reservationId, string $action, string $surface): bool
+    {
+        $reservation = $this->reservationRepository->getProviderMetadata($reservationId);
+
+        return \is_array($reservation)
+            && ProviderReservationActionPolicy::shouldBlockProviderBackedAction($reservation, $action, $surface);
     }
 
     private function confirmReservation(int $reservationId): bool
@@ -260,6 +300,240 @@ final class ReservationAdminActions
         return true;
     }
 
+    private function cancelReservationNotice(int $reservationId): string
+    {
+        $reservation = $this->reservationRepository->getReservation($reservationId);
+
+        if (!\is_array($reservation)) {
+            return 'reservation_not_found';
+        }
+
+        $providerContext = ProviderReservationView::metadata($reservation);
+
+        if (empty($providerContext['is_provider_backed'])) {
+            return $this->cancelReservation($reservationId) ? 'reservation_cancelled' : 'action_failed';
+        }
+
+        if (!ProviderReservationActionPolicy::supportsProviderAction($providerContext, 'cancel', ProviderReservationActionPolicy::SURFACE_ADMIN_POST)) {
+            return 'provider_backed_read_only';
+        }
+
+        $result = (new ClockPaymentReconciliationService())->cancelReservation($reservationId, 'admin_cancelled', 'admin');
+
+        if (!empty($result['success'])) {
+            return 'reservation_cancelled';
+        }
+
+        if (!empty($result['queued'])) {
+            return 'reservation_cancellation_queued';
+        }
+
+        return 'reservation_cancellation_failed';
+    }
+
+    private function checkInReservationNotice(int $reservationId): string
+    {
+        $reservation = $this->reservationRepository->getReservation($reservationId);
+
+        if (!\is_array($reservation)) {
+            return 'reservation_not_found';
+        }
+
+        $providerContext = ProviderReservationView::metadata($reservation);
+
+        if (empty($providerContext['is_provider_backed'])) {
+            return 'action_failed';
+        }
+
+        if (!ProviderReservationActionPolicy::supportsProviderAction($providerContext, 'checkin', ProviderReservationActionPolicy::SURFACE_ADMIN_POST)) {
+            return 'provider_backed_read_only';
+        }
+
+        $result = (new ClockPaymentReconciliationService())->checkInReservation($reservationId, 'admin');
+
+        if (!empty($result['success'])) {
+            $this->logReservationActivity(
+                $reservationId,
+                $reservation,
+                'reservation_checked_in',
+                'info',
+                \__('Clock guest check-in completed.', 'must-hotel-booking')
+            );
+
+            return 'reservation_checked_in';
+        }
+
+        if (!empty($result['queued'])) {
+            $this->logReservationActivity(
+                $reservationId,
+                $reservation,
+                'reservation_checkin_queued',
+                'warning',
+                \__('Clock guest check-in was queued for provider retry.', 'must-hotel-booking')
+            );
+
+            return 'reservation_checkin_queued';
+        }
+
+        return 'reservation_checkin_failed';
+    }
+
+    private function checkOutReservationNotice(int $reservationId): string
+    {
+        $reservation = $this->reservationRepository->getReservation($reservationId);
+
+        if (!\is_array($reservation)) {
+            return 'reservation_not_found';
+        }
+
+        $providerContext = ProviderReservationView::metadata($reservation);
+
+        if (empty($providerContext['is_provider_backed'])) {
+            return 'action_failed';
+        }
+
+        if (!ProviderReservationActionPolicy::supportsProviderAction($providerContext, 'checkout', ProviderReservationActionPolicy::SURFACE_ADMIN_POST)) {
+            return 'provider_backed_read_only';
+        }
+
+        $result = (new ClockPaymentReconciliationService())->checkOutReservation($reservationId, 'admin');
+
+        if (!empty($result['success'])) {
+            $this->logReservationActivity(
+                $reservationId,
+                $reservation,
+                'reservation_checked_out',
+                'info',
+                \__('Clock guest check-out completed.', 'must-hotel-booking')
+            );
+
+            return 'reservation_checked_out';
+        }
+
+        if (!empty($result['queued'])) {
+            $this->logReservationActivity(
+                $reservationId,
+                $reservation,
+                'reservation_checkout_queued',
+                'warning',
+                \__('Clock guest check-out was queued for provider retry.', 'must-hotel-booking')
+            );
+
+            return 'reservation_checkout_queued';
+        }
+
+        return 'reservation_checkout_failed';
+    }
+
+    private function assignRoomNotice(int $reservationId): string
+    {
+        $reservation = $this->reservationRepository->getReservation($reservationId);
+
+        if (!\is_array($reservation)) {
+            return 'reservation_not_found';
+        }
+
+        $providerContext = ProviderReservationView::metadata($reservation);
+
+        if (empty($providerContext['is_provider_backed'])) {
+            return 'action_failed';
+        }
+
+        if (!ProviderReservationActionPolicy::supportsProviderAction($providerContext, 'assign_room', ProviderReservationActionPolicy::SURFACE_ADMIN_POST)) {
+            return 'provider_backed_read_only';
+        }
+
+        $roomId = isset($_POST['assigned_room_id']) ? \absint(\wp_unslash($_POST['assigned_room_id'])) : 0;
+        $result = (new ClockPaymentReconciliationService())->assignRoom($reservationId, $roomId, 'admin');
+
+        if (!empty($result['success'])) {
+            $this->logReservationActivity(
+                $reservationId,
+                $reservation,
+                'room_assigned',
+                'info',
+                \__('Clock room assignment completed.', 'must-hotel-booking')
+            );
+
+            return 'reservation_room_assigned';
+        }
+
+        if (!empty($result['queued'])) {
+            $this->logReservationActivity(
+                $reservationId,
+                $reservation,
+                'reservation_room_assignment_queued',
+                'warning',
+                \__('Clock room assignment was queued for provider retry.', 'must-hotel-booking')
+            );
+
+            return 'reservation_room_assignment_queued';
+        }
+
+        return 'reservation_room_assignment_failed';
+    }
+
+    private function updateStayNotice(int $reservationId): string
+    {
+        $reservation = $this->reservationRepository->getReservation($reservationId);
+
+        if (!\is_array($reservation)) {
+            return 'reservation_not_found';
+        }
+
+        $providerContext = ProviderReservationView::metadata($reservation);
+
+        if (empty($providerContext['is_provider_backed'])) {
+            return 'action_failed';
+        }
+
+        if (!ProviderReservationActionPolicy::supportsProviderAction($providerContext, 'update_stay', ProviderReservationActionPolicy::SURFACE_ADMIN_POST)) {
+            return 'provider_backed_read_only';
+        }
+
+        $checkin = isset($_POST['stay_checkin']) ? \sanitize_text_field((string) \wp_unslash($_POST['stay_checkin'])) : '';
+        $checkout = isset($_POST['stay_checkout']) ? \sanitize_text_field((string) \wp_unslash($_POST['stay_checkout'])) : '';
+        $result = (new ClockPaymentReconciliationService())->updateStayDates($reservationId, $checkin, $checkout, 'admin');
+
+        if (!empty($result['success']) && !empty($result['pricing_pending'])) {
+            $this->logReservationActivity(
+                $reservationId,
+                $reservation,
+                !empty($result['queued']) ? 'reservation_stay_pricing_queued' : 'reservation_stay_pricing_pending',
+                'warning',
+                \__('Clock stay dates updated, but pricing reconciliation is pending.', 'must-hotel-booking')
+            );
+
+            return !empty($result['queued']) ? 'reservation_stay_pricing_queued' : 'reservation_stay_pricing_pending';
+        }
+
+        if (!empty($result['success'])) {
+            $this->logReservationActivity(
+                $reservationId,
+                $reservation,
+                'reservation_stay_updated',
+                'info',
+                \__('Clock stay dates updated.', 'must-hotel-booking')
+            );
+
+            return 'reservation_stay_updated';
+        }
+
+        if (!empty($result['queued'])) {
+            $this->logReservationActivity(
+                $reservationId,
+                $reservation,
+                'reservation_stay_update_queued',
+                'warning',
+                \__('Clock stay-date edit was queued for provider retry.', 'must-hotel-booking')
+            );
+
+            return 'reservation_stay_update_queued';
+        }
+
+        return 'reservation_stay_update_failed';
+    }
+
     private function saveGuestDetails(int $reservationId): string
     {
         $reservation = $this->reservationRepository->getReservation($reservationId);
@@ -267,6 +541,8 @@ final class ReservationAdminActions
         if (!\is_array($reservation)) {
             return 'reservation_not_found';
         }
+
+        $providerContext = ProviderReservationView::metadata($reservation);
 
         $firstName = isset($_POST['guest_first_name']) ? \sanitize_text_field((string) \wp_unslash($_POST['guest_first_name'])) : '';
         $lastName = isset($_POST['guest_last_name']) ? \sanitize_text_field((string) \wp_unslash($_POST['guest_last_name'])) : '';
@@ -276,6 +552,50 @@ final class ReservationAdminActions
 
         if ($email !== '' && !\is_email($email)) {
             return 'invalid_guest_email';
+        }
+
+        if (!empty($providerContext['is_provider_backed'])) {
+            if (!ProviderReservationActionPolicy::supportsProviderAction($providerContext, 'save_guest', ProviderReservationActionPolicy::SURFACE_ADMIN_POST)) {
+                return 'provider_backed_read_only';
+            }
+
+            $result = (new ClockPaymentReconciliationService())->updateGuestDetails(
+                $reservationId,
+                [
+                    'first_name' => $firstName,
+                    'last_name' => $lastName,
+                    'email' => $email,
+                    'phone' => $phone,
+                    'country' => $country,
+                ],
+                'admin'
+            );
+
+            if (!empty($result['success'])) {
+                $this->logReservationActivity(
+                    $reservationId,
+                    $reservation,
+                    'guest_updated',
+                    'info',
+                    \__('Clock guest details updated.', 'must-hotel-booking')
+                );
+
+                return 'reservation_guest_updated';
+            }
+
+            if (!empty($result['queued'])) {
+                $this->logReservationActivity(
+                    $reservationId,
+                    $reservation,
+                    'reservation_guest_update_queued',
+                    'warning',
+                    \__('Clock guest detail edit was queued for provider retry.', 'must-hotel-booking')
+                );
+
+                return 'reservation_guest_update_queued';
+            }
+
+            return 'reservation_guest_update_failed';
         }
 
         $guestId = $this->guestRepository->saveAdminGuestProfile(

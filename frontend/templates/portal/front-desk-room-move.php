@@ -3,6 +3,7 @@
 use MustHotelBooking\Core\StaffAccess;
 use MustHotelBooking\Portal\PortalRenderer;
 use MustHotelBooking\Portal\PortalRouter;
+use MustHotelBooking\Provider\ProviderReservationActionPolicy;
 
 if (!\defined('ABSPATH')) {
     exit;
@@ -38,6 +39,10 @@ if (empty($rows)) {
         }
 
         $reservationId = isset($row['id']) ? (int) $row['id'] : 0;
+        $providerContext = isset($row['provider']) && \is_array($row['provider']) ? $row['provider'] : [];
+        $isProviderBacked = !empty($providerContext['is_provider_backed']);
+        $canProviderRoomMove = $isProviderBacked
+            && ProviderReservationActionPolicy::supportsProviderAction($providerContext, 'reservation_assign_room', ProviderReservationActionPolicy::SURFACE_PORTAL);
         $reservationUrl = $reservationId > 0 ? PortalRouter::getModuleUrl('reservations', ['reservation_id' => $reservationId]) : '';
         $moveOptions = isset($row['move_options']) && \is_array($row['move_options']) ? $row['move_options'] : [];
 
@@ -52,6 +57,14 @@ if (empty($rows)) {
             echo '<br /><span class="must-portal-muted">' . \esc_html((string) ($row['booking_id'] ?? '')) . '</span>';
         }
 
+        if ($isProviderBacked) {
+            echo '<br /><span class="must-portal-muted">' . \esc_html(\sprintf(
+                /* translators: %s: provider label. */
+                \__('%s mirror', 'must-hotel-booking'),
+                (string) ($providerContext['provider_label'] ?? \__('Provider', 'must-hotel-booking'))
+            )) . '</span>';
+        }
+
         echo '</td>';
         echo '<td><strong>' . \esc_html((string) ($row['checkin'] ?? '')) . ' - ' . \esc_html((string) ($row['checkout'] ?? '')) . '</strong></td>';
         echo '<td><strong>' . \esc_html((string) ($row['assigned_room'] ?? \__('No room assigned', 'must-hotel-booking'))) . '</strong></td>';
@@ -60,17 +73,27 @@ if (empty($rows)) {
         PortalRenderer::renderBadge((string) ($row['desk_state_key'] ?? 'success'), (string) ($row['desk_state'] ?? ''));
         echo '<br />';
         PortalRenderer::renderBadge((string) ($row['reservation_status_key'] ?? 'info'), (string) ($row['reservation_status'] ?? ''));
+        if ($isProviderBacked) {
+            echo '<br />';
+            PortalRenderer::renderBadge('info', (string) ($providerContext['provider_status_label'] ?? \__('Provider mirror', 'must-hotel-booking')));
+        }
         echo '</td><td>';
 
         if ($reservationUrl !== '') {
             echo '<div class="must-portal-inline-actions"><a class="must-portal-inline-link" href="' . \esc_url($reservationUrl) . '">' . \esc_html__('Open reservation', 'must-hotel-booking') . '</a></div>';
         }
 
-        if (!$canMoveRoom) {
+        if ($isProviderBacked && !$canProviderRoomMove) {
+            echo '<span class="must-portal-muted">' . \esc_html__('Provider-backed mirror: room moves are read-only here.', 'must-hotel-booking') . '</span>';
+        } elseif (!$canMoveRoom) {
             echo '<span class="must-portal-muted">' . \esc_html__('Room moves require room-move authority.', 'must-hotel-booking') . '</span>';
         } elseif (empty($moveOptions)) {
-            echo '<span class="must-portal-muted">' . \esc_html__('No compatible room is currently available.', 'must-hotel-booking') . '</span>';
+            echo '<span class="must-portal-muted">' . \esc_html($canProviderRoomMove ? \__('No mapped compatible Clock room is currently available.', 'must-hotel-booking') : \__('No compatible room is currently available.', 'must-hotel-booking')) . '</span>';
         } elseif ($reservationId > 0) {
+            if ($canProviderRoomMove) {
+                echo '<span class="must-portal-muted">' . \esc_html__('Clock room move updates provider first.', 'must-hotel-booking') . '</span>';
+            }
+
             echo '<form method="post" action="' . \esc_url($formAction) . '" class="must-portal-form-stack">';
             \wp_nonce_field('must_portal_reservation_assign_room_' . $reservationId, 'must_portal_reservation_nonce');
             echo '<input type="hidden" name="must_portal_action" value="reservation_assign_room" />';

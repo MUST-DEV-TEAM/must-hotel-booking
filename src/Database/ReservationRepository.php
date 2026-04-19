@@ -53,6 +53,153 @@ final class ReservationRepository extends AbstractRepository
     }
 
     /**
+     * @return array<string, mixed>
+     */
+    public function getProviderMetadata(int $reservationId): array
+    {
+        if ($reservationId <= 0) {
+            return [];
+        }
+
+        $row = $this->wpdb->get_row(
+            $this->wpdb->prepare(
+                'SELECT provider, provider_booking_id, provider_reservation_id, provider_status, provider_payment_status, provider_sync_status, provider_synced_at, provider_sync_error, provider_payload_ref, provider_metadata
+                FROM ' . $this->table('reservations') . '
+                WHERE id = %d
+                LIMIT 1',
+                $reservationId
+            ),
+            ARRAY_A
+        );
+
+        return \is_array($row) ? $row : [];
+    }
+
+    /**
+     * @param array<int, int> $reservationIds
+     * @return array<int, array<string, mixed>>
+     */
+    public function getProviderReservationRowsByIds(array $reservationIds): array
+    {
+        $reservationIds = $this->normalizeIds($reservationIds);
+
+        if (empty($reservationIds)) {
+            return [];
+        }
+
+        $sql = $this->wpdb->prepare(
+            'SELECT id, booking_id, room_id, room_type_id, assigned_room_id, checkin, checkout, status, payment_status, checked_in_at, checked_out_at, provider, provider_booking_id, provider_reservation_id, provider_status, provider_payment_status, provider_sync_status, provider_synced_at, provider_sync_error, provider_payload_ref, provider_metadata
+            FROM ' . $this->table('reservations') . '
+            WHERE id IN (' . $this->buildIntegerPlaceholders($reservationIds) . ')
+            ORDER BY id ASC',
+            ...$reservationIds
+        );
+        $rows = $this->wpdb->get_results($sql, ARRAY_A);
+
+        return \is_array($rows) ? $rows : [];
+    }
+
+    /**
+     * @return array<int, array<string, mixed>>
+     */
+    public function getProviderReservationRowsByExternalIds(string $provider, string $providerReservationId = '', string $providerBookingId = ''): array
+    {
+        $provider = $this->providerKey($provider, 50);
+        $providerReservationId = $this->providerText($providerReservationId, 191);
+        $providerBookingId = $this->providerText($providerBookingId, 191);
+
+        if ($provider === '' || ($providerReservationId === '' && $providerBookingId === '')) {
+            return [];
+        }
+
+        $clauses = [];
+        $params = [$provider];
+
+        if ($providerReservationId !== '') {
+            $clauses[] = 'provider_reservation_id = %s';
+            $params[] = $providerReservationId;
+            $clauses[] = 'provider_payload_ref = %s';
+            $params[] = $providerReservationId;
+        }
+
+        if ($providerBookingId !== '') {
+            $clauses[] = 'provider_booking_id = %s';
+            $params[] = $providerBookingId;
+            $clauses[] = 'provider_payload_ref = %s';
+            $params[] = $providerBookingId;
+        }
+
+        $sql = $this->wpdb->prepare(
+            'SELECT id, booking_id, status, payment_status, checked_in_at, checked_out_at, provider, provider_booking_id, provider_reservation_id, provider_status, provider_payment_status, provider_sync_status, provider_synced_at, provider_sync_error, provider_payload_ref, provider_metadata
+            FROM ' . $this->table('reservations') . '
+            WHERE provider = %s
+                AND (' . \implode(' OR ', $clauses) . ')
+            ORDER BY id ASC',
+            ...$params
+        );
+        $rows = $this->wpdb->get_results($sql, ARRAY_A);
+
+        return \is_array($rows) ? $rows : [];
+    }
+
+    /**
+     * @param array<string, mixed> $metadata
+     */
+    public function updateProviderMetadata(int $reservationId, array $metadata): bool
+    {
+        if ($reservationId <= 0) {
+            return false;
+        }
+
+        $data = [];
+
+        foreach ($metadata as $key => $value) {
+            if (!\is_string($key)) {
+                continue;
+            }
+
+            switch ($key) {
+                case 'provider':
+                    $data[$key] = $this->providerKey((string) $value, 50);
+                    break;
+                case 'provider_booking_id':
+                case 'provider_reservation_id':
+                case 'provider_payload_ref':
+                    $data[$key] = $this->providerText((string) $value, 191);
+                    break;
+                case 'provider_status':
+                case 'provider_payment_status':
+                    $data[$key] = $this->providerText((string) $value, 100);
+                    break;
+                case 'provider_sync_status':
+                    $data[$key] = $this->providerKey((string) $value, 50);
+                    break;
+                case 'provider_synced_at':
+                    $data[$key] = $this->providerNullableText($value);
+                    break;
+                case 'provider_sync_error':
+                    $data[$key] = $this->providerNullableText($value);
+                    break;
+                case 'provider_metadata':
+                    $data[$key] = $this->providerJson($value);
+                    break;
+            }
+        }
+
+        if (empty($data)) {
+            return true;
+        }
+
+        return $this->wpdb->update(
+            $this->table('reservations'),
+            $data,
+            ['id' => $reservationId],
+            $this->providerMetadataFormats($data),
+            ['%d']
+        ) !== false;
+    }
+
+    /**
      * @param array<string, mixed> $reservationData
      * @param array<int, string> $nonBlockingStatuses
      */
@@ -217,6 +364,105 @@ final class ReservationRepository extends AbstractRepository
     }
 
     /**
+     * @param array<string, mixed> $reservationData
+     */
+    public function createProviderMirrorReservation(array $reservationData): int
+    {
+        $bookingId = isset($reservationData['booking_id']) ? (string) $reservationData['booking_id'] : '';
+        $roomId = isset($reservationData['room_id']) ? (int) $reservationData['room_id'] : 0;
+        $guestId = isset($reservationData['guest_id']) ? (int) $reservationData['guest_id'] : 0;
+        $checkin = isset($reservationData['checkin']) ? (string) $reservationData['checkin'] : '';
+        $checkout = isset($reservationData['checkout']) ? (string) $reservationData['checkout'] : '';
+
+        if ($bookingId === '' || $roomId <= 0 || $guestId <= 0 || $checkin === '' || $checkout === '') {
+            return 0;
+        }
+
+        $data = [
+            'booking_id' => $bookingId,
+            'room_id' => $roomId,
+            'room_type_id' => isset($reservationData['room_type_id']) ? (int) $reservationData['room_type_id'] : $roomId,
+            'assigned_room_id' => isset($reservationData['assigned_room_id']) ? (int) $reservationData['assigned_room_id'] : 0,
+            'rate_plan_id' => isset($reservationData['rate_plan_id']) ? (int) $reservationData['rate_plan_id'] : 0,
+            'guest_id' => $guestId,
+            'checkin' => $checkin,
+            'checkout' => $checkout,
+            'guests' => isset($reservationData['guests']) ? (int) $reservationData['guests'] : 1,
+            'status' => isset($reservationData['status']) ? (string) $reservationData['status'] : 'pending',
+            'booking_source' => isset($reservationData['booking_source']) ? (string) $reservationData['booking_source'] : 'website',
+            'notes' => isset($reservationData['notes']) ? (string) $reservationData['notes'] : '',
+            'total_price' => isset($reservationData['total_price']) ? (float) $reservationData['total_price'] : 0.0,
+            'coupon_id' => isset($reservationData['coupon_id']) ? (int) $reservationData['coupon_id'] : 0,
+            'coupon_code' => isset($reservationData['coupon_code']) ? (string) $reservationData['coupon_code'] : '',
+            'coupon_discount_total' => isset($reservationData['coupon_discount_total']) ? (float) $reservationData['coupon_discount_total'] : 0.0,
+            'payment_status' => isset($reservationData['payment_status']) ? (string) $reservationData['payment_status'] : 'unpaid',
+            'provider' => $this->providerKey((string) ($reservationData['provider'] ?? 'local'), 50),
+            'provider_booking_id' => $this->providerText((string) ($reservationData['provider_booking_id'] ?? ''), 191),
+            'provider_reservation_id' => $this->providerText((string) ($reservationData['provider_reservation_id'] ?? ''), 191),
+            'provider_status' => $this->providerText((string) ($reservationData['provider_status'] ?? ''), 100),
+            'provider_payment_status' => $this->providerText((string) ($reservationData['provider_payment_status'] ?? ''), 100),
+            'provider_sync_status' => $this->providerKey((string) ($reservationData['provider_sync_status'] ?? ''), 50),
+            'provider_synced_at' => $this->providerNullableText($reservationData['provider_synced_at'] ?? null),
+            'provider_sync_error' => $this->providerNullableText($reservationData['provider_sync_error'] ?? null),
+            'provider_payload_ref' => $this->providerText((string) ($reservationData['provider_payload_ref'] ?? ''), 191),
+            'provider_metadata' => $this->providerJson($reservationData['provider_metadata'] ?? null),
+            'created_at' => isset($reservationData['created_at']) ? (string) $reservationData['created_at'] : \current_time('mysql'),
+        ];
+
+        $inserted = $this->wpdb->insert(
+            $this->table('reservations'),
+            $data,
+            $this->resolveReservationFormats($data)
+        );
+
+        return $inserted !== false ? (int) $this->wpdb->insert_id : 0;
+    }
+
+    /** @param array<string, mixed> $data @return array<int, string> */
+    private function providerMetadataFormats(array $data): array
+    {
+        return \array_fill(0, \count($data), '%s');
+    }
+
+    private function providerKey(string $value, int $maxLength): string
+    {
+        $value = \function_exists('sanitize_key') ? \sanitize_key($value) : \strtolower(\preg_replace('/[^a-zA-Z0-9_\-]/', '', $value) ?? '');
+
+        return \substr($value, 0, $maxLength);
+    }
+
+    private function providerText(string $value, int $maxLength): string
+    {
+        $value = \function_exists('sanitize_text_field') ? \sanitize_text_field($value) : \trim(\strip_tags($value));
+
+        return \substr($value, 0, $maxLength);
+    }
+
+    /** @param mixed $value */
+    private function providerNullableText($value): ?string
+    {
+        $value = \is_scalar($value) ? \trim((string) $value) : '';
+
+        return $value !== '' ? $value : null;
+    }
+
+    /** @param mixed $value */
+    private function providerJson($value): ?string
+    {
+        if ($value === null || $value === '') {
+            return null;
+        }
+
+        if (\is_string($value)) {
+            return $value;
+        }
+
+        $json = \function_exists('wp_json_encode') ? \wp_json_encode($value) : \json_encode($value);
+
+        return \is_string($json) ? $json : null;
+    }
+
+    /**
      * @return array<string, mixed>|null
      */
     public function getReservation(int $reservationId): ?array
@@ -304,6 +550,16 @@ final class ReservationRepository extends AbstractRepository
                 r.coupon_code,
                 r.coupon_discount_total,
                 r.payment_status,
+                r.provider,
+                r.provider_booking_id,
+                r.provider_reservation_id,
+                r.provider_status,
+                r.provider_payment_status,
+                r.provider_sync_status,
+                r.provider_synced_at,
+                r.provider_sync_error,
+                r.provider_payload_ref,
+                r.provider_metadata,
                 r.created_at,
                 ' . $roomSelect . ',
                 ' . $guestSelect . ',
@@ -458,6 +714,16 @@ final class ReservationRepository extends AbstractRepository
                     r.status,
                     r.total_price,
                     r.payment_status,
+                    r.provider,
+                    r.provider_booking_id,
+                    r.provider_reservation_id,
+                    r.provider_status,
+                    r.provider_payment_status,
+                    r.provider_sync_status,
+                    r.provider_synced_at,
+                    r.provider_sync_error,
+                    r.provider_payload_ref,
+                    r.provider_metadata,
                     r.created_at,
                     r.checked_in_at,
                     r.checked_out_at,
@@ -691,6 +957,16 @@ final class ReservationRepository extends AbstractRepository
                     r.status,
                     r.total_price,
                     r.payment_status,
+                    r.provider,
+                    r.provider_booking_id,
+                    r.provider_reservation_id,
+                    r.provider_status,
+                    r.provider_payment_status,
+                    r.provider_sync_status,
+                    r.provider_synced_at,
+                    r.provider_sync_error,
+                    r.provider_payload_ref,
+                    r.provider_metadata,
                     r.created_at,
                     r.checked_in_at,
                     r.checked_out_at,
@@ -731,6 +1007,16 @@ final class ReservationRepository extends AbstractRepository
                     r.status,
                     r.total_price,
                     r.payment_status,
+                    r.provider,
+                    r.provider_booking_id,
+                    r.provider_reservation_id,
+                    r.provider_status,
+                    r.provider_payment_status,
+                    r.provider_sync_status,
+                    r.provider_synced_at,
+                    r.provider_sync_error,
+                    r.provider_payload_ref,
+                    r.provider_metadata,
                     r.created_at,
                     r.checked_in_at,
                     r.checked_out_at,

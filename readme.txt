@@ -4,7 +4,7 @@ Tags: hotel, booking, reservation, accommodation
 Requires at least: 5.0
 Tested up to: 6.0
 Requires PHP: 7.4
-Stable tag: 0.3.49
+Stable tag: 0.4.0
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -31,6 +31,19 @@ Main features include:
 5. When updating, upload the new release ZIP or use the configured updater, then review **Diagnostics & Maintenance** after the update completes.
 
 == Changelog ==
+
+= 0.4.0 =
+* Added Clock PMS provider integration — the plugin now supports two booking modes: Local (self-contained, unchanged) and Clock (mirrors reservations to an external PMS via REST API).
+* Added provider infrastructure: `ProviderManager`, `ProviderMappingRepository`, `ProviderSyncJobRepository`, `ProviderRequestLogRepository`, and supporting value objects for routing all booking operations through the active provider.
+* Added Clock availability, quote, reservation creation, payment reconciliation, cancellation, room assignment, stay-date editing, guest-detail editing, and check-in/check-out flows via configurable REST endpoint paths with token substitution.
+* Added inbound Clock sync: webhook receiver and refresh sync job apply provider status/payment updates to local mirror reservations.
+* Added Clock catalog service for fetching remote accommodation, physical room, and rate plan lists and saving them as local provider mappings.
+* Added provider-aware admin and staff portal actions: cancel, check-in, check-out, room move, stay-date edit, and guest-detail edit route to Clock when the reservation is a Clock mirror.
+* Added provider-aware reporting: booking source breakdown, sync error and payment mismatch issue counts, and Provider column in audit log and CSV exports.
+* Added Clock diagnostics panel: readiness checklist, mapping management UI (accommodation/rate plan/physical room inline add/delete), sync health summary, and last-error display.
+* Added three new database tables: `mhb_provider_mappings`, `mhb_provider_request_logs`, `mhb_provider_sync_jobs`. Tables are created automatically on upgrade via `dbDelta`.
+* Hardened Clock API contract handling: non-JSON 2xx responses now surface a `bad_response_body` error; unresolved path tokens in endpoint URLs fail fast with a clear operator message instead of sending a malformed request.
+* Local mode behavior, all existing frontend pages, booking flow, payment handling, admin panels, and staff portal are unchanged.
 
 = 0.3.49 =
 * Standardized booking-flow mobile shell spacing so the managed booking, accommodation, checkout, and confirmation views use `120px` top/bottom padding and `20px` left/right padding on phones.

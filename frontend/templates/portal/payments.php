@@ -70,10 +70,28 @@ if (empty($moduleData['rows'])) {
         }
 
         $reservationId = (int) ($row['reservation_id'] ?? 0);
+        $providerContext = isset($row['provider']) && \is_array($row['provider']) ? $row['provider'] : [];
+        $providerPayment = isset($row['provider_payment']) && \is_array($row['provider_payment']) ? $row['provider_payment'] : [];
+        $isProviderBacked = !empty($providerContext['is_provider_backed']);
 
         echo '<tr><td><strong>' . \esc_html((string) ($row['booking_id'] ?? '')) . '</strong><br /><span class="must-portal-muted">' . \esc_html((string) ($row['accommodation'] ?? '')) . '</span></td>';
-        echo '<td>' . \esc_html((string) ($row['guest'] ?? '')) . '</td><td>' . \esc_html((string) ($row['payment_method'] ?? '')) . '</td><td>';
+        if ($isProviderBacked) {
+            echo '<td>' . \esc_html((string) ($row['guest'] ?? '')) . '<br /><span class="must-portal-muted">' . \esc_html((string) ($providerContext['provider_label'] ?? __('Provider mirror', 'must-hotel-booking'))) . '</span></td>';
+        } else {
+            echo '<td>' . \esc_html((string) ($row['guest'] ?? '')) . '</td>';
+        }
+        echo '<td>' . \esc_html((string) ($row['payment_method'] ?? '')) . '</td><td>';
         PortalRenderer::renderBadge((string) ($row['payment_status_key'] ?? 'info'), (string) ($row['payment_status'] ?? ''));
+        if ($isProviderBacked && !empty($providerPayment)) {
+            echo '<br /><span class="must-portal-muted">' . \esc_html(\sprintf(
+                /* translators: %s: provider payment status. */
+                __('Provider: %s', 'must-hotel-booking'),
+                (string) ($providerPayment['provider_status_label'] ?? __('Not reported', 'must-hotel-booking'))
+            )) . '</span>';
+            if (!empty($providerPayment['differs'])) {
+                echo '<br /><span class="must-portal-muted">' . \esc_html__('Provider/local differ', 'must-hotel-booking') . '</span>';
+            }
+        }
         echo '</td><td>' . \esc_html((string) ($row['amount_due'] ?? '')) . '</td><td><a class="must-portal-inline-link" href="' . \esc_url($buildPaymentDetailUrl($reservationId)) . '">' . \esc_html__('View', 'must-hotel-booking') . '</a></td></tr>';
     }
 
@@ -88,6 +106,9 @@ if (\is_array($detail)) {
     $detailUrl = $buildPaymentDetailUrl($reservationId);
     $state = isset($detail['state']) && \is_array($detail['state']) ? $detail['state'] : [];
     $reservation = isset($detail['reservation']) && \is_array($detail['reservation']) ? $detail['reservation'] : [];
+    $providerContext = isset($detail['provider']) && \is_array($detail['provider']) ? $detail['provider'] : [];
+    $providerPayment = isset($detail['provider_payment']) && \is_array($detail['provider_payment']) ? $detail['provider_payment'] : [];
+    $isProviderBacked = !empty($providerContext['is_provider_backed']);
     $payments = isset($detail['payments']) && \is_array($detail['payments']) ? $detail['payments'] : [];
     $timeline = isset($detail['timeline']) && \is_array($detail['timeline']) ? $detail['timeline'] : [];
     $warnings = isset($state['warnings']) && \is_array($state['warnings']) ? $state['warnings'] : [];
@@ -120,6 +141,16 @@ if (\is_array($detail)) {
     $canRenderReceipt = $canIssueReceipt && (!empty($payments) || $amountPaid > 0.0);
     $canRenderInvoice = $canIssueInvoice && $totalAmount > 0.0;
 
+    if ($isProviderBacked) {
+        $canPostPayment = false;
+        $canPostPartialPayment = false;
+        $canMarkPaid = false;
+        $canRefund = false;
+        $canReconcile = false;
+        $canRenderReceipt = false;
+        $canRenderInvoice = false;
+    }
+
     echo '<section class="must-portal-grid must-portal-grid--2">';
     echo '<article class="must-portal-panel"><div class="must-portal-panel-header"><div><h2>' . \esc_html__('Payment detail', 'must-hotel-booking') . '</h2><p>' . \esc_html((string) ($detail['booking_id'] ?? '')) . '</p></div></div><div class="must-portal-definition-list">';
     PortalRenderer::renderDefinitionRow(\__('Guest', 'must-hotel-booking'), (string) ($detail['guest_name'] ?? ''));
@@ -137,6 +168,16 @@ if (\is_array($detail)) {
     echo '</div><div class="must-portal-inline-actions">';
     PortalRenderer::renderBadge($paymentStatusKey !== '' ? $paymentStatusKey : 'info', $paymentStatusLabel);
     PortalRenderer::renderBadge($reservationStatus !== '' ? $reservationStatus : 'info', $reservationStatusLabel);
+    if ($isProviderBacked) {
+        PortalRenderer::renderBadge('info', (string) ($providerContext['provider_label'] ?? __('Provider mirror', 'must-hotel-booking')));
+        if (!empty($providerPayment)) {
+            PortalRenderer::renderBadge((string) ($providerPayment['provider_status'] ?? 'info'), \sprintf(
+                /* translators: %s: provider payment status. */
+                __('Provider payment: %s', 'must-hotel-booking'),
+                (string) ($providerPayment['provider_status_label'] ?? __('Not reported', 'must-hotel-booking'))
+            ));
+        }
+    }
     echo '</div></article>';
 
     echo '<article class="must-portal-panel"><div class="must-portal-panel-header"><div><h2>' . \esc_html__('Operational actions', 'must-hotel-booking') . '</h2><p>' . \esc_html__('Collect funds, issue documents, and reconcile payment-state exceptions only when the current reservation state allows it.', 'must-hotel-booking') . '</p></div></div>';
@@ -145,6 +186,22 @@ if (\is_array($detail)) {
         foreach ($warnings as $warning) {
             echo '<div class="must-portal-feed-item"><div><strong>' . \esc_html((string) $warning) . '</strong></div>';
             PortalRenderer::renderBadge('warning', \__('Review', 'must-hotel-booking'));
+            echo '</div>';
+        }
+    }
+
+    if ($isProviderBacked) {
+        echo '<div class="must-portal-feed-item"><div><strong>' . \esc_html__('Provider-backed payment actions are read-only here.', 'must-hotel-booking') . '</strong><span>' . \esc_html__('Use provider-aware reservation actions or provider diagnostics instead of changing this payment state locally.', 'must-hotel-booking') . '</span></div>';
+        PortalRenderer::renderBadge('warning', \__('Read-only', 'must-hotel-booking'));
+        echo '</div>';
+        if (!empty($providerPayment)) {
+            echo '<div class="must-portal-feed-item"><div><strong>' . \esc_html__('Provider/local payment state', 'must-hotel-booking') . '</strong><span>' . \esc_html(\sprintf(
+                /* translators: 1: local payment state, 2: provider payment state. */
+                __('Local: %1$s | Provider: %2$s', 'must-hotel-booking'),
+                (string) ($providerPayment['local_status_label'] ?? __('Not reported', 'must-hotel-booking')),
+                (string) ($providerPayment['provider_status_label'] ?? __('Not reported', 'must-hotel-booking'))
+            )) . '</span></div>';
+            PortalRenderer::renderBadge(!empty($providerPayment['differs']) ? 'warning' : 'info', !empty($providerPayment['differs']) ? \__('Differs', 'must-hotel-booking') : \__('Aligned', 'must-hotel-booking'));
             echo '</div>';
         }
     }

@@ -321,7 +321,7 @@ function get_pending_confirmation_page_view_data(): array
                     ) {
                         $reservation_ids = \array_map('intval', (array) $pending_payment['reservation_ids']);
                     } else {
-                        $result = ReservationEngine::createReservations(
+                        $result = create_checkout_reservations(
                             $context,
                             $confirmation_guest_form,
                             $effective_coupon_code,
@@ -406,7 +406,7 @@ function get_pending_confirmation_page_view_data(): array
                         }
                     }
                 } else {
-                    $result = ReservationEngine::createReservations(
+                    $result = create_checkout_reservations(
                         $context,
                         $confirmation_guest_form,
                         $effective_coupon_code,

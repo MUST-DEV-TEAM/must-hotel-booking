@@ -25,6 +25,7 @@ $issues = isset($moduleData['issues']) && \is_array($moduleData['issues']) ? $mo
 $notes = isset($moduleData['notes']) && \is_array($moduleData['notes']) ? $moduleData['notes'] : [];
 $canExport = !empty($moduleData['can_export']);
 $exportUrl = isset($moduleData['export_url']) ? (string) $moduleData['export_url'] : '';
+$providerBreakdown = isset($moduleData['provider_breakdown']) && \is_array($moduleData['provider_breakdown']) ? $moduleData['provider_breakdown'] : [];
 
 $buildReportsUrl = static function (string $tab, array $overrides = []) use ($filters, $filterUrl): string {
     $allowedKeys = ['preset', 'date_from', 'date_to'];
@@ -212,6 +213,18 @@ if ($activeTab === 'daily-operations') {
                     <?php $renderMiniList($issues, \__('No operational issues were flagged for the current range.', 'must-hotel-booking')); ?>
                 </article>
             </section>
+
+            <?php if (!empty($providerBreakdown)) : ?>
+                <section class="must-portal-panel">
+                    <div class="must-portal-panel-header">
+                        <div>
+                            <h2><?php echo \esc_html__('Booking source mix', 'must-hotel-booking'); ?></h2>
+                            <p><?php echo \esc_html__('Reservations in this range by booking source. Provider-backed rows are mirrors from an external system and are not locally authoritative.', 'must-hotel-booking'); ?></p>
+                        </div>
+                    </div>
+                    <?php $renderMiniList($providerBreakdown, ''); ?>
+                </section>
+            <?php endif; ?>
 
             <section class="must-portal-panel">
                 <div class="must-portal-panel-header">
@@ -410,6 +423,7 @@ if ($activeTab === 'daily-operations') {
                                     <th><?php echo \esc_html__('Event', 'must-hotel-booking'); ?></th>
                                     <th><?php echo \esc_html__('Entity', 'must-hotel-booking'); ?></th>
                                     <th><?php echo \esc_html__('Actor', 'must-hotel-booking'); ?></th>
+                                    <th><?php echo \esc_html__('Provider', 'must-hotel-booking'); ?></th>
                                     <th><?php echo \esc_html__('Detail', 'must-hotel-booking'); ?></th>
                                     <th><?php echo \esc_html__('Open', 'must-hotel-booking'); ?></th>
                                 </tr>
@@ -426,6 +440,13 @@ if ($activeTab === 'daily-operations') {
                                         </td>
                                         <td><?php echo \esc_html((string) ($row['entity_label'] ?? '')); ?></td>
                                         <td><?php echo \esc_html((string) ($row['actor_label'] ?? '')); ?></td>
+                                        <td>
+                                            <?php if (!empty($row['is_provider_backed'])) : ?>
+                                                <?php PortalRenderer::renderBadge((string) ($row['provider_key'] ?? 'info'), (string) ($row['provider_label'] ?? '')); ?>
+                                            <?php else : ?>
+                                                <span class="must-portal-muted"><?php echo \esc_html__('Local', 'must-hotel-booking'); ?></span>
+                                            <?php endif; ?>
+                                        </td>
                                         <td><?php echo \esc_html((string) ($row['message'] ?? '')); ?></td>
                                         <td>
                                             <?php if (!empty($row['action_url'])) : ?>

@@ -5,8 +5,9 @@ namespace MustHotelBooking\Frontend;
 use MustHotelBooking\Core\ManagedPages;
 use MustHotelBooking\Engine\BookingValidationEngine;
 use MustHotelBooking\Engine\CouponService;
-use MustHotelBooking\Engine\PricingEngine;
-use MustHotelBooking\Engine\ReservationEngine;
+use MustHotelBooking\Provider\Dto\QuoteRequest;
+use MustHotelBooking\Provider\Dto\ReservationCreateRequest;
+use MustHotelBooking\Provider\ProviderManager;
 
 /**
  * Split stored phone value into prefix and number pieces.
@@ -84,7 +85,7 @@ function combine_checkout_phone_value(array $guest_form): string
  */
 function build_checkout_reservation_note(int $room_id, array $guest_form): string
 {
-    return ReservationEngine::buildReservationNote($room_id, $guest_form);
+    return ProviderManager::active()->reservations()->buildReservationNote($room_id, $guest_form);
 }
 
 /**
@@ -94,7 +95,7 @@ function build_checkout_reservation_note(int $room_id, array $guest_form): strin
  */
 function get_checkout_room_data(int $room_id): ?array
 {
-    return ReservationEngine::getCheckoutRoomData($room_id);
+    return ProviderManager::active()->reservations()->getCheckoutRoomData($room_id);
 }
 
 /**
@@ -106,7 +107,7 @@ function get_checkout_room_data(int $room_id): ?array
  */
 function get_checkout_room_guest_allocations(array $rooms, int $total_guests, array $guest_form = [], bool $strict = false): array
 {
-    return ReservationEngine::getRoomGuestAllocations($rooms, $total_guests, $guest_form, $strict);
+    return ProviderManager::active()->reservations()->getRoomGuestAllocations($rooms, $total_guests, $guest_form, $strict);
 }
 
 /**
@@ -114,7 +115,7 @@ function get_checkout_room_guest_allocations(array $rooms, int $total_guests, ar
  */
 function ensure_checkout_room_lock(int $room_id, string $checkin, string $checkout): bool
 {
-    return ReservationEngine::ensureRoomLock($room_id, $checkin, $checkout);
+    return ProviderManager::active()->reservations()->ensureRoomLock($room_id, $checkin, $checkout);
 }
 
 /**
@@ -124,7 +125,7 @@ function ensure_checkout_room_lock(int $room_id, string $checkin, string $checko
  */
 function ensure_checkout_room_locks(array $room_ids, string $checkin, string $checkout): bool
 {
-    return ReservationEngine::ensureRoomLocks($room_ids, $checkin, $checkout);
+    return ProviderManager::active()->reservations()->ensureRoomLocks($room_ids, $checkin, $checkout);
 }
 
 /**
@@ -156,7 +157,7 @@ function validate_checkout_guest_form_values(array $guest_form): array
  */
 function create_checkout_guest(array $guest_form): int
 {
-    return ReservationEngine::createGuest($guest_form);
+    return ProviderManager::active()->reservations()->createGuest($guest_form);
 }
 
 /**
@@ -167,7 +168,7 @@ function create_checkout_guest(array $guest_form): int
  */
 function maybe_bootstrap_checkout_selection_from_request(array $source): array
 {
-    return ReservationEngine::bootstrapCheckoutSelectionFromRequest($source);
+    return ProviderManager::active()->reservations()->bootstrapCheckoutSelectionFromRequest($source);
 }
 
 /**
@@ -179,7 +180,9 @@ function maybe_bootstrap_checkout_selection_from_request(array $source): array
  */
 function get_checkout_selected_room_items(array $context, string $coupon_code = '', array $guest_form = [], bool $strict_room_guests = false): array
 {
-    return PricingEngine::buildCheckoutRoomItems($context, $coupon_code, $guest_form, $strict_room_guests);
+    return ProviderManager::active()->quote()->buildCheckoutRoomItems(
+        new QuoteRequest($context, $coupon_code, $guest_form, $strict_room_guests)
+    );
 }
 
 /**
@@ -239,7 +242,7 @@ function maybe_process_checkout_continue(array $context, array $guest_form, stri
         return [\__('Security check failed. Please try again.', 'must-hotel-booking')];
     }
 
-    $result = ReservationEngine::continueCheckout($context, $guest_form, $coupon_code);
+    $result = ProviderManager::active()->reservations()->continueCheckout($context, $guest_form, $coupon_code);
 
     if (empty($result['success'])) {
         return (array) ($result['errors'] ?? []);
@@ -265,7 +268,9 @@ function maybe_process_checkout_continue(array $context, array $guest_form, stri
  */
 function create_checkout_reservations(array $context, array $guest_form, string $coupon_code = '', array $options = []): array
 {
-    return ReservationEngine::createReservations($context, $guest_form, $coupon_code, $options);
+    return ProviderManager::active()->reservations()->createReservations(
+        new ReservationCreateRequest($context, $guest_form, $coupon_code, $options)
+    );
 }
 
 /**
@@ -295,7 +300,7 @@ function maybe_process_checkout_submit(array $context, array $guest_form, string
         return [\__('Security check failed. Please try again.', 'must-hotel-booking')];
     }
 
-    $result = ReservationEngine::submitCheckout($context, $guest_form, $coupon_code);
+    $result = ProviderManager::active()->reservations()->submitCheckout($context, $guest_form, $coupon_code);
 
     if (empty($result['success'])) {
         return (array) ($result['errors'] ?? []);
@@ -396,7 +401,7 @@ function get_checkout_page_view_data(): array
     ]];
 
     if (!empty($context['is_valid'])) {
-        $room_items = PricingEngine::buildCheckoutRoomItems($context, $coupon_code, $guest_form);
+        $room_items = get_checkout_selected_room_items($context, $coupon_code, $guest_form);
     }
 
     if (!empty($room_items['errors'])) {

@@ -3,6 +3,7 @@
 use MustHotelBooking\Core\StaffAccess;
 use MustHotelBooking\Portal\PortalRenderer;
 use MustHotelBooking\Portal\PortalRouter;
+use MustHotelBooking\Provider\ProviderReservationActionPolicy;
 
 if (!\defined('ABSPATH')) {
     exit;
@@ -62,8 +63,15 @@ if (empty($rows)) {
         }
 
         $reservationId = isset($row['id']) ? (int) $row['id'] : 0;
+        $providerContext = isset($row['provider']) && \is_array($row['provider']) ? $row['provider'] : [];
+        $isProviderBacked = !empty($providerContext['is_provider_backed']);
+        $canProviderOperationalCheck = $isProviderBacked
+            && (
+                ProviderReservationActionPolicy::supportsProviderAction($providerContext, 'reservation_checkin', ProviderReservationActionPolicy::SURFACE_PORTAL)
+                || ProviderReservationActionPolicy::supportsProviderAction($providerContext, 'reservation_checkout', ProviderReservationActionPolicy::SURFACE_PORTAL)
+            );
         $reservationUrl = $reservationId > 0 ? PortalRouter::getModuleUrl('reservations', ['reservation_id' => $reservationId]) : '';
-        $paymentsUrl = $canOpenPayments && !empty($row['payment_workspace_needed']) && $reservationId > 0
+        $paymentsUrl = !$isProviderBacked && $canOpenPayments && !empty($row['payment_workspace_needed']) && $reservationId > 0
             ? PortalRouter::getModuleUrl('payments', ['reservation_id' => $reservationId])
             : '';
         $assignedRoom = \trim((string) ($row['assigned_room'] ?? ''));
@@ -80,6 +88,14 @@ if (empty($rows)) {
             echo '<br /><span class="must-portal-muted">' . \esc_html((string) ($row['booking_id'] ?? '')) . '</span>';
         }
 
+        if ($isProviderBacked) {
+            echo '<br /><span class="must-portal-muted">' . \esc_html(\sprintf(
+                /* translators: %s: provider label. */
+                \__('%s mirror', 'must-hotel-booking'),
+                (string) ($providerContext['provider_label'] ?? \__('Provider', 'must-hotel-booking'))
+            )) . '</span>';
+        }
+
         echo '</td>';
         echo '<td><strong>' . \esc_html((string) ($row['checkin'] ?? '')) . ' - ' . \esc_html((string) ($row['checkout'] ?? '')) . '</strong></td>';
         echo '<td><strong>' . \esc_html((string) ($row['accommodation'] ?? \__('Unassigned', 'must-hotel-booking'))) . '</strong>';
@@ -88,6 +104,10 @@ if (empty($rows)) {
         PortalRenderer::renderBadge((string) ($row['queue_tone'] ?? 'warning'), (string) ($row['queue_label'] ?? ''));
         echo '<br />';
         PortalRenderer::renderBadge((string) ($row['reservation_status_key'] ?? 'info'), (string) ($row['reservation_status'] ?? ''));
+        if ($isProviderBacked) {
+            echo '<br />';
+            PortalRenderer::renderBadge('info', (string) ($providerContext['provider_status_label'] ?? \__('Provider mirror', 'must-hotel-booking')));
+        }
         echo '</td><td>';
         PortalRenderer::renderBadge((string) ($row['payment_status_key'] ?? 'info'), (string) ($row['payment_status'] ?? ''));
         echo '<br /><span class="must-portal-muted">' . \esc_html(\sprintf(\__('Due: %s', 'must-hotel-booking'), $paymentDue)) . '</span>';
@@ -101,7 +121,13 @@ if (empty($rows)) {
             echo '<a class="must-portal-inline-link" href="' . \esc_url($paymentsUrl) . '">' . \esc_html__('Payments', 'must-hotel-booking') . '</a>';
         }
 
-        if ($activeTab === 'checkin' && $canCheckIn && $reservationId > 0) {
+        if ($isProviderBacked && !$canProviderOperationalCheck) {
+            echo '<span class="must-portal-muted">' . \esc_html__('Provider-backed mirror: check-in/check-out actions are read-only here.', 'must-hotel-booking') . '</span>';
+        } elseif ($canProviderOperationalCheck) {
+            echo '<span class="must-portal-muted">' . \esc_html__('Clock operation updates provider first.', 'must-hotel-booking') . '</span>';
+        }
+
+        if ((!$isProviderBacked || $canProviderOperationalCheck) && $activeTab === 'checkin' && $canCheckIn && $reservationId > 0) {
             $renderQueueActionForm(
                 'reservation_checkin',
                 \__('Check in', 'must-hotel-booking'),
@@ -113,7 +139,7 @@ if (empty($rows)) {
             );
         }
 
-        if ($activeTab === 'checkout' && $canCheckOut && $reservationId > 0) {
+        if ((!$isProviderBacked || $canProviderOperationalCheck) && $activeTab === 'checkout' && $canCheckOut && $reservationId > 0) {
             $renderQueueActionForm(
                 'reservation_checkout',
                 \__('Check out', 'must-hotel-booking'),

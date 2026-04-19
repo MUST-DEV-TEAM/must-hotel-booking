@@ -9,6 +9,11 @@ use MustHotelBooking\Engine\EmailEngine;
 use MustHotelBooking\Engine\EmailLayoutEngine;
 use MustHotelBooking\Engine\LockEngine;
 use MustHotelBooking\Engine\PaymentEngine;
+use MustHotelBooking\Provider\Clock\ClockConnectionDiagnostic;
+use MustHotelBooking\Provider\ProviderManager;
+use MustHotelBooking\Provider\Storage\ProviderRequestLogRepository;
+use MustHotelBooking\Provider\Storage\ProviderSyncJobRepository;
+use MustHotelBooking\Provider\Sync\ProviderSyncJobRunner;
 use MustHotelBooking\Portal\PortalRouter;
 
 final class SettingsDiagnostics
@@ -49,6 +54,9 @@ final class SettingsDiagnostics
             ['label' => 'Rate Plan Prices', 'table_name' => $wpdb->prefix . 'mhb_rate_plan_prices', 'exists' => $ratePlanRepository->ratePlanPricesTableExists()],
             ['label' => 'Seasons', 'table_name' => $wpdb->prefix . 'mhb_seasons', 'exists' => $ratePlanRepository->seasonsTableExists()],
             ['label' => 'Seasonal Prices', 'table_name' => $wpdb->prefix . 'mhb_seasonal_prices', 'exists' => $ratePlanRepository->seasonalPricesTableExists()],
+            ['label' => 'Provider Mappings', 'table_name' => $wpdb->prefix . 'mhb_provider_mappings', 'exists' => self::tableExists($wpdb->prefix . 'mhb_provider_mappings')],
+            ['label' => 'Provider Request Logs', 'table_name' => $wpdb->prefix . 'mhb_provider_request_logs', 'exists' => self::tableExists($wpdb->prefix . 'mhb_provider_request_logs')],
+            ['label' => 'Provider Sync Jobs', 'table_name' => $wpdb->prefix . 'mhb_provider_sync_jobs', 'exists' => self::tableExists($wpdb->prefix . 'mhb_provider_sync_jobs')],
         ];
 
         $tables = [];
@@ -212,6 +220,81 @@ final class SettingsDiagnostics
             'timezone' => MustBookingConfig::get_timezone(),
         ];
 
+        $providerSummary = ClockConnectionDiagnostic::getConfigSummary();
+        $configuredMode = (string) ($providerSummary['provider_mode'] ?? ProviderManager::getConfiguredMode());
+        $activeBookingProvider = (string) ($providerSummary['active_booking_provider'] ?? ProviderManager::activeKey());
+        $modeWarning = '';
+
+        if ($configuredMode !== $activeBookingProvider) {
+            $modeWarning = \sprintf(
+                /* translators: 1: configured provider mode, 2: active runtime provider. */
+                \__('Configured provider is %1$s, but active public booking runtime is %2$s because the configured provider is not booking-ready.', 'must-hotel-booking'),
+                $configuredMode,
+                $activeBookingProvider
+            );
+            $warnings++;
+        }
+
+        if (!empty($providerSummary['clock_enabled']) && empty($providerSummary['clock_configured'])) {
+            $warnings++;
+        }
+
+        if ((string) $configuredMode === 'clock' && empty($providerSummary['clock_public_booking_configured'])) {
+            $warnings++;
+        }
+
+        $syncJobs = new ProviderSyncJobRepository();
+        $requestLogs = new ProviderRequestLogRepository();
+        $syncJobSummary = $syncJobs->getStatusSummary(ProviderManager::CLOCK_MODE);
+        $inboundSummary = $requestLogs->getInboundSummary(ProviderManager::CLOCK_MODE);
+        $syncJobCounts = isset($syncJobSummary['counts']) && \is_array($syncJobSummary['counts']) ? $syncJobSummary['counts'] : [];
+        $syncCronHook = ProviderSyncJobRunner::getCronHook();
+        $nextSyncCron = $syncCronHook !== '' ? \wp_next_scheduled($syncCronHook) : false;
+        $syncCronScheduled = $nextSyncCron !== false;
+
+        if (
+            (int) ($syncJobCounts[ProviderSyncJobRepository::STATUS_FAILED] ?? 0) > 0
+            || (int) ($syncJobCounts[ProviderSyncJobRepository::STATUS_EXHAUSTED] ?? 0) > 0
+        ) {
+            $warnings++;
+        }
+
+        if (!$syncCronScheduled && (string) $configuredMode === 'clock') {
+            $warnings++;
+        }
+
+        if ((int) ($inboundSummary['failed'] ?? 0) > 0 && (string) $configuredMode === 'clock') {
+            $warnings++;
+        }
+
+        $provider = [
+            'configured_mode' => $configuredMode,
+            'active_booking_provider' => $activeBookingProvider,
+            'mode_warning' => $modeWarning,
+            'clock' => $providerSummary,
+            'sync_jobs' => [
+                'summary' => $syncJobSummary,
+                'recent_problem_jobs' => $syncJobs->getRecentProblemJobs(ProviderManager::CLOCK_MODE, 5),
+                'cron' => [
+                    'status' => $syncCronScheduled ? 'healthy' : 'warning',
+                    'health' => $syncCronScheduled ? 'ok' : 'missing',
+                    'message' => $syncCronScheduled
+                        ? \__('Provider sync retry cron is scheduled.', 'must-hotel-booking')
+                        : \__('Provider sync retry cron is not scheduled.', 'must-hotel-booking'),
+                    'next_run' => $syncCronScheduled && \is_numeric($nextSyncCron)
+                        ? \wp_date('Y-m-d H:i:s', (int) $nextSyncCron)
+                        : \__('Not scheduled', 'must-hotel-booking'),
+                    'hook' => $syncCronHook,
+                ],
+            ],
+            'inbound_sync' => [
+                'summary' => $inboundSummary,
+                'webhook_secret_set' => !empty($providerSummary['clock_webhook_secret_set']),
+                'webhook_url' => (string) ($providerSummary['clock_webhook_url'] ?? ''),
+                'reservation_fetch_path' => (string) ($providerSummary['clock_reservation_fetch_path'] ?? ''),
+            ],
+        ];
+
         $overallStatus = 'healthy';
 
         if ($criticalIssues > 0) {
@@ -232,6 +315,7 @@ final class SettingsDiagnostics
             'payments' => $payments,
             'emails' => $emails,
             'updater' => $updater,
+            'provider' => $provider,
             'environment' => $environment,
         ];
     }
@@ -289,6 +373,59 @@ final class SettingsDiagnostics
         $lines[] = 'Readme Stable Tag: ' . (string) ($data['updater']['readme_stable_tag'] ?? '');
         $lines[] = 'Expected Release Asset: ' . (string) ($data['updater']['expected_release_asset_name'] ?? '');
         $lines[] = 'Token Configured: ' . (!empty($data['updater']['token_configured']) ? 'yes' : 'no');
+
+        $lines[] = '';
+        $lines[] = '[Provider]';
+        $lines[] = 'Configured Mode: ' . (string) ($data['provider']['configured_mode'] ?? '');
+        $lines[] = 'Active Booking Runtime: ' . (string) ($data['provider']['active_booking_provider'] ?? '');
+        $clock = isset($data['provider']['clock']) && \is_array($data['provider']['clock']) ? $data['provider']['clock'] : [];
+        $lines[] = 'Clock Enabled: ' . (!empty($clock['clock_enabled']) ? 'yes' : 'no');
+        $lines[] = 'Clock Configured: ' . (!empty($clock['clock_configured']) ? 'yes' : 'no');
+        $lines[] = 'Clock Environment: ' . (string) ($clock['clock_environment'] ?? '');
+        $lines[] = 'Clock API User Set: ' . (!empty($clock['clock_api_user_set']) ? 'yes' : 'no');
+        $lines[] = 'Clock API Key Set: ' . (!empty($clock['clock_api_key_set']) ? 'yes' : 'no');
+        $lines[] = 'Clock Property ID: ' . (string) ($clock['clock_property_id'] ?? '');
+        $lines[] = 'Clock Catalog Paths Configured: ' . (string) ($clock['clock_catalog_paths_configured'] ?? 0);
+        $lines[] = 'Clock Public Booking Configured: ' . (!empty($clock['clock_public_booking_configured']) ? 'yes' : 'no');
+        $lines[] = 'Clock Public Booking Paths Configured: ' . (string) ($clock['clock_public_booking_paths_configured'] ?? 0);
+        $lines[] = 'Clock Reconciliation Paths Configured: ' . (string) ($clock['clock_reconciliation_paths_configured'] ?? 0);
+        $lines[] = 'Clock Inbound Sync Paths Configured: ' . (string) ($clock['clock_inbound_sync_paths_configured'] ?? 0);
+        $lines[] = 'Clock Webhook Secret Set: ' . (!empty($clock['clock_webhook_secret_set']) ? 'yes' : 'no');
+        $lines[] = 'Clock Webhook URL: ' . (string) ($clock['clock_webhook_url'] ?? '');
+        $inboundSync = isset($data['provider']['inbound_sync']) && \is_array($data['provider']['inbound_sync']) ? $data['provider']['inbound_sync'] : [];
+        $inboundSummary = isset($inboundSync['summary']) && \is_array($inboundSync['summary']) ? $inboundSync['summary'] : [];
+        $lines[] = 'Clock Inbound Events Total: ' . (string) ($inboundSummary['total'] ?? 0);
+        $lines[] = 'Clock Inbound Events Successful: ' . (string) ($inboundSummary['successful'] ?? 0);
+        $lines[] = 'Clock Inbound Events Failed: ' . (string) ($inboundSummary['failed'] ?? 0);
+        $lines[] = 'Clock Inbound Last Error: ' . (string) ($inboundSummary['last_error'] ?? '');
+        $syncJobs = isset($data['provider']['sync_jobs']) && \is_array($data['provider']['sync_jobs']) ? $data['provider']['sync_jobs'] : [];
+        $syncSummary = isset($syncJobs['summary']) && \is_array($syncJobs['summary']) ? $syncJobs['summary'] : [];
+        $syncCounts = isset($syncSummary['counts']) && \is_array($syncSummary['counts']) ? $syncSummary['counts'] : [];
+        $syncCron = isset($syncJobs['cron']) && \is_array($syncJobs['cron']) ? $syncJobs['cron'] : [];
+        $lines[] = 'Clock Sync Cron: ' . (string) ($syncCron['health'] ?? '');
+        $lines[] = 'Clock Sync Due Jobs: ' . (string) ($syncSummary['due'] ?? 0);
+        $lines[] = 'Clock Sync Pending Jobs: ' . (string) ($syncCounts[ProviderSyncJobRepository::STATUS_PENDING] ?? 0);
+        $lines[] = 'Clock Sync Retryable Jobs: ' . (string) ($syncCounts[ProviderSyncJobRepository::STATUS_RETRYABLE] ?? 0);
+        $lines[] = 'Clock Sync Exhausted Jobs: ' . (string) ($syncCounts[ProviderSyncJobRepository::STATUS_EXHAUSTED] ?? 0);
+        $lines[] = 'Clock Sync Last Error: ' . (string) ($syncSummary['last_error'] ?? '');
+        $recentProblemJobs = isset($syncJobs['recent_problem_jobs']) && \is_array($syncJobs['recent_problem_jobs']) ? $syncJobs['recent_problem_jobs'] : [];
+
+        foreach ($recentProblemJobs as $job) {
+            if (!\is_array($job)) {
+                continue;
+            }
+
+            $lines[] = \sprintf(
+                'Clock Sync Job #%1$d: %2$s %3$s attempts %4$d/%5$d reservation %6$d - %7$s',
+                (int) ($job['id'] ?? 0),
+                (string) ($job['operation'] ?? ''),
+                (string) ($job['status'] ?? ''),
+                (int) ($job['attempts'] ?? 0),
+                (int) ($job['max_attempts'] ?? 0),
+                (int) ($job['target_local_id'] ?? 0),
+                (string) ($job['last_error'] ?? '')
+            );
+        }
 
         return \implode("\n", $lines);
     }

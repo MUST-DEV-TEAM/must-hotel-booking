@@ -339,6 +339,16 @@ function install_tables(): void
         cancellation_requested TINYINT(1) NOT NULL DEFAULT 0,
         cancellation_requested_at DATETIME NULL,
         cancellation_requested_by BIGINT(20) UNSIGNED NOT NULL DEFAULT 0,
+        provider VARCHAR(50) NOT NULL DEFAULT 'local',
+        provider_booking_id VARCHAR(191) NOT NULL DEFAULT '',
+        provider_reservation_id VARCHAR(191) NOT NULL DEFAULT '',
+        provider_status VARCHAR(100) NOT NULL DEFAULT '',
+        provider_payment_status VARCHAR(100) NOT NULL DEFAULT '',
+        provider_sync_status VARCHAR(50) NOT NULL DEFAULT '',
+        provider_synced_at DATETIME NULL DEFAULT NULL,
+        provider_sync_error TEXT NULL,
+        provider_payload_ref VARCHAR(191) NOT NULL DEFAULT '',
+        provider_metadata LONGTEXT NULL,
         created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
         PRIMARY KEY  (id),
         KEY room_id (room_id),
@@ -354,7 +364,11 @@ function install_tables(): void
         KEY payment_status (payment_status),
         KEY coupon_id (coupon_id),
         KEY coupon_code (coupon_code),
-        KEY cancellation_requested (cancellation_requested)
+        KEY cancellation_requested (cancellation_requested),
+        KEY provider (provider),
+        KEY provider_booking_id (provider_booking_id),
+        KEY provider_reservation_id (provider_reservation_id),
+        KEY provider_sync_status (provider_sync_status)
     ) {$charset_collate};";
 
     $tables[] = "CREATE TABLE {$prefix}must_pricing (
@@ -482,6 +496,85 @@ function install_tables(): void
         KEY entity_lookup (entity_type, entity_id),
         KEY actor_user_id (actor_user_id),
         KEY created_at (created_at)
+    ) {$charset_collate};";
+
+    $tables[] = "CREATE TABLE {$prefix}mhb_provider_mappings (
+        id BIGINT(20) UNSIGNED NOT NULL AUTO_INCREMENT,
+        provider VARCHAR(50) NOT NULL DEFAULT '',
+        entity_type VARCHAR(80) NOT NULL DEFAULT '',
+        local_table VARCHAR(100) NOT NULL DEFAULT '',
+        local_id BIGINT(20) UNSIGNED NOT NULL DEFAULT 0,
+        external_id VARCHAR(191) NOT NULL DEFAULT '',
+        external_code VARCHAR(191) NOT NULL DEFAULT '',
+        external_parent_id VARCHAR(191) NOT NULL DEFAULT '',
+        display_name VARCHAR(191) NOT NULL DEFAULT '',
+        status VARCHAR(50) NOT NULL DEFAULT 'active',
+        metadata LONGTEXT NULL,
+        last_synced_at DATETIME NULL DEFAULT NULL,
+        created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        PRIMARY KEY  (id),
+        KEY provider (provider),
+        KEY entity_type (entity_type),
+        KEY local_lookup (entity_type, local_id),
+        KEY external_id (external_id),
+        KEY status (status),
+        KEY last_synced_at (last_synced_at)
+    ) {$charset_collate};";
+
+    $tables[] = "CREATE TABLE {$prefix}mhb_provider_request_logs (
+        id BIGINT(20) UNSIGNED NOT NULL AUTO_INCREMENT,
+        provider VARCHAR(50) NOT NULL DEFAULT '',
+        operation VARCHAR(100) NOT NULL DEFAULT '',
+        direction VARCHAR(20) NOT NULL DEFAULT 'outbound',
+        correlation_id VARCHAR(191) NOT NULL DEFAULT '',
+        idempotency_key VARCHAR(191) NOT NULL DEFAULT '',
+        reservation_id BIGINT(20) UNSIGNED NOT NULL DEFAULT 0,
+        external_id VARCHAR(191) NOT NULL DEFAULT '',
+        http_status SMALLINT(5) UNSIGNED NOT NULL DEFAULT 0,
+        success TINYINT(1) NOT NULL DEFAULT 0,
+        error_code VARCHAR(100) NOT NULL DEFAULT '',
+        error_message TEXT NULL,
+        duration_ms INT(10) UNSIGNED NOT NULL DEFAULT 0,
+        request_summary LONGTEXT NULL,
+        response_summary LONGTEXT NULL,
+        created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        PRIMARY KEY  (id),
+        KEY provider_operation (provider, operation),
+        KEY direction (direction),
+        KEY correlation_id (correlation_id),
+        KEY idempotency_key (idempotency_key),
+        KEY reservation_id (reservation_id),
+        KEY external_id (external_id),
+        KEY success (success),
+        KEY created_at (created_at)
+    ) {$charset_collate};";
+
+    $tables[] = "CREATE TABLE {$prefix}mhb_provider_sync_jobs (
+        id BIGINT(20) UNSIGNED NOT NULL AUTO_INCREMENT,
+        provider VARCHAR(50) NOT NULL DEFAULT '',
+        operation VARCHAR(100) NOT NULL DEFAULT '',
+        target_type VARCHAR(80) NOT NULL DEFAULT '',
+        target_local_id BIGINT(20) UNSIGNED NOT NULL DEFAULT 0,
+        target_external_id VARCHAR(191) NOT NULL DEFAULT '',
+        status VARCHAR(40) NOT NULL DEFAULT 'pending',
+        attempts SMALLINT(5) UNSIGNED NOT NULL DEFAULT 0,
+        max_attempts SMALLINT(5) UNSIGNED NOT NULL DEFAULT 5,
+        priority SMALLINT(5) UNSIGNED NOT NULL DEFAULT 10,
+        run_after DATETIME NULL DEFAULT NULL,
+        locked_at DATETIME NULL DEFAULT NULL,
+        last_error TEXT NULL,
+        payload LONGTEXT NULL,
+        created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        PRIMARY KEY  (id),
+        KEY provider_status (provider, status),
+        KEY operation (operation),
+        KEY target_lookup (target_type, target_local_id),
+        KEY target_external_id (target_external_id),
+        KEY run_after (run_after),
+        KEY priority (priority),
+        KEY updated_at (updated_at)
     ) {$charset_collate};";
 
     $tables[] = "CREATE TABLE {$prefix}mhb_cancellation_policies (

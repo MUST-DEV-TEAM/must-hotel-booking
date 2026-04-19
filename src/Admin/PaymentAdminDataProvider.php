@@ -6,6 +6,7 @@ use MustHotelBooking\Core\MustBookingConfig;
 use MustHotelBooking\Core\PaymentMethodRegistry;
 use MustHotelBooking\Engine\PaymentEngine;
 use MustHotelBooking\Engine\PaymentStatusService;
+use MustHotelBooking\Provider\ProviderReservationView;
 
 final class PaymentAdminDataProvider
 {
@@ -39,6 +40,11 @@ final class PaymentAdminDataProvider
 
             $reservationId = isset($row['id']) ? (int) $row['id'] : 0;
             $state = PaymentStatusService::buildReservationPaymentState($row, $paymentRowsByReservation[$reservationId] ?? []);
+            $providerPayment = ProviderReservationView::paymentContext($row, $state);
+
+            if (ProviderReservationView::isProviderBacked($row) && !empty($providerPayment['needs_attention'])) {
+                $state['needs_review'] = true;
+            }
 
             if (!$this->matchesDerivedFilters($state, $filters)) {
                 continue;
@@ -145,30 +151,48 @@ final class PaymentAdminDataProvider
     private function formatListRow(array $row, array $state, PaymentAdminQuery $query): array
     {
         $reservationId = isset($row['id']) ? (int) $row['id'] : 0;
+        $providerContext = ProviderReservationView::metadata($row);
+        $isProviderBacked = !empty($providerContext['is_provider_backed']);
         $actions = [];
 
-        foreach (['mark_paid', 'mark_unpaid', 'mark_pending', 'mark_pay_at_hotel', 'mark_failed', 'resend_guest_email'] as $action) {
-            if (!PaymentStatusService::canTransition($state, $action) && $action !== 'resend_guest_email') {
-                continue;
-            }
+        if (!$isProviderBacked) {
+            foreach (['mark_paid', 'mark_unpaid', 'mark_pending', 'mark_pay_at_hotel', 'mark_failed', 'resend_guest_email'] as $action) {
+                if (!PaymentStatusService::canTransition($state, $action) && $action !== 'resend_guest_email') {
+                    continue;
+                }
 
-            if ($action === 'resend_guest_email' && $reservationId <= 0) {
-                continue;
-            }
+                if ($action === 'resend_guest_email' && $reservationId <= 0) {
+                    continue;
+                }
 
-            $actions[$action] = \wp_nonce_url(
-                get_admin_payments_page_url($query->buildUrlArgs([
-                    'action' => $action,
-                    'reservation_id' => $reservationId,
-                ])),
-                'must_payment_action_' . $action . '_' . $reservationId
-            );
+                $actions[$action] = \wp_nonce_url(
+                    get_admin_payments_page_url($query->buildUrlArgs([
+                        'action' => $action,
+                        'reservation_id' => $reservationId,
+                    ])),
+                    'must_payment_action_' . $action . '_' . $reservationId
+                );
+            }
         }
 
         $detailUrl = get_admin_payments_page_url($query->buildUrlArgs([
             'action' => 'view',
             'reservation_id' => $reservationId,
         ]));
+        $warnings = isset($state['warnings']) && \is_array($state['warnings']) ? $state['warnings'] : [];
+        $providerPayment = ProviderReservationView::paymentContext($row, $state);
+
+        if ($isProviderBacked) {
+            $warnings[] = \__('Provider-backed payment mutations are read-only in this local payment workspace.', 'must-hotel-booking');
+
+            if (!empty($providerPayment['differs'])) {
+                $warnings[] = \__('Provider payment status differs from the local plugin payment state.', 'must-hotel-booking');
+            }
+
+            if (!empty($providerPayment['reconciliation_required'])) {
+                $warnings[] = \__('Provider payment reconciliation is pending or failed.', 'must-hotel-booking');
+            }
+        }
 
         return [
             'reservation_id' => $reservationId,
@@ -190,8 +214,10 @@ final class PaymentAdminDataProvider
             'transaction_id' => (string) ($state['transaction_id'] ?? ''),
             'paid_at' => $this->formatDateTime((string) ($state['paid_at'] ?? '')),
             'updated_at' => $this->formatDateTime((string) ($state['created_at'] ?? '')),
-            'warnings' => isset($state['warnings']) && \is_array($state['warnings']) ? $state['warnings'] : [],
+            'warnings' => $warnings,
             'needs_review' => !empty($state['needs_review']),
+            'provider' => $providerContext,
+            'provider_payment' => $providerPayment,
             'detail_url' => $detailUrl,
             'reservation_url' => get_admin_reservation_detail_page_url($reservationId),
             'actions' => $actions,
@@ -277,6 +303,25 @@ final class PaymentAdminDataProvider
 
         $paymentRows = $this->paymentRepository->getPaymentsForReservation($reservationId);
         $state = PaymentStatusService::buildReservationPaymentState($reservation, $paymentRows);
+        $providerContext = ProviderReservationView::metadata($reservation);
+        $providerPayment = ProviderReservationView::paymentContext($reservation, $state);
+
+        if (!empty($providerContext['is_provider_backed'])) {
+            if (!isset($state['warnings']) || !\is_array($state['warnings'])) {
+                $state['warnings'] = [];
+            }
+
+            $state['warnings'][] = \__('Provider-backed payment mutations are read-only in this local payment workspace.', 'must-hotel-booking');
+
+            if (!empty($providerPayment['differs'])) {
+                $state['warnings'][] = \__('Provider payment status differs from the local plugin payment state.', 'must-hotel-booking');
+            }
+
+            if (!empty($providerPayment['reconciliation_required'])) {
+                $state['warnings'][] = \__('Provider payment reconciliation is pending or failed.', 'must-hotel-booking');
+            }
+        }
+
         $activityRows = $this->activityRepository->getRecentActivitiesForReservation($reservationId, $this->formatReservationReference($reservation), 20);
         $timeline = [];
 
@@ -307,6 +352,8 @@ final class PaymentAdminDataProvider
                 : \__('Unassigned', 'must-hotel-booking'),
             'payments' => $paymentRows,
             'timeline' => $timeline,
+            'provider' => $providerContext,
+            'provider_payment' => $providerPayment,
             'reservation_url' => get_admin_reservation_detail_page_url($reservationId),
             'settings_url' => get_admin_payments_page_url(),
         ];

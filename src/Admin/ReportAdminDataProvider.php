@@ -6,6 +6,7 @@ use MustHotelBooking\Core\MustBookingConfig;
 use MustHotelBooking\Core\PaymentMethodRegistry;
 use MustHotelBooking\Core\ReservationStatus;
 use MustHotelBooking\Engine\PaymentStatusService;
+use MustHotelBooking\Provider\ProviderReservationView;
 
 final class ReportAdminDataProvider
 {
@@ -147,6 +148,7 @@ final class ReportAdminDataProvider
             'top_accommodations' => $this->buildAccommodationRows($createdRows),
             'coupons' => $this->buildCouponRows($createdRows),
             'issues' => $this->buildIssues($createdRows),
+            'provider_breakdown' => $this->buildProviderBreakdown($createdRows),
         ];
     }
 
@@ -504,6 +506,8 @@ final class ReportAdminDataProvider
             'missing_payment_state' => 0,
             'coupon_inconsistent' => 0,
             'payment_review' => 0,
+            'provider_sync_error' => 0,
+            'provider_payment_mismatch' => 0,
         ];
 
         foreach ($rows as $row) {
@@ -528,6 +532,21 @@ final class ReportAdminDataProvider
 
             if (!empty($paymentState['needs_review'])) {
                 $counts['payment_review']++;
+            }
+
+            $providerKey = \sanitize_key((string) ($row['provider'] ?? ''));
+
+            if ($providerKey !== '' && $providerKey !== 'local') {
+                if (\trim((string) ($row['provider_sync_error'] ?? '')) !== '') {
+                    $counts['provider_sync_error']++;
+                }
+
+                $localPayStatus = \sanitize_key((string) ($row['payment_status'] ?? ''));
+                $providerPayStatus = \sanitize_key((string) ($row['provider_payment_status'] ?? ''));
+
+                if ($localPayStatus !== '' && $providerPayStatus !== '' && $localPayStatus !== $providerPayStatus) {
+                    $counts['provider_payment_mismatch']++;
+                }
             }
         }
 
@@ -566,6 +585,20 @@ final class ReportAdminDataProvider
             $issues[] = [
                 'label' => \__('Payments linked to missing reservations', 'must-hotel-booking'),
                 'value' => \number_format_i18n($orphanPayments),
+            ];
+        }
+
+        if ($counts['provider_sync_error'] > 0) {
+            $issues[] = [
+                'label' => \__('Provider-backed reservations with sync errors', 'must-hotel-booking'),
+                'value' => \number_format_i18n($counts['provider_sync_error']),
+            ];
+        }
+
+        if ($counts['provider_payment_mismatch'] > 0) {
+            $issues[] = [
+                'label' => \__('Provider-backed reservations with payment status mismatch', 'must-hotel-booking'),
+                'value' => \number_format_i18n($counts['provider_payment_mismatch']),
             ];
         }
 
@@ -801,5 +834,38 @@ final class ReportAdminDataProvider
         }
 
         return $options;
+    }
+
+    /**
+     * Break down created-range reservations by booking source (Local vs provider-backed).
+     *
+     * @param array<int, array<string, mixed>> $rows
+     * @return array<int, array<string, string>>
+     */
+    private function buildProviderBreakdown(array $rows): array
+    {
+        $counts = [];
+
+        foreach ($rows as $row) {
+            if (!\is_array($row)) {
+                continue;
+            }
+
+            $provider = \sanitize_key((string) ($row['provider'] ?? ''));
+            $key = ($provider === '' || $provider === 'local') ? 'local' : $provider;
+            $counts[$key] = isset($counts[$key]) ? $counts[$key] + 1 : 1;
+        }
+
+        \arsort($counts);
+        $formatted = [];
+
+        foreach ($counts as $key => $count) {
+            $formatted[] = [
+                'label' => ProviderReservationView::providerLabel($key),
+                'value' => \number_format_i18n((int) $count),
+            ];
+        }
+
+        return $formatted;
     }
 }

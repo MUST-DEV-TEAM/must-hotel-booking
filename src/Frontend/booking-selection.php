@@ -5,10 +5,10 @@ namespace MustHotelBooking\Frontend;
 use MustHotelBooking\Core\BookingRules;
 use MustHotelBooking\Core\RoomData;
 use MustHotelBooking\Core\RoomViewBuilder;
-use MustHotelBooking\Engine\InventoryEngine;
 use MustHotelBooking\Engine\LockEngine;
 use MustHotelBooking\Engine\PaymentEngine;
 use MustHotelBooking\Engine\PricingEngine;
+use MustHotelBooking\Provider\ProviderManager;
 
 /**
  * Get the transient key used for session-backed booking selections.
@@ -323,12 +323,7 @@ function release_booking_selection_locks(array $selection): void
             continue;
         }
 
-        if (InventoryEngine::hasInventoryForRoomType($room_id)) {
-            InventoryEngine::releaseLocksForRoomType($room_id, $checkin, $checkout);
-            continue;
-        }
-
-        LockEngine::releaseExactLock($room_id, $checkin, $checkout);
+        ProviderManager::active()->reservations()->releaseRoomSelectionLock($room_id, $checkin, $checkout);
     }
 }
 
@@ -502,11 +497,7 @@ function remove_room_from_booking_selection(int $room_id): bool
         (string) $context['checkin'] !== '' &&
         (string) $context['checkout'] !== ''
     ) {
-        if (InventoryEngine::hasInventoryForRoomType($room_id)) {
-            InventoryEngine::releaseLocksForRoomType($room_id, (string) $context['checkin'], (string) $context['checkout']);
-        } else {
-            LockEngine::releaseExactLock($room_id, (string) $context['checkin'], (string) $context['checkout']);
-        }
+        ProviderManager::active()->reservations()->releaseRoomSelectionLock($room_id, (string) $context['checkin'], (string) $context['checkout']);
     }
 
     return true;

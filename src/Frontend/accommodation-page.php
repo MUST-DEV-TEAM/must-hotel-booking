@@ -4,9 +4,8 @@ namespace MustHotelBooking\Frontend;
 
 use MustHotelBooking\Engine\AvailabilityEngine;
 use MustHotelBooking\Engine\BookingValidationEngine;
-use MustHotelBooking\Engine\PricingEngine;
-use MustHotelBooking\Engine\RatePlanEngine;
-use MustHotelBooking\Engine\ReservationEngine;
+use MustHotelBooking\Provider\Dto\AvailabilitySearchRequest;
+use MustHotelBooking\Provider\ProviderManager;
 
 /**
  * Check if current frontend request is the managed accommodation step page.
@@ -120,6 +119,38 @@ function get_accommodation_room_selection_state(array $context, array $messages 
 }
 
 /**
+ * Load available accommodations through the active booking provider.
+ *
+ * @return array<int, array<string, mixed>>
+ */
+function get_provider_available_accommodation_rooms(string $checkin, string $checkout, int $guests = 1, string $category = 'standard-rooms'): array
+{
+    return ProviderManager::active()->availability()->getAvailableRooms(
+        new AvailabilitySearchRequest($checkin, $checkout, $guests, $category)
+    );
+}
+
+/**
+ * Calculate accommodation display pricing through the active booking provider.
+ *
+ * @return array<string, mixed>
+ */
+function get_provider_accommodation_room_pricing(int $room_id, string $checkin, string $checkout, int $guests = 1, string $coupon_code = '', int $rate_plan_id = 0): array
+{
+    return ProviderManager::active()->quote()->calculateTotal($room_id, $checkin, $checkout, $guests, $coupon_code, $rate_plan_id);
+}
+
+/**
+ * Load accommodation rate-plan display data through the active booking provider.
+ *
+ * @return array<int, array<string, mixed>>
+ */
+function get_provider_accommodation_room_rate_plans(int $room_id, string $checkin, string $checkout, int $guests = 1): array
+{
+    return ProviderManager::active()->quote()->getRoomRatePlansWithPricing($room_id, $checkin, $checkout, $guests);
+}
+
+/**
  * Process a room-selection request and return a reusable result payload.
  *
  * @param array<string, mixed> $request_source
@@ -127,7 +158,7 @@ function get_accommodation_room_selection_state(array $context, array $messages 
  */
 function handle_accommodation_room_selection_request(array $request_source): array
 {
-    return ReservationEngine::handleAccommodationRoomSelectionRequest($request_source);
+    return ProviderManager::active()->reservations()->handleAccommodationRoomSelectionRequest($request_source);
 }
 
 /**
@@ -267,7 +298,7 @@ function get_accommodation_page_view_data(): array
     $no_rooms_message = \__('No rooms are available for the selected dates.', 'must-hotel-booking');
 
     if ($has_context && !empty($context['is_valid'])) {
-        $room_results = AvailabilityEngine::getAvailableRooms(
+        $room_results = get_provider_available_accommodation_rooms(
             (string) $context['checkin'],
             (string) $context['checkout'],
             $single_room_mode ? (int) $context['guests'] : 1,
@@ -287,7 +318,7 @@ function get_accommodation_page_view_data(): array
                 }
 
                 if ($single_room_mode) {
-                    $pricing = PricingEngine::calculateTotal(
+                    $pricing = get_provider_accommodation_room_pricing(
                         $room_id,
                         (string) $context['checkin'],
                         (string) $context['checkout'],
@@ -305,7 +336,7 @@ function get_accommodation_page_view_data(): array
 
                 if ($room_view !== null && \is_array($room_view)) {
                     $display_guests = $single_room_mode ? (int) ($context['guests'] ?? 1) : 1;
-                    $rate_plans = RatePlanEngine::getRoomRatePlansWithPricing(
+                    $rate_plans = get_provider_accommodation_room_rate_plans(
                         $room_id,
                         (string) $context['checkin'],
                         (string) $context['checkout'],

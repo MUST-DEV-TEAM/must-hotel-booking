@@ -123,6 +123,7 @@ function render_payments_admin_notice_from_query(): void
         'payment_marked_failed' => ['success', \__('Reservation payment marked failed.', 'must-hotel-booking')],
         'reservation_guest_email_resent' => ['success', \__('Guest confirmation email resent.', 'must-hotel-booking')],
         'reservation_admin_email_resent' => ['success', \__('Admin notification email resent.', 'must-hotel-booking')],
+        'provider_backed_read_only' => ['error', \__('Provider-backed reservations are read-only in local payment actions until provider-aware payment operations are implemented.', 'must-hotel-booking')],
         'invalid_nonce' => ['error', \__('Security check failed. Please try again.', 'must-hotel-booking')],
         'action_failed' => ['error', \__('The requested payment action could not be completed.', 'must-hotel-booking')],
     ];
@@ -565,6 +566,9 @@ function render_payments_table(array $rows, array $pagination): void
         $methodKey = (string) ($row['payment_method_key'] ?? '');
         $transactionId = (string) ($row['transaction_id'] ?? '');
         $updatedAt = (string) (($row['paid_at'] ?? '') !== '' ? $row['paid_at'] : ($row['updated_at'] ?? ''));
+        $providerContext = isset($row['provider']) && \is_array($row['provider']) ? $row['provider'] : [];
+        $providerPayment = isset($row['provider_payment']) && \is_array($row['provider_payment']) ? $row['provider_payment'] : [];
+        $isProviderBacked = !empty($providerContext['is_provider_backed']);
         $labels = [
             'mark_paid' => \__('Mark Paid', 'must-hotel-booking'),
             'mark_unpaid' => \__('Mark Unpaid', 'must-hotel-booking'),
@@ -579,6 +583,9 @@ function render_payments_table(array $rows, array $pagination): void
         echo '<td>';
         echo '<div class="must-payments-row-title"><a href="' . \esc_url((string) ($row['detail_url'] ?? '')) . '">' . \esc_html((string) ($row['booking_id'] ?? '')) . '</a></div>';
         echo '<div class="must-payments-row-meta"><span>' . \esc_html(\sprintf(__('Reservation #%d', 'must-hotel-booking'), (int) ($row['reservation_id'] ?? 0))) . '</span></div>';
+        if ($isProviderBacked) {
+            echo '<div class="must-payments-pill-stack">' . render_payments_badge((string) ($providerContext['provider_label'] ?? __('Provider mirror', 'must-hotel-booking')), 'info') . '</div>';
+        }
         if ((string) ($row['reservation_url'] ?? '') !== '') {
             echo '<div class="must-payments-cell-links"><a class="must-payments-text-link" href="' . \esc_url((string) $row['reservation_url']) . '">' . \esc_html__('Open reservation', 'must-hotel-booking') . '</a></div>';
         }
@@ -595,6 +602,19 @@ function render_payments_table(array $rows, array $pagination): void
         echo '<td>' . render_payments_status_badge((string) ($row['payment_status'] ?? ''), (string) ($row['payment_status_key'] ?? ''));
         if (!empty($row['needs_review'])) {
             echo '<div class="must-payments-pill-stack">' . render_payments_badge(__('Needs review', 'must-hotel-booking'), 'warning') . '</div>';
+        }
+        if ($isProviderBacked && !empty($providerPayment)) {
+            echo '<div class="must-payments-pill-stack">' . render_payments_badge(
+                \sprintf(
+                    /* translators: %s: provider payment status. */
+                    __('Provider: %s', 'must-hotel-booking'),
+                    (string) ($providerPayment['provider_status_label'] ?? __('Not reported', 'must-hotel-booking'))
+                ),
+                (string) ($providerPayment['provider_status'] ?? 'info')
+            ) . '</div>';
+            if (!empty($providerPayment['differs'])) {
+                echo '<div class="must-payments-pill-stack">' . render_payments_badge(__('Provider/local differ', 'must-hotel-booking'), 'warning') . '</div>';
+            }
         }
         echo '</td>';
         echo '<td>' . render_payments_status_badge((string) ($row['reservation_status'] ?? ''), (string) ($row['reservation_status_key'] ?? '')) . '</td>';
@@ -623,6 +643,10 @@ function render_payments_table(array $rows, array $pagination): void
             }
 
             echo '<a class="' . \esc_attr($className) . '" href="' . \esc_url((string) $url) . '">' . \esc_html($labels[$action]) . '</a>';
+        }
+
+        if ($isProviderBacked && empty($row['actions'])) {
+            echo '<span class="button button-small disabled" aria-disabled="true">' . \esc_html__('Provider read-only', 'must-hotel-booking') . '</span>';
         }
 
         echo '</div>';
@@ -706,6 +730,9 @@ function render_payment_detail(?array $detail): void
     $reservation = isset($detail['reservation']) && \is_array($detail['reservation']) ? $detail['reservation'] : [];
     $state = isset($detail['state']) && \is_array($detail['state']) ? $detail['state'] : [];
     $warnings = isset($state['warnings']) && \is_array($state['warnings']) ? $state['warnings'] : [];
+    $providerContext = isset($detail['provider']) && \is_array($detail['provider']) ? $detail['provider'] : [];
+    $providerPayment = isset($detail['provider_payment']) && \is_array($detail['provider_payment']) ? $detail['provider_payment'] : [];
+    $isProviderBacked = !empty($providerContext['is_provider_backed']);
     $currency = MustBookingConfig::get_currency();
     $metrics = [
         [
@@ -749,6 +776,19 @@ function render_payment_detail(?array $detail): void
     echo render_payments_status_badge((string) (get_reservation_status_options()[(string) ($reservation['status'] ?? '')] ?? (string) ($reservation['status'] ?? '')), (string) ($reservation['status'] ?? ''));
     echo render_payments_status_badge((string) ($state['derived_status'] ?? ''), (string) ($state['derived_status'] ?? ''));
     echo render_payments_badge($detailMethodLabel, (string) ($state['method'] ?? 'info'));
+    if ($isProviderBacked) {
+        echo render_payments_badge((string) ($providerContext['provider_label'] ?? __('Provider mirror', 'must-hotel-booking')), 'info');
+        if (!empty($providerPayment)) {
+            echo render_payments_badge(
+                \sprintf(
+                    /* translators: %s: provider payment status. */
+                    __('Provider payment: %s', 'must-hotel-booking'),
+                    (string) ($providerPayment['provider_status_label'] ?? __('Not reported', 'must-hotel-booking'))
+                ),
+                (string) ($providerPayment['provider_status'] ?? 'info')
+            );
+        }
+    }
     echo '</div>';
 
     echo '<div class="must-payments-detail-list">';
@@ -793,6 +833,35 @@ function render_payment_detail(?array $detail): void
     echo '</div>';
 
     echo '<div class="must-payments-detail-side">';
+    if ($isProviderBacked) {
+        echo '<div class="must-payments-form-alert">';
+        echo '<h3>' . \esc_html__('Provider-backed payment row', 'must-hotel-booking') . '</h3>';
+        echo '<p>' . \esc_html__('Local payment mutations are disabled for this mirrored reservation. Use provider-aware reservation actions or provider diagnostics instead of changing payment state locally.', 'must-hotel-booking') . '</p>';
+        if (!empty($providerPayment)) {
+            echo '<ul class="must-payments-warning-list">';
+            echo '<li>' . \esc_html(\sprintf(
+                /* translators: %s: local payment state. */
+                __('Local plugin payment state: %s', 'must-hotel-booking'),
+                (string) ($providerPayment['local_status_label'] ?? __('Not reported', 'must-hotel-booking'))
+            )) . '</li>';
+            echo '<li>' . \esc_html(\sprintf(
+                /* translators: %s: provider payment state. */
+                __('Provider payment state: %s', 'must-hotel-booking'),
+                (string) ($providerPayment['provider_status_label'] ?? __('Not reported', 'must-hotel-booking'))
+            )) . '</li>';
+            if (!empty($providerPayment['differs'])) {
+                echo '<li>' . \esc_html__('Provider and local plugin payment states differ; treat the provider state as separate from the local ledger state until reconciliation completes.', 'must-hotel-booking') . '</li>';
+            }
+            if (!empty($providerPayment['reconciliation_required'])) {
+                echo '<li>' . \esc_html__('Provider payment reconciliation is pending or retryable.', 'must-hotel-booking') . '</li>';
+            }
+            if (!empty($providerPayment['sync_error'])) {
+                echo '<li>' . \esc_html((string) $providerPayment['sync_error']) . '</li>';
+            }
+            echo '</ul>';
+        }
+        echo '</div>';
+    }
     if (!empty($warnings)) {
         echo '<div class="must-payments-form-alert">';
         echo '<h3>' . \esc_html__('Warnings', 'must-hotel-booking') . '</h3>';

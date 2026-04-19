@@ -6,7 +6,7 @@ class MustBookingConfig
 {
     public const OPTION_NAME = 'must_hotel_booking_settings';
     private const VERSION_KEY = 'settings_version';
-    private const VERSION = 3;
+    private const VERSION = 4;
 
     public static function get_option_name(): string
     {
@@ -130,6 +130,40 @@ class MustBookingConfig
     public static function get_max_booking_rooms(): int { return self::int((string) self::get_setting('max_booking_rooms', 3), 1, 25, 3); }
     public static function get_checkin_time(): string { return self::time((string) self::get_setting('checkin_time', '14:00'), '14:00'); }
     public static function get_checkout_time(): string { return self::time((string) self::get_setting('checkout_time', '11:00'), '11:00'); }
+    public static function get_provider_mode(): string { return self::choice(\sanitize_key((string) self::get_setting('provider_mode', 'local')), ['local', 'clock'], 'local'); }
+    public static function is_clock_enabled(): bool { return self::bool(self::get_setting('clock_enabled', false)); }
+
+    /** @return array<string, mixed> */
+    public static function get_clock_settings(): array
+    {
+        $provider = self::get_group_settings('provider');
+        $defaults = self::group_defaults()['provider'];
+
+        return [
+            'provider_mode' => self::get_provider_mode(),
+            'clock_enabled' => self::bool($provider['clock_enabled'] ?? $defaults['clock_enabled']),
+            'clock_environment' => self::choice(\sanitize_key((string) ($provider['clock_environment'] ?? $defaults['clock_environment'])), ['sandbox', 'production', 'custom'], (string) $defaults['clock_environment']),
+            'clock_api_base_url' => \esc_url_raw((string) ($provider['clock_api_base_url'] ?? $defaults['clock_api_base_url'])),
+            'clock_api_user' => \sanitize_text_field((string) ($provider['clock_api_user'] ?? $defaults['clock_api_user'])),
+            'clock_api_key' => \sanitize_text_field((string) ($provider['clock_api_key'] ?? $defaults['clock_api_key'])),
+            'clock_property_id' => \sanitize_text_field((string) ($provider['clock_property_id'] ?? $defaults['clock_property_id'])),
+            'clock_connection_path' => self::api_path((string) ($provider['clock_connection_path'] ?? $defaults['clock_connection_path']), '/'),
+            'clock_room_types_path' => self::api_path_or_blank((string) ($provider['clock_room_types_path'] ?? $defaults['clock_room_types_path'])),
+            'clock_rooms_path' => self::api_path_or_blank((string) ($provider['clock_rooms_path'] ?? $defaults['clock_rooms_path'])),
+            'clock_rate_plans_path' => self::api_path_or_blank((string) ($provider['clock_rate_plans_path'] ?? $defaults['clock_rate_plans_path'])),
+            'clock_availability_path' => self::api_path_or_blank((string) ($provider['clock_availability_path'] ?? $defaults['clock_availability_path'])),
+            'clock_quote_path' => self::api_path_or_blank((string) ($provider['clock_quote_path'] ?? $defaults['clock_quote_path'])),
+            'clock_reservation_create_path' => self::api_path_or_blank((string) ($provider['clock_reservation_create_path'] ?? $defaults['clock_reservation_create_path'])),
+            'clock_reservation_status_update_path' => self::api_path_or_blank((string) ($provider['clock_reservation_status_update_path'] ?? $defaults['clock_reservation_status_update_path'])),
+            'clock_reservation_cancel_path' => self::api_path_or_blank((string) ($provider['clock_reservation_cancel_path'] ?? $defaults['clock_reservation_cancel_path'])),
+            'clock_reservation_room_update_path' => self::api_path_or_blank((string) ($provider['clock_reservation_room_update_path'] ?? $defaults['clock_reservation_room_update_path'])),
+            'clock_reservation_stay_update_path' => self::api_path_or_blank((string) ($provider['clock_reservation_stay_update_path'] ?? $defaults['clock_reservation_stay_update_path'])),
+            'clock_reservation_guest_update_path' => self::api_path_or_blank((string) ($provider['clock_reservation_guest_update_path'] ?? $defaults['clock_reservation_guest_update_path'])),
+            'clock_reservation_fetch_path' => self::api_path_or_blank((string) ($provider['clock_reservation_fetch_path'] ?? $defaults['clock_reservation_fetch_path'])),
+            'clock_webhook_secret' => \sanitize_text_field((string) ($provider['clock_webhook_secret'] ?? $defaults['clock_webhook_secret'])),
+            'clock_timeout_seconds' => self::int($provider['clock_timeout_seconds'] ?? $defaults['clock_timeout_seconds'], 1, 60, (int) $defaults['clock_timeout_seconds']),
+        ];
+    }
 
     public static function get_booking_notification_email(): string
     {
@@ -205,6 +239,7 @@ class MustBookingConfig
         $normalized['branding'] = self::normalize_branding($inputs['branding']);
         $normalized['managed_pages'] = self::normalize_managed_pages($inputs['managed_pages']);
         $normalized['notifications_summary'] = self::normalize_notifications($inputs['notifications_summary']);
+        $normalized['provider'] = self::normalize_provider($inputs['provider']);
         $normalized['maintenance'] = isset($inputs['maintenance']) && \is_array($inputs['maintenance']) ? $inputs['maintenance'] : [];
 
         foreach ($raw as $key => $item) {
@@ -273,6 +308,7 @@ class MustBookingConfig
             'branding' => ['primary_color' => '#0f766e', 'secondary_color' => '#155e75', 'accent_color' => '#f59e0b', 'text_color' => '#16212b', 'border_radius' => 18, 'font_family' => 'Instrument Sans', 'inherit_elementor_colors' => false, 'inherit_elementor_typography' => false, 'portal_welcome_title' => \__('Welcome back', 'must-hotel-booking'), 'portal_welcome_text' => \__('Manage arrivals, departures, guest requests, and stay operations from one place.', 'must-hotel-booking'), 'booking_form_style_preset' => 'balanced'],
             'managed_pages' => ['page_rooms_id' => 0, 'page_booking_id' => 0, 'page_booking_accommodation_id' => 0, 'page_checkout_id' => 0, 'page_booking_confirmation_id' => 0, 'portal_page_id' => 0, 'portal_login_page_id' => 0],
             'notifications_summary' => ['booking_notification_email' => '', 'email_from_name' => '', 'email_from_email' => '', 'email_reply_to' => '', 'email_logo_url' => '', 'email_button_color' => '#141414', 'email_footer_text' => \__('We look forward to welcoming you.', 'must-hotel-booking'), 'email_layout_type' => 'classic', 'custom_email_layout_html' => '', 'email_templates' => []],
+            'provider' => ['provider_mode' => 'local', 'clock_enabled' => false, 'clock_environment' => 'production', 'clock_api_base_url' => '', 'clock_api_user' => '', 'clock_api_key' => '', 'clock_property_id' => '', 'clock_connection_path' => '/', 'clock_room_types_path' => '', 'clock_rooms_path' => '', 'clock_rate_plans_path' => '', 'clock_availability_path' => '', 'clock_quote_path' => '', 'clock_reservation_create_path' => '', 'clock_reservation_status_update_path' => '', 'clock_reservation_cancel_path' => '', 'clock_reservation_room_update_path' => '', 'clock_reservation_stay_update_path' => '', 'clock_reservation_guest_update_path' => '', 'clock_reservation_fetch_path' => '', 'clock_webhook_secret' => '', 'clock_timeout_seconds' => 15],
             'maintenance' => [],
         ];
     }
@@ -361,6 +397,36 @@ class MustBookingConfig
         return ['booking_notification_email' => \is_email($notify) ? $notify : (string) $d['booking_notification_email'], 'email_from_name' => \sanitize_text_field((string) ($v['email_from_name'] ?? $d['email_from_name'])), 'email_from_email' => \is_email($from) ? $from : (string) $d['email_from_email'], 'email_reply_to' => \is_email($reply) ? $reply : '', 'email_logo_url' => \esc_url_raw((string) ($v['email_logo_url'] ?? $d['email_logo_url'])), 'email_button_color' => self::hex((string) ($v['email_button_color'] ?? $d['email_button_color']), (string) $d['email_button_color']), 'email_footer_text' => \sanitize_textarea_field((string) ($v['email_footer_text'] ?? $d['email_footer_text'])), 'email_layout_type' => self::email_layout((string) ($v['email_layout_type'] ?? $d['email_layout_type'])), 'custom_email_layout_html' => (string) ($v['custom_email_layout_html'] ?? $d['custom_email_layout_html']), 'email_templates' => isset($v['email_templates']) && \is_array($v['email_templates']) ? $v['email_templates'] : (array) $d['email_templates']];
     }
 
+    /** @param array<string, mixed> $v @return array<string, mixed> */
+    private static function normalize_provider(array $v): array
+    {
+        $d = self::group_defaults()['provider'];
+        return [
+            'provider_mode' => self::choice(\sanitize_key((string) ($v['provider_mode'] ?? $d['provider_mode'])), ['local', 'clock'], (string) $d['provider_mode']),
+            'clock_enabled' => self::bool($v['clock_enabled'] ?? $d['clock_enabled']),
+            'clock_environment' => self::choice(\sanitize_key((string) ($v['clock_environment'] ?? $d['clock_environment'])), ['sandbox', 'production', 'custom'], (string) $d['clock_environment']),
+            'clock_api_base_url' => \esc_url_raw((string) ($v['clock_api_base_url'] ?? $d['clock_api_base_url'])),
+            'clock_api_user' => \sanitize_text_field((string) ($v['clock_api_user'] ?? $d['clock_api_user'])),
+            'clock_api_key' => \sanitize_text_field((string) ($v['clock_api_key'] ?? $d['clock_api_key'])),
+            'clock_property_id' => \sanitize_text_field((string) ($v['clock_property_id'] ?? $d['clock_property_id'])),
+            'clock_connection_path' => self::api_path((string) ($v['clock_connection_path'] ?? $d['clock_connection_path']), (string) $d['clock_connection_path']),
+            'clock_room_types_path' => self::api_path_or_blank((string) ($v['clock_room_types_path'] ?? $d['clock_room_types_path'])),
+            'clock_rooms_path' => self::api_path_or_blank((string) ($v['clock_rooms_path'] ?? $d['clock_rooms_path'])),
+            'clock_rate_plans_path' => self::api_path_or_blank((string) ($v['clock_rate_plans_path'] ?? $d['clock_rate_plans_path'])),
+            'clock_availability_path' => self::api_path_or_blank((string) ($v['clock_availability_path'] ?? $d['clock_availability_path'])),
+            'clock_quote_path' => self::api_path_or_blank((string) ($v['clock_quote_path'] ?? $d['clock_quote_path'])),
+            'clock_reservation_create_path' => self::api_path_or_blank((string) ($v['clock_reservation_create_path'] ?? $d['clock_reservation_create_path'])),
+            'clock_reservation_status_update_path' => self::api_path_or_blank((string) ($v['clock_reservation_status_update_path'] ?? $d['clock_reservation_status_update_path'])),
+            'clock_reservation_cancel_path' => self::api_path_or_blank((string) ($v['clock_reservation_cancel_path'] ?? $d['clock_reservation_cancel_path'])),
+            'clock_reservation_room_update_path' => self::api_path_or_blank((string) ($v['clock_reservation_room_update_path'] ?? $d['clock_reservation_room_update_path'])),
+            'clock_reservation_stay_update_path' => self::api_path_or_blank((string) ($v['clock_reservation_stay_update_path'] ?? $d['clock_reservation_stay_update_path'])),
+            'clock_reservation_guest_update_path' => self::api_path_or_blank((string) ($v['clock_reservation_guest_update_path'] ?? $d['clock_reservation_guest_update_path'])),
+            'clock_reservation_fetch_path' => self::api_path_or_blank((string) ($v['clock_reservation_fetch_path'] ?? $d['clock_reservation_fetch_path'])),
+            'clock_webhook_secret' => \sanitize_text_field((string) ($v['clock_webhook_secret'] ?? $d['clock_webhook_secret'])),
+            'clock_timeout_seconds' => self::int($v['clock_timeout_seconds'] ?? $d['clock_timeout_seconds'], 1, 60, (int) $d['clock_timeout_seconds']),
+        ];
+    }
+
     private static function site_name(): string { $name = \function_exists('get_bloginfo') ? \trim((string) \get_bloginfo('name')) : ''; return $name !== '' ? $name : 'Hotel'; }
     private static function admin_email(): string { $email = \sanitize_email((string) self::get_wp_option('admin_email', '')); return \is_email($email) ? $email : ''; }
     private static function wp_timezone(): string { $timezone = \function_exists('wp_timezone_string') ? \trim((string) \wp_timezone_string()) : ''; return $timezone !== '' ? $timezone : 'UTC'; }
@@ -371,6 +437,8 @@ class MustBookingConfig
     private static function email_layout(string $value): string { return self::choice(\sanitize_key($value), ['classic', 'luxury', 'compact', 'custom'], 'classic'); }
     private static function time(string $value, string $fallback): string { $value = \trim($value); if (\preg_match('/^\d{2}:\d{2}$/', $value) !== 1) { return $fallback; } $h = (int) \substr($value, 0, 2); $m = (int) \substr($value, 3, 2); return ($h >= 0 && $h <= 23 && $m >= 0 && $m <= 59) ? \sprintf('%02d:%02d', $h, $m) : $fallback; }
     private static function time_or_blank(string $value, string $fallback = ''): string { return \trim($value) === '' ? $fallback : self::time($value, $fallback !== '' ? $fallback : '18:00'); }
+    private static function api_path(string $value, string $fallback): string { $value = \trim(\sanitize_text_field($value)); if ($value === '') { return $fallback; } if (\preg_match('/^https?:\/\//i', $value) === 1) { return \esc_url_raw($value); } return '/' . \ltrim($value, '/'); }
+    private static function api_path_or_blank(string $value): string { $value = \trim($value); return $value !== '' ? self::api_path($value, '') : ''; }
     /** @param mixed $value */ private static function bool($value): bool { if (\is_bool($value)) { return $value; } return \in_array(\strtolower(\trim((string) $value)), ['1', 'true', 'yes', 'on'], true); }
     /** @param mixed $value */ private static function int($value, int $min, int $max, int $fallback): int { $value = \absint((string) $value); return ($value >= $min && $value <= $max) ? $value : $fallback; }
     /** @param mixed $value */ private static function decimal($value, float $min, float $max, float $fallback): float { $value = \is_numeric($value) ? (float) $value : $fallback; return ($value >= $min && $value <= $max) ? $value : $fallback; }

@@ -5,6 +5,10 @@ namespace MustHotelBooking\Admin;
 use MustHotelBooking\Core\MustBookingConfig;
 use MustHotelBooking\Core\PaymentMethodRegistry;
 use MustHotelBooking\Engine\PaymentStatusService;
+use MustHotelBooking\Provider\ProviderManager;
+use MustHotelBooking\Provider\ProviderReservationView;
+use MustHotelBooking\Provider\Storage\ProviderMappingRepository;
+use MustHotelBooking\Provider\Storage\ProviderSyncJobRepository;
 
 final class ReservationAdminDataProvider
 {
@@ -26,6 +30,13 @@ final class ReservationAdminDataProvider
     /** @var \MustHotelBooking\Database\ActivityRepository */
     private $activityRepository;
 
+    private ProviderSyncJobRepository $providerSyncJobRepository;
+
+    private ProviderMappingRepository $providerMappingRepository;
+
+    /** @var array<int, bool> */
+    private array $clockPhysicalRoomMappingCache = [];
+
     public function __construct()
     {
         $this->reservationRepository = \MustHotelBooking\Engine\get_reservation_repository();
@@ -34,6 +45,8 @@ final class ReservationAdminDataProvider
         $this->inventoryRepository = \MustHotelBooking\Engine\get_inventory_repository();
         $this->ratePlanRepository = \MustHotelBooking\Engine\get_rate_plan_repository();
         $this->activityRepository = \MustHotelBooking\Engine\get_activity_repository();
+        $this->providerSyncJobRepository = new ProviderSyncJobRepository();
+        $this->providerMappingRepository = new ProviderMappingRepository();
     }
 
     /**
@@ -131,6 +144,11 @@ final class ReservationAdminDataProvider
         $totalPrice = isset($reservation['total_price']) ? (float) $reservation['total_price'] : 0.0;
         $amountPaid = isset($paymentState['amount_paid']) ? (float) $paymentState['amount_paid'] : 0.0;
         $amountDue = isset($paymentState['amount_due']) ? (float) $paymentState['amount_due'] : \max(0.0, $totalPrice - $amountPaid);
+        $providerContext = $this->buildProviderContext($reservation, $reservationId, $paymentState);
+
+        if (!empty($providerContext['is_clock'])) {
+            $assignableRooms = $this->filterClockMappedInventoryRooms($assignableRooms);
+        }
 
         return [
             'id' => $reservationId,
@@ -189,6 +207,7 @@ final class ReservationAdminDataProvider
             'emails' => $emailRows,
             'timeline' => $timelineRows,
             'assignable_rooms' => $assignableRooms,
+            'provider' => $providerContext,
         ];
     }
 
@@ -230,6 +249,7 @@ final class ReservationAdminDataProvider
             $formattedRows[] = [
                 'id' => isset($row['id']) ? (int) $row['id'] : 0,
                 'booking_id' => $this->formatReservationReference($row),
+                'provider' => ProviderReservationView::metadata($row),
                 'guest' => $this->formatGuestName($row),
                 'guest_email' => (string) ($row['guest_email'] ?? ''),
                 'accommodation' => isset($row['room_name']) && (string) $row['room_name'] !== ''
@@ -306,6 +326,9 @@ final class ReservationAdminDataProvider
                 );
             }
 
+            $providerContext = ProviderReservationView::metadata($row);
+            $isProviderBacked = !empty($providerContext['is_provider_backed']);
+            $isClockBacked = !empty($providerContext['is_clock']) && (string) ($providerContext['provider'] ?? '') === ProviderManager::CLOCK_MODE;
             $moveOptions = [];
 
             foreach ($candidateRooms as $candidateRoom) {
@@ -319,13 +342,17 @@ final class ReservationAdminDataProvider
                     continue;
                 }
 
+                if ($isClockBacked && !$this->isClockPhysicalRoomMapped($candidateId)) {
+                    continue;
+                }
+
                 $moveOptions[] = [
                     'id' => $candidateId,
                     'label' => $this->formatInventoryRoomLabel($candidateRoom),
                 ];
             }
 
-            if (!empty($moveOptions)) {
+            if (!empty($moveOptions) && (!$isProviderBacked || $isClockBacked)) {
                 $moveableCount++;
             }
 
@@ -336,6 +363,7 @@ final class ReservationAdminDataProvider
             $formattedRows[] = [
                 'id' => $reservationId,
                 'booking_id' => $this->formatReservationReference($row),
+                'provider' => $providerContext,
                 'guest' => $this->formatGuestName($row),
                 'guest_email' => (string) ($row['guest_email'] ?? ''),
                 'accommodation' => isset($row['room_name']) && (string) $row['room_name'] !== ''
@@ -350,8 +378,8 @@ final class ReservationAdminDataProvider
                 'reservation_status_key' => (string) ($row['status'] ?? ''),
                 'desk_state' => \__('In house', 'must-hotel-booking'),
                 'desk_state_key' => ((string) ($row['checkout'] ?? '') !== '' && (string) ($row['checkout'] ?? '') <= $today) ? 'warning' : 'success',
-                'move_options' => $moveOptions,
-                'can_move' => !empty($moveOptions),
+                'move_options' => (!$isProviderBacked || $isClockBacked) ? $moveOptions : [],
+                'can_move' => (!$isProviderBacked || $isClockBacked) && !empty($moveOptions),
             ];
         }
 
@@ -735,9 +763,12 @@ final class ReservationAdminDataProvider
             $paymentState = isset($row['payment_state']) && \is_array($row['payment_state']) ? $row['payment_state'] : [];
             $paymentStatusKey = (string) ($paymentState['derived_status'] ?? (string) ($row['payment_status'] ?? ''));
             $paymentMethodKey = (string) ($paymentState['method'] ?? (string) ($row['payment_method'] ?? ''));
+            $providerContext = ProviderReservationView::metadata($row);
             $formatted[] = [
                 'id' => $reservationId,
                 'booking_id' => $this->formatReservationReference($row),
+                'provider' => $providerContext,
+                'is_provider_backed' => !empty($providerContext['is_provider_backed']),
                 'guest' => $this->formatGuestName($row),
                 'guest_id' => isset($row['guest_id']) ? (int) $row['guest_id'] : 0,
                 'guest_url' => isset($row['guest_id']) && (int) $row['guest_id'] > 0
@@ -767,6 +798,186 @@ final class ReservationAdminDataProvider
         }
 
         return $formatted;
+    }
+
+    /**
+     * @param array<string, mixed> $reservation
+     * @return array<string, mixed>
+     */
+    private function buildProviderContext(array $reservation, int $reservationId, array $paymentState = []): array
+    {
+        $context = ProviderReservationView::metadata($reservation);
+
+        if (empty($context['is_provider_backed'])) {
+            return $context;
+        }
+
+        $provider = isset($context['provider']) ? (string) $context['provider'] : '';
+        $jobSummary = $this->providerSyncJobRepository->getTargetSummary($provider, 'reservation', $reservationId);
+        $context['sync_jobs'] = $this->formatProviderSyncJobSummary($jobSummary);
+        $context['payment_sync'] = ProviderReservationView::paymentContext($reservation, $paymentState);
+        $context['pricing_sync'] = $this->formatProviderPricingSync(
+            $this->decodeProviderMetadata($reservation['provider_metadata'] ?? null)
+        );
+        $context['guest_sync'] = $this->formatProviderGuestSync(
+            $this->decodeProviderMetadata($reservation['provider_metadata'] ?? null)
+        );
+
+        return $context;
+    }
+
+    /**
+     * @param array<string, mixed> $summary
+     * @return array<string, mixed>
+     */
+    private function formatProviderSyncJobSummary(array $summary): array
+    {
+        $lastUpdatedAt = isset($summary['last_updated_at']) ? (string) $summary['last_updated_at'] : '';
+
+        if ($lastUpdatedAt !== '') {
+            $lastUpdatedAt = $this->formatDateTime($lastUpdatedAt);
+        }
+
+        return [
+            'counts' => isset($summary['counts']) && \is_array($summary['counts']) ? $summary['counts'] : [],
+            'open_count' => isset($summary['open_count']) ? (int) $summary['open_count'] : 0,
+            'problem_count' => isset($summary['problem_count']) ? (int) $summary['problem_count'] : 0,
+            'last_error' => (string) ($summary['last_error'] ?? ''),
+            'last_updated_at' => $lastUpdatedAt,
+        ];
+    }
+
+    /**
+     * @param array<string, mixed> $metadata
+     * @return array<string, mixed>
+     */
+    private function formatProviderPricingSync(array $metadata): array
+    {
+        $last = isset($metadata['last_provider_pricing_refresh']) && \is_array($metadata['last_provider_pricing_refresh'])
+            ? $metadata['last_provider_pricing_refresh']
+            : [];
+        $required = !empty($metadata['pricing_reconciliation_required']);
+
+        if (empty($last) && !$required) {
+            return [];
+        }
+
+        $status = isset($last['sync_status']) ? \sanitize_key((string) $last['sync_status']) : '';
+
+        if ($status === '') {
+            $status = $required ? 'pending_retry' : (!empty($last['success']) ? 'synced' : '');
+        }
+
+        return [
+            'required' => $required,
+            'success' => !empty($last['success']),
+            'status' => $status,
+            'status_label' => ProviderReservationView::formatStatusLabel($status),
+            'error' => (string) ($last['sync_error'] ?? ''),
+            'synced_at' => $this->formatDateTime((string) ($last['synced_at'] ?? '')),
+            'total_price' => isset($last['total_price']) && \is_numeric($last['total_price'])
+                ? $this->formatMoney((float) $last['total_price'])
+                : '',
+            'amount_due' => isset($last['amount_due']) && \is_numeric($last['amount_due'])
+                ? $this->formatMoney((float) $last['amount_due'])
+                : '',
+            'pricing_source' => (string) ($last['pricing_source'] ?? ''),
+        ];
+    }
+
+    /**
+     * @param array<string, mixed> $metadata
+     * @return array<string, mixed>
+     */
+    private function formatProviderGuestSync(array $metadata): array
+    {
+        $last = isset($metadata['last_provider_guest_update']) && \is_array($metadata['last_provider_guest_update'])
+            ? $metadata['last_provider_guest_update']
+            : [];
+        $required = !empty($metadata['provider_guest_update_required']);
+
+        if (empty($last) && !$required) {
+            return [];
+        }
+
+        $status = isset($last['sync_status']) ? \sanitize_key((string) $last['sync_status']) : '';
+
+        if ($status === '') {
+            $status = $required ? 'pending_retry' : (!empty($last['success']) ? 'synced' : '');
+        }
+
+        return [
+            'required' => $required,
+            'success' => !empty($last['success']),
+            'status' => $status,
+            'status_label' => ProviderReservationView::formatStatusLabel($status),
+            'error' => (string) ($last['sync_error'] ?? ''),
+            'synced_at' => $this->formatDateTime((string) ($last['synced_at'] ?? '')),
+        ];
+    }
+
+    /**
+     * @param mixed $metadata
+     * @return array<string, mixed>
+     */
+    private function decodeProviderMetadata($metadata): array
+    {
+        if (\is_array($metadata)) {
+            return $metadata;
+        }
+
+        if (!\is_string($metadata) || \trim($metadata) === '') {
+            return [];
+        }
+
+        $decoded = \json_decode($metadata, true);
+
+        return \is_array($decoded) ? $decoded : [];
+    }
+
+    /**
+     * @param array<int, array<string, mixed>> $rooms
+     * @return array<int, array<string, mixed>>
+     */
+    private function filterClockMappedInventoryRooms(array $rooms): array
+    {
+        $mapped = [];
+
+        foreach ($rooms as $room) {
+            if (!\is_array($room)) {
+                continue;
+            }
+
+            $roomId = isset($room['id']) ? (int) $room['id'] : 0;
+
+            if ($this->isClockPhysicalRoomMapped($roomId)) {
+                $mapped[] = $room;
+            }
+        }
+
+        return $mapped;
+    }
+
+    private function isClockPhysicalRoomMapped(int $roomId): bool
+    {
+        if ($roomId <= 0) {
+            return false;
+        }
+
+        if (isset($this->clockPhysicalRoomMappingCache[$roomId])) {
+            return $this->clockPhysicalRoomMappingCache[$roomId];
+        }
+
+        $mapping = $this->providerMappingRepository->findByLocal(
+            ProviderManager::CLOCK_MODE,
+            'physical_room',
+            $roomId,
+            'mhb_rooms'
+        );
+        $mapped = \is_array($mapping) && (string) ($mapping['external_id'] ?? '') !== '';
+        $this->clockPhysicalRoomMappingCache[$roomId] = $mapped;
+
+        return $mapped;
     }
 
     /**

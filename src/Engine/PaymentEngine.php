@@ -476,6 +476,14 @@ final class PaymentEngine
                 isset($session['payment_intent']) ? (string) $session['payment_intent'] : $sessionId
             );
 
+            if (\class_exists(\MustHotelBooking\Provider\Clock\ClockPaymentReconciliationService::class)) {
+                (new \MustHotelBooking\Provider\Clock\ClockPaymentReconciliationService())->reconcilePaymentSucceeded(
+                    $reservationIds,
+                    'stripe',
+                    isset($session['payment_intent']) ? (string) $session['payment_intent'] : $sessionId
+                );
+            }
+
             if ($shouldIncrementCouponUsage) {
                 $couponMetadata = isset($session['metadata']['coupon_ids']) ? (string) $session['metadata']['coupon_ids'] : '';
                 $couponIds = $couponMetadata === ''
@@ -881,6 +889,14 @@ final class PaymentEngine
 
             BookingStatusEngine::updateReservationStatuses($reservationIds, 'confirmed', 'paid');
             BookingStatusEngine::createPaymentRows($reservationIds, 'stripe', 'paid', $paymentIntent !== '' ? $paymentIntent : $sessionId);
+
+            if (\class_exists(\MustHotelBooking\Provider\Clock\ClockPaymentReconciliationService::class)) {
+                (new \MustHotelBooking\Provider\Clock\ClockPaymentReconciliationService())->reconcilePaymentSucceeded(
+                    $reservationIds,
+                    'stripe',
+                    $paymentIntent !== '' ? $paymentIntent : $sessionId
+                );
+            }
 
             unset($couponIds);
         } elseif ($type === 'checkout.session.expired') {

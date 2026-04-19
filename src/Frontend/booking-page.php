@@ -9,8 +9,7 @@ use MustHotelBooking\Core\RoomCatalog;
 use MustHotelBooking\Core\RoomData;
 use MustHotelBooking\Core\RoomViewBuilder;
 use MustHotelBooking\Engine\BookingValidationEngine;
-use MustHotelBooking\Engine\PricingEngine;
-use MustHotelBooking\Engine\ReservationEngine;
+use MustHotelBooking\Provider\ProviderManager;
 
 /**
  * Get plugin settings option name.
@@ -380,7 +379,7 @@ function maybe_process_booking_room_selection(): string
         return '';
     }
 
-    $result = ReservationEngine::handleBookingRoomSelectionRequest(\is_array($_POST) ? $_POST : []);
+    $result = ProviderManager::active()->reservations()->handleBookingRoomSelectionRequest(\is_array($_POST) ? $_POST : []);
 
     if (empty($result['handled'])) {
         return '';
@@ -409,6 +408,16 @@ function maybe_process_booking_room_selection(): string
 function get_booking_results_room_view_data(array $room): ?array
 {
     return RoomViewBuilder::buildBookingResultsRoomViewData($room);
+}
+
+/**
+ * Calculate public booking-page display pricing through the active booking provider.
+ *
+ * @return array<string, mixed>
+ */
+function get_provider_booking_room_pricing(int $room_id, string $checkin, string $checkout, int $guests = 1): array
+{
+    return ProviderManager::active()->quote()->calculateTotal($room_id, $checkin, $checkout, $guests);
 }
 
 /**
@@ -510,7 +519,7 @@ function get_booking_page_view_data(): array
             (string) ($context['checkin'] ?? '') !== '' &&
             (string) ($context['checkout'] ?? '') !== ''
         ) {
-            $pricing = PricingEngine::calculateTotal(
+            $pricing = get_provider_booking_room_pricing(
                 (int) ($fixed_room['id'] ?? 0),
                 (string) $context['checkin'],
                 (string) $context['checkout'],

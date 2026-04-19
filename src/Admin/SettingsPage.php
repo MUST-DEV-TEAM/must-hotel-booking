@@ -10,11 +10,21 @@ use MustHotelBooking\Engine\EmailEngine;
 use MustHotelBooking\Engine\EmailLayoutEngine;
 use MustHotelBooking\Engine\LockEngine;
 use MustHotelBooking\Engine\PaymentEngine;
+use MustHotelBooking\Provider\Clock\ClockConfig;
+use MustHotelBooking\Provider\Clock\ClockConnectionDiagnostic;
+use MustHotelBooking\Provider\Clock\ClockInboundSyncService;
+use MustHotelBooking\Provider\ProviderManager;
+use MustHotelBooking\Provider\Storage\ProviderMappingRepository;
+use MustHotelBooking\Provider\Storage\ProviderSyncJobRepository;
+use MustHotelBooking\Provider\Sync\ProviderSyncJobRunner;
 use MustHotelBooking\Portal\PortalRegistry;
 use MustHotelBooking\Portal\PortalRouter;
 
 final class SettingsPage
 {
+    /** @var array<string, mixed>|null */
+    private static $earlyRequestState = null;
+
     /**
      * @return array<string, array<string, string>>
      */
@@ -30,6 +40,7 @@ final class SettingsPage
             'branding' => ['label' => \__('Frontend & Branding', 'must-hotel-booking'), 'icon' => 'dashicons-art'],
             'managed_pages' => ['label' => \__('Managed Pages', 'must-hotel-booking'), 'icon' => 'dashicons-admin-page'],
             'notifications_summary' => ['label' => \__('Notifications & Emails Summary', 'must-hotel-booking'), 'icon' => 'dashicons-email-alt'],
+            'provider' => ['label' => \__('Provider', 'must-hotel-booking'), 'icon' => 'dashicons-networking'],
             'maintenance' => ['label' => \__('Diagnostics & Maintenance', 'must-hotel-booking'), 'icon' => 'dashicons-admin-tools'],
         ];
     }
@@ -60,6 +71,10 @@ final class SettingsPage
      */
     public static function maybeHandleSaveRequest(): array
     {
+        if (\is_array(self::$earlyRequestState)) {
+            return self::$earlyRequestState;
+        }
+
         $state = self::blankState();
         $requestMethod = isset($_SERVER['REQUEST_METHOD']) ? \strtoupper((string) $_SERVER['REQUEST_METHOD']) : 'GET';
 
@@ -105,6 +120,7 @@ final class SettingsPage
         /** @var array<string, mixed> $source */
         $source = \is_array($_POST) ? $_POST : [];
         $state = self::processPostAction($action, $source, true);
+        self::$earlyRequestState = $state;
 
         if (!empty($state['errors']) || (string) ($state['notice'] ?? '') === '') {
             return;
@@ -207,6 +223,7 @@ final class SettingsPage
             'branding' => self::getBrandingForm($formOverrides['branding'] ?? []),
             'managed_pages' => self::getManagedPagesForm($formOverrides['managed_pages'] ?? []),
             'notifications_summary' => self::getNotificationsForm($formOverrides['notifications_summary'] ?? []),
+            'provider' => self::getProviderForm($formOverrides['provider'] ?? []),
             'maintenance' => self::getMaintenanceForm($formOverrides['maintenance'] ?? []),
         ];
     }
@@ -237,6 +254,10 @@ final class SettingsPage
 
         if ($action === 'dangerous_reset_action') {
             return self::processDangerousResetAction($source, $persist);
+        }
+
+        if ($action === 'provider_mapping_action') {
+            return self::processProviderMappingAction($source, $persist);
         }
 
         return $state;
@@ -362,7 +383,7 @@ final class SettingsPage
         }
 
         $task = isset($source['maintenance_task']) ? \sanitize_key((string) \wp_unslash($source['maintenance_task'])) : '';
-        $allowedTasks = ['reinstall_pages', 'reschedule_cron', 'cleanup_expired_locks', 'send_test_email', 'flush_portal_routes', 'repair_inventory_mirror'];
+        $allowedTasks = ['reinstall_pages', 'reschedule_cron', 'cleanup_expired_locks', 'send_test_email', 'flush_portal_routes', 'repair_inventory_mirror', 'test_clock_connection', 'run_provider_sync_jobs', 'queue_clock_reservation_refresh'];
 
         if (!\in_array($task, $allowedTasks, true)) {
             return [
@@ -370,6 +391,86 @@ final class SettingsPage
                 'notice' => '',
                 'errors' => [\__('Unknown maintenance action.', 'must-hotel-booking')],
                 'forms' => [],
+            ];
+        }
+
+        if ($task === 'test_clock_connection') {
+            $result = ClockConnectionDiagnostic::testConnection();
+
+            if (empty($result['success'])) {
+                return [
+                    'tab' => $tab,
+                    'notice' => '',
+                    'errors' => [(string) ($result['message'] ?? \__('Clock connection test failed.', 'must-hotel-booking'))],
+                    'forms' => [],
+                ];
+            }
+
+            return [
+                'tab' => $tab,
+                'notice' => 'clock_connection_test_succeeded',
+                'errors' => [],
+                'forms' => [],
+                'query_args' => [
+                    'clock_http_status' => (int) ($result['http_status'] ?? 0),
+                    'clock_duration_ms' => (int) ($result['duration_ms'] ?? 0),
+                ],
+            ];
+        }
+
+        if ($task === 'run_provider_sync_jobs') {
+            $summary = $persist
+                ? (new ProviderSyncJobRunner())->runDueJobs(10)
+                : ['processed' => 0, 'succeeded' => 0, 'retryable' => 0, 'failed' => 0, 'skipped' => 0, 'released_stale' => 0];
+
+            return [
+                'tab' => $tab,
+                'notice' => 'provider_sync_jobs_processed',
+                'errors' => [],
+                'forms' => [],
+                'query_args' => [
+                    'sync_processed' => (int) ($summary['processed'] ?? 0),
+                    'sync_succeeded' => (int) ($summary['succeeded'] ?? 0),
+                    'sync_retryable' => (int) ($summary['retryable'] ?? 0),
+                    'sync_failed' => (int) ($summary['failed'] ?? 0),
+                    'sync_skipped' => (int) ($summary['skipped'] ?? 0),
+                    'sync_released_stale' => (int) ($summary['released_stale'] ?? 0),
+                ],
+            ];
+        }
+
+        if ($task === 'queue_clock_reservation_refresh') {
+            $reservationId = isset($source['clock_reservation_id']) ? \absint(\wp_unslash($source['clock_reservation_id'])) : 0;
+
+            if ($reservationId <= 0) {
+                return [
+                    'tab' => $tab,
+                    'notice' => '',
+                    'errors' => [\__('Enter a valid local reservation ID to queue a Clock refresh.', 'must-hotel-booking')],
+                    'forms' => [],
+                ];
+            }
+
+            $jobId = $persist ? (new ClockInboundSyncService())->enqueueReservationRefresh($reservationId, 'manual') : 0;
+
+            if ($jobId <= 0) {
+                return [
+                    'tab' => $tab,
+                    'notice' => '',
+                    'errors' => [\__('Unable to queue Clock reservation refresh. Confirm the reservation is a Clock-linked mirror reservation.', 'must-hotel-booking')],
+                    'forms' => [],
+                ];
+            }
+
+            return [
+                'tab' => $tab,
+                'notice' => 'clock_reservation_refresh_queued',
+                'errors' => [],
+                'forms' => [],
+                'query_args' => [
+                    'clock_refresh_job_id' => $jobId,
+                    'clock_reservation_id' => $reservationId,
+                ],
             ];
         }
 
@@ -381,6 +482,8 @@ final class SettingsPage
             } elseif ($task === 'reschedule_cron') {
                 LockEngine::unscheduleCleanupCron();
                 LockEngine::scheduleCleanupCron();
+                ProviderSyncJobRunner::unscheduleCron();
+                ProviderSyncJobRunner::scheduleCron();
             } elseif ($task === 'cleanup_expired_locks') {
                 LockEngine::cleanupExpiredLocks();
             } elseif ($task === 'send_test_email') {
@@ -691,6 +794,10 @@ final class SettingsPage
             return self::sanitizeNotificationsForm($source);
         }
 
+        if ($tab === 'provider') {
+            return self::sanitizeProviderForm($source);
+        }
+
         return [
             'form' => [],
             'updates' => [],
@@ -883,6 +990,15 @@ final class SettingsPage
                     : []
             ),
         ];
+    }
+
+    /**
+     * @param array<string, mixed> $overrides
+     * @return array<string, mixed>
+     */
+    private static function getProviderForm(array $overrides): array
+    {
+        return \array_merge(MustBookingConfig::get_clock_settings(), $overrides);
     }
 
     /**
@@ -1308,6 +1424,68 @@ final class SettingsPage
 
     /**
      * @param array<string, mixed> $source
+     * @return array<string, mixed>
+     */
+    private static function sanitizeProviderForm(array $source): array
+    {
+        $form = self::getProviderForm([]);
+        $form['provider_mode'] = \sanitize_key((string) \wp_unslash($source['provider_mode'] ?? $form['provider_mode']));
+        $form['clock_enabled'] = self::parseBool($source, 'clock_enabled');
+        $form['clock_environment'] = \sanitize_key((string) \wp_unslash($source['clock_environment'] ?? $form['clock_environment']));
+        $form['clock_api_base_url'] = \esc_url_raw((string) \wp_unslash($source['clock_api_base_url'] ?? ''));
+        $form['clock_api_user'] = \sanitize_text_field((string) \wp_unslash($source['clock_api_user'] ?? ''));
+        $form['clock_api_key'] = \sanitize_text_field((string) \wp_unslash($source['clock_api_key'] ?? ''));
+        $form['clock_property_id'] = \sanitize_text_field((string) \wp_unslash($source['clock_property_id'] ?? ''));
+        $form['clock_connection_path'] = ClockConfig::normalizePath((string) \wp_unslash($source['clock_connection_path'] ?? '/'));
+        $form['clock_room_types_path'] = ClockConfig::normalizeOptionalPath((string) \wp_unslash($source['clock_room_types_path'] ?? ''));
+        $form['clock_rooms_path'] = ClockConfig::normalizeOptionalPath((string) \wp_unslash($source['clock_rooms_path'] ?? ''));
+        $form['clock_rate_plans_path'] = ClockConfig::normalizeOptionalPath((string) \wp_unslash($source['clock_rate_plans_path'] ?? ''));
+        $form['clock_availability_path'] = ClockConfig::normalizeOptionalPath((string) \wp_unslash($source['clock_availability_path'] ?? ''));
+        $form['clock_quote_path'] = ClockConfig::normalizeOptionalPath((string) \wp_unslash($source['clock_quote_path'] ?? ''));
+        $form['clock_reservation_create_path'] = ClockConfig::normalizeOptionalPath((string) \wp_unslash($source['clock_reservation_create_path'] ?? ''));
+        $form['clock_reservation_status_update_path'] = ClockConfig::normalizeOptionalPath((string) \wp_unslash($source['clock_reservation_status_update_path'] ?? ''));
+        $form['clock_reservation_cancel_path'] = ClockConfig::normalizeOptionalPath((string) \wp_unslash($source['clock_reservation_cancel_path'] ?? ''));
+        $form['clock_reservation_room_update_path'] = ClockConfig::normalizeOptionalPath((string) \wp_unslash($source['clock_reservation_room_update_path'] ?? ''));
+        $form['clock_reservation_stay_update_path'] = ClockConfig::normalizeOptionalPath((string) \wp_unslash($source['clock_reservation_stay_update_path'] ?? ''));
+        $form['clock_reservation_guest_update_path'] = ClockConfig::normalizeOptionalPath((string) \wp_unslash($source['clock_reservation_guest_update_path'] ?? ''));
+        $form['clock_reservation_fetch_path'] = ClockConfig::normalizeOptionalPath((string) \wp_unslash($source['clock_reservation_fetch_path'] ?? ''));
+        $form['clock_webhook_secret'] = \sanitize_text_field((string) \wp_unslash($source['clock_webhook_secret'] ?? ''));
+        $form['clock_timeout_seconds'] = (int) \absint(\wp_unslash($source['clock_timeout_seconds'] ?? $form['clock_timeout_seconds']));
+        $errors = [];
+
+        if (!\in_array($form['provider_mode'], ['local', 'clock'], true)) {
+            $form['provider_mode'] = 'local';
+        }
+
+        if (!\in_array($form['clock_environment'], ['sandbox', 'production', 'custom'], true)) {
+            $form['clock_environment'] = 'production';
+        }
+
+        if ($form['clock_api_base_url'] !== '' && \filter_var($form['clock_api_base_url'], \FILTER_VALIDATE_URL) === false) {
+            $errors[] = \__('Clock API base URL must be a valid URL.', 'must-hotel-booking');
+        }
+
+        if ($form['clock_timeout_seconds'] < 1 || $form['clock_timeout_seconds'] > 60) {
+            $errors[] = \__('Clock timeout must be between 1 and 60 seconds.', 'must-hotel-booking');
+        }
+
+        if (!empty($errors)) {
+            return [
+                'form' => $form,
+                'updates' => [],
+                'errors' => $errors,
+            ];
+        }
+
+        return [
+            'form' => $form,
+            'updates' => ['provider' => $form],
+            'errors' => [],
+        ];
+    }
+
+    /**
+     * @param array<string, mixed> $source
      */
     private static function parseBool(array $source, string $key): bool
     {
@@ -1372,6 +1550,77 @@ final class SettingsPage
     }
 
     /**
+     * Handle Clock provider mapping save / delete actions.
+     *
+     * @param array<string, mixed> $source
+     * @return array<string, mixed>
+     */
+    private static function processProviderMappingAction(array $source, bool $persist): array
+    {
+        $tab = 'provider';
+        $nonce = isset($source['must_settings_nonce']) ? (string) \wp_unslash($source['must_settings_nonce']) : '';
+
+        if (!\wp_verify_nonce($nonce, 'must_settings_provider_mapping')) {
+            return [
+                'tab' => $tab,
+                'notice' => '',
+                'errors' => [\__('Security check failed. Please try again.', 'must-hotel-booking')],
+                'forms' => [],
+            ];
+        }
+
+        $subAction = isset($source['mapping_sub_action']) ? \sanitize_key((string) \wp_unslash($source['mapping_sub_action'])) : '';
+
+        if ($subAction === 'delete_mapping') {
+            $mappingId = isset($source['mapping_id']) ? \absint(\wp_unslash($source['mapping_id'])) : 0;
+
+            if ($mappingId <= 0) {
+                return ['tab' => $tab, 'notice' => '', 'errors' => [\__('Invalid mapping ID.', 'must-hotel-booking')], 'forms' => []];
+            }
+
+            if ($persist) {
+                (new ProviderMappingRepository())->delete($mappingId);
+            }
+
+            return ['tab' => $tab, 'notice' => 'provider_mapping_deleted', 'errors' => [], 'forms' => []];
+        }
+
+        if ($subAction === 'save_mapping') {
+            $entityType = isset($source['mapping_entity_type']) ? \sanitize_key((string) \wp_unslash($source['mapping_entity_type'])) : '';
+            $localId = isset($source['mapping_local_id']) ? \absint(\wp_unslash($source['mapping_local_id'])) : 0;
+            $externalId = isset($source['mapping_external_id']) ? \sanitize_text_field((string) \wp_unslash($source['mapping_external_id'])) : '';
+            $displayName = isset($source['mapping_display_name']) ? \sanitize_text_field((string) \wp_unslash($source['mapping_display_name'])) : '';
+
+            $allowedEntityTypes = ['accommodation' => 'must_rooms', 'physical_room' => 'mhb_rooms', 'rate_plan' => 'mhb_rate_plans'];
+
+            if (!isset($allowedEntityTypes[$entityType])) {
+                return ['tab' => $tab, 'notice' => '', 'errors' => [\__('Unknown mapping entity type.', 'must-hotel-booking')], 'forms' => []];
+            }
+
+            if ($localId <= 0 || $externalId === '') {
+                return ['tab' => $tab, 'notice' => '', 'errors' => [\__('Local ID and external ID are both required.', 'must-hotel-booking')], 'forms' => []];
+            }
+
+            if ($persist) {
+                (new ProviderMappingRepository())->save([
+                    'provider' => ProviderManager::CLOCK_MODE,
+                    'entity_type' => $entityType,
+                    'local_table' => $allowedEntityTypes[$entityType],
+                    'local_id' => $localId,
+                    'external_id' => $externalId,
+                    'display_name' => $displayName,
+                    'status' => 'active',
+                    'last_synced_at' => \current_time('mysql'),
+                ]);
+            }
+
+            return ['tab' => $tab, 'notice' => 'provider_mapping_saved', 'errors' => [], 'forms' => []];
+        }
+
+        return ['tab' => $tab, 'notice' => '', 'errors' => [\__('Unknown mapping action.', 'must-hotel-booking')], 'forms' => []];
+    }
+
+    /**
      * @param array<string, mixed> $diagnostics
      */
     private static function renderHero(array $diagnostics): void
@@ -1422,10 +1671,16 @@ final class SettingsPage
             'branding_saved' => \__('Branding settings saved.', 'must-hotel-booking'),
             'managed_pages_saved' => \__('Managed page assignments saved.', 'must-hotel-booking'),
             'notifications_summary_saved' => \__('Notification and email summary settings saved.', 'must-hotel-booking'),
+            'provider_saved' => \__('Provider settings saved.', 'must-hotel-booking'),
+            'clock_connection_test_succeeded' => \__('Clock connection test succeeded.', 'must-hotel-booking'),
+            'provider_sync_jobs_processed' => \__('Provider sync jobs processed.', 'must-hotel-booking'),
+            'clock_reservation_refresh_queued' => \__('Clock reservation refresh queued.', 'must-hotel-booking'),
             'managed_page_repaired' => \__('Managed page action completed.', 'must-hotel-booking'),
             'maintenance_action_completed' => \__('Maintenance action completed.', 'must-hotel-booking'),
             'hotel_operational_reset_completed' => \__('Hotel operational data reset completed.', 'must-hotel-booking'),
             'plugin_factory_reset_completed' => \__('Full plugin factory reset completed.', 'must-hotel-booking'),
+            'provider_mapping_saved' => \__('Clock mapping saved.', 'must-hotel-booking'),
+            'provider_mapping_deleted' => \__('Clock mapping deleted.', 'must-hotel-booking'),
         ];
 
         if ($notice === 'staff_user_created') {
@@ -1472,6 +1727,40 @@ final class SettingsPage
                 $inserted,
                 $updated,
                 $unitsCreated
+            )) . '</p></div>';
+            return;
+        }
+
+        if ($notice === 'provider_sync_jobs_processed') {
+            $processed = isset($_GET['sync_processed']) ? \absint(\wp_unslash($_GET['sync_processed'])) : 0;
+            $succeeded = isset($_GET['sync_succeeded']) ? \absint(\wp_unslash($_GET['sync_succeeded'])) : 0;
+            $retryable = isset($_GET['sync_retryable']) ? \absint(\wp_unslash($_GET['sync_retryable'])) : 0;
+            $failed = isset($_GET['sync_failed']) ? \absint(\wp_unslash($_GET['sync_failed'])) : 0;
+            $skipped = isset($_GET['sync_skipped']) ? \absint(\wp_unslash($_GET['sync_skipped'])) : 0;
+            $releasedStale = isset($_GET['sync_released_stale']) ? \absint(\wp_unslash($_GET['sync_released_stale'])) : 0;
+
+            echo '<div class="notice notice-success"><p>' . \esc_html(\sprintf(
+                /* translators: 1: processed jobs, 2: succeeded jobs, 3: retryable jobs, 4: failed jobs, 5: skipped jobs, 6: stale locks released. */
+                __('Provider sync run completed. Processed %1$d jobs: %2$d succeeded, %3$d scheduled for retry, %4$d failed, %5$d skipped, %6$d stale locks released.', 'must-hotel-booking'),
+                $processed,
+                $succeeded,
+                $retryable,
+                $failed,
+                $skipped,
+                $releasedStale
+            )) . '</p></div>';
+            return;
+        }
+
+        if ($notice === 'clock_reservation_refresh_queued') {
+            $jobId = isset($_GET['clock_refresh_job_id']) ? \absint(\wp_unslash($_GET['clock_refresh_job_id'])) : 0;
+            $reservationId = isset($_GET['clock_reservation_id']) ? \absint(\wp_unslash($_GET['clock_reservation_id'])) : 0;
+
+            echo '<div class="notice notice-success"><p>' . \esc_html(\sprintf(
+                /* translators: 1: local reservation ID, 2: provider sync job ID. */
+                __('Clock refresh queued for local reservation #%1$d as sync job #%2$d.', 'must-hotel-booking'),
+                $reservationId,
+                $jobId
             )) . '</p></div>';
             return;
         }
@@ -1661,6 +1950,11 @@ final class SettingsPage
 
         if ($activeTab === 'notifications_summary') {
             self::renderNotificationsTab($forms['notifications_summary'], $diagnostics);
+            return;
+        }
+
+        if ($activeTab === 'provider') {
+            self::renderProviderTab($forms['provider'], $diagnostics);
             return;
         }
 
@@ -2366,6 +2660,483 @@ final class SettingsPage
     }
 
     /**
+     * @param array<string, mixed> $form
+     * @param array<string, mixed> $diagnostics
+     */
+    private static function renderProviderTab(array $form, array $diagnostics): void
+    {
+        $providerData = isset($diagnostics['provider']) && \is_array($diagnostics['provider']) ? $diagnostics['provider'] : [];
+        $summary = ClockConnectionDiagnostic::getConfigSummary();
+        $warnings = [];
+
+        if ((string) ($form['provider_mode'] ?? 'local') === 'clock' && empty($summary['clock_public_booking_configured'])) {
+            $warnings[] = \__('Clock mode is selected, but public booking endpoints or credentials are incomplete. Public booking remains on the booking-ready provider until Clock is configured.', 'must-hotel-booking');
+        }
+
+        if (!empty($form['clock_enabled']) && empty($summary['clock_configured'])) {
+            $warnings[] = \__('Clock is enabled but API URL, user, or key is still missing.', 'must-hotel-booking');
+        }
+
+        if (!empty($providerData['mode_warning'])) {
+            $warnings[] = (string) $providerData['mode_warning'];
+        }
+
+        self::renderFormStart('provider');
+        self::renderWarnings($warnings);
+        self::renderPanelStart(\__('Provider Mode', 'must-hotel-booking'), \__('Configure the booking backend provider. Clock public booking is only used when credentials and public booking endpoints are configured.', 'must-hotel-booking'));
+        echo '<div class="must-settings-summary-grid">';
+        echo '<article class="must-settings-summary-card"><span class="must-settings-summary-label">' . \esc_html__('Configured mode', 'must-hotel-booking') . '</span><strong>' . \esc_html((string) ($summary['provider_mode'] ?? 'local')) . '</strong></article>';
+        echo '<article class="must-settings-summary-card"><span class="must-settings-summary-label">' . \esc_html__('Active booking runtime', 'must-hotel-booking') . '</span><strong>' . \esc_html((string) ($summary['active_booking_provider'] ?? ProviderManager::activeKey())) . '</strong></article>';
+        echo '<article class="must-settings-summary-card"><span class="must-settings-summary-label">' . \esc_html__('Clock config', 'must-hotel-booking') . '</span><strong>' . \esc_html(!empty($summary['clock_configured']) ? __('Configured', 'must-hotel-booking') : __('Incomplete', 'must-hotel-booking')) . '</strong></article>';
+        echo '<article class="must-settings-summary-card"><span class="must-settings-summary-label">' . \esc_html__('Catalog paths', 'must-hotel-booking') . '</span><strong>' . \esc_html((string) ($summary['clock_catalog_paths_configured'] ?? 0)) . '</strong></article>';
+        echo '<article class="must-settings-summary-card"><span class="must-settings-summary-label">' . \esc_html__('Public booking paths', 'must-hotel-booking') . '</span><strong>' . \esc_html((string) ($summary['clock_public_booking_paths_configured'] ?? 0)) . '</strong></article>';
+        echo '<article class="must-settings-summary-card"><span class="must-settings-summary-label">' . \esc_html__('Reconciliation paths', 'must-hotel-booking') . '</span><strong>' . \esc_html((string) ($summary['clock_reconciliation_paths_configured'] ?? 0)) . '</strong></article>';
+        echo '<article class="must-settings-summary-card"><span class="must-settings-summary-label">' . \esc_html__('Inbound webhook', 'must-hotel-booking') . '</span><strong>' . \esc_html(!empty($summary['clock_webhook_secret_set']) ? __('Secret set', 'must-hotel-booking') : __('Secret missing', 'must-hotel-booking')) . '</strong></article>';
+        echo '</div>';
+
+        echo '<div class="must-settings-grid must-settings-grid--2">';
+        self::renderSectionIntro(\__('Mode selection', 'must-hotel-booking'), \__('Local is the default booking backend. Clock can serve the public booking flow when credentials, endpoints, and mappings are ready.', 'must-hotel-booking'));
+        self::renderField(['label' => __('Provider mode', 'must-hotel-booking'), 'name' => 'provider_mode', 'type' => 'select', 'value' => $form['provider_mode'] ?? 'local', 'options' => ['local' => __('Local', 'must-hotel-booking'), 'clock' => __('Clock', 'must-hotel-booking')]]);
+        self::renderField(['label' => __('Enable Clock configuration', 'must-hotel-booking'), 'name' => 'clock_enabled', 'type' => 'checkbox', 'value' => !empty($form['clock_enabled']), 'description' => __('Allows backend diagnostics, catalog reads, and Clock public booking when required endpoint paths are configured.', 'must-hotel-booking')]);
+        self::renderField(['label' => __('Clock environment', 'must-hotel-booking'), 'name' => 'clock_environment', 'type' => 'select', 'value' => $form['clock_environment'] ?? 'production', 'options' => ['production' => __('Production', 'must-hotel-booking'), 'sandbox' => __('Sandbox / test', 'must-hotel-booking'), 'custom' => __('Custom', 'must-hotel-booking')]]);
+        self::renderField(['label' => __('Request timeout (seconds)', 'must-hotel-booking'), 'name' => 'clock_timeout_seconds', 'type' => 'number', 'min' => 1, 'max' => 60, 'value' => $form['clock_timeout_seconds'] ?? 15]);
+        echo '</div>';
+
+        echo '<div class="must-settings-grid must-settings-grid--2">';
+        self::renderSectionIntro(\__('Clock API connection', 'must-hotel-booking'), \__('Credentials are stored in the plugin settings bundle and are only used by backend diagnostics/catalog calls in this phase.', 'must-hotel-booking'));
+        self::renderField(['label' => __('API base URL', 'must-hotel-booking'), 'name' => 'clock_api_base_url', 'type' => 'url', 'value' => $form['clock_api_base_url'] ?? '', 'description' => __('Example: https://example.clockpms.com', 'must-hotel-booking')]);
+        self::renderField(['label' => __('API user', 'must-hotel-booking'), 'name' => 'clock_api_user', 'value' => $form['clock_api_user'] ?? '']);
+        self::renderField(['label' => __('API key', 'must-hotel-booking'), 'name' => 'clock_api_key', 'type' => 'password', 'value' => $form['clock_api_key'] ?? '']);
+        self::renderField(['label' => __('Property / hotel ID', 'must-hotel-booking'), 'name' => 'clock_property_id', 'value' => $form['clock_property_id'] ?? '', 'description' => __('Optional for diagnostics, but required before Clock can become the public booking runtime.', 'must-hotel-booking')]);
+        self::renderField(['label' => __('Connection test path', 'must-hotel-booking'), 'name' => 'clock_connection_path', 'value' => $form['clock_connection_path'] ?? '/', 'description' => __('Relative path or full URL used by the Clock connection test.', 'must-hotel-booking')]);
+        echo '</div>';
+
+        echo '<div class="must-settings-grid must-settings-grid--3">';
+        self::renderSectionIntro(\__('Clock catalog paths', 'must-hotel-booking'), \__('Optional endpoint paths used later to inspect remote room types, physical rooms, and rate plans for mapping.', 'must-hotel-booking'));
+        self::renderField(['label' => __('Room types path', 'must-hotel-booking'), 'name' => 'clock_room_types_path', 'value' => $form['clock_room_types_path'] ?? '']);
+        self::renderField(['label' => __('Physical rooms path', 'must-hotel-booking'), 'name' => 'clock_rooms_path', 'value' => $form['clock_rooms_path'] ?? '']);
+        self::renderField(['label' => __('Rate plans path', 'must-hotel-booking'), 'name' => 'clock_rate_plans_path', 'value' => $form['clock_rate_plans_path'] ?? '']);
+        echo '</div>';
+
+        echo '<div class="must-settings-grid must-settings-grid--3">';
+        self::renderSectionIntro(\__('Clock public booking paths', 'must-hotel-booking'), \__('Endpoint paths used by the public provider flow for availability, quotes, and reservation creation.', 'must-hotel-booking'));
+        self::renderField(['label' => __('Availability path', 'must-hotel-booking'), 'name' => 'clock_availability_path', 'value' => $form['clock_availability_path'] ?? '']);
+        self::renderField(['label' => __('Quote path', 'must-hotel-booking'), 'name' => 'clock_quote_path', 'value' => $form['clock_quote_path'] ?? '']);
+        self::renderField(['label' => __('Reservation create path', 'must-hotel-booking'), 'name' => 'clock_reservation_create_path', 'value' => $form['clock_reservation_create_path'] ?? '']);
+        echo '</div>';
+
+        echo '<div class="must-settings-grid must-settings-grid--3">';
+        self::renderSectionIntro(\__('Clock reconciliation paths', 'must-hotel-booking'), \__('Optional endpoint paths used to update paid reservations, cancel/expire bookings, assign physical rooms, edit stay dates, or sync guest contact details. Use {reservation_id}, {booking_id}, {provider_room_id}, {checkin}, or {checkout} tokens if the endpoint path needs them.', 'must-hotel-booking'));
+        self::renderField(['label' => __('Reservation status update path', 'must-hotel-booking'), 'name' => 'clock_reservation_status_update_path', 'value' => $form['clock_reservation_status_update_path'] ?? '']);
+        self::renderField(['label' => __('Reservation cancel path', 'must-hotel-booking'), 'name' => 'clock_reservation_cancel_path', 'value' => $form['clock_reservation_cancel_path'] ?? '']);
+        self::renderField(['label' => __('Reservation room update path', 'must-hotel-booking'), 'name' => 'clock_reservation_room_update_path', 'value' => $form['clock_reservation_room_update_path'] ?? '', 'description' => __('Used by provider-aware room assignment and room moves for Clock mirrors.', 'must-hotel-booking')]);
+        self::renderField(['label' => __('Reservation stay update path', 'must-hotel-booking'), 'name' => 'clock_reservation_stay_update_path', 'value' => $form['clock_reservation_stay_update_path'] ?? '', 'description' => __('Used by provider-aware stay-date edits for Clock mirrors.', 'must-hotel-booking')]);
+        self::renderField(['label' => __('Reservation guest update path', 'must-hotel-booking'), 'name' => 'clock_reservation_guest_update_path', 'value' => $form['clock_reservation_guest_update_path'] ?? '', 'description' => __('Used by provider-aware guest/contact edits for Clock mirrors.', 'must-hotel-booking')]);
+        echo '</div>';
+
+        echo '<div class="must-settings-grid must-settings-grid--2">';
+        self::renderSectionIntro(\__('Clock inbound sync', 'must-hotel-booking'), \__('Webhook updates refresh existing Clock mirror reservations only. Use a shared secret via token or HMAC signature. The endpoint URL is shown for Clock webhook setup.', 'must-hotel-booking'));
+        self::renderField(['label' => __('Reservation fetch path', 'must-hotel-booking'), 'name' => 'clock_reservation_fetch_path', 'value' => $form['clock_reservation_fetch_path'] ?? '', 'description' => __('Optional path for manual/deferred mirror refresh. Use {reservation_id} or {booking_id} if needed.', 'must-hotel-booking')]);
+        self::renderField(['label' => __('Webhook shared secret', 'must-hotel-booking'), 'name' => 'clock_webhook_secret', 'type' => 'password', 'value' => $form['clock_webhook_secret'] ?? '', 'description' => __('Inbound webhook calls must provide this secret as Bearer/X-MHB-Clock-Token or an HMAC SHA-256 signature.', 'must-hotel-booking')]);
+        echo '<p class="description"><strong>' . \esc_html__('Webhook URL:', 'must-hotel-booking') . '</strong> <code>' . \esc_html((string) ($summary['clock_webhook_url'] ?? '')) . '</code></p>';
+        echo '</div>';
+        self::renderPanelEnd();
+        self::renderFormEnd(\__('Save Provider Settings', 'must-hotel-booking'));
+
+        self::renderPanelStart(\__('Clock diagnostics', 'must-hotel-booking'), \__('Run a safe backend connection test. The request is logged without credentials for future troubleshooting.', 'must-hotel-booking'));
+        echo '<form method="post" action="' . \esc_url(get_admin_settings_page_url(['tab' => 'provider'])) . '" class="must-settings-secondary-action">';
+        \wp_nonce_field('must_settings_maintenance_action', 'must_settings_nonce');
+        echo '<input type="hidden" name="must_settings_action" value="maintenance_action" />';
+        echo '<input type="hidden" name="maintenance_task" value="test_clock_connection" />';
+        echo '<input type="hidden" name="return_tab" value="provider" />';
+        echo '<button type="submit" class="button button-secondary">' . \esc_html__('Test Clock connection', 'must-hotel-booking') . '</button>';
+        echo '</form>';
+        echo '<form method="post" action="' . \esc_url(get_admin_settings_page_url(['tab' => 'provider'])) . '" class="must-settings-secondary-action">';
+        \wp_nonce_field('must_settings_maintenance_action', 'must_settings_nonce');
+        echo '<input type="hidden" name="must_settings_action" value="maintenance_action" />';
+        echo '<input type="hidden" name="maintenance_task" value="queue_clock_reservation_refresh" />';
+        echo '<input type="hidden" name="return_tab" value="provider" />';
+        echo '<label for="must-clock-refresh-reservation-id">' . \esc_html__('Queue Clock refresh for local reservation ID', 'must-hotel-booking') . '</label> ';
+        echo '<input id="must-clock-refresh-reservation-id" type="number" min="1" name="clock_reservation_id" class="small-text" /> ';
+        echo '<button type="submit" class="button button-secondary">' . \esc_html__('Queue refresh', 'must-hotel-booking') . '</button>';
+        echo '</form>';
+        self::renderPanelEnd();
+
+        self::renderClockReadinessPanel($summary, $providerData);
+        self::renderClockSyncHealthPanel($providerData);
+        self::renderClockMappingsPanel();
+    }
+
+    /**
+     * Render the Clock capability readiness checklist.
+     *
+     * @param array<string, mixed> $summary
+     * @param array<string, mixed> $providerData
+     */
+    private static function renderClockReadinessPanel(array $summary, array $providerData): void
+    {
+        $mappingRepo = new ProviderMappingRepository();
+        $accommodationCount = $mappingRepo->countForProvider(ProviderManager::CLOCK_MODE, 'accommodation');
+        $ratePlanCount = $mappingRepo->countForProvider(ProviderManager::CLOCK_MODE, 'rate_plan');
+        $physicalRoomCount = $mappingRepo->countForProvider(ProviderManager::CLOCK_MODE, 'physical_room');
+
+        $clockEnabled = !empty($summary['clock_enabled']);
+        $clockConfigured = !empty($summary['clock_configured']);
+        $publicBookingPathsOk = !empty($summary['clock_public_booking_configured']);
+        $reconciliationPathsCount = (int) ($summary['clock_reconciliation_paths_configured'] ?? 0);
+        $roomUpdatePath = (string) ($summary['clock_reservation_room_update_path'] ?? '');
+        $fetchPath = (string) ($summary['clock_reservation_fetch_path'] ?? '');
+        $webhookSet = !empty($summary['clock_webhook_secret_set']);
+
+        $readiness = [
+            [
+                'label' => \__('Public booking', 'must-hotel-booking'),
+                'ready' => $clockEnabled && $clockConfigured && $publicBookingPathsOk && $accommodationCount > 0,
+                'note' => \__('Needs: Clock enabled + configured + public booking paths + accommodation mapping.', 'must-hotel-booking'),
+            ],
+            [
+                'label' => \__('Pricing / quote', 'must-hotel-booking'),
+                'ready' => $clockEnabled && $clockConfigured && $publicBookingPathsOk && $accommodationCount > 0 && $ratePlanCount > 0,
+                'note' => \__('Needs all public-booking conditions plus at least one rate plan mapping.', 'must-hotel-booking'),
+            ],
+            [
+                'label' => \__('Provider mutations (cancel / status / stay / guest)', 'must-hotel-booking'),
+                'ready' => $clockEnabled && $clockConfigured && $reconciliationPathsCount > 0,
+                'note' => \__('Needs: Clock enabled + configured + at least one reconciliation path.', 'must-hotel-booking'),
+            ],
+            [
+                'label' => \__('Room assignment / move', 'must-hotel-booking'),
+                'ready' => $clockEnabled && $clockConfigured && $roomUpdatePath !== '' && $physicalRoomCount > 0,
+                'note' => \__('Needs: Clock enabled + configured + room update path + physical room mapping.', 'must-hotel-booking'),
+            ],
+            [
+                'label' => \__('Inbound webhook sync', 'must-hotel-booking'),
+                'ready' => $webhookSet && $fetchPath !== '',
+                'note' => \__('Needs: webhook shared secret + reservation fetch path.', 'must-hotel-booking'),
+            ],
+        ];
+
+        self::renderPanelStart(\__('Clock readiness', 'must-hotel-booking'), \__('Per-capability readiness based on current config and mapping coverage. Not ready items show what is missing.', 'must-hotel-booking'));
+        echo '<div class="must-dashboard-health-list">';
+
+        foreach ($readiness as $item) {
+            $status = $item['ready'] ? 'ok' : 'warning';
+            echo '<div class="must-dashboard-health-item">';
+            self::renderBadge($status);
+            echo '<span class="must-dashboard-health-label">' . \esc_html((string) $item['label']) . '</span>';
+
+            if (!$item['ready']) {
+                echo '<span class="must-dashboard-health-text">' . \esc_html((string) $item['note']) . '</span>';
+            }
+
+            echo '</div>';
+        }
+
+        echo '</div>';
+        self::renderPanelEnd();
+    }
+
+    /**
+     * Compact sync job health summary for the provider tab.
+     *
+     * @param array<string, mixed> $providerData
+     */
+    private static function renderClockSyncHealthPanel(array $providerData): void
+    {
+        $syncJobs = isset($providerData['sync_jobs']) && \is_array($providerData['sync_jobs']) ? $providerData['sync_jobs'] : [];
+        $syncSummary = isset($syncJobs['summary']) && \is_array($syncJobs['summary']) ? $syncJobs['summary'] : [];
+        $syncCounts = isset($syncSummary['counts']) && \is_array($syncSummary['counts']) ? $syncSummary['counts'] : [];
+        $syncCron = isset($syncJobs['cron']) && \is_array($syncJobs['cron']) ? $syncJobs['cron'] : [];
+        $recentProblemJobs = isset($syncJobs['recent_problem_jobs']) && \is_array($syncJobs['recent_problem_jobs']) ? $syncJobs['recent_problem_jobs'] : [];
+        $inboundSync = isset($providerData['inbound_sync']) && \is_array($providerData['inbound_sync']) ? $providerData['inbound_sync'] : [];
+        $inboundSummary = isset($inboundSync['summary']) && \is_array($inboundSync['summary']) ? $inboundSync['summary'] : [];
+
+        self::renderPanelStart(\__('Sync &amp; reconciliation health', 'must-hotel-booking'), \__('Compact view of outbound sync jobs, inbound webhook events, and recent errors.', 'must-hotel-booking'));
+        echo '<div class="must-settings-summary-grid">';
+        echo '<article class="must-settings-summary-card"><span class="must-settings-summary-label">' . \esc_html__('Pending jobs', 'must-hotel-booking') . '</span><strong>' . \esc_html((string) ($syncCounts[ProviderSyncJobRepository::STATUS_PENDING] ?? 0)) . '</strong></article>';
+        echo '<article class="must-settings-summary-card"><span class="must-settings-summary-label">' . \esc_html__('Retryable jobs', 'must-hotel-booking') . '</span><strong>' . \esc_html((string) ($syncCounts[ProviderSyncJobRepository::STATUS_RETRYABLE] ?? 0)) . '</strong></article>';
+        echo '<article class="must-settings-summary-card"><span class="must-settings-summary-label">' . \esc_html__('Failed / exhausted', 'must-hotel-booking') . '</span><strong>' . \esc_html((string) ((int) ($syncCounts[ProviderSyncJobRepository::STATUS_FAILED] ?? 0) + (int) ($syncCounts[ProviderSyncJobRepository::STATUS_EXHAUSTED] ?? 0))) . '</strong></article>';
+        echo '<article class="must-settings-summary-card"><span class="must-settings-summary-label">' . \esc_html__('Sync cron', 'must-hotel-booking') . '</span><strong>' . \esc_html((string) ($syncCron['health'] ?? 'unknown')) . '</strong></article>';
+        echo '<article class="must-settings-summary-card"><span class="must-settings-summary-label">' . \esc_html__('Inbound successful', 'must-hotel-booking') . '</span><strong>' . \esc_html((string) ($inboundSummary['successful'] ?? 0)) . '</strong></article>';
+        echo '<article class="must-settings-summary-card"><span class="must-settings-summary-label">' . \esc_html__('Inbound failed', 'must-hotel-booking') . '</span><strong>' . \esc_html((string) ($inboundSummary['failed'] ?? 0)) . '</strong></article>';
+        echo '<article class="must-settings-summary-card"><span class="must-settings-summary-label">' . \esc_html__('Webhook configured', 'must-hotel-booking') . '</span><strong>' . \esc_html(!empty($inboundSync['webhook_secret_set']) ? \__('Yes', 'must-hotel-booking') : \__('No', 'must-hotel-booking')) . '</strong></article>';
+        echo '</div>';
+
+        if (!empty($syncSummary['last_error'])) {
+            echo '<p class="description"><strong>' . \esc_html__('Last outbound sync error:', 'must-hotel-booking') . '</strong> ' . \esc_html((string) $syncSummary['last_error']) . '</p>';
+        }
+
+        if (!empty($inboundSummary['last_error'])) {
+            echo '<p class="description"><strong>' . \esc_html__('Last inbound error:', 'must-hotel-booking') . '</strong> ' . \esc_html((string) $inboundSummary['last_error']) . '</p>';
+        }
+
+        if (!empty($recentProblemJobs)) {
+            echo '<h4 style="margin-bottom:4px;">' . \esc_html__('Recent problem jobs', 'must-hotel-booking') . '</h4>';
+            echo '<table class="widefat striped" style="margin-bottom:8px;">';
+            echo '<thead><tr><th>' . \esc_html__('ID', 'must-hotel-booking') . '</th><th>' . \esc_html__('Operation', 'must-hotel-booking') . '</th><th>' . \esc_html__('Status', 'must-hotel-booking') . '</th><th>' . \esc_html__('Attempts', 'must-hotel-booking') . '</th><th>' . \esc_html__('Reservation', 'must-hotel-booking') . '</th><th>' . \esc_html__('Last error', 'must-hotel-booking') . '</th></tr></thead><tbody>';
+
+            foreach ($recentProblemJobs as $job) {
+                if (!\is_array($job)) {
+                    continue;
+                }
+
+                echo '<tr>';
+                echo '<td>' . \esc_html((string) ($job['id'] ?? '')) . '</td>';
+                echo '<td>' . \esc_html((string) ($job['operation'] ?? '')) . '</td>';
+                echo '<td>' . \esc_html((string) ($job['status'] ?? '')) . '</td>';
+                echo '<td>' . \esc_html((string) ($job['attempts'] ?? '')) . '/' . \esc_html((string) ($job['max_attempts'] ?? '')) . '</td>';
+                echo '<td>' . \esc_html((string) ($job['target_local_id'] ?? '')) . '</td>';
+                echo '<td style="max-width:300px;word-break:break-word;">' . \esc_html(\wp_trim_words((string) ($job['last_error'] ?? ''), 20)) . '</td>';
+                echo '</tr>';
+            }
+
+            echo '</tbody></table>';
+        }
+
+        self::renderPanelEnd();
+    }
+
+    /**
+     * Render mapping view/edit panel for Clock entity mappings.
+     */
+    private static function renderClockMappingsPanel(): void
+    {
+        $mappingRepo = new ProviderMappingRepository();
+        $roomRepo = \MustHotelBooking\Engine\get_room_repository();
+        $ratePlanRepo = \MustHotelBooking\Engine\get_rate_plan_repository();
+        $inventoryRepo = \MustHotelBooking\Engine\get_inventory_repository();
+
+        $accommodationMappings = $mappingRepo->listForProvider(ProviderManager::CLOCK_MODE, 'accommodation');
+        $ratePlanMappings = $mappingRepo->listForProvider(ProviderManager::CLOCK_MODE, 'rate_plan');
+        $physicalRoomMappings = $mappingRepo->listForProvider(ProviderManager::CLOCK_MODE, 'physical_room');
+
+        // Index mappings by local_id for quick lookup.
+        $accommodationMappedIds = [];
+
+        foreach ($accommodationMappings as $m) {
+            $accommodationMappedIds[(int) ($m['local_id'] ?? 0)] = $m;
+        }
+
+        $ratePlanMappedIds = [];
+
+        foreach ($ratePlanMappings as $m) {
+            $ratePlanMappedIds[(int) ($m['local_id'] ?? 0)] = $m;
+        }
+
+        $physicalRoomMappedIds = [];
+
+        foreach ($physicalRoomMappings as $m) {
+            $physicalRoomMappedIds[(int) ($m['local_id'] ?? 0)] = $m;
+        }
+
+        // Local entities.
+        $localRooms = $roomRepo->roomsTableExists() ? $roomRepo->getRoomSelectorRows(true, false) : [];
+        $localRatePlans = $ratePlanRepo->ratePlansTableExists() ? $ratePlanRepo->getRatePlans(true) : [];
+        $localPhysicalRooms = [];
+
+        if ($inventoryRepo->inventoryRoomsTableExists()) {
+            foreach ($inventoryRepo->getRoomTypes() as $roomType) {
+                foreach ($inventoryRepo->getRoomsByType((int) ($roomType['id'] ?? 0)) as $physRoom) {
+                    if (\is_array($physRoom)) {
+                        $localPhysicalRooms[] = $physRoom;
+                    }
+                }
+            }
+        }
+
+        $pageUrl = get_admin_settings_page_url(['tab' => 'provider']);
+
+        self::renderPanelStart(\__('Clock entity mappings', 'must-hotel-booking'), \__('Link local entities to their Clock counterparts. These mappings drive availability, quotes, room assignment, and rate plan lookups. Missing mappings for active accommodations are flagged.', 'must-hotel-booking'));
+
+        // --- Accommodation mappings ---
+        $missingAccommodations = 0;
+
+        foreach ($localRooms as $room) {
+            if (!\is_array($room)) {
+                continue;
+            }
+
+            if (!isset($accommodationMappedIds[(int) ($room['id'] ?? 0)])) {
+                $missingAccommodations++;
+            }
+        }
+
+        echo '<h3 style="margin-bottom:4px;">' . \esc_html__('Accommodation mappings', 'must-hotel-booking') . ' (must_rooms → Clock)</h3>';
+
+        if ($missingAccommodations > 0) {
+            echo '<p class="description" style="color:#b32d2e;"><strong>' . \esc_html(\sprintf(
+                /* translators: %d: number of unmapped rooms */
+                \_n('%d accommodation has no Clock mapping.', '%d accommodations have no Clock mapping.', $missingAccommodations, 'must-hotel-booking'),
+                $missingAccommodations
+            )) . '</strong></p>';
+        }
+
+        if (!empty($localRooms)) {
+            echo '<table class="widefat striped" style="margin-bottom:8px;"><thead><tr>';
+            echo '<th>' . \esc_html__('Local ID', 'must-hotel-booking') . '</th>';
+            echo '<th>' . \esc_html__('Accommodation', 'must-hotel-booking') . '</th>';
+            echo '<th>' . \esc_html__('External ID', 'must-hotel-booking') . '</th>';
+            echo '<th>' . \esc_html__('Display name', 'must-hotel-booking') . '</th>';
+            echo '<th>' . \esc_html__('Action', 'must-hotel-booking') . '</th>';
+            echo '</tr></thead><tbody>';
+
+            foreach ($localRooms as $room) {
+                if (!\is_array($room)) {
+                    continue;
+                }
+
+                $roomId = (int) ($room['id'] ?? 0);
+                $mapping = $accommodationMappedIds[$roomId] ?? null;
+                echo '<tr>';
+                echo '<td>' . \esc_html((string) $roomId) . '</td>';
+                echo '<td>' . \esc_html((string) ($room['name'] ?? '')) . '</td>';
+                echo '<td>' . \esc_html($mapping ? (string) ($mapping['external_id'] ?? '') : '—') . '</td>';
+                echo '<td>' . \esc_html($mapping ? (string) ($mapping['display_name'] ?? '') : '—') . '</td>';
+                echo '<td>';
+
+                if ($mapping) {
+                    echo '<form method="post" action="' . \esc_url($pageUrl) . '" style="display:inline;">';
+                    \wp_nonce_field('must_settings_provider_mapping', 'must_settings_nonce');
+                    echo '<input type="hidden" name="must_settings_action" value="provider_mapping_action" />';
+                    echo '<input type="hidden" name="mapping_sub_action" value="delete_mapping" />';
+                    echo '<input type="hidden" name="mapping_id" value="' . \esc_attr((string) ($mapping['id'] ?? 0)) . '" />';
+                    echo '<button type="submit" class="button button-small" onclick="return confirm(\'' . \esc_js(\__('Delete this mapping?', 'must-hotel-booking')) . '\')">' . \esc_html__('Delete', 'must-hotel-booking') . '</button>';
+                    echo '</form>';
+                } else {
+                    echo '<form method="post" action="' . \esc_url($pageUrl) . '" style="display:inline;white-space:nowrap;">';
+                    \wp_nonce_field('must_settings_provider_mapping', 'must_settings_nonce');
+                    echo '<input type="hidden" name="must_settings_action" value="provider_mapping_action" />';
+                    echo '<input type="hidden" name="mapping_sub_action" value="save_mapping" />';
+                    echo '<input type="hidden" name="mapping_entity_type" value="accommodation" />';
+                    echo '<input type="hidden" name="mapping_local_id" value="' . \esc_attr((string) $roomId) . '" />';
+                    echo '<input type="text" name="mapping_external_id" placeholder="' . \esc_attr(\__('External ID', 'must-hotel-booking')) . '" class="small-text" required /> ';
+                    echo '<input type="text" name="mapping_display_name" placeholder="' . \esc_attr(\__('Name (optional)', 'must-hotel-booking')) . '" class="small-text" /> ';
+                    echo '<button type="submit" class="button button-small button-primary">' . \esc_html__('Add', 'must-hotel-booking') . '</button>';
+                    echo '</form>';
+                }
+
+                echo '</td></tr>';
+            }
+
+            echo '</tbody></table>';
+        } else {
+            echo '<p class="description">' . \esc_html__('No local accommodations found. Add rooms first.', 'must-hotel-booking') . '</p>';
+        }
+
+        // --- Rate plan mappings ---
+        echo '<h3 style="margin-top:20px;margin-bottom:4px;">' . \esc_html__('Rate plan mappings', 'must-hotel-booking') . ' (mhb_rate_plans → Clock)</h3>';
+
+        if (!empty($localRatePlans)) {
+            echo '<table class="widefat striped" style="margin-bottom:8px;"><thead><tr>';
+            echo '<th>' . \esc_html__('Local ID', 'must-hotel-booking') . '</th>';
+            echo '<th>' . \esc_html__('Rate plan', 'must-hotel-booking') . '</th>';
+            echo '<th>' . \esc_html__('External ID', 'must-hotel-booking') . '</th>';
+            echo '<th>' . \esc_html__('Display name', 'must-hotel-booking') . '</th>';
+            echo '<th>' . \esc_html__('Action', 'must-hotel-booking') . '</th>';
+            echo '</tr></thead><tbody>';
+
+            foreach ($localRatePlans as $plan) {
+                if (!\is_array($plan)) {
+                    continue;
+                }
+
+                $planId = (int) ($plan['id'] ?? 0);
+                $mapping = $ratePlanMappedIds[$planId] ?? null;
+                echo '<tr>';
+                echo '<td>' . \esc_html((string) $planId) . '</td>';
+                echo '<td>' . \esc_html((string) ($plan['name'] ?? '')) . '</td>';
+                echo '<td>' . \esc_html($mapping ? (string) ($mapping['external_id'] ?? '') : '—') . '</td>';
+                echo '<td>' . \esc_html($mapping ? (string) ($mapping['display_name'] ?? '') : '—') . '</td>';
+                echo '<td>';
+
+                if ($mapping) {
+                    echo '<form method="post" action="' . \esc_url($pageUrl) . '" style="display:inline;">';
+                    \wp_nonce_field('must_settings_provider_mapping', 'must_settings_nonce');
+                    echo '<input type="hidden" name="must_settings_action" value="provider_mapping_action" />';
+                    echo '<input type="hidden" name="mapping_sub_action" value="delete_mapping" />';
+                    echo '<input type="hidden" name="mapping_id" value="' . \esc_attr((string) ($mapping['id'] ?? 0)) . '" />';
+                    echo '<button type="submit" class="button button-small" onclick="return confirm(\'' . \esc_js(\__('Delete this mapping?', 'must-hotel-booking')) . '\')">' . \esc_html__('Delete', 'must-hotel-booking') . '</button>';
+                    echo '</form>';
+                } else {
+                    echo '<form method="post" action="' . \esc_url($pageUrl) . '" style="display:inline;white-space:nowrap;">';
+                    \wp_nonce_field('must_settings_provider_mapping', 'must_settings_nonce');
+                    echo '<input type="hidden" name="must_settings_action" value="provider_mapping_action" />';
+                    echo '<input type="hidden" name="mapping_sub_action" value="save_mapping" />';
+                    echo '<input type="hidden" name="mapping_entity_type" value="rate_plan" />';
+                    echo '<input type="hidden" name="mapping_local_id" value="' . \esc_attr((string) $planId) . '" />';
+                    echo '<input type="text" name="mapping_external_id" placeholder="' . \esc_attr(\__('External ID', 'must-hotel-booking')) . '" class="small-text" required /> ';
+                    echo '<input type="text" name="mapping_display_name" placeholder="' . \esc_attr(\__('Name (optional)', 'must-hotel-booking')) . '" class="small-text" /> ';
+                    echo '<button type="submit" class="button button-small button-primary">' . \esc_html__('Add', 'must-hotel-booking') . '</button>';
+                    echo '</form>';
+                }
+
+                echo '</td></tr>';
+            }
+
+            echo '</tbody></table>';
+        } else {
+            echo '<p class="description">' . \esc_html__('No rate plans found.', 'must-hotel-booking') . '</p>';
+        }
+
+        // --- Physical room mappings ---
+        echo '<h3 style="margin-top:20px;margin-bottom:4px;">' . \esc_html__('Physical room mappings', 'must-hotel-booking') . ' (mhb_rooms → Clock)</h3>';
+
+        if (!empty($localPhysicalRooms)) {
+            echo '<table class="widefat striped" style="margin-bottom:8px;"><thead><tr>';
+            echo '<th>' . \esc_html__('Local ID', 'must-hotel-booking') . '</th>';
+            echo '<th>' . \esc_html__('Room', 'must-hotel-booking') . '</th>';
+            echo '<th>' . \esc_html__('External ID', 'must-hotel-booking') . '</th>';
+            echo '<th>' . \esc_html__('Display name', 'must-hotel-booking') . '</th>';
+            echo '<th>' . \esc_html__('Action', 'must-hotel-booking') . '</th>';
+            echo '</tr></thead><tbody>';
+
+            foreach ($localPhysicalRooms as $physRoom) {
+                if (!\is_array($physRoom)) {
+                    continue;
+                }
+
+                $physId = (int) ($physRoom['id'] ?? 0);
+                $mapping = $physicalRoomMappedIds[$physId] ?? null;
+                echo '<tr>';
+                echo '<td>' . \esc_html((string) $physId) . '</td>';
+                echo '<td>' . \esc_html((string) ($physRoom['name'] ?? ($physRoom['room_number'] ?? ''))) . '</td>';
+                echo '<td>' . \esc_html($mapping ? (string) ($mapping['external_id'] ?? '') : '—') . '</td>';
+                echo '<td>' . \esc_html($mapping ? (string) ($mapping['display_name'] ?? '') : '—') . '</td>';
+                echo '<td>';
+
+                if ($mapping) {
+                    echo '<form method="post" action="' . \esc_url($pageUrl) . '" style="display:inline;">';
+                    \wp_nonce_field('must_settings_provider_mapping', 'must_settings_nonce');
+                    echo '<input type="hidden" name="must_settings_action" value="provider_mapping_action" />';
+                    echo '<input type="hidden" name="mapping_sub_action" value="delete_mapping" />';
+                    echo '<input type="hidden" name="mapping_id" value="' . \esc_attr((string) ($mapping['id'] ?? 0)) . '" />';
+                    echo '<button type="submit" class="button button-small" onclick="return confirm(\'' . \esc_js(\__('Delete this mapping?', 'must-hotel-booking')) . '\')">' . \esc_html__('Delete', 'must-hotel-booking') . '</button>';
+                    echo '</form>';
+                } else {
+                    echo '<form method="post" action="' . \esc_url($pageUrl) . '" style="display:inline;white-space:nowrap;">';
+                    \wp_nonce_field('must_settings_provider_mapping', 'must_settings_nonce');
+                    echo '<input type="hidden" name="must_settings_action" value="provider_mapping_action" />';
+                    echo '<input type="hidden" name="mapping_sub_action" value="save_mapping" />';
+                    echo '<input type="hidden" name="mapping_entity_type" value="physical_room" />';
+                    echo '<input type="hidden" name="mapping_local_id" value="' . \esc_attr((string) $physId) . '" />';
+                    echo '<input type="text" name="mapping_external_id" placeholder="' . \esc_attr(\__('External ID', 'must-hotel-booking')) . '" class="small-text" required /> ';
+                    echo '<input type="text" name="mapping_display_name" placeholder="' . \esc_attr(\__('Name (optional)', 'must-hotel-booking')) . '" class="small-text" /> ';
+                    echo '<button type="submit" class="button button-small button-primary">' . \esc_html__('Add', 'must-hotel-booking') . '</button>';
+                    echo '</form>';
+                }
+
+                echo '</td></tr>';
+            }
+
+            echo '</tbody></table>';
+        } else {
+            echo '<p class="description">' . \esc_html__('No physical rooms found. Inventory rooms must exist first.', 'must-hotel-booking') . '</p>';
+        }
+
+        self::renderPanelEnd();
+    }
+
+    /**
      * @param array<string, mixed> $diagnostics
      */
     private static function renderMaintenanceTab(array $diagnostics, array $form): void
@@ -2375,6 +3146,15 @@ final class SettingsPage
         $emails = isset($diagnostics['emails']) && \is_array($diagnostics['emails']) ? $diagnostics['emails'] : [];
         $cron = isset($diagnostics['cron']) && \is_array($diagnostics['cron']) ? $diagnostics['cron'] : [];
         $updater = isset($diagnostics['updater']) && \is_array($diagnostics['updater']) ? $diagnostics['updater'] : [];
+        $provider = isset($diagnostics['provider']) && \is_array($diagnostics['provider']) ? $diagnostics['provider'] : [];
+        $providerSyncJobs = isset($provider['sync_jobs']) && \is_array($provider['sync_jobs']) ? $provider['sync_jobs'] : [];
+        $providerInboundSync = isset($provider['inbound_sync']) && \is_array($provider['inbound_sync']) ? $provider['inbound_sync'] : [];
+        $providerInboundSummary = isset($providerInboundSync['summary']) && \is_array($providerInboundSync['summary']) ? $providerInboundSync['summary'] : [];
+        $providerSyncSummary = isset($providerSyncJobs['summary']) && \is_array($providerSyncJobs['summary']) ? $providerSyncJobs['summary'] : [];
+        $providerSyncCounts = isset($providerSyncSummary['counts']) && \is_array($providerSyncSummary['counts']) ? $providerSyncSummary['counts'] : [];
+        $providerSyncCron = isset($providerSyncJobs['cron']) && \is_array($providerSyncJobs['cron']) ? $providerSyncJobs['cron'] : [];
+        $providerSyncProblemCount = (int) ($providerSyncCounts[\MustHotelBooking\Provider\Storage\ProviderSyncJobRepository::STATUS_FAILED] ?? 0)
+            + (int) ($providerSyncCounts[\MustHotelBooking\Provider\Storage\ProviderSyncJobRepository::STATUS_EXHAUSTED] ?? 0);
 
         self::renderPanelStart(\__('Diagnostics & Maintenance', 'must-hotel-booking'), \__('Turn system health into direct admin actions for setup repair and release readiness.', 'must-hotel-booking'));
         echo '<div class="must-settings-summary-grid">';
@@ -2394,7 +3174,10 @@ final class SettingsPage
             ['label' => __('Portal routes', 'must-hotel-booking'), 'status' => 'ok', 'text' => \sprintf(\__('Portal base: /%1$s | Login: /%2$s', 'must-hotel-booking'), PortalRouter::getPortalBasePath(), PortalRouter::getPortalLoginPath())],
             ['label' => __('Email config', 'must-hotel-booking'), 'status' => !empty($emails['is_configured']) ? 'ok' : 'warning', 'text' => !empty($emails['is_configured']) ? __('Email sending basics are configured.', 'must-hotel-booking') : __('Email configuration needs attention.', 'must-hotel-booking')],
             ['label' => __('Payment config', 'must-hotel-booking'), 'status' => !empty($payments['stripe_enabled']) && empty($payments['stripe_configured']) ? 'warning' : 'ok', 'text' => !empty($payments['stripe_enabled']) ? __('Stripe is enabled on this site.', 'must-hotel-booking') : __('Stripe is disabled.', 'must-hotel-booking')],
+            ['label' => __('Provider runtime', 'must-hotel-booking'), 'status' => !empty($provider['mode_warning']) ? 'warning' : 'ok', 'text' => !empty($provider['mode_warning']) ? (string) $provider['mode_warning'] : __('Provider runtime is using the configured booking-ready provider.', 'must-hotel-booking')],
             ['label' => __('Cron / cleanup', 'must-hotel-booking'), 'status' => (string) ($cron['status'] ?? 'warning'), 'text' => (string) ($cron['message'] ?? '')],
+            ['label' => __('Provider sync', 'must-hotel-booking'), 'status' => $providerSyncProblemCount > 0 || (string) ($providerSyncCron['health'] ?? '') === 'missing' ? 'warning' : 'ok', 'text' => \sprintf(__('Due jobs: %1$d | Retryable: %2$d | Failed/exhausted: %3$d', 'must-hotel-booking'), (int) ($providerSyncSummary['due'] ?? 0), (int) ($providerSyncCounts[\MustHotelBooking\Provider\Storage\ProviderSyncJobRepository::STATUS_RETRYABLE] ?? 0), $providerSyncProblemCount)],
+            ['label' => __('Clock inbound sync', 'must-hotel-booking'), 'status' => (int) ($providerInboundSummary['failed'] ?? 0) > 0 ? 'warning' : 'ok', 'text' => \sprintf(__('Inbound events: %1$d successful, %2$d failed', 'must-hotel-booking'), (int) ($providerInboundSummary['successful'] ?? 0), (int) ($providerInboundSummary['failed'] ?? 0))],
             ['label' => __('GitHub updater', 'must-hotel-booking'), 'status' => !empty($updater['version_consistent']) && !empty($updater['asset_pattern_strict']) ? 'ok' : 'warning', 'text' => !empty($updater['release_readiness_message']) ? (string) $updater['release_readiness_message'] : __('Updater readiness has not been validated yet.', 'must-hotel-booking')],
         ];
 
@@ -2408,7 +3191,7 @@ final class SettingsPage
         echo '<div class="must-settings-status-column">';
         self::renderSectionIntro(\__('Maintenance actions', 'must-hotel-booking'));
         echo '<div class="must-dashboard-actions-grid">';
-        foreach (['reinstall_pages' => __('Reinstall missing managed pages', 'must-hotel-booking'), 'flush_portal_routes' => __('Flush portal routes', 'must-hotel-booking'), 'reschedule_cron' => __('Reschedule cleanup cron', 'must-hotel-booking'), 'cleanup_expired_locks' => __('Clear expired locks', 'must-hotel-booking'), 'repair_inventory_mirror' => __('Repair inventory mirror', 'must-hotel-booking'), 'send_test_email' => __('Send test email', 'must-hotel-booking')] as $task => $label) {
+        foreach (['reinstall_pages' => __('Reinstall missing managed pages', 'must-hotel-booking'), 'flush_portal_routes' => __('Flush portal routes', 'must-hotel-booking'), 'reschedule_cron' => __('Reschedule cron jobs', 'must-hotel-booking'), 'cleanup_expired_locks' => __('Clear expired locks', 'must-hotel-booking'), 'repair_inventory_mirror' => __('Repair inventory mirror', 'must-hotel-booking'), 'run_provider_sync_jobs' => __('Run provider sync jobs now', 'must-hotel-booking'), 'send_test_email' => __('Send test email', 'must-hotel-booking')] as $task => $label) {
             echo '<form method="post" action="' . \esc_url(get_admin_settings_page_url(['tab' => 'maintenance'])) . '">';
             \wp_nonce_field('must_settings_maintenance_action', 'must_settings_nonce');
             echo '<input type="hidden" name="must_settings_action" value="maintenance_action" />';
