@@ -48,6 +48,9 @@ function get_empty_booking_selection(): array
             'pending_payment' => PaymentEngine::getEmptyPendingPaymentFlowData(),
             'booking_mode' => '',
             'fixed_room_id' => 0,
+            'anti_abuse_context_hash' => '',
+            'anti_abuse_checkout_started_at' => 0,
+            'anti_abuse_confirmation_started_at' => 0,
         ],
     ];
 }
@@ -69,6 +72,9 @@ function normalize_booking_selection_flow_data($flow_data): array
             'pending_payment' => PaymentEngine::getEmptyPendingPaymentFlowData(),
             'booking_mode' => '',
             'fixed_room_id' => 0,
+            'anti_abuse_context_hash' => '',
+            'anti_abuse_checkout_started_at' => 0,
+            'anti_abuse_confirmation_started_at' => 0,
         ];
     }
 
@@ -97,6 +103,15 @@ function normalize_booking_selection_flow_data($flow_data): array
         'booking_mode' => $booking_mode,
         'fixed_room_id' => isset($flow_data['fixed_room_id'])
             ? \absint($flow_data['fixed_room_id'])
+            : 0,
+        'anti_abuse_context_hash' => isset($flow_data['anti_abuse_context_hash'])
+            ? \sanitize_text_field((string) $flow_data['anti_abuse_context_hash'])
+            : '',
+        'anti_abuse_checkout_started_at' => isset($flow_data['anti_abuse_checkout_started_at'])
+            ? \absint($flow_data['anti_abuse_checkout_started_at'])
+            : 0,
+        'anti_abuse_confirmation_started_at' => isset($flow_data['anti_abuse_confirmation_started_at'])
+            ? \absint($flow_data['anti_abuse_confirmation_started_at'])
             : 0,
     ];
 }

@@ -5,6 +5,7 @@ namespace MustHotelBooking\Frontend;
 use MustHotelBooking\Core\ManagedPages;
 use MustHotelBooking\Core\MustBookingConfig;
 use MustHotelBooking\Core\ReservationStatus;
+use MustHotelBooking\Engine\BookingAbuseProtection;
 use MustHotelBooking\Engine\BookingStatusEngine;
 use MustHotelBooking\Engine\BookingValidationEngine;
 use MustHotelBooking\Engine\CancellationEngine;
@@ -269,6 +270,10 @@ function get_pending_confirmation_page_view_data(): array
         }
     }
 
+    if ($request_method === 'GET' && !empty($context['is_valid'])) {
+        BookingAbuseProtection::markConfirmationStepStarted($context);
+    }
+
     $summary = isset($room_items['summary']) && \is_array($room_items['summary']) ? $room_items['summary'] : [];
     $applied_coupon_code = isset($summary['applied_coupon']) ? \sanitize_text_field((string) $summary['applied_coupon']) : '';
     $coupon_input_value = $submitted_coupon_code;
@@ -287,18 +292,31 @@ function get_pending_confirmation_page_view_data(): array
         if (!\wp_verify_nonce($nonce, 'must_confirm_booking')) {
             $messages[] = \__('Security check failed. Please try again.', 'must-hotel-booking');
         } else {
-            $billing_errors = BookingValidationEngine::validateBillingForm($billing_form);
+            $confirmation_guest_form = BookingValidationEngine::buildConfirmationGuestForm($guest_form, $billing_form);
+            $anti_abuse_result = BookingAbuseProtection::guardSubmission(
+                $context,
+                $confirmation_guest_form,
+                [
+                    'anti_abuse_surface' => BookingAbuseProtection::SURFACE_CONFIRMATION,
+                ]
+            );
 
-            foreach ($billing_errors as $billing_error) {
-                $messages[] = $billing_error;
-            }
+            if (empty($anti_abuse_result['allowed'])) {
+                $messages[] = isset($anti_abuse_result['message']) && (string) $anti_abuse_result['message'] !== ''
+                    ? (string) $anti_abuse_result['message']
+                    : BookingAbuseProtection::getGenericFailureMessage();
+            } else {
+                $billing_errors = BookingValidationEngine::validateBillingForm($billing_form);
 
-            if (!isset($payment_methods[$payment_method])) {
-                $messages[] = \__('Please select a valid payment method.', 'must-hotel-booking');
-            }
+                foreach ($billing_errors as $billing_error) {
+                    $messages[] = $billing_error;
+                }
 
-            if (empty($billing_errors) && isset($payment_methods[$payment_method]) && !empty($context['is_valid'])) {
-                $confirmation_guest_form = BookingValidationEngine::buildConfirmationGuestForm($guest_form, $billing_form);
+                if (!isset($payment_methods[$payment_method])) {
+                    $messages[] = \__('Please select a valid payment method.', 'must-hotel-booking');
+                }
+
+                if (empty($billing_errors) && isset($payment_methods[$payment_method]) && !empty($context['is_valid'])) {
                 $effective_coupon_code = $applied_coupon_code !== '' ? $applied_coupon_code : $coupon_code;
                 $payment_creation_options = PaymentEngine::getReservationCreationOptions($payment_method);
                 $total_amount = isset($summary['total_price']) ? (float) $summary['total_price'] : 0.0;
@@ -326,6 +344,8 @@ function get_pending_confirmation_page_view_data(): array
                             $confirmation_guest_form,
                             $effective_coupon_code,
                             [
+                                'anti_abuse_surface' => BookingAbuseProtection::SURFACE_CONFIRMATION,
+                                'anti_abuse_prechecked' => true,
                                 'reservation_status' => (string) $payment_creation_options['reservation_status'],
                                 'payment_status' => (string) $payment_creation_options['payment_status'],
                                 'clear_selection' => (bool) $payment_creation_options['clear_selection'],
@@ -411,6 +431,8 @@ function get_pending_confirmation_page_view_data(): array
                         $confirmation_guest_form,
                         $effective_coupon_code,
                         [
+                            'anti_abuse_surface' => BookingAbuseProtection::SURFACE_CONFIRMATION,
+                            'anti_abuse_prechecked' => true,
                             'reservation_status' => (string) $payment_creation_options['reservation_status'],
                             'payment_status' => (string) $payment_creation_options['payment_status'],
                             'clear_selection' => (bool) $payment_creation_options['clear_selection'],
@@ -454,6 +476,7 @@ function get_pending_confirmation_page_view_data(): array
                             \wp_safe_redirect($redirect_url);
                             exit;
                         }
+                    }
                     }
                 }
             }

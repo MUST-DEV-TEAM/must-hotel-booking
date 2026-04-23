@@ -71,6 +71,8 @@ $country_picker_has_selection = \is_array($selected_country_option) && $selected
 $phone_picker_search_placeholder = \__('Search code or country', 'must-hotel-booking');
 $country_picker_search_placeholder = \__('Search country', 'must-hotel-booking');
 $picker_no_results_label = \__('No matches found.', 'must-hotel-booking');
+$show_honeypot = \MustHotelBooking\Engine\BookingAbuseProtection::shouldRenderHoneypotField();
+$honeypot_field_name = $show_honeypot ? \MustHotelBooking\Engine\BookingAbuseProtection::getHoneypotFieldName() : '';
 
 $summary_currency = 'USD';
 
@@ -139,6 +141,12 @@ $format_display_date = static function (string $date): string {
         <?php else : ?>
             <form method="post" action="<?php echo \esc_url($checkout_url); ?>" class="must-checkout-form">
                 <?php \wp_nonce_field('must_checkout_complete', 'must_checkout_nonce'); ?>
+                <?php if ($show_honeypot && $honeypot_field_name !== '') : ?>
+                    <div style="position:absolute !important;left:-10000px !important;top:auto !important;width:1px !important;height:1px !important;overflow:hidden !important;" aria-hidden="true" role="presentation">
+                        <label for="must-checkout-honeypot"><?php echo \esc_html__('Leave this field empty', 'must-hotel-booking'); ?></label>
+                        <input id="must-checkout-honeypot" type="text" name="<?php echo \esc_attr($honeypot_field_name); ?>" value="" tabindex="-1" autocomplete="new-password" autocapitalize="off" autocorrect="off" spellcheck="false" data-lpignore="true" data-1p-ignore="true" aria-hidden="true" />
+                    </div>
+                <?php endif; ?>
                 <input type="hidden" name="checkin" value="<?php echo \esc_attr($checkin); ?>" />
                 <input type="hidden" name="checkout" value="<?php echo \esc_attr($checkout); ?>" />
                 <input type="hidden" name="guests" value="<?php echo \esc_attr((string) $guests); ?>" />

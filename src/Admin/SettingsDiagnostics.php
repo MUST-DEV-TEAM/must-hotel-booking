@@ -5,6 +5,7 @@ namespace MustHotelBooking\Admin;
 use MustHotelBooking\Core\ManagedPages;
 use MustHotelBooking\Core\MustBookingConfig;
 use MustHotelBooking\Core\Updater;
+use MustHotelBooking\Engine\BookingAbuseProtection;
 use MustHotelBooking\Engine\EmailEngine;
 use MustHotelBooking\Engine\EmailLayoutEngine;
 use MustHotelBooking\Engine\LockEngine;
@@ -199,6 +200,40 @@ final class SettingsDiagnostics
             'recent_failures' => $emailFailures,
             'is_configured' => \is_email($emailSender) && \is_email($bookingRecipient) && !empty($emailTemplates),
         ];
+        $recentBlockedAttempts = [];
+
+        foreach ($activityRepository->getRecentActivitiesByEventTypes([BookingAbuseProtection::getBlockedEventType()], 10) as $activity) {
+            if (!\is_array($activity)) {
+                continue;
+            }
+
+            $context = self::decodeContext((string) ($activity['context_json'] ?? ''));
+            $recentBlockedAttempts[] = [
+                'created_at' => (string) ($activity['created_at'] ?? ''),
+                'message' => (string) ($activity['message'] ?? ''),
+                'actor_ip' => (string) ($activity['actor_ip'] ?? ''),
+                'reference' => (string) ($activity['reference'] ?? ''),
+                'reason_code' => (string) ($context['reason_code'] ?? ''),
+                'reason_label' => (string) ($context['reason_label'] ?? ''),
+                'surface' => (string) ($context['surface'] ?? ''),
+                'email' => (string) ($context['submitted_email'] ?? ''),
+                'payment_method' => (string) ($context['payment_method'] ?? ''),
+            ];
+        }
+
+        $antiAbuse = [
+            'enabled' => !empty(MustBookingConfig::get_setting('anti_abuse_enabled', false)),
+            'honeypot_enabled' => !empty(MustBookingConfig::get_setting('anti_abuse_honeypot_enabled', false)),
+            'minimum_submit_enabled' => !empty(MustBookingConfig::get_setting('anti_abuse_min_submit_enabled', false)),
+            'minimum_submit_seconds' => (int) MustBookingConfig::get_setting('anti_abuse_min_submit_seconds', 5),
+            'throttle_enabled' => !empty(MustBookingConfig::get_setting('anti_abuse_throttle_enabled', false)),
+            'max_attempts' => (int) MustBookingConfig::get_setting('anti_abuse_max_attempts', 5),
+            'window_minutes' => (int) MustBookingConfig::get_setting('anti_abuse_window_minutes', 10),
+            'block_duration_minutes' => (int) MustBookingConfig::get_setting('anti_abuse_block_duration_minutes', 30),
+            'logging_enabled' => !empty(MustBookingConfig::get_setting('anti_abuse_logging_enabled', false)),
+            'recent_blocked_total' => \count($recentBlockedAttempts),
+            'recent_blocked_attempts' => $recentBlockedAttempts,
+        ];
 
         $roomCount = $roomRepository->roomsTableExists() ? $roomRepository->countRooms() : 0;
 
@@ -314,6 +349,7 @@ final class SettingsDiagnostics
             'cron' => $cron,
             'payments' => $payments,
             'emails' => $emails,
+            'anti_abuse' => $antiAbuse,
             'updater' => $updater,
             'provider' => $provider,
             'environment' => $environment,
@@ -337,6 +373,18 @@ final class SettingsDiagnostics
             'Overall Status: ' . (string) ($data['overall_status'] ?? ''),
             'Critical Issues: ' . (int) ($data['critical_issues'] ?? 0),
             'Warnings: ' . (int) ($data['warnings'] ?? 0),
+            '',
+            '[Anti-Abuse]',
+            'Enabled: ' . (!empty($data['anti_abuse']['enabled']) ? 'yes' : 'no'),
+            'Honeypot Enabled: ' . (!empty($data['anti_abuse']['honeypot_enabled']) ? 'yes' : 'no'),
+            'Minimum Submit Time Enabled: ' . (!empty($data['anti_abuse']['minimum_submit_enabled']) ? 'yes' : 'no'),
+            'Minimum Submit Seconds: ' . (string) ($data['anti_abuse']['minimum_submit_seconds'] ?? 0),
+            'Throttling Enabled: ' . (!empty($data['anti_abuse']['throttle_enabled']) ? 'yes' : 'no'),
+            'Throttle Max Attempts: ' . (string) ($data['anti_abuse']['max_attempts'] ?? 0),
+            'Throttle Window Minutes: ' . (string) ($data['anti_abuse']['window_minutes'] ?? 0),
+            'Throttle Block Minutes: ' . (string) ($data['anti_abuse']['block_duration_minutes'] ?? 0),
+            'Logging Enabled: ' . (!empty($data['anti_abuse']['logging_enabled']) ? 'yes' : 'no'),
+            'Recent Blocked Attempts Loaded: ' . (string) ($data['anti_abuse']['recent_blocked_total'] ?? 0),
             '',
             '[Managed Pages]',
         ];
@@ -428,6 +476,16 @@ final class SettingsDiagnostics
         }
 
         return \implode("\n", $lines);
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private static function decodeContext(string $contextJson): array
+    {
+        $decoded = \json_decode($contextJson, true);
+
+        return \is_array($decoded) ? $decoded : [];
     }
 
     private static function tableExists(string $tableName): bool

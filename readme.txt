@@ -4,7 +4,7 @@ Tags: hotel, booking, reservation, accommodation
 Requires at least: 5.0
 Tested up to: 6.0
 Requires PHP: 7.4
-Stable tag: 0.4.0
+Stable tag: 0.4.1
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -31,6 +31,13 @@ Main features include:
 5. When updating, upload the new release ZIP or use the configured updater, then review **Diagnostics & Maintenance** after the update completes.
 
 == Changelog ==
+
+= 0.4.1 =
+* Added optional public booking anti-spam protections with a hidden honeypot, minimum submit-time checks, and configurable throttling for checkout and confirmation submissions.
+* Added Booking Rules controls for enabling anti-spam checks, tuning thresholds, and turning blocked-attempt logging on or off.
+* Added diagnostics visibility for booking protection status and recent blocked reservation attempts.
+* Added safe frontend tracking and hidden-field rendering without changing the visible booking layout.
+* Applied the protection layer to both Local reservations and Clock PMS mirrored reservations.
 
 = 0.4.0 =
 * Added Clock PMS provider integration — the plugin now supports two booking modes: Local (self-contained, unchanged) and Clock (mirrors reservations to an external PMS via REST API).

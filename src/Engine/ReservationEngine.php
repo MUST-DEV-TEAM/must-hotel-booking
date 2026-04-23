@@ -794,6 +794,20 @@ final class ReservationEngine
             ];
         }
 
+        $antiAbuseResult = BookingAbuseProtection::guardSubmission($context, $guestForm, $options);
+
+        if (empty($antiAbuseResult['allowed'])) {
+            return [
+                'errors' => [
+                    isset($antiAbuseResult['message']) && (string) $antiAbuseResult['message'] !== ''
+                        ? (string) $antiAbuseResult['message']
+                        : BookingAbuseProtection::getGenericFailureMessage(),
+                ],
+                'reservation_ids' => [],
+                'applied_coupon_ids' => [],
+            ];
+        }
+
         $validationErrors = BookingValidationEngine::validateGuestForm($guestForm);
 
         if (!empty($validationErrors)) {
@@ -1121,7 +1135,12 @@ final class ReservationEngine
      */
     public static function submitCheckout(array $context, array $guestForm, string $couponCode = ''): array
     {
-        $result = self::createReservations($context, $guestForm, $couponCode);
+        $result = self::createReservations(
+            $context,
+            $guestForm,
+            $couponCode,
+            ['anti_abuse_surface' => BookingAbuseProtection::SURFACE_CHECKOUT]
+        );
 
         if (!empty($result['errors'])) {
             return [

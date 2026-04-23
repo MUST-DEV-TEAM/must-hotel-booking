@@ -4,6 +4,7 @@ namespace MustHotelBooking\Frontend;
 
 use MustHotelBooking\Core\ManagedPages;
 use MustHotelBooking\Engine\BookingValidationEngine;
+use MustHotelBooking\Engine\BookingAbuseProtection;
 use MustHotelBooking\Engine\CouponService;
 use MustHotelBooking\Provider\Dto\QuoteRequest;
 use MustHotelBooking\Provider\Dto\ReservationCreateRequest;
@@ -378,6 +379,10 @@ function get_checkout_page_view_data(): array
         foreach ((array) ($context['errors'] ?? []) as $error_message) {
             $messages[] = (string) $error_message;
         }
+    }
+
+    if ($request_method === 'GET' && !empty($context['is_valid'])) {
+        BookingAbuseProtection::markCheckoutStepStarted($context);
     }
 
     $guest_form_source = $request_method === 'POST' && \is_array($_POST)

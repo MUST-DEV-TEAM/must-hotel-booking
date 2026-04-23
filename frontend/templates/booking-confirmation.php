@@ -61,6 +61,8 @@ $country_picker_has_selection = \is_array($selected_country_option) && $selected
 $phone_picker_search_placeholder = \__('Search code or country', 'must-hotel-booking');
 $country_picker_search_placeholder = \__('Search country', 'must-hotel-booking');
 $picker_no_results_label = \__('No matches found.', 'must-hotel-booking');
+$show_honeypot = \MustHotelBooking\Engine\BookingAbuseProtection::shouldRenderHoneypotField();
+$honeypot_field_name = $show_honeypot ? \MustHotelBooking\Engine\BookingAbuseProtection::getHoneypotFieldName() : '';
 $success_icon_url = \defined('MUST_HOTEL_BOOKING_URL') ? MUST_HOTEL_BOOKING_URL . 'assets/img/PatchCheckFill.svg' : '';
 $success_offer_image_url = \defined('MUST_HOTEL_BOOKING_URL') ? MUST_HOTEL_BOOKING_URL . 'assets/img/imgoffer.jpg' : '';
 $paid_success_heading = \__('Thank You!', 'must-hotel-booking');
@@ -280,6 +282,12 @@ $render_payment_method_icon = static function (string $payment_method_key, strin
         <?php elseif ($is_form_mode) : ?>
             <form method="post" action="<?php echo \esc_url($confirmation_url); ?>" class="must-confirmation-form">
                 <?php \wp_nonce_field('must_confirm_booking', 'must_confirmation_nonce'); ?>
+                <?php if ($show_honeypot && $honeypot_field_name !== '') : ?>
+                    <div style="position:absolute !important;left:-10000px !important;top:auto !important;width:1px !important;height:1px !important;overflow:hidden !important;" aria-hidden="true" role="presentation">
+                        <label for="must-confirmation-honeypot"><?php echo \esc_html__('Leave this field empty', 'must-hotel-booking'); ?></label>
+                        <input id="must-confirmation-honeypot" type="text" name="<?php echo \esc_attr($honeypot_field_name); ?>" value="" tabindex="-1" autocomplete="new-password" autocapitalize="off" autocorrect="off" spellcheck="false" data-lpignore="true" data-1p-ignore="true" aria-hidden="true" />
+                    </div>
+                <?php endif; ?>
                 <input type="hidden" name="applied_coupon_code" value="<?php echo \esc_attr($applied_coupon_code); ?>" />
 
                 <?php if ($can_confirm) : ?>

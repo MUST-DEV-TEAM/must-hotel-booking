@@ -857,6 +857,15 @@ final class SettingsPage
             'default_payment_mode' => (string) MustBookingConfig::get_setting('default_payment_mode', 'guest_choice'),
             'cancellation_allowed' => !empty(MustBookingConfig::get_setting('cancellation_allowed', true)),
             'cancellation_notice_hours' => (int) MustBookingConfig::get_setting('cancellation_notice_hours', 48),
+            'anti_abuse_enabled' => !empty(MustBookingConfig::get_setting('anti_abuse_enabled', false)),
+            'anti_abuse_honeypot_enabled' => !empty(MustBookingConfig::get_setting('anti_abuse_honeypot_enabled', false)),
+            'anti_abuse_min_submit_enabled' => !empty(MustBookingConfig::get_setting('anti_abuse_min_submit_enabled', false)),
+            'anti_abuse_min_submit_seconds' => (int) MustBookingConfig::get_setting('anti_abuse_min_submit_seconds', 5),
+            'anti_abuse_throttle_enabled' => !empty(MustBookingConfig::get_setting('anti_abuse_throttle_enabled', false)),
+            'anti_abuse_max_attempts' => (int) MustBookingConfig::get_setting('anti_abuse_max_attempts', 5),
+            'anti_abuse_window_minutes' => (int) MustBookingConfig::get_setting('anti_abuse_window_minutes', 10),
+            'anti_abuse_block_duration_minutes' => (int) MustBookingConfig::get_setting('anti_abuse_block_duration_minutes', 30),
+            'anti_abuse_logging_enabled' => !empty(MustBookingConfig::get_setting('anti_abuse_logging_enabled', false)),
         ];
 
         return \array_merge($form, $overrides);
@@ -1098,6 +1107,15 @@ final class SettingsPage
         $form['default_payment_mode'] = \sanitize_key((string) \wp_unslash($source['default_payment_mode'] ?? $form['default_payment_mode']));
         $form['cancellation_allowed'] = self::parseBool($source, 'cancellation_allowed');
         $form['cancellation_notice_hours'] = (int) \absint(\wp_unslash($source['cancellation_notice_hours'] ?? $form['cancellation_notice_hours']));
+        $form['anti_abuse_enabled'] = self::parseBool($source, 'anti_abuse_enabled');
+        $form['anti_abuse_honeypot_enabled'] = self::parseBool($source, 'anti_abuse_honeypot_enabled');
+        $form['anti_abuse_min_submit_enabled'] = self::parseBool($source, 'anti_abuse_min_submit_enabled');
+        $form['anti_abuse_min_submit_seconds'] = (int) \absint(\wp_unslash($source['anti_abuse_min_submit_seconds'] ?? $form['anti_abuse_min_submit_seconds']));
+        $form['anti_abuse_throttle_enabled'] = self::parseBool($source, 'anti_abuse_throttle_enabled');
+        $form['anti_abuse_max_attempts'] = (int) \absint(\wp_unslash($source['anti_abuse_max_attempts'] ?? $form['anti_abuse_max_attempts']));
+        $form['anti_abuse_window_minutes'] = (int) \absint(\wp_unslash($source['anti_abuse_window_minutes'] ?? $form['anti_abuse_window_minutes']));
+        $form['anti_abuse_block_duration_minutes'] = (int) \absint(\wp_unslash($source['anti_abuse_block_duration_minutes'] ?? $form['anti_abuse_block_duration_minutes']));
+        $form['anti_abuse_logging_enabled'] = self::parseBool($source, 'anti_abuse_logging_enabled');
         $errors = [];
 
         if ($form['booking_window'] < 1 || $form['booking_window'] > 3650) {
@@ -1136,6 +1154,22 @@ final class SettingsPage
 
         if ($form['cancellation_notice_hours'] > 720) {
             $errors[] = \__('Cancellation notice must be 720 hours or less.', 'must-hotel-booking');
+        }
+
+        if ($form['anti_abuse_min_submit_enabled'] && ($form['anti_abuse_min_submit_seconds'] < 1 || $form['anti_abuse_min_submit_seconds'] > 60)) {
+            $errors[] = \__('Minimum submit seconds must be between 1 and 60.', 'must-hotel-booking');
+        }
+
+        if ($form['anti_abuse_throttle_enabled'] && ($form['anti_abuse_max_attempts'] < 1 || $form['anti_abuse_max_attempts'] > 50)) {
+            $errors[] = \__('Maximum attempts must be between 1 and 50.', 'must-hotel-booking');
+        }
+
+        if ($form['anti_abuse_throttle_enabled'] && ($form['anti_abuse_window_minutes'] < 1 || $form['anti_abuse_window_minutes'] > 1440)) {
+            $errors[] = \__('Throttle window must be between 1 and 1440 minutes.', 'must-hotel-booking');
+        }
+
+        if ($form['anti_abuse_throttle_enabled'] && ($form['anti_abuse_block_duration_minutes'] < 1 || $form['anti_abuse_block_duration_minutes'] > 1440)) {
+            $errors[] = \__('Throttle block duration must be between 1 and 1440 minutes.', 'must-hotel-booking');
         }
 
         return [
@@ -2233,6 +2267,19 @@ final class SettingsPage
         self::renderField(['label' => __('Cancellation notice (hours)', 'must-hotel-booking'), 'name' => 'cancellation_notice_hours', 'type' => 'number', 'min' => 0, 'max' => 720, 'value' => $form['cancellation_notice_hours'] ?? 48]);
         echo '</div>';
 
+        echo '<div class="must-settings-grid must-settings-grid--3">';
+        self::renderSectionIntro(\__('Anti-Spam Protection', 'must-hotel-booking'), \__('Optional server-side protections for public reservation submits. These checks do not add visible frontend widgets or change the booking layout.', 'must-hotel-booking'));
+        self::renderField(['label' => __('Enable anti-spam protections', 'must-hotel-booking'), 'name' => 'anti_abuse_enabled', 'type' => 'checkbox', 'value' => $form['anti_abuse_enabled'] ?? false, 'description' => __('Master switch for all plugin-side abuse protection checks.', 'must-hotel-booking')]);
+        self::renderField(['label' => __('Enable hidden honeypot', 'must-hotel-booking'), 'name' => 'anti_abuse_honeypot_enabled', 'type' => 'checkbox', 'value' => $form['anti_abuse_honeypot_enabled'] ?? false]);
+        self::renderField(['label' => __('Enable minimum submit time', 'must-hotel-booking'), 'name' => 'anti_abuse_min_submit_enabled', 'type' => 'checkbox', 'value' => $form['anti_abuse_min_submit_enabled'] ?? false]);
+        self::renderField(['label' => __('Minimum submit seconds', 'must-hotel-booking'), 'name' => 'anti_abuse_min_submit_seconds', 'type' => 'number', 'min' => 1, 'max' => 60, 'value' => $form['anti_abuse_min_submit_seconds'] ?? 5]);
+        self::renderField(['label' => __('Enable throttling', 'must-hotel-booking'), 'name' => 'anti_abuse_throttle_enabled', 'type' => 'checkbox', 'value' => $form['anti_abuse_throttle_enabled'] ?? false]);
+        self::renderField(['label' => __('Max attempts', 'must-hotel-booking'), 'name' => 'anti_abuse_max_attempts', 'type' => 'number', 'min' => 1, 'max' => 50, 'value' => $form['anti_abuse_max_attempts'] ?? 5]);
+        self::renderField(['label' => __('Window length (minutes)', 'must-hotel-booking'), 'name' => 'anti_abuse_window_minutes', 'type' => 'number', 'min' => 1, 'max' => 1440, 'value' => $form['anti_abuse_window_minutes'] ?? 10]);
+        self::renderField(['label' => __('Temporary block (minutes)', 'must-hotel-booking'), 'name' => 'anti_abuse_block_duration_minutes', 'type' => 'number', 'min' => 1, 'max' => 1440, 'value' => $form['anti_abuse_block_duration_minutes'] ?? 30]);
+        self::renderField(['label' => __('Enable abuse logging', 'must-hotel-booking'), 'name' => 'anti_abuse_logging_enabled', 'type' => 'checkbox', 'value' => $form['anti_abuse_logging_enabled'] ?? false, 'description' => __('Writes blocked attempts into the activity log for diagnostics.', 'must-hotel-booking')]);
+        echo '</div>';
+
         self::renderPanelEnd();
         self::renderFormEnd(\__('Save Booking Rules', 'must-hotel-booking'));
     }
@@ -3144,6 +3191,7 @@ final class SettingsPage
         $environment = isset($diagnostics['environment']) && \is_array($diagnostics['environment']) ? $diagnostics['environment'] : [];
         $payments = isset($diagnostics['payments']) && \is_array($diagnostics['payments']) ? $diagnostics['payments'] : [];
         $emails = isset($diagnostics['emails']) && \is_array($diagnostics['emails']) ? $diagnostics['emails'] : [];
+        $antiAbuse = isset($diagnostics['anti_abuse']) && \is_array($diagnostics['anti_abuse']) ? $diagnostics['anti_abuse'] : [];
         $cron = isset($diagnostics['cron']) && \is_array($diagnostics['cron']) ? $diagnostics['cron'] : [];
         $updater = isset($diagnostics['updater']) && \is_array($diagnostics['updater']) ? $diagnostics['updater'] : [];
         $provider = isset($diagnostics['provider']) && \is_array($diagnostics['provider']) ? $diagnostics['provider'] : [];
@@ -3162,6 +3210,8 @@ final class SettingsPage
         echo '<article class="must-settings-summary-card"><span class="must-settings-summary-label">' . \esc_html__('DB version', 'must-hotel-booking') . '</span><strong>' . \esc_html((string) ($environment['database_version'] ?? '')) . '</strong></article>';
         echo '<article class="must-settings-summary-card"><span class="must-settings-summary-label">' . \esc_html__('Rooms', 'must-hotel-booking') . '</span><strong>' . \esc_html((string) ($environment['room_count'] ?? 0)) . '</strong></article>';
         echo '<article class="must-settings-summary-card"><span class="must-settings-summary-label">' . \esc_html__('Cron', 'must-hotel-booking') . '</span><strong>' . \esc_html((string) ($cron['next_run'] ?? '')) . '</strong></article>';
+        echo '<article class="must-settings-summary-card"><span class="must-settings-summary-label">' . \esc_html__('Booking protection', 'must-hotel-booking') . '</span><strong>' . \esc_html(!empty($antiAbuse['enabled']) ? __('Enabled', 'must-hotel-booking') : __('Disabled', 'must-hotel-booking')) . '</strong></article>';
+        echo '<article class="must-settings-summary-card"><span class="must-settings-summary-label">' . \esc_html__('Recent blocked attempts', 'must-hotel-booking') . '</span><strong>' . \esc_html((string) ($antiAbuse['recent_blocked_total'] ?? 0)) . '</strong></article>';
         echo '</div>';
 
         echo '<div class="must-settings-status-columns">';
@@ -3174,6 +3224,7 @@ final class SettingsPage
             ['label' => __('Portal routes', 'must-hotel-booking'), 'status' => 'ok', 'text' => \sprintf(\__('Portal base: /%1$s | Login: /%2$s', 'must-hotel-booking'), PortalRouter::getPortalBasePath(), PortalRouter::getPortalLoginPath())],
             ['label' => __('Email config', 'must-hotel-booking'), 'status' => !empty($emails['is_configured']) ? 'ok' : 'warning', 'text' => !empty($emails['is_configured']) ? __('Email sending basics are configured.', 'must-hotel-booking') : __('Email configuration needs attention.', 'must-hotel-booking')],
             ['label' => __('Payment config', 'must-hotel-booking'), 'status' => !empty($payments['stripe_enabled']) && empty($payments['stripe_configured']) ? 'warning' : 'ok', 'text' => !empty($payments['stripe_enabled']) ? __('Stripe is enabled on this site.', 'must-hotel-booking') : __('Stripe is disabled.', 'must-hotel-booking')],
+            ['label' => __('Booking protection', 'must-hotel-booking'), 'status' => !empty($antiAbuse['enabled']) ? 'ok' : 'warning', 'text' => !empty($antiAbuse['enabled']) ? __('Plugin-side anti-spam protections are enabled for public booking when individual checks are turned on.', 'must-hotel-booking') : __('Anti-spam protections are currently disabled.', 'must-hotel-booking')],
             ['label' => __('Provider runtime', 'must-hotel-booking'), 'status' => !empty($provider['mode_warning']) ? 'warning' : 'ok', 'text' => !empty($provider['mode_warning']) ? (string) $provider['mode_warning'] : __('Provider runtime is using the configured booking-ready provider.', 'must-hotel-booking')],
             ['label' => __('Cron / cleanup', 'must-hotel-booking'), 'status' => (string) ($cron['status'] ?? 'warning'), 'text' => (string) ($cron['message'] ?? '')],
             ['label' => __('Provider sync', 'must-hotel-booking'), 'status' => $providerSyncProblemCount > 0 || (string) ($providerSyncCron['health'] ?? '') === 'missing' ? 'warning' : 'ok', 'text' => \sprintf(__('Due jobs: %1$d | Retryable: %2$d | Failed/exhausted: %3$d', 'must-hotel-booking'), (int) ($providerSyncSummary['due'] ?? 0), (int) ($providerSyncCounts[\MustHotelBooking\Provider\Storage\ProviderSyncJobRepository::STATUS_RETRYABLE] ?? 0), $providerSyncProblemCount)],
@@ -3234,6 +3285,116 @@ final class SettingsPage
             self::renderBadge((string) ($row['health'] ?? 'warning'));
             echo '</div><p>' . \esc_html((string) ($row['message'] ?? '')) . '</p></div>';
         }
+        echo '</div></div></div>';
+
+        echo '<div class="must-settings-status-columns">';
+        echo '<div class="must-settings-status-column">';
+        self::renderSectionIntro(\__('Blocked reservation attempts', 'must-hotel-booking'));
+        echo '<div class="must-dashboard-health-list">';
+
+        if (empty($antiAbuse['logging_enabled'])) {
+            echo '<div class="must-dashboard-health-item"><div class="must-dashboard-health-header"><strong>' . \esc_html__('Abuse logging is disabled', 'must-hotel-booking') . '</strong>';
+            self::renderBadge('warning');
+            echo '</div><p>' . \esc_html__('Enable abuse logging in Booking Rules to record and review blocked reservation attempts here.', 'must-hotel-booking') . '</p></div>';
+        } elseif (empty($antiAbuse['recent_blocked_attempts']) || !\is_array($antiAbuse['recent_blocked_attempts'])) {
+            echo '<div class="must-dashboard-health-item"><div class="must-dashboard-health-header"><strong>' . \esc_html__('No recent blocked attempts', 'must-hotel-booking') . '</strong>';
+            self::renderBadge('ok');
+            echo '</div><p>' . \esc_html__('Recent blocked public reservation attempts will appear here when the protection layer rejects a request.', 'must-hotel-booking') . '</p></div>';
+        } else {
+            foreach ((array) $antiAbuse['recent_blocked_attempts'] as $attempt) {
+                if (!\is_array($attempt)) {
+                    continue;
+                }
+
+                $reason = (string) ($attempt['reason_label'] ?? __('Request blocked', 'must-hotel-booking'));
+                $metaParts = [];
+
+                if ((string) ($attempt['created_at'] ?? '') !== '') {
+                    $metaParts[] = (string) $attempt['created_at'];
+                }
+
+                if ((string) ($attempt['surface'] ?? '') !== '') {
+                    $metaParts[] = (string) $attempt['surface'];
+                }
+
+                if ((string) ($attempt['payment_method'] ?? '') !== '') {
+                    $metaParts[] = (string) $attempt['payment_method'];
+                }
+
+                if ((string) ($attempt['actor_ip'] ?? '') !== '') {
+                    $metaParts[] = 'IP ' . (string) $attempt['actor_ip'];
+                }
+
+                $identity = (string) ($attempt['email'] ?? '');
+
+                if ($identity === '') {
+                    $identity = (string) ($attempt['reference'] ?? '');
+                }
+
+                echo '<div class="must-dashboard-health-item"><div class="must-dashboard-health-header"><strong>' . \esc_html($reason) . '</strong>';
+                self::renderBadge('warning');
+                echo '</div><p>' . \esc_html(\implode(' | ', $metaParts)) . '</p>';
+
+                if ($identity !== '') {
+                    echo '<p><code>' . \esc_html($identity) . '</code></p>';
+                }
+
+                if ((string) ($attempt['message'] ?? '') !== '') {
+                    echo '<p>' . \esc_html((string) $attempt['message']) . '</p>';
+                }
+
+                echo '</div>';
+            }
+        }
+
+        echo '</div></div>';
+        echo '<div class="must-settings-status-column">';
+        self::renderSectionIntro(\__('Protection configuration', 'must-hotel-booking'));
+        echo '<div class="must-dashboard-health-list">';
+        $protectionItems = [
+            [
+                'label' => __('Master protection', 'must-hotel-booking'),
+                'status' => !empty($antiAbuse['enabled']) ? 'ok' : 'warning',
+                'text' => !empty($antiAbuse['enabled'])
+                    ? __('Enabled from Booking Rules.', 'must-hotel-booking')
+                    : __('Disabled from Booking Rules.', 'must-hotel-booking'),
+            ],
+            [
+                'label' => __('Hidden honeypot', 'must-hotel-booking'),
+                'status' => !empty($antiAbuse['honeypot_enabled']) ? 'ok' : 'warning',
+                'text' => !empty($antiAbuse['honeypot_enabled'])
+                    ? __('Enabled on public submit forms.', 'must-hotel-booking')
+                    : __('Disabled.', 'must-hotel-booking'),
+            ],
+            [
+                'label' => __('Minimum submit time', 'must-hotel-booking'),
+                'status' => !empty($antiAbuse['minimum_submit_enabled']) ? 'ok' : 'warning',
+                'text' => !empty($antiAbuse['minimum_submit_enabled'])
+                    ? \sprintf(__('Minimum submit time: %d seconds.', 'must-hotel-booking'), (int) ($antiAbuse['minimum_submit_seconds'] ?? 0))
+                    : __('Disabled.', 'must-hotel-booking'),
+            ],
+            [
+                'label' => __('Throttling', 'must-hotel-booking'),
+                'status' => !empty($antiAbuse['throttle_enabled']) ? 'ok' : 'warning',
+                'text' => !empty($antiAbuse['throttle_enabled'])
+                    ? \sprintf(__('Max %1$d attempts in %2$d minutes. Temporary block: %3$d minutes.', 'must-hotel-booking'), (int) ($antiAbuse['max_attempts'] ?? 0), (int) ($antiAbuse['window_minutes'] ?? 0), (int) ($antiAbuse['block_duration_minutes'] ?? 0))
+                    : __('Disabled.', 'must-hotel-booking'),
+            ],
+            [
+                'label' => __('Abuse logging', 'must-hotel-booking'),
+                'status' => !empty($antiAbuse['logging_enabled']) ? 'ok' : 'warning',
+                'text' => !empty($antiAbuse['logging_enabled'])
+                    ? __('Blocked attempts are written to the activity log.', 'must-hotel-booking')
+                    : __('Blocked attempts are not currently recorded in diagnostics.', 'must-hotel-booking'),
+            ],
+        ];
+
+        foreach ($protectionItems as $item) {
+            echo '<div class="must-dashboard-health-item"><div class="must-dashboard-health-header"><strong>' . \esc_html((string) $item['label']) . '</strong>';
+            self::renderBadge((string) $item['status']);
+            echo '</div><p>' . \esc_html((string) $item['text']) . '</p></div>';
+        }
+
         echo '</div></div></div>';
         self::renderPanelEnd();
         self::renderDangerZoneSection(

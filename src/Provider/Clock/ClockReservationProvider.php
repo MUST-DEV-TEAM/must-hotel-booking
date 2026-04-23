@@ -3,6 +3,7 @@
 namespace MustHotelBooking\Provider\Clock;
 
 use MustHotelBooking\Core\ManagedPages;
+use MustHotelBooking\Engine\BookingAbuseProtection;
 use MustHotelBooking\Engine\BookingValidationEngine;
 use MustHotelBooking\Engine\ReservationEngine;
 use MustHotelBooking\Provider\Contracts\ReservationProviderInterface;
@@ -202,7 +203,14 @@ final class ClockReservationProvider implements ReservationProviderInterface
 
     public function submitCheckout(array $context, array $guestForm, string $couponCode = ''): array
     {
-        $result = $this->createReservations(new ReservationCreateRequest($context, $guestForm, $couponCode));
+        $result = $this->createReservations(
+            new ReservationCreateRequest(
+                $context,
+                $guestForm,
+                $couponCode,
+                ['anti_abuse_surface' => BookingAbuseProtection::SURFACE_CHECKOUT]
+            )
+        );
 
         if (!empty($result['errors'])) {
             return [
@@ -244,6 +252,18 @@ final class ClockReservationProvider implements ReservationProviderInterface
 
         if (empty($selectedRoomIds)) {
             return $this->errorResult([\__('Please select at least one room before continuing.', 'must-hotel-booking')]);
+        }
+
+        $antiAbuseResult = BookingAbuseProtection::guardSubmission($context, $guestForm, $options);
+
+        if (empty($antiAbuseResult['allowed'])) {
+            return $this->errorResult(
+                [
+                    isset($antiAbuseResult['message']) && (string) $antiAbuseResult['message'] !== ''
+                        ? (string) $antiAbuseResult['message']
+                        : BookingAbuseProtection::getGenericFailureMessage(),
+                ]
+            );
         }
 
         $validationErrors = BookingValidationEngine::validateGuestForm($guestForm);
