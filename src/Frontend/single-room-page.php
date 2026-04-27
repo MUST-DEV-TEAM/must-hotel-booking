@@ -12,7 +12,132 @@ use MustHotelBooking\Database\RoomRepository;
  */
 function is_frontend_rooms_page(): bool
 {
-    return ManagedPages::isAssignedCurrentPage('page_rooms_id');
+    return get_current_single_room_host_page_id() > 0;
+}
+
+/**
+ * Check whether Elementor data contains a supported single-room host widget.
+ *
+ * @param array<int, mixed> $elements
+ */
+function elementor_elements_support_single_room_host(array $elements): bool
+{
+    foreach ($elements as $element) {
+        if (!\is_array($element)) {
+            continue;
+        }
+
+        $widget_type = isset($element['widgetType']) ? (string) $element['widgetType'] : '';
+
+        if ($widget_type === 'must_hotel_booking_rooms_list' || $widget_type === 'must_hotel_booking_rooms_text_grid') {
+            return true;
+        }
+
+        $child_elements = isset($element['elements']) && \is_array($element['elements'])
+            ? $element['elements']
+            : [];
+
+        if (!empty($child_elements) && elementor_elements_support_single_room_host($child_elements)) {
+            return true;
+        }
+    }
+
+    return false;
+}
+
+/**
+ * Determine whether a page can act as a single-room host.
+ */
+function page_supports_single_room_host(int $page_id): bool
+{
+    static $support_cache = [];
+
+    if ($page_id <= 0) {
+        return false;
+    }
+
+    if (isset($support_cache[$page_id])) {
+        return $support_cache[$page_id];
+    }
+
+    $assigned_rooms_page_id = ManagedPages::getAssignedPageId('page_rooms_id');
+
+    if ($assigned_rooms_page_id > 0 && $assigned_rooms_page_id === $page_id) {
+        $support_cache[$page_id] = true;
+
+        return true;
+    }
+
+    $stored_data = \get_post_meta($page_id, '_elementor_data', true);
+    $elements = [];
+
+    if (\is_array($stored_data)) {
+        $elements = $stored_data;
+    } elseif (\is_string($stored_data) && $stored_data !== '') {
+        $decoded_data = \json_decode($stored_data, true);
+
+        if (\is_array($decoded_data)) {
+            $elements = $decoded_data;
+        }
+    }
+
+    $support_cache[$page_id] = elementor_elements_support_single_room_host($elements);
+
+    return $support_cache[$page_id];
+}
+
+/**
+ * Resolve the current page ID that should host single-room requests.
+ */
+function get_current_single_room_host_page_id(): int
+{
+    if (\is_admin()) {
+        return 0;
+    }
+
+    $assigned_rooms_page_id = ManagedPages::getAssignedPageId('page_rooms_id');
+
+    if ($assigned_rooms_page_id > 0 && \is_page($assigned_rooms_page_id)) {
+        return $assigned_rooms_page_id;
+    }
+
+    if (!\is_singular('page')) {
+        return 0;
+    }
+
+    $page_id = \get_queried_object_id();
+
+    if ($page_id <= 0) {
+        $page_id = \get_the_ID();
+    }
+
+    if ($page_id <= 0) {
+        return 0;
+    }
+
+    return page_supports_single_room_host($page_id) ? $page_id : 0;
+}
+
+/**
+ * Resolve the preferred host page URL for single-room links.
+ */
+function get_preferred_single_room_host_page_url(): string
+{
+    $rooms_page_url = ManagedPages::getRoomsPageUrl();
+
+    if ($rooms_page_url !== '') {
+        return $rooms_page_url;
+    }
+
+    $host_page_id = get_current_single_room_host_page_id();
+
+    if ($host_page_id <= 0) {
+        return '';
+    }
+
+    $permalink = \get_permalink($host_page_id);
+
+    return \is_string($permalink) ? $permalink : '';
 }
 
 /**
@@ -78,7 +203,7 @@ function get_single_room_record_from_request(): ?array
 function get_single_room_url(string $slug): string
 {
     $slug = \sanitize_title($slug);
-    $roomsPageUrl = ManagedPages::getRoomsPageUrl();
+    $roomsPageUrl = get_preferred_single_room_host_page_url();
 
     if ($slug === '' || $roomsPageUrl === '') {
         return '';
@@ -181,7 +306,7 @@ function get_single_room_page_view_data(): array
             'message' => \__('Room was not found.', 'must-hotel-booking'),
             'room' => null,
             'booking_url' => ManagedPages::getBookingPageUrl(),
-            'rooms_url' => ManagedPages::getRoomsPageUrl(),
+            'rooms_url' => get_preferred_single_room_host_page_url(),
             'terms_url' => \home_url('/terms-conditions/'),
         ];
     }
@@ -222,7 +347,7 @@ function get_single_room_page_view_data(): array
         'category_label' => RoomCatalog::getCategoryLabel($room_category),
         'booking_url' => $booking_url,
         'inquiry_url' => get_single_room_inquiry_url($room),
-        'rooms_url' => ManagedPages::getRoomsPageUrl(),
+        'rooms_url' => get_preferred_single_room_host_page_url(),
         'terms_url' => \home_url('/terms-conditions/'),
         'people_icon_url' => MUST_HOTEL_BOOKING_URL . 'assets/img/PeopleFill.svg',
         'surface_icon_url' => MUST_HOTEL_BOOKING_URL . 'assets/img/Surface.svg',

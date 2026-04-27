@@ -165,6 +165,28 @@ class Booking_Search_Widget extends \Elementor\Widget_Base
                                 aria-hidden="true"
                             />
                         </div>
+
+                        <div class="must-hotel-booking-field must-hotel-booking-field-guests">
+                            <label class="screen-reader-text" for="<?php echo \esc_attr($guests_id); ?>"><?php echo \esc_html__('Guests Number', 'must-hotel-booking'); ?></label>
+                            <input
+                                id="<?php echo \esc_attr($guests_id); ?>"
+                                type="number"
+                                min="1"
+                                max="<?php echo \esc_attr((string) $max_booking_guests); ?>"
+                                step="1"
+                                inputmode="numeric"
+                                pattern="[0-9]*"
+                                placeholder="<?php echo \esc_attr__('Guests Number', 'must-hotel-booking'); ?>"
+                                autocomplete="off"
+                                data-must-hotel-booking-guests-field="1"
+                            />
+                            <img
+                                class="must-hotel-booking-field-icon"
+                                src="<?php echo \esc_url($people_icon_url); ?>"
+                                alt=""
+                                aria-hidden="true"
+                            />
+                        </div>
                     </div>
 
                     <input type="hidden" name="bonusCode" value="" />

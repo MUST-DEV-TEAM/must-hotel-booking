@@ -85,9 +85,11 @@
     border-top: 0;
     border-right: 0;
     border-left: 0;
+    border-radius: 0 !important;
     background: transparent;
     padding: 0;
     margin: 0;
+    box-shadow: none;
     cursor: pointer;
     appearance: none;
     -webkit-appearance: none;
@@ -113,6 +115,19 @@
 .must-hotel-booking-single-room .must-hotel-booking-single-room-terms-link:hover {
     opacity: 0.78;
     border-bottom-color: #141414;
+}
+
+.must-hotel-booking-single-room button.must-hotel-booking-single-room-action-link:hover,
+.must-hotel-booking-single-room button.must-hotel-booking-single-room-action-link:focus,
+.must-hotel-booking-single-room button.must-hotel-booking-single-room-action-link:active,
+.must-hotel-booking-single-room button.must-hotel-booking-related-room-book:hover,
+.must-hotel-booking-single-room button.must-hotel-booking-related-room-book:focus,
+.must-hotel-booking-single-room button.must-hotel-booking-related-room-book:active {
+    color: #141414 !important;
+    background: transparent !important;
+    border-bottom-color: #141414 !important;
+    box-shadow: none !important;
+    opacity: 1;
 }
 
 .must-hotel-booking-single-room .must-hotel-booking-single-room-action-link:focus-visible,

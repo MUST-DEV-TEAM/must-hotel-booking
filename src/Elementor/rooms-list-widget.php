@@ -48,6 +48,14 @@ function register_elementor_rooms_list_widget_scripts(): void
  */
 function get_rooms_widget_rooms_page_url(): string
 {
+    if (\function_exists('\MustHotelBooking\Frontend\get_preferred_single_room_host_page_url')) {
+        $single_room_host_url = \MustHotelBooking\Frontend\get_preferred_single_room_host_page_url();
+
+        if ($single_room_host_url !== '') {
+            return $single_room_host_url;
+        }
+    }
+
     return ManagedPages::getRoomsPageUrl();
 }
 

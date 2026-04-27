@@ -4,7 +4,7 @@ Tags: hotel, booking, reservation, accommodation
 Requires at least: 5.0
 Tested up to: 6.0
 Requires PHP: 7.4
-Stable tag: 0.4.2
+Stable tag: 0.4.3
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -31,6 +31,11 @@ Main features include:
 5. When updating, upload the new release ZIP or use the configured updater, then review **Diagnostics & Maintenance** after the update completes.
 
 == Changelog ==
+
+= 0.4.3 =
+* Restored the guest-count field in the public Booking Search widget UI while keeping the Clock WBE inline form limited to Clock's documented field names.
+* Improved room-details linking so the Rooms List widget can keep showing `Additional Details` even when the managed Rooms page is not explicitly assigned, by resolving a usable single-room host page from supported Elementor room pages.
+* Tightened Clock WBE inline CTA styling on room details surfaces so `Book Now` buttons keep the existing flat appearance without border radius or hover color changes.
 
 = 0.4.2 =
 * Added a separate `website_booking_flow_mode` so public frontend booking can switch between the plugin checkout flow and Clock WBE Inline without changing `provider_mode`.

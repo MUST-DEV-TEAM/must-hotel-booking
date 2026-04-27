@@ -285,16 +285,21 @@
             var isWbeInline = bookingMode === 'clock_wbe_inline';
             var checkinInput = form.querySelector('.must-hotel-booking-checkin');
             var checkoutInput = form.querySelector('.must-hotel-booking-checkout');
-            var guestsInput = form.querySelector('.must-hotel-booking-field-guests input[name="guests"]');
+            var guestsInput = form.querySelector('.must-hotel-booking-field-guests input');
+
+            attachNumericGuestsGuard(guestsInput);
+            sanitizeGuestsValue(guestsInput, true);
 
             if (!isWbeInline) {
                 syncLinkedAccommodationTypeInput(form);
-                attachNumericGuestsGuard(guestsInput);
-                sanitizeGuestsValue(guestsInput, true);
 
                 form.addEventListener('submit', function () {
                     syncLinkedAccommodationTypeInput(form);
                     sanitizeGuestsValue(guestsInput, false);
+                });
+            } else if (guestsInput) {
+                form.addEventListener('submit', function () {
+                    sanitizeGuestsValue(guestsInput, true);
                 });
             }
 
