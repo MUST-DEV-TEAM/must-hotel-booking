@@ -3,6 +3,7 @@
 namespace MustHotelBooking\Elementor;
 
 use MustHotelBooking\Core\RoomCatalog;
+use MustHotelBooking\Frontend\ClockWbeFrontend;
 
 class Rooms_List_Widget extends \Elementor\Widget_Base
 {
@@ -126,6 +127,10 @@ class Rooms_List_Widget extends \Elementor\Widget_Base
         $booking_page_url = get_rooms_widget_booking_page_url();
         $arrow_icon_url = MUST_HOTEL_BOOKING_URL . 'assets/img/ArrowRight.svg';
         $bed_icon_url = MUST_HOTEL_BOOKING_URL . 'assets/img/bed.svg';
+        $wbeInlineMode = ClockWbeFrontend::isClockWbeInlineMode();
+        $wbeReady = ClockWbeFrontend::shouldRenderInlineBookingUi();
+        $wbeWarningMarkup = ClockWbeFrontend::getFrontendConfigurationWarningMarkup();
+        $hasPrintedWbeWarning = false;
 
         echo '<div class="must-hotel-booking-widget must-hotel-booking-rooms-list-widget" data-room-list-widget-id="' . \esc_attr($this->get_id()) . '" data-room-category="' . \esc_attr($selected_category) . '" data-connection-key="' . \esc_attr($legacy_connection_key) . '">';
 
@@ -236,10 +241,21 @@ class Rooms_List_Widget extends \Elementor\Widget_Base
             echo '</div>';
             echo '<div class="must-hotel-booking-rooms-list-section must-hotel-booking-rooms-list-section-actions">';
             echo '<div class="must-hotel-booking-rooms-list-actions">';
-            echo '<a class="must-hotel-booking-rooms-list-book" href="' . \esc_url($book_url) . '">';
-            echo '<span class="must-hotel-booking-rooms-list-book-text">' . \esc_html__('Book Now', 'must-hotel-booking') . '</span>';
-            echo '<img class="must-hotel-booking-rooms-list-book-icon" src="' . \esc_url($arrow_icon_url) . '" alt="" aria-hidden="true" />';
-            echo '</a>';
+
+            if ($wbeInlineMode && $wbeReady) {
+                echo '<button type="button" class="must-hotel-booking-rooms-list-book" data-clock-pms-wbe-button>';
+                echo '<span class="must-hotel-booking-rooms-list-book-text">' . \esc_html__('Book Now', 'must-hotel-booking') . '</span>';
+                echo '<img class="must-hotel-booking-rooms-list-book-icon" src="' . \esc_url($arrow_icon_url) . '" alt="" aria-hidden="true" />';
+                echo '</button>';
+            } elseif (!$wbeInlineMode) {
+                echo '<a class="must-hotel-booking-rooms-list-book" href="' . \esc_url($book_url) . '">';
+                echo '<span class="must-hotel-booking-rooms-list-book-text">' . \esc_html__('Book Now', 'must-hotel-booking') . '</span>';
+                echo '<img class="must-hotel-booking-rooms-list-book-icon" src="' . \esc_url($arrow_icon_url) . '" alt="" aria-hidden="true" />';
+                echo '</a>';
+            } elseif (!$hasPrintedWbeWarning && $wbeWarningMarkup !== '') {
+                echo $wbeWarningMarkup; // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped
+                $hasPrintedWbeWarning = true;
+            }
 
             if ($details_url !== '') {
                 echo '<a class="must-hotel-booking-rooms-list-details" href="' . \esc_url($details_url) . '">';

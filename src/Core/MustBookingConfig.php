@@ -6,7 +6,7 @@ class MustBookingConfig
 {
     public const OPTION_NAME = 'must_hotel_booking_settings';
     private const VERSION_KEY = 'settings_version';
-    private const VERSION = 4;
+    private const VERSION = 5;
 
     public static function get_option_name(): string
     {
@@ -130,6 +130,8 @@ class MustBookingConfig
     public static function get_max_booking_rooms(): int { return self::int((string) self::get_setting('max_booking_rooms', 3), 1, 25, 3); }
     public static function get_checkin_time(): string { return self::time((string) self::get_setting('checkin_time', '14:00'), '14:00'); }
     public static function get_checkout_time(): string { return self::time((string) self::get_setting('checkout_time', '11:00'), '11:00'); }
+    public static function get_website_booking_flow_mode(): string { return self::choice(\sanitize_key((string) self::get_setting('website_booking_flow_mode', 'plugin_checkout')), ['plugin_checkout', 'clock_wbe_inline'], 'plugin_checkout'); }
+    public static function get_clock_wbe_inline_head_snippet(): string { return self::normalize_clock_wbe_inline_head_snippet((string) self::get_setting('clock_wbe_inline_head_snippet', '')); }
     public static function get_provider_mode(): string { return self::choice(\sanitize_key((string) self::get_setting('provider_mode', 'local')), ['local', 'clock'], 'local'); }
     public static function is_clock_enabled(): bool { return self::bool(self::get_setting('clock_enabled', false)); }
 
@@ -140,6 +142,8 @@ class MustBookingConfig
         $defaults = self::group_defaults()['provider'];
 
         return [
+            'website_booking_flow_mode' => self::get_website_booking_flow_mode(),
+            'clock_wbe_inline_head_snippet' => self::get_clock_wbe_inline_head_snippet(),
             'provider_mode' => self::get_provider_mode(),
             'clock_enabled' => self::bool($provider['clock_enabled'] ?? $defaults['clock_enabled']),
             'clock_environment' => self::choice(\sanitize_key((string) ($provider['clock_environment'] ?? $defaults['clock_environment'])), ['sandbox', 'production', 'custom'], (string) $defaults['clock_environment']),
@@ -308,7 +312,7 @@ class MustBookingConfig
             'branding' => ['primary_color' => '#0f766e', 'secondary_color' => '#155e75', 'accent_color' => '#f59e0b', 'text_color' => '#16212b', 'border_radius' => 18, 'font_family' => 'Instrument Sans', 'inherit_elementor_colors' => false, 'inherit_elementor_typography' => false, 'portal_welcome_title' => \__('Welcome back', 'must-hotel-booking'), 'portal_welcome_text' => \__('Manage arrivals, departures, guest requests, and stay operations from one place.', 'must-hotel-booking'), 'booking_form_style_preset' => 'balanced'],
             'managed_pages' => ['page_rooms_id' => 0, 'page_booking_id' => 0, 'page_booking_accommodation_id' => 0, 'page_checkout_id' => 0, 'page_booking_confirmation_id' => 0, 'portal_page_id' => 0, 'portal_login_page_id' => 0],
             'notifications_summary' => ['booking_notification_email' => '', 'email_from_name' => '', 'email_from_email' => '', 'email_reply_to' => '', 'email_logo_url' => '', 'email_button_color' => '#141414', 'email_footer_text' => \__('We look forward to welcoming you.', 'must-hotel-booking'), 'email_layout_type' => 'classic', 'custom_email_layout_html' => '', 'email_templates' => []],
-            'provider' => ['provider_mode' => 'local', 'clock_enabled' => false, 'clock_environment' => 'production', 'clock_api_base_url' => '', 'clock_api_user' => '', 'clock_api_key' => '', 'clock_property_id' => '', 'clock_connection_path' => '/', 'clock_room_types_path' => '', 'clock_rooms_path' => '', 'clock_rate_plans_path' => '', 'clock_availability_path' => '', 'clock_quote_path' => '', 'clock_reservation_create_path' => '', 'clock_reservation_status_update_path' => '', 'clock_reservation_cancel_path' => '', 'clock_reservation_room_update_path' => '', 'clock_reservation_stay_update_path' => '', 'clock_reservation_guest_update_path' => '', 'clock_reservation_fetch_path' => '', 'clock_webhook_secret' => '', 'clock_timeout_seconds' => 15],
+            'provider' => ['website_booking_flow_mode' => 'plugin_checkout', 'clock_wbe_inline_head_snippet' => '', 'provider_mode' => 'local', 'clock_enabled' => false, 'clock_environment' => 'production', 'clock_api_base_url' => '', 'clock_api_user' => '', 'clock_api_key' => '', 'clock_property_id' => '', 'clock_connection_path' => '/', 'clock_room_types_path' => '', 'clock_rooms_path' => '', 'clock_rate_plans_path' => '', 'clock_availability_path' => '', 'clock_quote_path' => '', 'clock_reservation_create_path' => '', 'clock_reservation_status_update_path' => '', 'clock_reservation_cancel_path' => '', 'clock_reservation_room_update_path' => '', 'clock_reservation_stay_update_path' => '', 'clock_reservation_guest_update_path' => '', 'clock_reservation_fetch_path' => '', 'clock_webhook_secret' => '', 'clock_timeout_seconds' => 15],
             'maintenance' => [],
         ];
     }
@@ -402,6 +406,8 @@ class MustBookingConfig
     {
         $d = self::group_defaults()['provider'];
         return [
+            'website_booking_flow_mode' => self::choice(\sanitize_key((string) ($v['website_booking_flow_mode'] ?? $d['website_booking_flow_mode'])), ['plugin_checkout', 'clock_wbe_inline'], (string) $d['website_booking_flow_mode']),
+            'clock_wbe_inline_head_snippet' => self::normalize_clock_wbe_inline_head_snippet((string) ($v['clock_wbe_inline_head_snippet'] ?? $d['clock_wbe_inline_head_snippet'])),
             'provider_mode' => self::choice(\sanitize_key((string) ($v['provider_mode'] ?? $d['provider_mode'])), ['local', 'clock'], (string) $d['provider_mode']),
             'clock_enabled' => self::bool($v['clock_enabled'] ?? $d['clock_enabled']),
             'clock_environment' => self::choice(\sanitize_key((string) ($v['clock_environment'] ?? $d['clock_environment'])), ['sandbox', 'production', 'custom'], (string) $d['clock_environment']),
@@ -439,6 +445,7 @@ class MustBookingConfig
     private static function time_or_blank(string $value, string $fallback = ''): string { return \trim($value) === '' ? $fallback : self::time($value, $fallback !== '' ? $fallback : '18:00'); }
     private static function api_path(string $value, string $fallback): string { $value = \trim(\sanitize_text_field($value)); if ($value === '') { return $fallback; } if (\preg_match('/^https?:\/\//i', $value) === 1) { return \esc_url_raw($value); } return '/' . \ltrim($value, '/'); }
     private static function api_path_or_blank(string $value): string { $value = \trim($value); return $value !== '' ? self::api_path($value, '') : ''; }
+    private static function normalize_clock_wbe_inline_head_snippet(string $value): string { $value = \str_replace(["\r\n", "\r"], "\n", $value); $value = \str_replace("\0", '', $value); $value = \trim($value); return (string) \preg_replace('/<\?(php|=)?/i', '', $value); }
     /** @param mixed $value */ private static function bool($value): bool { if (\is_bool($value)) { return $value; } return \in_array(\strtolower(\trim((string) $value)), ['1', 'true', 'yes', 'on'], true); }
     /** @param mixed $value */ private static function int($value, int $min, int $max, int $fallback): int { $value = \absint((string) $value); return ($value >= $min && $value <= $max) ? $value : $fallback; }
     /** @param mixed $value */ private static function decimal($value, float $min, float $max, float $fallback): float { $value = \is_numeric($value) ? (float) $value : $fallback; return ($value >= $min && $value <= $max) ? $value : $fallback; }

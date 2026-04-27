@@ -3,6 +3,7 @@
 namespace MustHotelBooking\Admin;
 
 use MustHotelBooking\Core\PaymentMethodRegistry;
+use MustHotelBooking\Frontend\ClockWbeFrontend;
 use MustHotelBooking\Provider\ProviderReservationActionPolicy;
 use MustHotelBooking\Provider\ProviderReservationView;
 
@@ -273,6 +274,15 @@ function render_admin_reservations_notice_from_query(): void
     $class = $type === 'success' ? 'notice notice-success' : ($type === 'warning' ? 'notice notice-warning' : 'notice notice-error');
 
     echo '<div class="' . \esc_attr($class) . '"><p>' . \esc_html($message) . '</p></div>';
+}
+
+function render_admin_clock_wbe_inline_notice(): void
+{
+    if (!ClockWbeFrontend::isClockWbeInlineMode()) {
+        return;
+    }
+
+    echo '<div class="notice notice-warning inline"><p>' . \esc_html(ClockWbeFrontend::getOperationalWarningMessage()) . '</p></div>';
 }
 
 function get_admin_reservation_badge_tone(string $key): string
@@ -1549,6 +1559,7 @@ function render_admin_reservations_page(): void
     echo '</div>';
 
     render_admin_reservations_notice_from_query();
+    render_admin_clock_wbe_inline_notice();
     render_admin_reservations_overview($quickFilters);
     render_admin_reservations_quick_filters($quickFilters);
     render_admin_reservations_filters($filters, $pageData);
@@ -1573,6 +1584,7 @@ function render_admin_reservation_detail_page(): void
 
     echo '<div class="wrap">';
     render_admin_reservations_notice_from_query();
+    render_admin_clock_wbe_inline_notice();
 
     if (!\is_array($detailData)) {
         echo '<h1>' . \esc_html__('Reservation not found', 'must-hotel-booking') . '</h1>';
@@ -1619,6 +1631,7 @@ function render_admin_reservation_create_page(): void
     echo '</div>';
 
     render_admin_reservations_notice_from_query();
+    render_admin_clock_wbe_inline_notice();
 
     if (\function_exists(__NAMESPACE__ . '\render_admin_quick_booking_panel')) {
         render_admin_quick_booking_panel(

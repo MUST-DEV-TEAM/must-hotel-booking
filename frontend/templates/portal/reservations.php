@@ -1,6 +1,7 @@
 <?php
 
 use MustHotelBooking\Core\StaffAccess;
+use MustHotelBooking\Frontend\ClockWbeFrontend;
 use MustHotelBooking\Portal\PortalRenderer;
 use MustHotelBooking\Portal\PortalRouter;
 use MustHotelBooking\Provider\ProviderReservationActionPolicy;
@@ -102,6 +103,10 @@ $buildReservationUrl = static function (array $overrides = []) use ($filters): s
 
     return PortalRouter::getModuleUrl('reservations', $args);
 };
+
+if (ClockWbeFrontend::isClockWbeInlineMode()) {
+    echo '<section class="must-portal-panel"><div class="must-portal-panel-header"><div><h2>' . \esc_html__('Clock WBE Inline active', 'must-hotel-booking') . '</h2><p>' . \esc_html(ClockWbeFrontend::getOperationalWarningMessage()) . '</p></div></div></section>';
+}
 
 if (\is_array($detail)) {
     $reservationId = isset($detail['id']) ? (int) $detail['id'] : 0;

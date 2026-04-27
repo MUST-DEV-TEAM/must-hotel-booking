@@ -7,6 +7,9 @@ if (!\defined('ABSPATH')) {
 $view = \must_hotel_booking\get_single_room_page_view_data();
 $success = !empty($view['success']);
 $rooms_url = isset($view['rooms_url']) ? (string) $view['rooms_url'] : '';
+$wbeInlineMode = \MustHotelBooking\Frontend\ClockWbeFrontend::isClockWbeInlineMode();
+$wbeReady = \MustHotelBooking\Frontend\ClockWbeFrontend::shouldRenderInlineBookingUi();
+$wbeWarningMarkup = \MustHotelBooking\Frontend\ClockWbeFrontend::getFrontendConfigurationWarningMarkup();
 ?>
 <?php \get_header(); ?>
 <main class="must-hotel-booking-page must-hotel-booking-page-single-room">
@@ -70,12 +73,21 @@ $rooms_url = isset($view['rooms_url']) ? (string) $view['rooms_url'] : '';
                     <h1 class="must-hotel-booking-single-room-title"><?php echo \esc_html($room_title); ?></h1>
 
                     <div class="must-hotel-booking-single-room-actions">
-                        <a class="must-hotel-booking-single-room-action-link" href="<?php echo \esc_url($booking_url); ?>">
-                            <span><?php echo \esc_html__('Book Now', 'must-hotel-booking'); ?></span>
-                            <?php if ($arrow_icon_url !== '') : ?>
-                                <img src="<?php echo \esc_url($arrow_icon_url); ?>" alt="" aria-hidden="true" />
-                            <?php endif; ?>
-                        </a>
+                        <?php if ($wbeInlineMode && $wbeReady) : ?>
+                            <button type="button" class="must-hotel-booking-single-room-action-link" data-clock-pms-wbe-button>
+                                <span><?php echo \esc_html__('Book Now', 'must-hotel-booking'); ?></span>
+                                <?php if ($arrow_icon_url !== '') : ?>
+                                    <img src="<?php echo \esc_url($arrow_icon_url); ?>" alt="" aria-hidden="true" />
+                                <?php endif; ?>
+                            </button>
+                        <?php elseif (!$wbeInlineMode) : ?>
+                            <a class="must-hotel-booking-single-room-action-link" href="<?php echo \esc_url($booking_url); ?>">
+                                <span><?php echo \esc_html__('Book Now', 'must-hotel-booking'); ?></span>
+                                <?php if ($arrow_icon_url !== '') : ?>
+                                    <img src="<?php echo \esc_url($arrow_icon_url); ?>" alt="" aria-hidden="true" />
+                                <?php endif; ?>
+                            </a>
+                        <?php endif; ?>
                         <a class="must-hotel-booking-single-room-action-link" href="<?php echo \esc_url($inquiry_url); ?>">
                             <span><?php echo \esc_html__('Make an inquiry', 'must-hotel-booking'); ?></span>
                             <?php if ($arrow_icon_url !== '') : ?>
@@ -83,6 +95,10 @@ $rooms_url = isset($view['rooms_url']) ? (string) $view['rooms_url'] : '';
                             <?php endif; ?>
                         </a>
                     </div>
+
+                    <?php if ($wbeInlineMode && !$wbeReady && $wbeWarningMarkup !== '') : ?>
+                        <?php echo $wbeWarningMarkup; // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped ?>
+                    <?php endif; ?>
 
                     <div class="must-hotel-booking-single-room-meta">
                         <p>
@@ -293,12 +309,21 @@ $rooms_url = isset($view['rooms_url']) ? (string) $view['rooms_url'] : '';
                                     <div class="must-hotel-booking-related-room-content">
                                         <h3><?php echo \esc_html($related_room_name); ?></h3>
                                         <div class="must-hotel-booking-related-room-actions">
-                                            <a class="must-hotel-booking-related-room-book" href="<?php echo \esc_url($related_room_booking_url); ?>">
-                                                <span><?php echo \esc_html__('Book Now', 'must-hotel-booking'); ?></span>
-                                                <?php if ($arrow_icon_url !== '') : ?>
-                                                    <img src="<?php echo \esc_url($arrow_icon_url); ?>" alt="" aria-hidden="true" />
-                                                <?php endif; ?>
-                                            </a>
+                                            <?php if ($wbeInlineMode && $wbeReady) : ?>
+                                                <button type="button" class="must-hotel-booking-related-room-book" data-clock-pms-wbe-button>
+                                                    <span><?php echo \esc_html__('Book Now', 'must-hotel-booking'); ?></span>
+                                                    <?php if ($arrow_icon_url !== '') : ?>
+                                                        <img src="<?php echo \esc_url($arrow_icon_url); ?>" alt="" aria-hidden="true" />
+                                                    <?php endif; ?>
+                                                </button>
+                                            <?php elseif (!$wbeInlineMode) : ?>
+                                                <a class="must-hotel-booking-related-room-book" href="<?php echo \esc_url($related_room_booking_url); ?>">
+                                                    <span><?php echo \esc_html__('Book Now', 'must-hotel-booking'); ?></span>
+                                                    <?php if ($arrow_icon_url !== '') : ?>
+                                                        <img src="<?php echo \esc_url($arrow_icon_url); ?>" alt="" aria-hidden="true" />
+                                                    <?php endif; ?>
+                                                </a>
+                                            <?php endif; ?>
                                             <?php if ($related_room_url !== '') : ?>
                                                 <a class="must-hotel-booking-related-room-details" href="<?php echo \esc_url($related_room_url); ?>">
                                                     <span><?php echo \esc_html__('Additional Details', 'must-hotel-booking'); ?></span>

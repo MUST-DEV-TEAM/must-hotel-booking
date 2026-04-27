@@ -4,7 +4,7 @@ Tags: hotel, booking, reservation, accommodation
 Requires at least: 5.0
 Tested up to: 6.0
 Requires PHP: 7.4
-Stable tag: 0.4.1
+Stable tag: 0.4.2
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -31,6 +31,13 @@ Main features include:
 5. When updating, upload the new release ZIP or use the configured updater, then review **Diagnostics & Maintenance** after the update completes.
 
 == Changelog ==
+
+= 0.4.2 =
+* Added a separate `website_booking_flow_mode` so public frontend booking can switch between the plugin checkout flow and Clock WBE Inline without changing `provider_mode`.
+* Added Clock WBE Inline frontend support: inject the configured Clock head snippet on normal public pages, open WBE directly from Rooms List and single-room Book Now CTAs, and submit the Booking Search widget through `data-clock-pms-wbe-form`.
+* Bypassed the legacy `/booking`, `/booking-accommodation`, and `/checkout` plugin pages while Clock WBE Inline mode is active, while keeping `/booking-confirmation` available only for recognized local confirmation and cancellation contexts.
+* Added admin and staff warnings clarifying that WBE-origin website bookings are created in Clock and may not appear locally until real Clock API sync is configured.
+* Preserved the existing plugin checkout flow, provider architecture, Stripe settings, and Clock API provider implementation unchanged outside the new public flow mode.
 
 = 0.4.1 =
 * Added optional public booking anti-spam protections with a hidden honeypot, minimum submit-time checks, and configurable throttling for checkout and confirmation submissions.

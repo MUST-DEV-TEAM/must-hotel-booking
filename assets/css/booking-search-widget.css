@@ -32,6 +32,24 @@
     border: 0;
 }
 
+.must-hotel-booking-widget-booking-search .must-hotel-booking-wbe-inline-warning {
+    padding: 18px 20px;
+    border: 1px solid #f2c078;
+    background: #fff4e5;
+    color: #141414;
+}
+
+.must-hotel-booking-widget-booking-search .must-hotel-booking-wbe-inline-warning p {
+    margin: 0;
+    font-size: 15px;
+    line-height: 1.5;
+}
+
+.must-hotel-booking-widget-booking-search .must-hotel-booking-wbe-inline-warning a {
+    color: inherit;
+    font-weight: 600;
+}
+
 .must-hotel-booking-widget-booking-search .must-hotel-booking-booking-search {
     display: flex !important;
     flex-direction: row;

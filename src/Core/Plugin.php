@@ -54,6 +54,7 @@ final class Plugin
         \MustHotelBooking\Engine\AvailabilityAjaxController::registerHooks();
         \MustHotelBooking\Engine\EmailEngine::registerHooks();
         \MustHotelBooking\Portal\PortalBootstrap::registerHooks();
+        \MustHotelBooking\Frontend\ClockWbeFrontend::registerHooks();
 
         \do_action('must_hotel_booking/init');
     }

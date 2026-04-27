@@ -1463,6 +1463,8 @@ final class SettingsPage
     private static function sanitizeProviderForm(array $source): array
     {
         $form = self::getProviderForm([]);
+        $form['website_booking_flow_mode'] = \sanitize_key((string) \wp_unslash($source['website_booking_flow_mode'] ?? $form['website_booking_flow_mode']));
+        $form['clock_wbe_inline_head_snippet'] = (string) \wp_unslash($source['clock_wbe_inline_head_snippet'] ?? $form['clock_wbe_inline_head_snippet']);
         $form['provider_mode'] = \sanitize_key((string) \wp_unslash($source['provider_mode'] ?? $form['provider_mode']));
         $form['clock_enabled'] = self::parseBool($source, 'clock_enabled');
         $form['clock_environment'] = \sanitize_key((string) \wp_unslash($source['clock_environment'] ?? $form['clock_environment']));
@@ -1486,6 +1488,14 @@ final class SettingsPage
         $form['clock_webhook_secret'] = \sanitize_text_field((string) \wp_unslash($source['clock_webhook_secret'] ?? ''));
         $form['clock_timeout_seconds'] = (int) \absint(\wp_unslash($source['clock_timeout_seconds'] ?? $form['clock_timeout_seconds']));
         $errors = [];
+
+        if (!\in_array($form['website_booking_flow_mode'], ['plugin_checkout', 'clock_wbe_inline'], true)) {
+            $form['website_booking_flow_mode'] = 'plugin_checkout';
+        }
+
+        $form['clock_wbe_inline_head_snippet'] = \str_replace(["\r\n", "\r"], "\n", $form['clock_wbe_inline_head_snippet']);
+        $form['clock_wbe_inline_head_snippet'] = \str_replace("\0", '', $form['clock_wbe_inline_head_snippet']);
+        $form['clock_wbe_inline_head_snippet'] = \trim((string) \preg_replace('/<\?(php|=)?/i', '', $form['clock_wbe_inline_head_snippet']));
 
         if (!\in_array($form['provider_mode'], ['local', 'clock'], true)) {
             $form['provider_mode'] = 'local';
@@ -2715,6 +2725,20 @@ final class SettingsPage
         $providerData = isset($diagnostics['provider']) && \is_array($diagnostics['provider']) ? $diagnostics['provider'] : [];
         $summary = ClockConnectionDiagnostic::getConfigSummary();
         $warnings = [];
+        $websiteBookingFlowMode = (string) ($form['website_booking_flow_mode'] ?? 'plugin_checkout');
+        $wbeSnippetConfigured = \trim((string) ($form['clock_wbe_inline_head_snippet'] ?? '')) !== '';
+
+        if ($websiteBookingFlowMode === 'clock_wbe_inline' && !$wbeSnippetConfigured) {
+            $warnings[] = \__('Clock WBE Inline mode is active, but the required head snippet is missing. Inline booking buttons and forms stay hidden until the snippet is configured.', 'must-hotel-booking');
+        }
+
+        if ($websiteBookingFlowMode === 'clock_wbe_inline' && !\is_ssl()) {
+            $warnings[] = \__('Clock WBE Inline requires HTTPS on the public website. This WordPress request is not currently running over HTTPS.', 'must-hotel-booking');
+        }
+
+        if ($websiteBookingFlowMode === 'clock_wbe_inline' && (int) MustBookingConfig::get_setting('page_rooms_id', 0) <= 0) {
+            $warnings[] = \__('No Rooms page is assigned. Direct visits to legacy booking pages will fall back to the site home page while Clock WBE Inline mode is active.', 'must-hotel-booking');
+        }
 
         if ((string) ($form['provider_mode'] ?? 'local') === 'clock' && empty($summary['clock_public_booking_configured'])) {
             $warnings[] = \__('Clock mode is selected, but public booking endpoints or credentials are incomplete. Public booking remains on the booking-ready provider until Clock is configured.', 'must-hotel-booking');
@@ -2730,21 +2754,35 @@ final class SettingsPage
 
         self::renderFormStart('provider');
         self::renderWarnings($warnings);
-        self::renderPanelStart(\__('Provider Mode', 'must-hotel-booking'), \__('Configure the booking backend provider. Clock public booking is only used when credentials and public booking endpoints are configured.', 'must-hotel-booking'));
+        self::renderPanelStart(\__('Website Booking Flow', 'must-hotel-booking'), \__('Choose how public website visitors start booking. Clock WBE Inline launches Clock directly from website buttons and forms on the current page and does not use the plugin checkout flow.', 'must-hotel-booking'));
+        echo '<div class="must-settings-summary-grid">';
+        echo '<article class="must-settings-summary-card"><span class="must-settings-summary-label">' . \esc_html__('Website flow mode', 'must-hotel-booking') . '</span><strong>' . \esc_html($websiteBookingFlowMode === 'clock_wbe_inline' ? __('Clock WBE Inline', 'must-hotel-booking') : __('Plugin checkout', 'must-hotel-booking')) . '</strong></article>';
+        echo '<article class="must-settings-summary-card"><span class="must-settings-summary-label">' . \esc_html__('WBE snippet', 'must-hotel-booking') . '</span><strong>' . \esc_html($wbeSnippetConfigured ? __('Configured', 'must-hotel-booking') : __('Missing', 'must-hotel-booking')) . '</strong></article>';
+        echo '<article class="must-settings-summary-card"><span class="must-settings-summary-label">' . \esc_html__('Public booking ownership', 'must-hotel-booking') . '</span><strong>' . \esc_html($websiteBookingFlowMode === 'clock_wbe_inline' ? __('Clock WBE', 'must-hotel-booking') : __('Plugin checkout', 'must-hotel-booking')) . '</strong></article>';
+        echo '</div>';
+        echo '<div class="must-settings-grid must-settings-grid--2">';
+        self::renderSectionIntro(\__('Website flow mode', 'must-hotel-booking'), \__('Keep provider mode for backend integrations only. Use this separate setting to choose whether the public website uses the plugin checkout flow or opens Clock WBE Inline directly from frontend buttons and forms.', 'must-hotel-booking'));
+        self::renderField(['label' => __('Website booking flow mode', 'must-hotel-booking'), 'name' => 'website_booking_flow_mode', 'type' => 'select', 'value' => $websiteBookingFlowMode, 'options' => ['plugin_checkout' => __('Plugin checkout', 'must-hotel-booking'), 'clock_wbe_inline' => __('Clock WBE Inline', 'must-hotel-booking')]]);
+        self::renderField(['label' => __('Clock WBE head snippet', 'must-hotel-booking'), 'name' => 'clock_wbe_inline_head_snippet', 'type' => 'textarea', 'rows' => 10, 'value' => $form['clock_wbe_inline_head_snippet'] ?? '', 'description' => __('Paste the Clock head snippet exactly as provided by Clock. The plugin injects it on normal public frontend pages while Clock WBE Inline mode is active. Public WBE bookings are created in Clock and may not appear locally until real Clock API sync is configured.', 'must-hotel-booking')]);
+        echo '</div>';
+        echo '<p class="description">' . \esc_html__('Clock WBE Inline requirements: use HTTPS, allowlist the hotel domain in Clock WBE settings, and place launcher buttons/forms only on pages where guests should start booking.', 'must-hotel-booking') . '</p>';
+        self::renderPanelEnd();
+
+        self::renderPanelStart(\__('Backend Provider Mode', 'must-hotel-booking'), \__('Configure the backend reservation provider. This remains separate from the website booking flow mode above.', 'must-hotel-booking'));
         echo '<div class="must-settings-summary-grid">';
         echo '<article class="must-settings-summary-card"><span class="must-settings-summary-label">' . \esc_html__('Configured mode', 'must-hotel-booking') . '</span><strong>' . \esc_html((string) ($summary['provider_mode'] ?? 'local')) . '</strong></article>';
         echo '<article class="must-settings-summary-card"><span class="must-settings-summary-label">' . \esc_html__('Active booking runtime', 'must-hotel-booking') . '</span><strong>' . \esc_html((string) ($summary['active_booking_provider'] ?? ProviderManager::activeKey())) . '</strong></article>';
         echo '<article class="must-settings-summary-card"><span class="must-settings-summary-label">' . \esc_html__('Clock config', 'must-hotel-booking') . '</span><strong>' . \esc_html(!empty($summary['clock_configured']) ? __('Configured', 'must-hotel-booking') : __('Incomplete', 'must-hotel-booking')) . '</strong></article>';
         echo '<article class="must-settings-summary-card"><span class="must-settings-summary-label">' . \esc_html__('Catalog paths', 'must-hotel-booking') . '</span><strong>' . \esc_html((string) ($summary['clock_catalog_paths_configured'] ?? 0)) . '</strong></article>';
-        echo '<article class="must-settings-summary-card"><span class="must-settings-summary-label">' . \esc_html__('Public booking paths', 'must-hotel-booking') . '</span><strong>' . \esc_html((string) ($summary['clock_public_booking_paths_configured'] ?? 0)) . '</strong></article>';
+        echo '<article class="must-settings-summary-card"><span class="must-settings-summary-label">' . \esc_html__('Clock API public booking paths', 'must-hotel-booking') . '</span><strong>' . \esc_html((string) ($summary['clock_public_booking_paths_configured'] ?? 0)) . '</strong></article>';
         echo '<article class="must-settings-summary-card"><span class="must-settings-summary-label">' . \esc_html__('Reconciliation paths', 'must-hotel-booking') . '</span><strong>' . \esc_html((string) ($summary['clock_reconciliation_paths_configured'] ?? 0)) . '</strong></article>';
         echo '<article class="must-settings-summary-card"><span class="must-settings-summary-label">' . \esc_html__('Inbound webhook', 'must-hotel-booking') . '</span><strong>' . \esc_html(!empty($summary['clock_webhook_secret_set']) ? __('Secret set', 'must-hotel-booking') : __('Secret missing', 'must-hotel-booking')) . '</strong></article>';
         echo '</div>';
 
         echo '<div class="must-settings-grid must-settings-grid--2">';
-        self::renderSectionIntro(\__('Mode selection', 'must-hotel-booking'), \__('Local is the default booking backend. Clock can serve the public booking flow when credentials, endpoints, and mappings are ready.', 'must-hotel-booking'));
+        self::renderSectionIntro(\__('Mode selection', 'must-hotel-booking'), \__('Local is the default backend provider. Clock can serve the real provider-based public booking flow only when API credentials, endpoints, and mappings are ready.', 'must-hotel-booking'));
         self::renderField(['label' => __('Provider mode', 'must-hotel-booking'), 'name' => 'provider_mode', 'type' => 'select', 'value' => $form['provider_mode'] ?? 'local', 'options' => ['local' => __('Local', 'must-hotel-booking'), 'clock' => __('Clock', 'must-hotel-booking')]]);
-        self::renderField(['label' => __('Enable Clock configuration', 'must-hotel-booking'), 'name' => 'clock_enabled', 'type' => 'checkbox', 'value' => !empty($form['clock_enabled']), 'description' => __('Allows backend diagnostics, catalog reads, and Clock public booking when required endpoint paths are configured.', 'must-hotel-booking')]);
+        self::renderField(['label' => __('Enable Clock configuration', 'must-hotel-booking'), 'name' => 'clock_enabled', 'type' => 'checkbox', 'value' => !empty($form['clock_enabled']), 'description' => __('Allows backend diagnostics, catalog reads, and the real Clock API provider flow when required endpoint paths are configured.', 'must-hotel-booking')]);
         self::renderField(['label' => __('Clock environment', 'must-hotel-booking'), 'name' => 'clock_environment', 'type' => 'select', 'value' => $form['clock_environment'] ?? 'production', 'options' => ['production' => __('Production', 'must-hotel-booking'), 'sandbox' => __('Sandbox / test', 'must-hotel-booking'), 'custom' => __('Custom', 'must-hotel-booking')]]);
         self::renderField(['label' => __('Request timeout (seconds)', 'must-hotel-booking'), 'name' => 'clock_timeout_seconds', 'type' => 'number', 'min' => 1, 'max' => 60, 'value' => $form['clock_timeout_seconds'] ?? 15]);
         echo '</div>';
@@ -2766,7 +2804,7 @@ final class SettingsPage
         echo '</div>';
 
         echo '<div class="must-settings-grid must-settings-grid--3">';
-        self::renderSectionIntro(\__('Clock public booking paths', 'must-hotel-booking'), \__('Endpoint paths used by the public provider flow for availability, quotes, and reservation creation.', 'must-hotel-booking'));
+        self::renderSectionIntro(\__('Clock API public booking paths', 'must-hotel-booking'), \__('Endpoint paths used only by the real provider-based Clock API flow for availability, quotes, and reservation creation.', 'must-hotel-booking'));
         self::renderField(['label' => __('Availability path', 'must-hotel-booking'), 'name' => 'clock_availability_path', 'value' => $form['clock_availability_path'] ?? '']);
         self::renderField(['label' => __('Quote path', 'must-hotel-booking'), 'name' => 'clock_quote_path', 'value' => $form['clock_quote_path'] ?? '']);
         self::renderField(['label' => __('Reservation create path', 'must-hotel-booking'), 'name' => 'clock_reservation_create_path', 'value' => $form['clock_reservation_create_path'] ?? '']);

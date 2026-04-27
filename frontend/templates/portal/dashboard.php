@@ -1,5 +1,6 @@
 <?php
 
+use MustHotelBooking\Frontend\ClockWbeFrontend;
 use MustHotelBooking\Portal\PortalRenderer;
 
 $approvalItems = isset($moduleData['approval_items']) && \is_array($moduleData['approval_items']) ? $moduleData['approval_items'] : [];
@@ -29,6 +30,10 @@ if ($showHealth) {
 
 echo '</div>';
 echo '</section>';
+
+if (ClockWbeFrontend::isClockWbeInlineMode()) {
+    echo '<section class="must-portal-panel"><div class="must-portal-panel-header"><div><h2>' . \esc_html__('Clock WBE Inline active', 'must-hotel-booking') . '</h2><p>' . \esc_html(ClockWbeFrontend::getOperationalWarningMessage()) . '</p></div></div></section>';
+}
 
 PortalRenderer::renderSummaryCards((array) ($moduleData['kpis'] ?? []));
 

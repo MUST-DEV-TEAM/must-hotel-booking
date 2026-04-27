@@ -281,18 +281,22 @@
 
             form.dataset.mustHotelBookingReady = '1';
 
+            var bookingMode = String(form.getAttribute('data-must-hotel-booking-mode') || 'plugin_checkout');
+            var isWbeInline = bookingMode === 'clock_wbe_inline';
             var checkinInput = form.querySelector('.must-hotel-booking-checkin');
             var checkoutInput = form.querySelector('.must-hotel-booking-checkout');
             var guestsInput = form.querySelector('.must-hotel-booking-field-guests input[name="guests"]');
 
-            syncLinkedAccommodationTypeInput(form);
-            attachNumericGuestsGuard(guestsInput);
-            sanitizeGuestsValue(guestsInput, true);
-
-            form.addEventListener('submit', function () {
+            if (!isWbeInline) {
                 syncLinkedAccommodationTypeInput(form);
-                sanitizeGuestsValue(guestsInput, false);
-            });
+                attachNumericGuestsGuard(guestsInput);
+                sanitizeGuestsValue(guestsInput, true);
+
+                form.addEventListener('submit', function () {
+                    syncLinkedAccommodationTypeInput(form);
+                    sanitizeGuestsValue(guestsInput, false);
+                });
+            }
 
             if (typeof window.flatpickr !== 'function' || !checkinInput || !checkoutInput) {
                 return;
