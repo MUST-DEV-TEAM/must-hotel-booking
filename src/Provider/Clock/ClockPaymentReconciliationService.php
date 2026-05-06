@@ -40,6 +40,10 @@ final class ClockPaymentReconciliationService
     /** @param array<int, int> $reservationIds */
     public function reconcilePaymentSucceeded(array $reservationIds, string $paymentMethod = 'stripe', string $transactionId = ''): void
     {
+        if (!$this->directReservationUpdateSupported()) {
+            return;
+        }
+
         foreach ($this->clockReservationRows($reservationIds) as $row) {
             $this->reconcileRow($row, [
                 'operation' => 'payment_succeeded',
@@ -60,6 +64,10 @@ final class ClockPaymentReconciliationService
     /** @param array<int, int> $reservationIds */
     public function reconcilePaymentFailed(array $reservationIds, string $reason = 'payment_failed', string $paymentMethod = 'stripe'): void
     {
+        if (!$this->directReservationUpdateSupported()) {
+            return;
+        }
+
         $reason = \sanitize_key($reason);
 
         if (!\in_array($reason, ['payment_failed', 'expired', 'cancelled'], true)) {
@@ -88,6 +96,10 @@ final class ClockPaymentReconciliationService
      */
     public function cancelReservation(int $reservationId, string $reason = 'admin_cancelled', string $source = 'admin'): array
     {
+        if (!$this->directReservationUpdateSupported()) {
+            return $this->unsupportedActionResult();
+        }
+
         $rows = $this->clockReservationRows([$reservationId]);
         $row = isset($rows[0]) && \is_array($rows[0]) ? $rows[0] : [];
 
@@ -144,6 +156,10 @@ final class ClockPaymentReconciliationService
      */
     public function checkInReservation(int $reservationId, string $source = 'admin'): array
     {
+        if (!$this->directReservationUpdateSupported()) {
+            return $this->unsupportedActionResult();
+        }
+
         $rows = $this->clockReservationRows([$reservationId]);
         $row = isset($rows[0]) && \is_array($rows[0]) ? $rows[0] : [];
 
@@ -189,6 +205,10 @@ final class ClockPaymentReconciliationService
      */
     public function checkOutReservation(int $reservationId, string $source = 'admin'): array
     {
+        if (!$this->directReservationUpdateSupported()) {
+            return $this->unsupportedActionResult();
+        }
+
         $rows = $this->clockReservationRows([$reservationId]);
         $row = isset($rows[0]) && \is_array($rows[0]) ? $rows[0] : [];
 
@@ -243,6 +263,10 @@ final class ClockPaymentReconciliationService
      */
     public function assignRoom(int $reservationId, int $targetRoomId, string $source = 'admin'): array
     {
+        if (!$this->directReservationUpdateSupported()) {
+            return $this->unsupportedActionResult();
+        }
+
         $row = \MustHotelBooking\Engine\get_reservation_repository()->getReservation($reservationId);
 
         if (!\is_array($row) || (string) ($row['provider'] ?? '') !== ProviderManager::CLOCK_MODE) {
@@ -325,6 +349,10 @@ final class ClockPaymentReconciliationService
      */
     public function updateStayDates(int $reservationId, string $checkin, string $checkout, string $source = 'admin'): array
     {
+        if (!$this->directReservationUpdateSupported()) {
+            return $this->unsupportedActionResult();
+        }
+
         $row = \MustHotelBooking\Engine\get_reservation_repository()->getReservation($reservationId);
 
         if (!\is_array($row) || (string) ($row['provider'] ?? '') !== ProviderManager::CLOCK_MODE) {
@@ -424,6 +452,10 @@ final class ClockPaymentReconciliationService
      */
     public function updateGuestDetails(int $reservationId, array $guestData, string $source = 'admin'): array
     {
+        if (!$this->directReservationUpdateSupported()) {
+            return $this->unsupportedActionResult();
+        }
+
         $row = \MustHotelBooking\Engine\get_reservation_repository()->getAdminReservationDetails($reservationId);
 
         if (!\is_array($row) || (string) ($row['provider'] ?? '') !== ProviderManager::CLOCK_MODE) {
@@ -471,6 +503,14 @@ final class ClockPaymentReconciliationService
      */
     public function executeSyncJob(array $job): array
     {
+        if (!$this->directReservationUpdateSupported()) {
+            return [
+                'success' => false,
+                'retry' => false,
+                'message' => \__('Direct Clock API reservation sync/update adapters are not implemented yet.', 'must-hotel-booking'),
+            ];
+        }
+
         $operation = isset($job['operation']) ? \sanitize_key((string) $job['operation']) : '';
         $reservationId = isset($job['target_local_id']) ? (int) $job['target_local_id'] : 0;
         $payload = $this->decodePayload($job['payload'] ?? null);
@@ -1949,6 +1989,23 @@ final class ClockPaymentReconciliationService
     private function idempotencyKey(int $reservationId, string $externalId, string $providerStatus, string $providerPaymentStatus, string $context = ''): string
     {
         return 'mhb-clock-reconcile-' . \substr(\hash('sha256', $reservationId . '|' . $externalId . '|' . $providerStatus . '|' . $providerPaymentStatus . '|' . $context), 0, 48);
+    }
+
+    private function directReservationUpdateSupported(): bool
+    {
+        return false;
+    }
+
+    /**
+     * @return array{success: bool, queued: bool, message: string}
+     */
+    private function unsupportedActionResult(): array
+    {
+        return [
+            'success' => false,
+            'queued' => false,
+            'message' => \__('Direct Clock API reservation update/cancellation adapters are not implemented yet.', 'must-hotel-booking'),
+        ];
     }
 
     /** @param array<string, mixed> $row */

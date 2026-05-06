@@ -7,6 +7,15 @@ use MustHotelBooking\Provider\ProviderManager;
 
 final class ClockConfig
 {
+    /** @var array<string, string> */
+    private const CATALOG_DEFAULT_PATHS = [
+        'room_types' => '/room_types',
+        'rooms' => '/rooms',
+        'rates' => '/rates',
+        'wbe_room_type_rates' => '/rates',
+        'rate_plans' => '/rate_plans',
+    ];
+
     /** @return array<string, mixed> */
     public static function settings(): array
     {
@@ -20,17 +29,49 @@ final class ClockConfig
 
     public static function isConfigured(): bool
     {
-        $settings = self::settings();
+        return empty(self::configurationErrors());
+    }
 
-        return self::isEnabled()
-            && self::baseUrl() !== ''
-            && (string) ($settings['clock_api_user'] ?? '') !== ''
-            && (string) ($settings['clock_api_key'] ?? '') !== '';
+    public static function isDirectApiConfigured(): bool
+    {
+        return empty(self::directApiConfigurationErrors());
+    }
+
+    public static function isDirectPublicBookingReady(): bool
+    {
+        return false;
     }
 
     public static function baseUrl(): string
     {
         return \rtrim((string) (self::settings()['clock_api_base_url'] ?? ''), "/ \t\n\r\0\x0B");
+    }
+
+    public static function resolvedBaseUrl(string $apiType = ''): string
+    {
+        $url = ClockEndpointResolver::buildUrl($apiType !== '' ? $apiType : self::apiType(), '/');
+
+        return \rtrim($url, '/');
+    }
+
+    public static function region(): string
+    {
+        return ClockEndpointResolver::normalizeRegion((string) (self::settings()['clock_region'] ?? ''));
+    }
+
+    public static function apiType(): string
+    {
+        return ClockEndpointResolver::normalizeApiType((string) (self::settings()['clock_api_type'] ?? 'pms_api'));
+    }
+
+    public static function subscriptionId(): string
+    {
+        return ClockEndpointResolver::normalizeNumericId((string) (self::settings()['clock_subscription_id'] ?? ''));
+    }
+
+    public static function accountId(): string
+    {
+        return ClockEndpointResolver::normalizeNumericId((string) (self::settings()['clock_account_id'] ?? ''));
     }
 
     public static function apiUser(): string
@@ -45,12 +86,39 @@ final class ClockConfig
 
     public static function propertyId(): string
     {
-        return (string) (self::settings()['clock_property_id'] ?? '');
+        return \function_exists('sanitize_text_field')
+            ? \sanitize_text_field((string) (self::settings()['clock_property_id'] ?? ''))
+            : \trim((string) (self::settings()['clock_property_id'] ?? ''));
     }
 
     public static function environment(): string
     {
         return (string) (self::settings()['clock_environment'] ?? 'production');
+    }
+
+    public static function pmsApiEnabled(): bool
+    {
+        return !empty(self::settings()['clock_pms_api_enabled']);
+    }
+
+    public static function baseApiEnabled(): bool
+    {
+        return !empty(self::settings()['clock_base_api_enabled']);
+    }
+
+    public static function isPmsApiConfigured(): bool
+    {
+        return self::pmsApiEnabled() && empty(self::configurationErrors());
+    }
+
+    public static function isBaseApiConfigured(): bool
+    {
+        return self::baseApiEnabled() && empty(self::baseApiConfigurationErrors());
+    }
+
+    public static function allowLocalFallback(): bool
+    {
+        return !empty(self::settings()['fallback_to_local_when_clock_unavailable']);
     }
 
     public static function timeoutSeconds(): int
@@ -60,7 +128,9 @@ final class ClockConfig
 
     public static function connectionPath(): string
     {
-        return self::normalizePath((string) (self::settings()['clock_connection_path'] ?? '/'));
+        $path = self::normalizeOptionalPath((string) (self::settings()['clock_connection_path'] ?? ''));
+
+        return $path !== '' ? $path : self::CATALOG_DEFAULT_PATHS['room_types'];
     }
 
     public static function availabilityPath(): string
@@ -113,15 +183,71 @@ final class ClockConfig
         return (string) (self::settings()['clock_webhook_secret'] ?? '');
     }
 
+    public static function wbeHotelId(): string
+    {
+        return ClockEndpointResolver::normalizeNumericId((string) (self::settings()['clock_wbe_hotel_id'] ?? ''));
+    }
+
     /** @return array<string, string> */
     public static function catalogPaths(): array
     {
         $settings = self::settings();
 
         return [
-            'room_types' => self::normalizeOptionalPath((string) ($settings['clock_room_types_path'] ?? '')),
-            'rooms' => self::normalizeOptionalPath((string) ($settings['clock_rooms_path'] ?? '')),
-            'rate_plans' => self::normalizeOptionalPath((string) ($settings['clock_rate_plans_path'] ?? '')),
+            'room_types' => self::pathOrDefault((string) ($settings['clock_room_types_path'] ?? ''), self::CATALOG_DEFAULT_PATHS['room_types']),
+            'rooms' => self::pathOrDefault((string) ($settings['clock_rooms_path'] ?? ''), self::CATALOG_DEFAULT_PATHS['rooms']),
+            'rates' => self::pathOrDefault((string) ($settings['clock_rates_path'] ?? ''), self::CATALOG_DEFAULT_PATHS['rates']),
+            'wbe_room_type_rates' => self::pathOrDefault((string) ($settings['clock_wbe_room_type_rates_path'] ?? ''), self::CATALOG_DEFAULT_PATHS['wbe_room_type_rates']),
+            'rate_plans' => self::pathOrDefault((string) ($settings['clock_rate_plans_path'] ?? ''), self::CATALOG_DEFAULT_PATHS['rate_plans']),
+        ];
+    }
+
+    /** @return array<string, array<string, mixed>> */
+    public static function catalogEndpoints(): array
+    {
+        $paths = self::catalogPaths();
+
+        return [
+            'room_types' => [
+                'label' => \__('Clock room types', 'must-hotel-booking'),
+                'api_type' => 'pms_api',
+                'path' => $paths['room_types'],
+                'query' => [],
+                'operation' => 'clock.catalog.room_types',
+                'endpoint_name' => 'room_types',
+            ],
+            'rooms' => [
+                'label' => \__('Clock physical rooms', 'must-hotel-booking'),
+                'api_type' => 'pms_api',
+                'path' => $paths['rooms'],
+                'query' => [],
+                'operation' => 'clock.catalog.rooms',
+                'endpoint_name' => 'rooms',
+            ],
+            'rates' => [
+                'label' => \__('Clock rates', 'must-hotel-booking'),
+                'api_type' => 'pms_api',
+                'path' => $paths['rates'],
+                'query' => [],
+                'operation' => 'clock.catalog.rates',
+                'endpoint_name' => 'rates',
+            ],
+            'wbe_room_type_rates' => [
+                'label' => \__('Clock WBE room-type rates', 'must-hotel-booking'),
+                'api_type' => 'pms_api',
+                'path' => $paths['wbe_room_type_rates'],
+                'query' => ['wbe.eq' => 'true', 'bookable_type.eq' => 'Pms::RoomType'],
+                'operation' => 'clock.catalog.wbe_room_type_rates',
+                'endpoint_name' => 'wbe_room_type_rates',
+            ],
+            'rate_plans' => [
+                'label' => \__('Clock rate plans', 'must-hotel-booking'),
+                'api_type' => 'pms_api',
+                'path' => $paths['rate_plans'],
+                'query' => [],
+                'operation' => 'clock.catalog.rate_plans',
+                'endpoint_name' => 'rate_plans',
+            ],
         ];
     }
 
@@ -163,32 +289,31 @@ final class ClockConfig
 
     public static function isPublicBookingConfigured(): bool
     {
-        return empty(self::publicBookingConfigurationErrors());
+        return self::isDirectPublicBookingReady();
     }
 
     /** @return array<int, string> */
     public static function publicBookingConfigurationErrors(): array
     {
+        return self::directPublicBookingReadinessErrors();
+    }
+
+    /** @return array<int, string> */
+    public static function directApiConfigurationErrors(): array
+    {
         $errors = self::configurationErrors();
-        $paths = self::publicBookingPaths();
-
-        if ($paths['availability'] === '') {
-            $errors[] = \__('Clock availability endpoint path is missing.', 'must-hotel-booking');
-        }
-
-        if ($paths['quote'] === '') {
-            $errors[] = \__('Clock quote endpoint path is missing.', 'must-hotel-booking');
-        }
-
-        if ($paths['reservation_create'] === '') {
-            $errors[] = \__('Clock reservation create endpoint path is missing.', 'must-hotel-booking');
-        }
-
-        if (self::propertyId() === '') {
-            $errors[] = \__('Clock property / hotel ID is missing.', 'must-hotel-booking');
-        }
 
         return $errors;
+    }
+
+    /** @return array<int, string> */
+    public static function directPublicBookingReadinessErrors(): array
+    {
+        $errors = self::configurationErrors();
+
+        $errors[] = \__('Direct Clock API public booking adapters are not implemented yet. Availability, quote, and reservation-create schemas must be built against Clock PMS+ endpoints before this mode can take bookings.', 'must-hotel-booking');
+
+        return \array_values(\array_unique($errors));
     }
 
     /** @return array<int, string> */
@@ -200,8 +325,12 @@ final class ClockConfig
             $errors[] = \__('Clock integration is disabled.', 'must-hotel-booking');
         }
 
-        if (self::baseUrl() === '') {
-            $errors[] = \__('Clock API base URL is missing.', 'must-hotel-booking');
+        if (!self::pmsApiEnabled()) {
+            $errors[] = \__('Clock PMS API access is disabled in settings.', 'must-hotel-booking');
+        }
+
+        foreach (ClockEndpointResolver::configurationErrors() as $error) {
+            $errors[] = $error;
         }
 
         if (self::apiUser() === '') {
@@ -212,7 +341,35 @@ final class ClockConfig
             $errors[] = \__('Clock API key is missing.', 'must-hotel-booking');
         }
 
-        return $errors;
+        return \array_values(\array_unique($errors));
+    }
+
+    /** @return array<int, string> */
+    public static function baseApiConfigurationErrors(): array
+    {
+        $errors = [];
+
+        if (!self::isEnabled()) {
+            $errors[] = \__('Clock integration is disabled.', 'must-hotel-booking');
+        }
+
+        if (!self::baseApiEnabled()) {
+            $errors[] = \__('Clock Base API access is disabled in settings.', 'must-hotel-booking');
+        }
+
+        foreach (ClockEndpointResolver::configurationErrors() as $error) {
+            $errors[] = $error;
+        }
+
+        if (self::apiUser() === '') {
+            $errors[] = \__('Clock API user is missing.', 'must-hotel-booking');
+        }
+
+        if (self::apiKey() === '') {
+            $errors[] = \__('Clock API key is missing.', 'must-hotel-booking');
+        }
+
+        return \array_values(\array_unique($errors));
     }
 
     /** @return array<string, mixed> */
@@ -223,49 +380,42 @@ final class ClockConfig
         $publicBookingPaths = self::publicBookingPaths();
         $reconciliationPaths = self::reconciliationPaths();
         $inboundSyncPaths = self::inboundSyncPaths();
-        $configuredCatalogPaths = 0;
-        $configuredPublicBookingPaths = 0;
-        $configuredReconciliationPaths = 0;
-        $configuredInboundSyncPaths = 0;
-
-        foreach ($catalogPaths as $path) {
-            if ($path !== '') {
-                $configuredCatalogPaths++;
-            }
-        }
-
-        foreach ($publicBookingPaths as $path) {
-            if ($path !== '') {
-                $configuredPublicBookingPaths++;
-            }
-        }
-
-        foreach ($reconciliationPaths as $path) {
-            if ($path !== '') {
-                $configuredReconciliationPaths++;
-            }
-        }
-
-        foreach ($inboundSyncPaths as $path) {
-            if ($path !== '') {
-                $configuredInboundSyncPaths++;
-            }
-        }
+        $configuredCatalogPaths = self::configuredPathCount($catalogPaths);
+        $configuredPublicBookingPaths = self::configuredPathCount($publicBookingPaths);
+        $configuredReconciliationPaths = self::configuredPathCount($reconciliationPaths);
+        $configuredInboundSyncPaths = self::configuredPathCount($inboundSyncPaths);
 
         return [
             'provider_mode' => ProviderManager::getConfiguredMode(),
             'configured_provider' => $configuredProvider ? $configuredProvider->getKey() : '',
             'active_booking_provider' => ProviderManager::activeKey(),
+            'fallback_to_local_when_clock_unavailable' => self::allowLocalFallback(),
             'clock_enabled' => self::isEnabled(),
             'clock_configured' => self::isConfigured(),
+            'clock_direct_api_configured' => self::isDirectApiConfigured(),
+            'clock_direct_public_booking_ready' => self::isDirectPublicBookingReady(),
+            'clock_direct_public_booking_errors' => self::directPublicBookingReadinessErrors(),
             'clock_environment' => self::environment(),
-            'clock_base_url' => self::baseUrl(),
+            'clock_pms_api_enabled' => self::pmsApiEnabled(),
+            'clock_pms_api_configured' => self::isPmsApiConfigured(),
+            'clock_base_api_enabled' => self::baseApiEnabled(),
+            'clock_base_api_configured' => self::isBaseApiConfigured(),
+            'clock_region' => self::region(),
+            'clock_api_type' => self::apiType(),
+            'clock_subscription_id' => self::subscriptionId(),
+            'clock_account_id' => self::accountId(),
+            'clock_base_url' => self::resolvedBaseUrl(),
+            'clock_pms_base_url' => self::resolvedBaseUrl('pms_api'),
+            'clock_base_api_url' => self::resolvedBaseUrl('base_api'),
+            'clock_legacy_base_url' => self::baseUrl(),
             'clock_api_user_set' => self::apiUser() !== '',
             'clock_api_key_set' => self::apiKey() !== '',
             'clock_property_id' => self::propertyId(),
+            'clock_wbe_hotel_id' => self::wbeHotelId(),
             'clock_timeout_seconds' => self::timeoutSeconds(),
             'clock_connection_path' => self::connectionPath(),
             'clock_catalog_paths_configured' => $configuredCatalogPaths,
+            'clock_catalog_endpoints' => self::catalogEndpoints(),
             'clock_public_booking_paths_configured' => $configuredPublicBookingPaths,
             'clock_public_booking_configured' => self::isPublicBookingConfigured(),
             'clock_availability_path' => $publicBookingPaths['availability'],
@@ -284,19 +434,23 @@ final class ClockConfig
         ];
     }
 
+    /** @param array<string, string> $paths */
+    private static function configuredPathCount(array $paths): int
+    {
+        $count = 0;
+
+        foreach ($paths as $path) {
+            if ($path !== '') {
+                $count++;
+            }
+        }
+
+        return $count;
+    }
+
     public static function normalizePath(string $path): string
     {
-        $path = \trim($path);
-
-        if ($path === '') {
-            return '/';
-        }
-
-        if (\preg_match('#^https?://#i', $path) === 1) {
-            return \esc_url_raw($path);
-        }
-
-        return '/' . \ltrim($path, '/');
+        return ClockEndpointResolver::normalizePath($path);
     }
 
     public static function normalizeOptionalPath(string $path): string
@@ -304,5 +458,12 @@ final class ClockConfig
         $path = \trim($path);
 
         return $path !== '' ? self::normalizePath($path) : '';
+    }
+
+    private static function pathOrDefault(string $path, string $default): string
+    {
+        $path = self::normalizeOptionalPath($path);
+
+        return $path !== '' ? $path : self::normalizePath($default);
     }
 }

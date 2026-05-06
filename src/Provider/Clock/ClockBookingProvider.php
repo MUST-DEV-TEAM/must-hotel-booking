@@ -32,17 +32,13 @@ final class ClockBookingProvider implements BookingProviderInterface
 
     public function getCapabilities(): ProviderCapabilities
     {
-        return ClockConfig::isPublicBookingConfigured()
-            ? ProviderCapabilities::clockPublicBooking()
-            : ProviderCapabilities::clockScaffold();
+        return ProviderCapabilities::clockScaffold();
     }
 
     public function availability(): AvailabilityProviderInterface
     {
         if (!$this->availability instanceof AvailabilityProviderInterface) {
-            $this->availability = ClockConfig::isPublicBookingConfigured()
-                ? new ClockAvailabilityProvider()
-                : new ClockUnavailableAvailabilityProvider();
+            $this->availability = new ClockUnavailableAvailabilityProvider();
         }
 
         return $this->availability;
@@ -51,9 +47,7 @@ final class ClockBookingProvider implements BookingProviderInterface
     public function quote(): QuoteProviderInterface
     {
         if (!$this->quote instanceof QuoteProviderInterface) {
-            $this->quote = ClockConfig::isPublicBookingConfigured()
-                ? new ClockQuoteProvider()
-                : new ClockUnavailableQuoteProvider();
+            $this->quote = new ClockUnavailableQuoteProvider();
         }
 
         return $this->quote;
@@ -62,9 +56,7 @@ final class ClockBookingProvider implements BookingProviderInterface
     public function reservations(): ReservationProviderInterface
     {
         if (!$this->reservations instanceof ReservationProviderInterface) {
-            $this->reservations = ClockConfig::isPublicBookingConfigured()
-                ? new ClockReservationProvider()
-                : new ClockUnavailableReservationProvider();
+            $this->reservations = new ClockUnavailableReservationProvider();
         }
 
         return $this->reservations;

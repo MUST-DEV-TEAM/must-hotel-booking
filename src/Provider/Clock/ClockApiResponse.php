@@ -42,7 +42,22 @@ final class ClockApiResponse
 
     public function isAuthFailure(): bool
     {
-        return \in_array($this->statusCode, [401, 403], true);
+        return $this->statusCode === 401;
+    }
+
+    public function isForbidden(): bool
+    {
+        return $this->statusCode === 403;
+    }
+
+    public function isRateLimited(): bool
+    {
+        return $this->statusCode === 429;
+    }
+
+    public function isRetryable(): bool
+    {
+        return $this->isRateLimited() || $this->statusCode >= 500 || $this->isConnectivityFailure();
     }
 
     public function isConnectivityFailure(): bool

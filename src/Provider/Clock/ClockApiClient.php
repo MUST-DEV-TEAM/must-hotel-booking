@@ -10,17 +10,25 @@ final class ClockApiClient
     /** @var ProviderRequestLogRepository */
     private $logs;
 
-    public function __construct(?ProviderRequestLogRepository $logs = null)
+    /** @var ClockDigestTransport */
+    private $transport;
+
+    public function __construct(?ProviderRequestLogRepository $logs = null, ?ClockDigestTransport $transport = null)
     {
         $this->logs = $logs ?: new ProviderRequestLogRepository();
+        $this->transport = $transport ?: new ClockDigestTransport();
     }
 
-    /** @param array<string, scalar|array<int, scalar>> $query */
-    public function get(string $path, array $query = [], string $operation = 'clock.get'): ClockApiResponse
+    /**
+     * @param array<string, scalar|array<int, scalar>> $query
+     * @param array<string, mixed> $options
+     */
+    public function get(string $path, array $query = [], string $operation = 'clock.get', array $options = []): ClockApiResponse
     {
+        $options['query'] = $query;
+
         return $this->request('GET', $path, [
-            'query' => $query,
-        ], $operation);
+        ] + $options, $operation);
     }
 
     /**
@@ -32,13 +40,18 @@ final class ClockApiClient
         $method = \strtoupper($method);
         $operation = $operation !== '' ? $operation : 'clock.request';
         $correlationId = $this->correlationId();
-        $url = $this->buildUrl($path, isset($options['query']) && \is_array($options['query']) ? $options['query'] : []);
+        $apiType = isset($options['api_type']) ? ClockEndpointResolver::normalizeApiType((string) $options['api_type']) : ClockConfig::apiType();
+        $endpointName = isset($options['endpoint_name']) ? \sanitize_key((string) $options['endpoint_name']) : $operation;
+        $url = $this->buildUrl($path, isset($options['query']) && \is_array($options['query']) ? $options['query'] : [], $apiType);
         $requestSummary = [
             'method' => $method,
             'url' => $this->redactUrl($url),
+            'api_type' => $apiType,
+            'endpoint_name' => $endpointName,
             'path' => $path,
             'has_body' => isset($options['body']),
-            'property_id_set' => ClockConfig::propertyId() !== '',
+            'subscription_id_set' => ClockConfig::subscriptionId() !== '',
+            'account_id_set' => ClockConfig::accountId() !== '',
         ];
         $logId = $this->logs->create([
             'provider' => ProviderManager::CLOCK_MODE,
@@ -79,7 +92,7 @@ final class ClockApiClient
             return $response;
         }
 
-        $raw = \wp_remote_request($url, $args);
+        $raw = $this->transport->request($url, $args);
         $duration = $this->durationMs($started);
 
         if (\is_wp_error($raw)) {
@@ -99,7 +112,7 @@ final class ClockApiClient
             $response = new ClockApiResponse($statusCode, $body, $data, '', '', $duration);
 
             if (!$response->isSuccess() && $statusCode >= 400) {
-                $response = new ClockApiResponse($statusCode, $body, $data, 'http_' . $statusCode, $this->extractErrorMessage($data, $body), $duration);
+                $response = new ClockApiResponse($statusCode, $body, $data, $this->errorCodeForStatus($statusCode), $this->extractErrorMessage($data, $body), $duration);
             }
         }
 
@@ -111,14 +124,14 @@ final class ClockApiClient
     /**
      * @param array<string, scalar|array<int, scalar>> $query
      */
-    private function buildUrl(string $path, array $query = []): string
+    private function buildUrl(string $path, array $query = [], string $apiType = ''): string
     {
         $path = \trim($path);
 
         if (\preg_match('#^https?://#i', $path) === 1) {
             $url = $path;
         } else {
-            $url = ClockConfig::baseUrl() . ClockConfig::normalizePath($path);
+            $url = ClockEndpointResolver::buildUrl($apiType !== '' ? $apiType : ClockConfig::apiType(), $path);
         }
 
         if (!empty($query) && \function_exists('add_query_arg')) {
@@ -134,7 +147,6 @@ final class ClockApiClient
         $headers = [
             'Accept' => 'application/json',
             'Content-Type' => 'application/json',
-            'Authorization' => 'Basic ' . \base64_encode(ClockConfig::apiUser() . ':' . ClockConfig::apiKey()),
             'X-MHB-Correlation-ID' => $correlationId,
         ];
 
@@ -156,6 +168,8 @@ final class ClockApiClient
             'duration_ms' => $response->getDurationMs(),
             'response_summary' => [
                 'status_code' => $response->getStatusCode(),
+                'error_category' => $response->getErrorCode(),
+                'retryable' => $this->isRetryable($response),
                 'body_preview' => $this->bodyPreview($response->getBody()),
                 'decoded_type' => \gettype($data),
                 'decoded_keys' => \is_array($data) ? \array_slice(\array_keys($data), 0, 20) : [],
@@ -248,6 +262,40 @@ final class ClockApiClient
     private function redactUrl(string $url): string
     {
         return (string) \preg_replace('/([?&](?:api[_-]?key|key|token|password|secret)=)[^&]+/i', '$1[redacted]', $url);
+    }
+
+    private function errorCodeForStatus(int $statusCode): string
+    {
+        if ($statusCode === 401) {
+            return 'auth_failed';
+        }
+
+        if ($statusCode === 403) {
+            return 'forbidden';
+        }
+
+        if ($statusCode === 404) {
+            return 'bad_endpoint';
+        }
+
+        if ($statusCode === 422) {
+            return 'validation_error';
+        }
+
+        if ($statusCode === 429) {
+            return 'rate_limited';
+        }
+
+        if ($statusCode >= 500) {
+            return 'provider_unavailable';
+        }
+
+        return 'http_' . $statusCode;
+    }
+
+    private function isRetryable(ClockApiResponse $response): bool
+    {
+        return $response->getStatusCode() === 429 || $response->getStatusCode() >= 500 || $response->isConnectivityFailure();
     }
 
     private function correlationId(): string

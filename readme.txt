@@ -4,7 +4,7 @@ Tags: hotel, booking, reservation, accommodation
 Requires at least: 5.0
 Tested up to: 6.0
 Requires PHP: 7.4
-Stable tag: 0.4.3
+Stable tag: 0.4.4
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -31,6 +31,11 @@ Main features include:
 5. When updating, upload the new release ZIP or use the configured updater, then review **Diagnostics & Maintenance** after the update completes.
 
 == Changelog ==
+
+= 0.4.4 =
+* Added structured direct Clock API settings for region, API type, subscription/account IDs, endpoint resolution, and Digest authentication transport.
+* Added Clock catalog fetch/cache diagnostics and mapping helpers for room types, rooms, rates, WBE room-type rates, and rate plans.
+* Made direct Clock API booking and reservation-update paths fail closed with clearer admin diagnostics, retry/error categories, and optional local fallback control while the real adapters remain unavailable.
 
 = 0.4.3 =
 * Restored the guest-count field in the public Booking Search widget UI while keeping the Clock WBE inline form limited to Clock's documented field names.

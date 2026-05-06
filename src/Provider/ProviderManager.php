@@ -40,6 +40,14 @@ final class ProviderManager
 
         $provider = self::configured();
 
+        if (
+            $provider instanceof BookingProviderInterface
+            && $provider->getKey() === self::CLOCK_MODE
+            && !\MustHotelBooking\Provider\Clock\ClockConfig::allowLocalFallback()
+        ) {
+            return $provider;
+        }
+
         if ($provider instanceof BookingProviderInterface && self::isReadyForPublicBooking($provider)) {
             return $provider;
         }

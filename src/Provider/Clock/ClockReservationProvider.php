@@ -58,6 +58,8 @@ final class ClockReservationProvider implements ReservationProviderInterface
 
     public function ensureRoomLock(int $roomId, string $checkin, string $checkout): bool
     {
+        // This is only a local UI/session lock. It is not a Clock PMS+ inventory hold.
+        // A real Clock adapter must re-check provider availability immediately before create.
         if (!$this->availability->checkAvailability($roomId, $checkin, $checkout)) {
             return false;
         }

@@ -10,26 +10,37 @@ final class ClockUnavailableAvailabilityProvider implements AvailabilityProvider
 {
     public function getAvailableRooms(AvailabilitySearchRequest $request): array
     {
-        throw ClockBookingNotEnabledException::forPhase();
+        unset($request);
+
+        return [];
     }
 
     public function getAvailableRoomById(int $roomId, string $checkin, string $checkout, int $guests = 1): ?array
     {
-        throw ClockBookingNotEnabledException::forPhase();
+        return null;
     }
 
     public function getDisabledDates(DisabledDatesRequest $request): array
     {
-        throw ClockBookingNotEnabledException::forPhase();
+        unset($request);
+
+        return [
+            'disabled_checkin_dates' => [],
+            'disabled_checkout_dates' => [],
+        ];
     }
 
     public function checkAvailability(int $roomId, string $checkin, string $checkout, string $excludeSessionId = ''): bool
     {
-        throw ClockBookingNotEnabledException::forPhase();
+        unset($roomId, $checkin, $checkout, $excludeSessionId);
+
+        return false;
     }
 
     public function checkBookingRestrictions(int $roomId, string $checkin, string $checkout): bool
     {
-        throw ClockBookingNotEnabledException::forPhase();
+        unset($roomId, $checkin, $checkout);
+
+        return false;
     }
 }

@@ -11,6 +11,7 @@ use MustHotelBooking\Engine\EmailLayoutEngine;
 use MustHotelBooking\Engine\LockEngine;
 use MustHotelBooking\Engine\PaymentEngine;
 use MustHotelBooking\Provider\Clock\ClockConnectionDiagnostic;
+use MustHotelBooking\Provider\Clock\ClockCatalogService;
 use MustHotelBooking\Provider\ProviderManager;
 use MustHotelBooking\Provider\Storage\ProviderRequestLogRepository;
 use MustHotelBooking\Provider\Storage\ProviderSyncJobRepository;
@@ -270,19 +271,29 @@ final class SettingsDiagnostics
             $warnings++;
         }
 
-        if (!empty($providerSummary['clock_enabled']) && empty($providerSummary['clock_configured'])) {
+        if (!empty($providerSummary['clock_enabled']) && empty($providerSummary['clock_direct_api_configured'])) {
             $warnings++;
         }
 
-        if ((string) $configuredMode === 'clock' && empty($providerSummary['clock_public_booking_configured'])) {
+        if ((string) $configuredMode === 'clock' && empty($providerSummary['clock_direct_public_booking_ready'])) {
             $warnings++;
         }
 
         $syncJobs = new ProviderSyncJobRepository();
         $requestLogs = new ProviderRequestLogRepository();
+        $catalogSummary = ClockCatalogService::getCachedCatalogSummary();
         $syncJobSummary = $syncJobs->getStatusSummary(ProviderManager::CLOCK_MODE);
         $inboundSummary = $requestLogs->getInboundSummary(ProviderManager::CLOCK_MODE);
         $syncJobCounts = isset($syncJobSummary['counts']) && \is_array($syncJobSummary['counts']) ? $syncJobSummary['counts'] : [];
+
+        if ((string) $configuredMode === 'clock' && !empty($providerSummary['clock_direct_api_configured'])) {
+            $catalogErrors = isset($catalogSummary['errors']) && \is_array($catalogSummary['errors']) ? $catalogSummary['errors'] : [];
+
+            if (empty($catalogSummary['last_fetched_at']) || !empty($catalogErrors)) {
+                $warnings++;
+            }
+        }
+
         $syncCronHook = ProviderSyncJobRunner::getCronHook();
         $nextSyncCron = $syncCronHook !== '' ? \wp_next_scheduled($syncCronHook) : false;
         $syncCronScheduled = $nextSyncCron !== false;
@@ -307,6 +318,7 @@ final class SettingsDiagnostics
             'active_booking_provider' => $activeBookingProvider,
             'mode_warning' => $modeWarning,
             'clock' => $providerSummary,
+            'catalog' => $catalogSummary,
             'sync_jobs' => [
                 'summary' => $syncJobSummary,
                 'recent_problem_jobs' => $syncJobs->getRecentProblemJobs(ProviderManager::CLOCK_MODE, 5),
@@ -429,11 +441,35 @@ final class SettingsDiagnostics
         $clock = isset($data['provider']['clock']) && \is_array($data['provider']['clock']) ? $data['provider']['clock'] : [];
         $lines[] = 'Clock Enabled: ' . (!empty($clock['clock_enabled']) ? 'yes' : 'no');
         $lines[] = 'Clock Configured: ' . (!empty($clock['clock_configured']) ? 'yes' : 'no');
+        $lines[] = 'Direct Clock API Configured: ' . (!empty($clock['clock_direct_api_configured']) ? 'yes' : 'no');
+        $lines[] = 'Direct Clock Public Booking Ready: ' . (!empty($clock['clock_direct_public_booking_ready']) ? 'yes' : 'no');
+        $lines[] = 'Fallback To Local When Clock Unavailable: ' . (!empty($clock['fallback_to_local_when_clock_unavailable']) ? 'yes' : 'no');
         $lines[] = 'Clock Environment: ' . (string) ($clock['clock_environment'] ?? '');
+        $lines[] = 'Clock PMS API Enabled: ' . (!empty($clock['clock_pms_api_enabled']) ? 'yes' : 'no');
+        $lines[] = 'Clock PMS API Configured: ' . (!empty($clock['clock_pms_api_configured']) ? 'yes' : 'no');
+        $lines[] = 'Clock Base API Enabled: ' . (!empty($clock['clock_base_api_enabled']) ? 'yes' : 'no');
+        $lines[] = 'Clock Base API Configured: ' . (!empty($clock['clock_base_api_configured']) ? 'yes' : 'no');
+        $lines[] = 'Clock Region: ' . (string) ($clock['clock_region'] ?? '');
+        $lines[] = 'Clock API Type: ' . (string) ($clock['clock_api_type'] ?? '');
+        $lines[] = 'Clock Subscription ID: ' . (string) ($clock['clock_subscription_id'] ?? '');
+        $lines[] = 'Clock Account ID: ' . (string) ($clock['clock_account_id'] ?? '');
+        $lines[] = 'Clock Resolved Base URL: ' . (string) ($clock['clock_base_url'] ?? '');
         $lines[] = 'Clock API User Set: ' . (!empty($clock['clock_api_user_set']) ? 'yes' : 'no');
         $lines[] = 'Clock API Key Set: ' . (!empty($clock['clock_api_key_set']) ? 'yes' : 'no');
         $lines[] = 'Clock Property ID: ' . (string) ($clock['clock_property_id'] ?? '');
+        $lines[] = 'Clock WBE Hotel ID: ' . (string) ($clock['clock_wbe_hotel_id'] ?? '');
         $lines[] = 'Clock Catalog Paths Configured: ' . (string) ($clock['clock_catalog_paths_configured'] ?? 0);
+        $catalog = isset($data['provider']['catalog']) && \is_array($data['provider']['catalog']) ? $data['provider']['catalog'] : [];
+        $catalogCounts = isset($catalog['counts']) && \is_array($catalog['counts']) ? $catalog['counts'] : [];
+        $catalogErrors = isset($catalog['errors']) && \is_array($catalog['errors']) ? $catalog['errors'] : [];
+        $lines[] = 'Clock Catalog Last Fetched: ' . (string) ($catalog['last_fetched_at'] ?? '');
+        $lines[] = 'Clock Catalog Status: ' . (string) ($catalog['status'] ?? '');
+        $lines[] = 'Clock Catalog Room Types: ' . (string) ($catalogCounts['room_types'] ?? 0);
+        $lines[] = 'Clock Catalog Rooms: ' . (string) ($catalogCounts['rooms'] ?? 0);
+        $lines[] = 'Clock Catalog Rates: ' . (string) ($catalogCounts['rates'] ?? 0);
+        $lines[] = 'Clock Catalog WBE Rates: ' . (string) ($catalogCounts['wbe_room_type_rates'] ?? 0);
+        $lines[] = 'Clock Catalog Rate Plans: ' . (string) ($catalogCounts['rate_plans'] ?? 0);
+        $lines[] = 'Clock Catalog Error Count: ' . (string) \count($catalogErrors);
         $lines[] = 'Clock Public Booking Configured: ' . (!empty($clock['clock_public_booking_configured']) ? 'yes' : 'no');
         $lines[] = 'Clock Public Booking Paths Configured: ' . (string) ($clock['clock_public_booking_paths_configured'] ?? 0);
         $lines[] = 'Clock Reconciliation Paths Configured: ' . (string) ($clock['clock_reconciliation_paths_configured'] ?? 0);

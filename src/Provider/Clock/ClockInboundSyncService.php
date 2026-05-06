@@ -25,33 +25,12 @@ final class ClockInboundSyncService
      */
     public function processInboundPayload(array $payload, string $eventId = ''): array
     {
-        $source = $this->reservationSource($payload);
+        unset($eventId);
 
-        if (empty($source)) {
-            return $this->result(false, 422, \__('Clock inbound payload did not include reservation data.', 'must-hotel-booking'));
-        }
-
-        $providerReservationId = $this->firstString($source, ['provider_reservation_id', 'reservation_id', 'id']);
-        $providerBookingId = $this->firstString($source, ['provider_booking_id', 'booking_id', 'confirmation_number', 'reference']);
-
-        if ($providerReservationId === '' && $providerBookingId === '') {
-            return $this->result(false, 422, \__('Clock inbound payload did not include a provider reservation or booking identifier.', 'must-hotel-booking'));
-        }
-
-        $rows = \MustHotelBooking\Engine\get_reservation_repository()->getProviderReservationRowsByExternalIds(
-            ProviderManager::CLOCK_MODE,
-            $providerReservationId,
-            $providerBookingId
-        );
-
-        if (empty($rows)) {
-            return $this->result(false, 404, \__('No local Clock mirror reservation matched the inbound provider identifiers.', 'must-hotel-booking'), [
-                'provider_reservation_id' => $providerReservationId,
-                'provider_booking_id' => $providerBookingId,
-            ]);
-        }
-
-        return $this->applyReservationPayloadToRows($rows, $source, $payload, $eventId, 'webhook');
+        return $this->result(false, 202, \__('Clock webhook payload was authenticated and logged, but direct Clock Message Channel event handling is not implemented yet. No reservation was changed.', 'must-hotel-booking'), [
+            'unsupported' => true,
+            'event_type' => $this->firstString($payload, ['Subject', 'event_type', 'type', 'topic', 'action']),
+        ]);
     }
 
     /**

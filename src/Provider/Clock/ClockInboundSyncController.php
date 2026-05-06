@@ -95,15 +95,17 @@ final class ClockInboundSyncController
         $logId = self::createInboundLog($logs, $payload, $dedupeKey, $body);
         $result = (new ClockInboundSyncService())->processInboundPayload($payload, $eventId);
         $success = !empty($result['success']);
+        $unsupported = !empty($result['unsupported']);
         $status = isset($result['status']) ? (int) $result['status'] : ($success ? 200 : 422);
 
         $logs->complete($logId, [
             'success' => $success ? 1 : 0,
-            'error_code' => $success ? '' : 'inbound_sync_failed',
+            'error_code' => $success ? '' : ($unsupported ? 'unsupported_event' : 'inbound_sync_failed'),
             'error_message' => $success ? '' : (string) ($result['message'] ?? \__('Clock inbound sync failed.', 'must-hotel-booking')),
             'duration_ms' => self::durationMs($started),
             'response_summary' => [
                 'success' => $success,
+                'unsupported' => $unsupported,
                 'reservation_ids' => isset($result['reservation_ids']) && \is_array($result['reservation_ids']) ? \array_map('intval', $result['reservation_ids']) : [],
                 'updated_count' => (int) ($result['updated_count'] ?? 0),
                 'status' => $status,
@@ -112,6 +114,7 @@ final class ClockInboundSyncController
 
         return new \WP_REST_Response([
             'success' => $success,
+            'unsupported' => $unsupported,
             'message' => (string) ($result['message'] ?? ''),
             'reservation_ids' => isset($result['reservation_ids']) && \is_array($result['reservation_ids']) ? \array_map('intval', $result['reservation_ids']) : [],
         ], $status);
