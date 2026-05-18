@@ -4,7 +4,7 @@ Tags: hotel, booking, reservation, accommodation
 Requires at least: 5.0
 Tested up to: 6.0
 Requires PHP: 7.4
-Stable tag: 0.4.4
+Stable tag: 0.4.5
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -31,6 +31,11 @@ Main features include:
 5. When updating, upload the new release ZIP or use the configured updater, then review **Diagnostics & Maintenance** after the update completes.
 
 == Changelog ==
+
+= 0.4.5 =
+* Added PokPay payment method integration for booking deposits and reservation payment tracking.
+* Added PokPay checkout and confirmation handling with frontend status messaging and dashboard/payment diagnostics.
+* Added admin settings and payment views for PokPay configuration, payment state review, and manual operational follow-up.
 
 = 0.4.4 =
 * Added structured direct Clock API settings for region, API type, subscription/account IDs, endpoint resolution, and Digest authentication transport.
