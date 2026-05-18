@@ -389,11 +389,11 @@ function render_payments_page_header(PaymentAdminQuery $query, array $pageData):
     echo '<div class="must-dashboard-hero-copy">';
     echo '<span class="must-dashboard-eyebrow">' . \esc_html__('Payments Ledger Workspace', 'must-hotel-booking') . '</span>';
     echo '<h1>' . \esc_html__('Payments', 'must-hotel-booking') . '</h1>';
-    echo '<p class="description">' . \esc_html__('Manage paid, unpaid, pay-at-hotel, failed, and incomplete booking payments from the same ledger and reservation state used by checkout, Stripe sync, and booking emails.', 'must-hotel-booking') . '</p>';
+    echo '<p class="description">' . \esc_html__('Manage paid, unpaid, pay-at-hotel, failed, and incomplete booking payments from the same ledger and reservation state used by checkout, online payment sync, and booking emails.', 'must-hotel-booking') . '</p>';
     echo '<div class="must-dashboard-hero-meta">';
     echo '<span class="must-dashboard-hero-pill"><strong>' . \esc_html__('Visible Rows', 'must-hotel-booking') . '</strong> ' . \esc_html((string) \count($rows)) . '</span>';
     echo '<span class="must-dashboard-hero-pill"><strong>' . \esc_html__('Filtered Matches', 'must-hotel-booking') . '</strong> ' . \esc_html((string) $totalItems) . '</span>';
-    echo '<span class="must-dashboard-hero-pill"><strong>' . \esc_html__('Active Stripe Profile', 'must-hotel-booking') . '</strong> ' . \esc_html($activeEnvironmentLabel) . '</span>';
+    echo '<span class="must-dashboard-hero-pill"><strong>' . \esc_html__('Active Site Profile', 'must-hotel-booking') . '</strong> ' . \esc_html($activeEnvironmentLabel) . '</span>';
     echo '<span class="must-dashboard-hero-pill"><strong>' . \esc_html__('Enabled Methods', 'must-hotel-booking') . '</strong> ' . \esc_html((string) $enabledMethodCount) . '</span>';
     echo '<span class="must-dashboard-hero-pill"><strong>' . \esc_html__('Needs Review', 'must-hotel-booking') . '</strong> ' . \esc_html($reviewCount) . '</span>';
     echo '</div>';
@@ -453,7 +453,7 @@ function render_payments_filters(array $filters, array $statusOptions, array $re
     echo '<section id="must-payments-filters" class="postbox must-dashboard-panel must-payments-panel">';
     echo '<div class="must-dashboard-panel-inner">';
     echo '<div class="must-dashboard-panel-heading">';
-    echo '<div class="must-dashboard-panel-heading-copy"><h2>' . \esc_html__('Filter Payment Workspace', 'must-hotel-booking') . '</h2><p>' . \esc_html__('Search by booking, guest, Stripe reference, or reservation state, then narrow the ledger by payment status, collection mode, and due exposure.', 'must-hotel-booking') . '</p></div>';
+    echo '<div class="must-dashboard-panel-heading-copy"><h2>' . \esc_html__('Filter Payment Workspace', 'must-hotel-booking') . '</h2><p>' . \esc_html__('Search by booking, guest, gateway reference, or reservation state, then narrow the ledger by payment status, collection mode, and due exposure.', 'must-hotel-booking') . '</p></div>';
     echo '<div class="must-payments-panel-meta">';
     echo '<span class="must-dashboard-hero-pill"><strong>' . \esc_html__('Matches', 'must-hotel-booking') . '</strong> ' . \esc_html((string) $totalItems) . '</span>';
     echo '<span class="must-dashboard-hero-pill"><strong>' . \esc_html__('Visible', 'must-hotel-booking') . '</strong> ' . \esc_html((string) $visibleCount) . '</span>';
@@ -463,7 +463,7 @@ function render_payments_filters(array $filters, array $statusOptions, array $re
     echo '<form method="get" action="' . \esc_url(\admin_url('admin.php')) . '" class="must-payments-toolbar">';
     echo '<input type="hidden" name="page" value="must-hotel-booking-payments" />';
     echo '<div class="must-payments-toolbar-grid">';
-    echo '<label class="must-payments-toolbar-field is-wide"><span>' . \esc_html__('Search', 'must-hotel-booking') . '</span><input id="must-payment-filter-search" type="search" name="search" value="' . \esc_attr((string) ($filters['search'] ?? '')) . '" placeholder="' . \esc_attr__('Booking ID, guest, email, Stripe reference', 'must-hotel-booking') . '" /><small>' . \esc_html__('Search reservations, guests, gateway references, and payment metadata already stored in the ledger.', 'must-hotel-booking') . '</small></label>';
+    echo '<label class="must-payments-toolbar-field is-wide"><span>' . \esc_html__('Search', 'must-hotel-booking') . '</span><input id="must-payment-filter-search" type="search" name="search" value="' . \esc_attr((string) ($filters['search'] ?? '')) . '" placeholder="' . \esc_attr__('Booking ID, guest, email, gateway reference', 'must-hotel-booking') . '" /><small>' . \esc_html__('Search reservations, guests, gateway references, and payment metadata already stored in the ledger.', 'must-hotel-booking') . '</small></label>';
 
     echo '<label class="must-payments-toolbar-field"><span>' . \esc_html__('Payment status', 'must-hotel-booking') . '</span><select id="must-payment-filter-status" name="status">';
     foreach ($statusOptions as $value => $label) {
@@ -806,7 +806,7 @@ function render_payment_detail(?array $detail): void
             'value' => \trim((string) ($reservation['checkin'] ?? '') . ' -> ' . (string) ($reservation['checkout'] ?? '')),
         ],
         [
-            'label' => \__('Stripe / transaction reference', 'must-hotel-booking'),
+            'label' => \__('Gateway / transaction reference', 'must-hotel-booking'),
             'value' => (string) ($state['transaction_id'] ?? ''),
         ],
         [
@@ -962,15 +962,17 @@ function render_payment_settings_panel(array $settings): void
     $environmentCatalog = isset($settings['environment_catalog']) && \is_array($settings['environment_catalog']) ? $settings['environment_catalog'] : [];
     $activeEnvironment = isset($settings['active_environment']) ? (string) $settings['active_environment'] : '';
     $webhookUrl = isset($settings['webhook_url']) ? (string) $settings['webhook_url'] : '';
+    $pokpayEnvironment = isset($settings['pokpay_environment']) ? (string) $settings['pokpay_environment'] : 'staging';
     $enabledMethodCount = \count(\array_filter($states));
 
     echo '<section id="must-payment-settings" class="postbox must-dashboard-panel must-payments-panel">';
     echo '<div class="must-dashboard-panel-inner">';
     echo '<div class="must-dashboard-panel-heading">';
-    echo '<div class="must-dashboard-panel-heading-copy"><h2>' . \esc_html__('Payment Settings', 'must-hotel-booking') . '</h2><p>' . \esc_html__('Manage enabled collection methods and Stripe credentials from a cleaner settings surface without changing how payment processing behaves.', 'must-hotel-booking') . '</p></div>';
+    echo '<div class="must-dashboard-panel-heading-copy"><h2>' . \esc_html__('Payment Settings', 'must-hotel-booking') . '</h2><p>' . \esc_html__('Manage enabled collection methods and online payment credentials from a cleaner settings surface without changing how payment processing behaves.', 'must-hotel-booking') . '</p></div>';
     echo '<div class="must-payments-panel-meta">';
     echo '<span class="must-dashboard-hero-pill"><strong>' . \esc_html__('Enabled Methods', 'must-hotel-booking') . '</strong> ' . \esc_html((string) $enabledMethodCount) . '</span>';
-    echo '<span class="must-dashboard-hero-pill"><strong>' . \esc_html__('Active Stripe Profile', 'must-hotel-booking') . '</strong> ' . \esc_html(PaymentEngine::getSiteEnvironmentLabel($activeEnvironment)) . '</span>';
+    echo '<span class="must-dashboard-hero-pill"><strong>' . \esc_html__('Active Site Profile', 'must-hotel-booking') . '</strong> ' . \esc_html(PaymentEngine::getSiteEnvironmentLabel($activeEnvironment)) . '</span>';
+    echo '<span class="must-dashboard-hero-pill"><strong>' . \esc_html__('PokPay API', 'must-hotel-booking') . '</strong> ' . \esc_html(\ucfirst($pokpayEnvironment)) . '</span>';
     echo '</div>';
     echo '</div>';
     echo '<form method="post" action="' . \esc_url(get_admin_payments_page_url()) . '" class="must-payments-settings-form">';
@@ -1027,6 +1029,36 @@ function render_payment_settings_panel(array $settings): void
     }
 
     echo '<div class="must-payments-webhook-box"><span class="must-payments-webhook-label">' . \esc_html__('Webhook URL', 'must-hotel-booking') . '</span><code>' . \esc_html($webhookUrl) . '</code></div>';
+    echo '</div>';
+
+    echo '<div class="must-payments-subsection">';
+    echo '<div class="must-payments-subsection-heading"><h3>' . \esc_html__('PokPay Checkout', 'must-hotel-booking') . '</h3><p>' . \esc_html__('Store PokPay merchant credentials by site environment. Localhost and staging use PokPay staging; production uses PokPay production.', 'must-hotel-booking') . '</p></div>';
+
+    foreach ($environmentCatalog as $environmentKey => $environmentMeta) {
+        if (!\is_string($environmentKey) || !\is_array($environmentMeta)) {
+            continue;
+        }
+
+        $credentials = PaymentEngine::getPokPayEnvironmentCredentials($environmentKey);
+        $isActive = $environmentKey === $activeEnvironment;
+        $apiEnvironment = PaymentEngine::getPokPayApiEnvironment($environmentKey);
+        echo '<section class="must-payments-environment-card' . ($isActive ? ' is-active' : '') . '">';
+        echo '<div class="must-payments-environment-heading">';
+        echo '<div class="must-payments-environment-copy">';
+        echo '<h4>' . \esc_html((string) ($environmentMeta['label'] ?? $environmentKey)) . '</h4>';
+        echo '<p>' . \esc_html(\sprintf(__('PokPay API environment: %s', 'must-hotel-booking'), \ucfirst($apiEnvironment))) . '</p>';
+        echo '</div>';
+        echo '<div class="must-payments-pill-stack">' . render_payments_badge($isActive ? __('Active', 'must-hotel-booking') : __('Inactive', 'must-hotel-booking'), $isActive ? 'ok' : 'muted') . '</div>';
+        echo '</div>';
+
+        echo '<div class="must-payments-credential-grid">';
+        echo '<label class="must-payments-field"><span>' . \esc_html__('Merchant ID', 'must-hotel-booking') . '</span><input id="must-pokpay-' . \esc_attr($environmentKey) . '-merchant-id" type="text" name="pokpay_' . \esc_attr($environmentKey) . '_merchant_id" value="' . \esc_attr((string) ($credentials['merchant_id'] ?? '')) . '" autocomplete="off" /></label>';
+        echo '<label class="must-payments-field"><span>' . \esc_html__('Key ID', 'must-hotel-booking') . '</span><input id="must-pokpay-' . \esc_attr($environmentKey) . '-key-id" type="text" name="pokpay_' . \esc_attr($environmentKey) . '_key_id" value="' . \esc_attr((string) ($credentials['key_id'] ?? '')) . '" autocomplete="off" /></label>';
+        echo '<label class="must-payments-field"><span>' . \esc_html__('Key Secret', 'must-hotel-booking') . '</span><input id="must-pokpay-' . \esc_attr($environmentKey) . '-key-secret" type="password" name="pokpay_' . \esc_attr($environmentKey) . '_key_secret" value="' . \esc_attr((string) ($credentials['key_secret'] ?? '')) . '" autocomplete="new-password" /></label>';
+        echo '</div>';
+        echo '</section>';
+    }
+
     echo '</div>';
     echo '<div class="must-payments-form-actions"><button type="submit" class="button button-primary">' . \esc_html__('Save Payment Settings', 'must-hotel-booking') . '</button></div>';
     echo '</form>';

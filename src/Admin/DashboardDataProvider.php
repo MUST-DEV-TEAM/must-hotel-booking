@@ -343,6 +343,16 @@ final class DashboardDataProvider
             );
         }
 
+        if (\in_array('pokpay', PaymentMethodRegistry::getEnabled(), true) && !PaymentEngine::isPokPayConfigured()) {
+            $items[] = $this->makeAttentionItem(
+                'error',
+                \__('PokPay credentials missing', 'must-hotel-booking'),
+                \__('PokPay is enabled, but the active merchant ID, key ID, or key secret is incomplete.', 'must-hotel-booking'),
+                \ucfirst(PaymentEngine::getPokPayApiEnvironment()),
+                get_admin_payments_page_url()
+            );
+        }
+
         \usort(
             $items,
             function (array $left, array $right): int {
@@ -436,6 +446,7 @@ final class DashboardDataProvider
         }
 
         $stripeEnabled = \in_array('stripe', PaymentMethodRegistry::getEnabled(), true);
+        $pokpayEnabled = \in_array('pokpay', PaymentMethodRegistry::getEnabled(), true);
         $emailTemplates = EmailEngine::getTemplates();
         $emailSender = MustBookingConfig::get_booking_notification_email();
         $hotelCoreHealthy = MustBookingConfig::get_hotel_name() !== ''
@@ -482,6 +493,17 @@ final class DashboardDataProvider
                     : (PaymentEngine::getStripeWebhookSecret() !== ''
                         ? \__('Webhook signing secret is configured.', 'must-hotel-booking')
                         : \__('Webhook signing secret is missing for the active Stripe environment.', 'must-hotel-booking')),
+                get_admin_payments_page_url(),
+                \__('Open payments', 'must-hotel-booking')
+            ),
+            $this->makeHealthItem(
+                !$pokpayEnabled || PaymentEngine::isPokPayConfigured() ? 'ok' : 'error',
+                \__('PokPay credentials', 'must-hotel-booking'),
+                !$pokpayEnabled
+                    ? \__('PokPay is not enabled on this site.', 'must-hotel-booking')
+                    : (PaymentEngine::isPokPayConfigured()
+                        ? \__('PokPay merchant credentials are configured for the active environment.', 'must-hotel-booking')
+                        : \__('PokPay is enabled, but the active credentials are incomplete.', 'must-hotel-booking')),
                 get_admin_payments_page_url(),
                 \__('Open payments', 'must-hotel-booking')
             ),
@@ -710,11 +732,23 @@ final class DashboardDataProvider
         $paymentMethod = (string) ($reservation['payment_method'] ?? '');
 
         if ($paymentStatus === 'paid') {
-            return $paymentMethod === 'stripe' ? \__('Paid via Stripe', 'must-hotel-booking') : \__('Paid', 'must-hotel-booking');
+            if ($paymentMethod === 'stripe') {
+                return \__('Paid via Stripe', 'must-hotel-booking');
+            }
+
+            if ($paymentMethod === 'pokpay') {
+                return \__('Paid via PokPay', 'must-hotel-booking');
+            }
+
+            return \__('Paid', 'must-hotel-booking');
         }
 
         if ($paymentMethod === 'stripe' && $paymentStatus === 'pending') {
             return \__('Stripe pending', 'must-hotel-booking');
+        }
+
+        if ($paymentMethod === 'pokpay' && $paymentStatus === 'pending') {
+            return \__('PokPay pending', 'must-hotel-booking');
         }
 
         if ($paymentStatus === 'failed') {
@@ -810,9 +844,10 @@ final class DashboardDataProvider
 
     private function formatSyntheticPaymentMessage(string $status, string $method, string $reference): string
     {
-        $methodLabel = $method === 'stripe'
-            ? \__('Stripe', 'must-hotel-booking')
-            : ($method === 'pay_at_hotel' ? \__('Pay at hotel', 'must-hotel-booking') : \__('Payment', 'must-hotel-booking'));
+        $catalog = PaymentMethodRegistry::getCatalog();
+        $methodLabel = isset($catalog[$method]['label'])
+            ? (string) $catalog[$method]['label']
+            : ($method !== '' ? \ucwords(\str_replace('_', ' ', $method)) : \__('Payment', 'must-hotel-booking'));
 
         if ($status === 'paid') {
             return \sprintf(\__('%1$s payment received for %2$s.', 'must-hotel-booking'), $methodLabel, $reference);

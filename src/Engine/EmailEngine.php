@@ -1128,6 +1128,10 @@ final class EmailEngine
             return \__('Stripe', 'must-hotel-booking');
         }
 
+        if ($method === 'pokpay') {
+            return \__('PokPay', 'must-hotel-booking');
+        }
+
         if ($method === 'pay_at_hotel' || $method === 'cash') {
             return \__('Pay at hotel', 'must-hotel-booking');
         }

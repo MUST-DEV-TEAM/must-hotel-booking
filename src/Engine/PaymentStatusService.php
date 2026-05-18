@@ -187,16 +187,16 @@ final class PaymentStatusService
             $warnings[] = \__('Reservation is marked paid but still has amount due.', 'must-hotel-booking');
         }
 
-        if ($method === 'stripe' && $latestStatus === 'paid' && $transactionId === '') {
-            $warnings[] = \__('Stripe payment is marked paid but has no transaction reference.', 'must-hotel-booking');
+        if (\in_array($method, ['stripe', 'pokpay'], true) && $latestStatus === 'paid' && $transactionId === '') {
+            $warnings[] = \__('Online payment is marked paid but has no transaction reference.', 'must-hotel-booking');
         }
 
         if (($storedPaymentStatus === 'paid' || $latestStatus === 'paid') && $paidAt === '') {
             $warnings[] = \__('Paid payment is missing a paid timestamp.', 'must-hotel-booking');
         }
 
-        if ($reservationStatus === 'confirmed' && $amountDue > 0.0 && $method === 'stripe') {
-            $warnings[] = \__('Reservation is confirmed while Stripe payment is still incomplete.', 'must-hotel-booking');
+        if ($reservationStatus === 'confirmed' && $amountDue > 0.0 && \in_array($method, ['stripe', 'pokpay'], true)) {
+            $warnings[] = \__('Reservation is confirmed while online payment is still incomplete.', 'must-hotel-booking');
         }
 
         if ($latestStatus === 'failed') {

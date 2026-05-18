@@ -275,7 +275,7 @@ final class PaymentAdminActions
         if ($method !== 'stripe') {
             return [
                 'success' => false,
-                'message' => \__('Manual pay-at-hotel refunds must still be handled outside the plugin.', 'must-hotel-booking'),
+                'message' => \__('Refunds for this payment method must be handled outside the plugin.', 'must-hotel-booking'),
             ];
         }
 
@@ -361,7 +361,7 @@ final class PaymentAdminActions
     private function markPending(int $reservationId, array $reservation, array $state): bool
     {
         $method = $this->resolveLedgerMethod($state, 'stripe');
-        $targetStatus = $method === 'stripe' ? 'pending_payment' : 'pending';
+        $targetStatus = \in_array($method, ['stripe', 'pokpay'], true) ? 'pending_payment' : 'pending';
         $updated = $this->reservationRepository->updateReservationStatus($reservationId, $targetStatus, 'pending');
 
         if (!$updated) {
@@ -503,6 +503,18 @@ final class PaymentAdminActions
             MustBookingConfig::set_setting('stripe_publishable_key', (string) MustBookingConfig::get_setting($productionKeys['publishable_key'], ''));
             MustBookingConfig::set_setting('stripe_secret_key', (string) MustBookingConfig::get_setting($productionKeys['secret_key'], ''));
             MustBookingConfig::set_setting('stripe_webhook_secret', (string) MustBookingConfig::get_setting($productionKeys['webhook_secret'], ''));
+
+            foreach (\array_keys(PaymentEngine::getStripeEnvironmentCatalog()) as $environmentKey) {
+                $settingKeys = PaymentEngine::getPokPayEnvironmentSettingKeys((string) $environmentKey);
+
+                foreach ($settingKeys as $fieldKey => $settingKey) {
+                    $postedFieldKey = 'pokpay_' . $environmentKey . '_' . $fieldKey;
+                    $value = isset($_POST[$postedFieldKey])
+                        ? \sanitize_text_field((string) \wp_unslash($_POST[$postedFieldKey]))
+                        : '';
+                    MustBookingConfig::set_setting($settingKey, $value);
+                }
+            }
         }
 
         $this->redirectToPaymentsPage($query->buildUrlArgs([

@@ -15,6 +15,10 @@ $summary = isset($view['summary']) && \is_array($view['summary']) ? $view['summa
 $billing_form = isset($view['billing_form']) && \is_array($view['billing_form']) ? $view['billing_form'] : [];
 $payment_method = isset($view['payment_method']) ? (string) $view['payment_method'] : '';
 $payment_methods = isset($view['payment_methods']) && \is_array($view['payment_methods']) ? $view['payment_methods'] : [];
+$pending_payment = isset($view['pending_payment']) && \is_array($view['pending_payment']) ? $view['pending_payment'] : [];
+$is_pokpay_pending = (string) ($pending_payment['method'] ?? '') === 'pokpay'
+    && (string) ($pending_payment['session_id'] ?? '') !== ''
+    && !empty($pending_payment['reservation_ids']);
 $confirmation_cta_label = isset($view['confirmation_cta_label']) ? (string) $view['confirmation_cta_label'] : \__('Confirm reservation', 'must-hotel-booking');
 $primary_guest = isset($view['primary_guest']) && \is_array($view['primary_guest']) ? $view['primary_guest'] : null;
 $total_price = isset($view['total_price']) ? (float) $view['total_price'] : 0.0;
@@ -280,15 +284,21 @@ $render_payment_method_icon = static function (string $payment_method_key, strin
                 </section>
             <?php endif; ?>
         <?php elseif ($is_form_mode) : ?>
-            <form method="post" action="<?php echo \esc_url($confirmation_url); ?>" class="must-confirmation-form">
-                <?php \wp_nonce_field('must_confirm_booking', 'must_confirmation_nonce'); ?>
-                <?php if ($show_honeypot && $honeypot_field_name !== '') : ?>
+            <?php if ($is_pokpay_pending) : ?>
+                <div class="must-confirmation-form">
+            <?php else : ?>
+                <form method="post" action="<?php echo \esc_url($confirmation_url); ?>" class="must-confirmation-form">
+                    <?php \wp_nonce_field('must_confirm_booking', 'must_confirmation_nonce'); ?>
+            <?php endif; ?>
+                <?php if (!$is_pokpay_pending && $show_honeypot && $honeypot_field_name !== '') : ?>
                     <div style="position:absolute !important;left:-10000px !important;top:auto !important;width:1px !important;height:1px !important;overflow:hidden !important;" aria-hidden="true" role="presentation">
                         <label for="must-confirmation-honeypot"><?php echo \esc_html__('Leave this field empty', 'must-hotel-booking'); ?></label>
                         <input id="must-confirmation-honeypot" type="text" name="<?php echo \esc_attr($honeypot_field_name); ?>" value="" tabindex="-1" autocomplete="new-password" autocapitalize="off" autocorrect="off" spellcheck="false" data-lpignore="true" data-1p-ignore="true" aria-hidden="true" />
                     </div>
                 <?php endif; ?>
-                <input type="hidden" name="applied_coupon_code" value="<?php echo \esc_attr($applied_coupon_code); ?>" />
+                <?php if (!$is_pokpay_pending) : ?>
+                    <input type="hidden" name="applied_coupon_code" value="<?php echo \esc_attr($applied_coupon_code); ?>" />
+                <?php endif; ?>
 
                 <?php if ($can_confirm) : ?>
                     <div class="must-confirmation-layout">
@@ -563,9 +573,11 @@ $render_payment_method_icon = static function (string $payment_method_key, strin
                                             $payment_method_cta = \MustHotelBooking\Engine\PaymentEngine::getCheckoutPaymentCtaLabel($payment_method_key);
                                             $payment_method_tooltip = $payment_method_key === 'stripe'
                                                 ? \__('Pay with Stripe', 'must-hotel-booking')
-                                                : ($payment_method_key === 'pay_at_hotel'
+                                                : ($payment_method_key === 'pokpay'
+                                                    ? \__('Pay with PokPay', 'must-hotel-booking')
+                                                    : ($payment_method_key === 'pay_at_hotel'
                                                     ? \__('Pay with cash at hotel', 'must-hotel-booking')
-                                                    : \sprintf(\__('Pay with %s', 'must-hotel-booking'), $payment_method_label));
+                                                        : \sprintf(\__('Pay with %s', 'must-hotel-booking'), $payment_method_label)));
                                             ?>
                                             <label class="must-confirmation-payment-option must-confirmation-payment-option--<?php echo \esc_attr($payment_method_key); ?>" title="<?php echo \esc_attr($payment_method_tooltip); ?>">
                                                 <input type="radio" name="payment_method" value="<?php echo \esc_attr($payment_method_key); ?>" data-cta-label="<?php echo \esc_attr($payment_method_cta); ?>" aria-label="<?php echo \esc_attr($payment_method_tooltip); ?>"<?php checked($payment_method_key, $payment_method); ?> />
@@ -579,6 +591,14 @@ $render_payment_method_icon = static function (string $payment_method_key, strin
                                         <?php endforeach; ?>
                                     </div>
                                 </div>
+
+                                <?php if ($is_pokpay_pending) : ?>
+                                    <div class="must-confirmation-pokpay-panel" data-pokpay-panel="1">
+                                        <p class="must-confirmation-pokpay-intro"><?php echo \esc_html__('Complete your secure PokPay card payment below.', 'must-hotel-booking'); ?></p>
+                                        <div id="pok-payment-container" class="must-confirmation-pokpay-container"></div>
+                                        <p class="must-confirmation-pokpay-status" data-pokpay-status="1" role="status" aria-live="polite"></p>
+                                    </div>
+                                <?php endif; ?>
                             </section>
 
                             <section class="must-confirmation-policy-section">
@@ -586,19 +606,25 @@ $render_payment_method_icon = static function (string $payment_method_key, strin
                             </section>
 
                             <section class="must-confirmation-action">
-                                <button type="submit" name="must_confirmation_action" value="confirm_booking" class="must-confirmation-submit">
-                                    <span><?php echo \esc_html($confirmation_cta_label); ?></span>
-                                    <?php if ($arrow_icon_url !== '') : ?>
-                                        <img src="<?php echo \esc_url($arrow_icon_url); ?>" alt="" aria-hidden="true" />
-                                    <?php endif; ?>
-                                </button>
+                                <?php if (!$is_pokpay_pending) : ?>
+                                    <button type="submit" name="must_confirmation_action" value="confirm_booking" class="must-confirmation-submit">
+                                        <span><?php echo \esc_html($confirmation_cta_label); ?></span>
+                                        <?php if ($arrow_icon_url !== '') : ?>
+                                            <img src="<?php echo \esc_url($arrow_icon_url); ?>" alt="" aria-hidden="true" />
+                                        <?php endif; ?>
+                                    </button>
+                                <?php endif; ?>
                             </section>
                         </aside>
                     </div>
                 <?php else : ?>
                     <p><a href="<?php echo \esc_url($checkout_url); ?>"><?php echo \esc_html__('Back to Guest Information', 'must-hotel-booking'); ?></a></p>
                 <?php endif; ?>
-            </form>
+            <?php if ($is_pokpay_pending) : ?>
+                </div>
+            <?php else : ?>
+                </form>
+            <?php endif; ?>
         <?php else : ?>
             <p><?php echo \esc_html((string) ($view['message'] ?? __('Reservation details are unavailable.', 'must-hotel-booking'))); ?></p>
         <?php endif; ?>

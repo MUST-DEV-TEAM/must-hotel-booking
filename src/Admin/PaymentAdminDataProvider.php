@@ -280,7 +280,7 @@ final class PaymentAdminDataProvider
             [
                 'label' => \__('Failed / Incomplete', 'must-hotel-booking'),
                 'value' => (string) $failed,
-                'meta' => \__('Stripe failures, pending sessions, and manual follow-up.', 'must-hotel-booking'),
+                'meta' => \__('Online payment failures, pending sessions, and manual follow-up.', 'must-hotel-booking'),
             ],
             [
                 'label' => \__('Needs Review', 'must-hotel-booking'),
@@ -370,6 +370,7 @@ final class PaymentAdminDataProvider
             'environment_catalog' => PaymentEngine::getStripeEnvironmentCatalog(),
             'active_environment' => PaymentEngine::getActiveSiteEnvironment(),
             'webhook_url' => PaymentEngine::getStripeWebhookUrl(),
+            'pokpay_environment' => PaymentEngine::getPokPayApiEnvironment(),
         ];
     }
 

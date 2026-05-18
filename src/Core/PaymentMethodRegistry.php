@@ -18,6 +18,10 @@ final class PaymentMethodRegistry
                 'label' => \__('Stripe', 'must-hotel-booking'),
                 'description' => \__('Guest pays online immediately with card via Stripe Checkout.', 'must-hotel-booking'),
             ],
+            'pokpay' => [
+                'label' => \__('PokPay', 'must-hotel-booking'),
+                'description' => \__('Guest pays online immediately with card via the embedded PokPay checkout form.', 'must-hotel-booking'),
+            ],
         ];
     }
 
@@ -29,6 +33,7 @@ final class PaymentMethodRegistry
         return [
             'pay_at_hotel' => true,
             'stripe' => false,
+            'pokpay' => false,
         ];
     }
 

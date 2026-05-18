@@ -386,27 +386,34 @@ function get_pending_confirmation_page_view_data(): array
 
                         if (empty($payment_result['success'])) {
                             if ($created_new_draft) {
-                                BookingStatusEngine::failPendingStripeReservations($reservation_ids, 'payment_failed');
+                                BookingStatusEngine::failPendingPaymentReservations(
+                                    $reservation_ids,
+                                    PaymentEngine::normalizeMethod($payment_method) === 'pokpay' ? 'pokpay' : 'stripe',
+                                    'payment_failed'
+                                );
                             }
 
                             $messages[] = isset($payment_result['message']) && (string) $payment_result['message'] !== ''
                                 ? (string) $payment_result['message']
-                                : \__('Unable to start Stripe checkout right now.', 'must-hotel-booking');
+                                : \__('Unable to start online checkout right now.', 'must-hotel-booking');
                         } else {
+                            $pending_payment = PaymentEngine::normalizePendingPaymentFlowData([
+                                'method' => $payment_method,
+                                'reservation_ids' => $reservation_ids,
+                                'session_id' => (string) ($payment_result['session_id'] ?? $payment_result['transaction_id'] ?? ''),
+                                'checkout_url' => (string) ($payment_result['checkout_url'] ?? $payment_result['redirect_url'] ?? ''),
+                                'expires_at' => (string) ($payment_result['expires_at'] ?? ''),
+                                'created_at' => \current_time('mysql'),
+                            ]);
                             update_booking_selection_flow_data([
-                                'pending_payment' => [
-                                    'method' => $payment_method,
-                                    'reservation_ids' => $reservation_ids,
-                                    'session_id' => (string) ($payment_result['session_id'] ?? $payment_result['transaction_id'] ?? ''),
-                                    'checkout_url' => (string) ($payment_result['checkout_url'] ?? $payment_result['redirect_url'] ?? ''),
-                                    'expires_at' => (string) ($payment_result['expires_at'] ?? ''),
-                                    'created_at' => \current_time('mysql'),
-                                ],
+                                'pending_payment' => $pending_payment,
                             ]);
 
                             $stripe_checkout_url = (string) ($payment_result['redirect_url'] ?? '');
+                            $gateway = PaymentEngine::normalizeMethod($payment_method);
 
                             if (
+                                $gateway === 'stripe' &&
                                 $stripe_checkout_url !== ''
                                 && PaymentEngine::isStripeCheckoutUrl($stripe_checkout_url)
                             ) {
@@ -414,15 +421,20 @@ function get_pending_confirmation_page_view_data(): array
                                 exit;
                             }
 
+                            if ($gateway === 'pokpay' && !empty($payment_result['requires_embedded_checkout'])) {
+                                $messages[] = \__('Complete your PokPay card payment below.', 'must-hotel-booking');
+                            } else {
                             if ($created_new_draft) {
-                                BookingStatusEngine::failPendingStripeReservations($reservation_ids, 'payment_failed');
+                                    BookingStatusEngine::failPendingPaymentReservations($reservation_ids, $gateway === 'pokpay' ? 'pokpay' : 'stripe', 'payment_failed');
                             }
 
                             update_booking_selection_flow_data([
                                 'pending_payment' => PaymentEngine::getEmptyPendingPaymentFlowData(),
                             ]);
+                                $pending_payment = PaymentEngine::getEmptyPendingPaymentFlowData();
 
-                            $messages[] = \__('Stripe returned an invalid checkout URL. Please try again.', 'must-hotel-booking');
+                                $messages[] = \__('The online payment provider returned an invalid checkout response. Please try again.', 'must-hotel-booking');
+                            }
                         }
                     }
                 } else {
@@ -662,6 +674,12 @@ function enqueue_confirmation_page_assets(): void
     $phone_fields_script_version = \defined('MUST_HOTEL_BOOKING_PATH') && \file_exists(MUST_HOTEL_BOOKING_PATH . 'assets/js/booking-phone-fields.js')
         ? (string) \filemtime(MUST_HOTEL_BOOKING_PATH . 'assets/js/booking-phone-fields.js')
         : MUST_HOTEL_BOOKING_VERSION;
+    $flow_data = get_booking_selection_flow_data();
+    $pending_payment = PaymentEngine::normalizePendingPaymentFlowData($flow_data['pending_payment'] ?? []);
+    $is_pokpay_pending = (string) ($pending_payment['method'] ?? '') === 'pokpay'
+        && (string) ($pending_payment['session_id'] ?? '') !== ''
+        && !empty($pending_payment['reservation_ids']);
+    $confirmation_dependencies = [];
 
     \wp_enqueue_style(
         'must-hotel-booking-booking-page',
@@ -670,13 +688,69 @@ function enqueue_confirmation_page_assets(): void
         $booking_page_style_version
     );
 
+    if ($is_pokpay_pending) {
+        \wp_enqueue_script(
+            'must-hotel-booking-pokpay-sdk',
+            PaymentEngine::getPokPayCdnUrl(),
+            [],
+            null,
+            true
+        );
+        $confirmation_dependencies[] = 'must-hotel-booking-pokpay-sdk';
+    }
+
     \wp_enqueue_script(
         'must-hotel-booking-booking-confirmation',
         MUST_HOTEL_BOOKING_URL . 'assets/js/booking-confirmation.js',
-        [],
+        $confirmation_dependencies,
         MUST_HOTEL_BOOKING_VERSION,
         true
     );
+
+    if ($is_pokpay_pending) {
+        $guest_form = isset($flow_data['guest_form']) && \is_array($flow_data['guest_form']) ? $flow_data['guest_form'] : [];
+        $billing_form = isset($flow_data['billing_form']) && \is_array($flow_data['billing_form']) ? $flow_data['billing_form'] : [];
+        $locale = \strtolower((string) \get_locale());
+        $pokpay_locale = \strpos($locale, 'it') === 0 ? 'it' : (\strpos($locale, 'sq') === 0 ? 'al' : 'en');
+        $holder_name = \trim((string) ($billing_form['first_name'] ?? $guest_form['first_name'] ?? '') . ' ' . (string) ($billing_form['last_name'] ?? $guest_form['last_name'] ?? ''));
+        $initial_state = [
+            'email' => (string) ($billing_form['email'] ?? $guest_form['email'] ?? ''),
+            'holdersName' => $holder_name,
+            'countryCode' => \strtoupper((string) ($billing_form['country'] ?? $guest_form['country'] ?? '')),
+            'address1' => (string) ($billing_form['address'] ?? ''),
+            'locality' => (string) ($billing_form['city'] ?? ''),
+            'administrativeArea' => (string) ($billing_form['county'] ?? ''),
+            'postalCode' => (string) ($billing_form['postcode'] ?? ''),
+            'phoneNumber' => (string) ($billing_form['phone_number'] ?? $guest_form['phone_number'] ?? ''),
+        ];
+
+        \wp_localize_script(
+            'must-hotel-booking-booking-confirmation',
+            'mustHotelBookingPokPay',
+            [
+                'orderId' => (string) ($pending_payment['session_id'] ?? ''),
+                'reservationIds' => \array_values(\array_map('intval', (array) ($pending_payment['reservation_ids'] ?? []))),
+                'env' => PaymentEngine::getPokPayApiEnvironment(),
+                'locale' => $pokpay_locale,
+                'initialState' => \array_filter(
+                    $initial_state,
+                    static function ($value): bool {
+                        return \is_string($value) && \trim($value) !== '';
+                    }
+                ),
+                'finalizeUrl' => \rest_url('must-hotel-booking/v1/pokpay/finalize'),
+                'errorUrl' => \rest_url('must-hotel-booking/v1/pokpay/error'),
+                'nonce' => \wp_create_nonce('wp_rest'),
+                'messages' => [
+                    'loading' => \__('Loading secure PokPay checkout...', 'must-hotel-booking'),
+                    'processing' => \__('Confirming your payment...', 'must-hotel-booking'),
+                    'pending' => \__('PokPay is still finalizing this payment. Please wait a moment and try again.', 'must-hotel-booking'),
+                    'failed' => \__('Payment failed. Please check your card details or try another card.', 'must-hotel-booking'),
+                    'unavailable' => \__('PokPay checkout could not load. Please refresh the page and try again.', 'must-hotel-booking'),
+                ],
+            ]
+        );
+    }
 
     \wp_enqueue_script(
         'must-hotel-booking-phone-fields',

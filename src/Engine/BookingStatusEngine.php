@@ -154,15 +154,26 @@ final class BookingStatusEngine
      */
     public static function failPendingStripeReservations(array $reservationIds, string $reservationStatus = 'payment_failed'): void
     {
+        self::failPendingPaymentReservations($reservationIds, 'stripe', $reservationStatus);
+    }
+
+    /**
+     * @param array<int, int> $reservationIds
+     */
+    public static function failPendingPaymentReservations(array $reservationIds, string $method, string $reservationStatus = 'payment_failed'): void
+    {
         if (!\in_array($reservationStatus, ['payment_failed', 'expired', 'cancelled'], true)) {
             $reservationStatus = 'payment_failed';
         }
 
+        $method = \sanitize_key($method);
+        $method = $method !== '' ? $method : 'stripe';
+
         self::updateReservationStatuses($reservationIds, $reservationStatus, 'cancelled');
-        self::createPaymentRows($reservationIds, 'stripe', 'failed');
+        self::createPaymentRows($reservationIds, $method, 'failed');
 
         if (\class_exists(\MustHotelBooking\Provider\Clock\ClockPaymentReconciliationService::class)) {
-            (new \MustHotelBooking\Provider\Clock\ClockPaymentReconciliationService())->reconcilePaymentFailed($reservationIds, $reservationStatus, 'stripe');
+            (new \MustHotelBooking\Provider\Clock\ClockPaymentReconciliationService())->reconcilePaymentFailed($reservationIds, $reservationStatus, $method);
         }
     }
 
@@ -188,7 +199,7 @@ final class BookingStatusEngine
         if (!empty($statuses) && \count(\array_unique($statuses)) === 1 && $statuses[0] === 'pending_payment') {
             return [
                 'heading' => \__('Payment Processing', 'must-hotel-booking'),
-                'message' => \__('Your payment is being confirmed. This page will update once Stripe finishes processing your booking.', 'must-hotel-booking'),
+                'message' => \__('Your payment is being confirmed. This page will update once the payment provider finishes processing your booking.', 'must-hotel-booking'),
             ];
         }
 

@@ -144,12 +144,18 @@ final class SettingsDiagnostics
         $stripeEnabled = \in_array('stripe', $enabledMethods, true);
         $stripeConfigured = PaymentEngine::isStripeCheckoutConfigured();
         $stripeWebhookSecretSet = PaymentEngine::getStripeWebhookSecret() !== '';
+        $pokpayEnabled = \in_array('pokpay', $enabledMethods, true);
+        $pokpayConfigured = PaymentEngine::isPokPayConfigured();
 
         if ($stripeEnabled && !$stripeConfigured) {
             $warnings++;
         }
 
         if ($stripeEnabled && !$stripeWebhookSecretSet) {
+            $warnings++;
+        }
+
+        if ($pokpayEnabled && !$pokpayConfigured) {
             $warnings++;
         }
 
@@ -160,6 +166,9 @@ final class SettingsDiagnostics
             'stripe_webhook_secret_set' => $stripeWebhookSecretSet,
             'stripe_environment' => PaymentEngine::getSiteEnvironmentLabel(),
             'stripe_webhook_url' => PaymentEngine::getStripeWebhookUrl(),
+            'pokpay_enabled' => $pokpayEnabled,
+            'pokpay_configured' => $pokpayConfigured,
+            'pokpay_environment' => PaymentEngine::getPokPayApiEnvironment(),
             'default_payment_mode' => (string) MustBookingConfig::get_setting('default_payment_mode', 'guest_choice'),
             'deposit_required' => !empty(MustBookingConfig::get_setting('deposit_required', false)),
             'deposit_type' => (string) MustBookingConfig::get_setting('deposit_type', 'percentage'),

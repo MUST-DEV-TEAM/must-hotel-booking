@@ -2385,6 +2385,10 @@ final class SettingsPage
             $warnings[] = \__('Stripe webhook signing secret is missing for the active environment.', 'must-hotel-booking');
         }
 
+        if (\in_array('pokpay', $enabledMethods, true) && !PaymentEngine::isPokPayConfigured()) {
+            $warnings[] = \__('PokPay is enabled but the active merchant ID, key ID, or key secret is missing.', 'must-hotel-booking');
+        }
+
         self::renderFormStart('payments_summary');
         self::renderWarnings($warnings);
         self::renderPanelStart(\__('Payments Summary', 'must-hotel-booking'), \__('A control surface for high-level payment defaults with shortcuts into the dedicated Payments page.', 'must-hotel-booking'));
@@ -2392,6 +2396,7 @@ final class SettingsPage
         echo '<article class="must-settings-summary-card"><span class="must-settings-summary-label">' . \esc_html__('Enabled methods', 'must-hotel-booking') . '</span><strong>' . \esc_html(!empty($methodNames) ? \implode(', ', $methodNames) : __('No methods enabled', 'must-hotel-booking')) . '</strong></article>';
         echo '<article class="must-settings-summary-card"><span class="must-settings-summary-label">' . \esc_html__('Default payment mode', 'must-hotel-booking') . '</span><strong>' . \esc_html((string) ($bookingRules['default_payment_mode'] ?? 'guest_choice')) . '</strong></article>';
         echo '<article class="must-settings-summary-card"><span class="must-settings-summary-label">' . \esc_html__('Stripe environment', 'must-hotel-booking') . '</span><strong>' . \esc_html(PaymentEngine::getSiteEnvironmentLabel()) . '</strong></article>';
+        echo '<article class="must-settings-summary-card"><span class="must-settings-summary-label">' . \esc_html__('PokPay API', 'must-hotel-booking') . '</span><strong>' . \esc_html(\ucfirst(PaymentEngine::getPokPayApiEnvironment())) . '</strong></article>';
         echo '<article class="must-settings-summary-card"><span class="must-settings-summary-label">' . \esc_html__('Webhook URL', 'must-hotel-booking') . '</span><code>' . \esc_html(PaymentEngine::getStripeWebhookUrl()) . '</code></article>';
         echo '</div>';
         echo '<div class="must-settings-grid must-settings-grid--2">';
@@ -3573,7 +3578,7 @@ final class SettingsPage
             ['label' => __('Managed pages', 'must-hotel-booking'), 'status' => empty($diagnostics['pages']) ? 'missing' : 'ok', 'text' => \sprintf(\__('Tracked pages: %d', 'must-hotel-booking'), \count((array) ($diagnostics['pages'] ?? [])))],
             ['label' => __('Portal routes', 'must-hotel-booking'), 'status' => 'ok', 'text' => \sprintf(\__('Portal base: /%1$s | Login: /%2$s', 'must-hotel-booking'), PortalRouter::getPortalBasePath(), PortalRouter::getPortalLoginPath())],
             ['label' => __('Email config', 'must-hotel-booking'), 'status' => !empty($emails['is_configured']) ? 'ok' : 'warning', 'text' => !empty($emails['is_configured']) ? __('Email sending basics are configured.', 'must-hotel-booking') : __('Email configuration needs attention.', 'must-hotel-booking')],
-            ['label' => __('Payment config', 'must-hotel-booking'), 'status' => !empty($payments['stripe_enabled']) && empty($payments['stripe_configured']) ? 'warning' : 'ok', 'text' => !empty($payments['stripe_enabled']) ? __('Stripe is enabled on this site.', 'must-hotel-booking') : __('Stripe is disabled.', 'must-hotel-booking')],
+            ['label' => __('Payment config', 'must-hotel-booking'), 'status' => ((!empty($payments['stripe_enabled']) && empty($payments['stripe_configured'])) || (!empty($payments['pokpay_enabled']) && empty($payments['pokpay_configured']))) ? 'warning' : 'ok', 'text' => \sprintf(__('Enabled methods: %s', 'must-hotel-booking'), !empty($payments['enabled_methods']) ? \implode(', ', (array) $payments['enabled_methods']) : __('none', 'must-hotel-booking'))],
             ['label' => __('Booking protection', 'must-hotel-booking'), 'status' => !empty($antiAbuse['enabled']) ? 'ok' : 'warning', 'text' => !empty($antiAbuse['enabled']) ? __('Plugin-side anti-spam protections are enabled for public booking when individual checks are turned on.', 'must-hotel-booking') : __('Anti-spam protections are currently disabled.', 'must-hotel-booking')],
             ['label' => __('Provider runtime', 'must-hotel-booking'), 'status' => !empty($provider['mode_warning']) ? 'warning' : 'ok', 'text' => !empty($provider['mode_warning']) ? (string) $provider['mode_warning'] : __('Provider runtime is using the configured booking-ready provider.', 'must-hotel-booking')],
             ['label' => __('Cron / cleanup', 'must-hotel-booking'), 'status' => (string) ($cron['status'] ?? 'warning'), 'text' => (string) ($cron['message'] ?? '')],

@@ -3746,6 +3746,41 @@ div.must-confirmation-picker:nth-child(1) > div:nth-child(3) > div:nth-child(1) 
     box-shadow: 0 0 0 2px #141414, 0 0 0 6px rgba(194, 191, 175, 0.5);
 }
 
+.must-hotel-booking-page-booking-confirmation .must-confirmation-pokpay-panel {
+    width: 100%;
+    padding: 24px;
+    background: #f5f3ec;
+    border: 1px solid rgba(20, 20, 20, 0.16);
+    box-sizing: border-box;
+}
+
+.must-hotel-booking-page-booking-confirmation .must-confirmation-pokpay-intro,
+.must-hotel-booking-page-booking-confirmation .must-confirmation-pokpay-status {
+    margin: 0 0 16px;
+    font-family: 'PP Neue Montreal', sans-serif;
+    font-weight: 500;
+    font-size: 15px;
+    line-height: 1.35;
+    color: #141414;
+}
+
+.must-hotel-booking-page-booking-confirmation .must-confirmation-pokpay-status {
+    margin: 16px 0 0;
+}
+
+.must-hotel-booking-page-booking-confirmation .must-confirmation-pokpay-container {
+    min-height: 180px;
+}
+
+#pok-payment-container .pok-payment-button {
+    background: #141414;
+    border-radius: 0;
+}
+
+#pok-payment-container .pok-payment-input {
+    border-radius: 0;
+}
+
 .must-hotel-booking-page-booking-confirmation .must-confirmation-submit {
     --must-button-bg: transparent;
     --must-button-border: transparent;

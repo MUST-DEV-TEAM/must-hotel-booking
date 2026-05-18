@@ -14,6 +14,9 @@ final class PaymentFactory
             case 'stripe':
                 return new StripePayment($storageMethod);
 
+            case 'pokpay':
+                return new PokPayPayment($storageMethod);
+
             case 'cash':
             default:
                 return new CashPayment($storageMethod);
@@ -30,6 +33,9 @@ final class PaymentFactory
 
             case 'stripe':
                 return 'stripe';
+
+            case 'pokpay':
+                return 'pokpay';
 
             case 'cash':
             case 'pay_at_hotel':
