@@ -4,6 +4,7 @@ namespace MustHotelBooking\Provider\Clock;
 
 use MustHotelBooking\Core\MustBookingConfig;
 use MustHotelBooking\Provider\ProviderManager;
+use MustHotelBooking\Provider\Storage\ProviderMappingRepository;
 
 final class ClockConfig
 {
@@ -41,7 +42,7 @@ final class ClockConfig
 
     public static function isDirectPublicBookingReady(): bool
     {
-        return false;
+        return empty(self::directPublicBookingReadinessErrors());
     }
 
     public static function baseUrl(): string
@@ -372,6 +373,25 @@ final class ClockConfig
 
         if (self::reservationCreatePath() === '') {
             $errors[] = \__('Clock booking create endpoint path is not configured.', 'must-hotel-booking');
+        }
+
+        $catalogSummary = ClockCatalogService::getCachedCatalogSummary();
+        $catalogCounts = isset($catalogSummary['counts']) && \is_array($catalogSummary['counts'])
+            ? $catalogSummary['counts']
+            : [];
+
+        if (empty($catalogSummary['success']) || (int) ($catalogCounts['room_types'] ?? 0) <= 0) {
+            $errors[] = \__('Clock catalog has not been synced successfully yet.', 'must-hotel-booking');
+        }
+
+        $mappings = new ProviderMappingRepository();
+
+        if ($mappings->countForProvider(ProviderManager::CLOCK_MODE, 'accommodation') <= 0) {
+            $errors[] = \__('No Clock room type mappings are available.', 'must-hotel-booking');
+        }
+
+        if ($mappings->countForProvider(ProviderManager::CLOCK_MODE, 'rate_plan') <= 0) {
+            $errors[] = \__('No Clock rate mappings are available.', 'must-hotel-booking');
         }
 
         return \array_values(\array_unique($errors));

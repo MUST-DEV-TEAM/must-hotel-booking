@@ -383,9 +383,13 @@ final class ClockCatalogService
     /** @param array<string, mixed> $item @return array<string, mixed> */
     private function normalizeItem(array $item, string $catalogKey): array
     {
-        $parentKeys = $catalogKey === 'rooms'
-            ? ['room_type_id', 'room_type', 'roomType', 'parent_id', 'accommodation_id']
-            : ['rate_plan_id', 'rateplan_id', 'room_type_id', 'bookable_id', 'parent_id'];
+        if ($catalogKey === 'rooms') {
+            $parentKeys = ['room_type_id', 'room_type', 'roomType', 'parent_id', 'accommodation_id'];
+        } elseif ($catalogKey === 'rates') {
+            $parentKeys = ['bookable_id', 'room_type_id', 'room_type', 'bookable', 'parent_id', 'rate_plan_id', 'rateplan_id'];
+        } else {
+            $parentKeys = ['rate_plan_id', 'rateplan_id', 'room_type_id', 'bookable_id', 'parent_id'];
+        }
 
         return [
             'id' => $this->firstScalar($item, ['id', 'external_id', 'uid', 'uuid']),

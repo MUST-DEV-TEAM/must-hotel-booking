@@ -4,7 +4,7 @@ Tags: hotel, booking, reservation, accommodation
 Requires at least: 5.0
 Tested up to: 6.0
 Requires PHP: 7.4
-Stable tag: 0.4.10
+Stable tag: 0.4.11
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -31,6 +31,12 @@ Main features include:
 5. When updating, upload the new release ZIP or use the configured updater, then review **Diagnostics & Maintenance** after the update completes.
 
 == Changelog ==
+
+= 0.4.11 =
+* Expanded Clock full sync to assign synced rates to Clock room types and mirror recent/future Clock bookings into local reservations.
+* Added Clock booking mirror refresh support for arrivals, departures, guest records, physical rooms, rate plans, provider status, and balance-derived payment status.
+* Updated Clock backend room-list widgets so synced physical rooms display under each Clock room type while booking still targets the parent room type.
+* Restricted Clock backend checkout payment choices to Clock PMS payment ownership instead of exposing local Stripe or pay-at-hotel methods.
 
 = 0.4.10 =
 * Updated Clock backend mode so public booking selectors and room-list widgets use synced Clock room types instead of legacy local categories.

@@ -130,7 +130,7 @@ final class ReservationRepository extends AbstractRepository
         }
 
         $sql = $this->wpdb->prepare(
-            'SELECT id, booking_id, status, payment_status, checked_in_at, checked_out_at, provider, provider_booking_id, provider_reservation_id, provider_status, provider_payment_status, provider_sync_status, provider_synced_at, provider_sync_error, provider_payload_ref, provider_metadata
+            'SELECT id, booking_id, room_id, room_type_id, assigned_room_id, rate_plan_id, guest_id, checkin, checkout, status, payment_status, checked_in_at, checked_out_at, provider, provider_booking_id, provider_reservation_id, provider_status, provider_payment_status, provider_sync_status, provider_synced_at, provider_sync_error, provider_payload_ref, provider_metadata
             FROM ' . $this->table('reservations') . '
             WHERE provider = %s
                 AND (' . \implode(' OR ', $clauses) . ')

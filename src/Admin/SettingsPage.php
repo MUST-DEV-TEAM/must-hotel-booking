@@ -15,6 +15,7 @@ use MustHotelBooking\Provider\Clock\ClockCatalogService;
 use MustHotelBooking\Provider\Clock\ClockConnectionDiagnostic;
 use MustHotelBooking\Provider\Clock\ClockEndpointResolver;
 use MustHotelBooking\Provider\Clock\ClockInboundSyncService;
+use MustHotelBooking\Provider\Clock\ClockReservationSyncService;
 use MustHotelBooking\Provider\ProviderManager;
 use MustHotelBooking\Provider\Storage\ProviderMappingRepository;
 use MustHotelBooking\Provider\Storage\ProviderSyncJobRepository;
@@ -479,6 +480,10 @@ final class SettingsPage
                 'physical_rooms_mapped' => 0,
                 'rates_imported' => 0,
                 'rates_mapped' => 0,
+                'rates_assigned' => 0,
+                'reservations_created' => 0,
+                'reservations_updated' => 0,
+                'reservations_skipped' => 0,
                 'guests_synced' => 0,
                 'guests_skipped_reason' => 'Guest bulk sync requires a Clock guest list/export endpoint; /guests/search is search-based.',
             ];
@@ -505,6 +510,10 @@ final class SettingsPage
                     'clock_physical_rooms_mapped' => (int) ($summary['physical_rooms_mapped'] ?? 0),
                     'clock_rates_imported' => (int) ($summary['rates_imported'] ?? 0),
                     'clock_rates_mapped' => (int) ($summary['rates_mapped'] ?? 0),
+                    'clock_rates_assigned' => (int) ($summary['rates_assigned'] ?? 0),
+                    'clock_reservations_created' => (int) ($summary['reservations_created'] ?? 0),
+                    'clock_reservations_updated' => (int) ($summary['reservations_updated'] ?? 0),
+                    'clock_reservations_skipped' => (int) ($summary['reservations_skipped'] ?? 0),
                     'clock_guests_synced' => (int) ($summary['guests_synced'] ?? 0),
                 ],
             ];
@@ -676,6 +685,10 @@ final class SettingsPage
             'physical_rooms_mapped' => 0,
             'rates_imported' => 0,
             'rates_mapped' => 0,
+            'rates_assigned' => 0,
+            'reservations_created' => 0,
+            'reservations_updated' => 0,
+            'reservations_skipped' => 0,
             'guests_synced' => 0,
         ];
 
@@ -827,13 +840,16 @@ final class SettingsPage
         foreach ($rates as $item) {
             $clockId = (string) ($item['id'] ?? '');
 
-            if ($clockId === '' || $mappingRepo->findByExternal(ProviderManager::CLOCK_MODE, 'rate_plan', $clockId)) {
+            if ($clockId === '') {
                 continue;
             }
 
+            $existingRateMapping = $mappingRepo->findByExternal(ProviderManager::CLOCK_MODE, 'rate_plan', $clockId);
             $name = self::clockCatalogLabel($item, \__('Clock rate', 'must-hotel-booking'));
             $matchKey = self::matchKey($name);
-            $localId = isset($localRateIndex[$matchKey]) ? (int) ($localRateIndex[$matchKey]['id'] ?? 0) : 0;
+            $localId = \is_array($existingRateMapping)
+                ? (int) ($existingRateMapping['local_id'] ?? 0)
+                : (isset($localRateIndex[$matchKey]) ? (int) ($localRateIndex[$matchKey]['id'] ?? 0) : 0);
 
             if ($localId <= 0 && $ratePlanRepo->ratePlansTableExists()) {
                 $localId = $ratePlanRepo->createRatePlan([
@@ -852,6 +868,7 @@ final class SettingsPage
             }
 
             if ($localId > 0) {
+                $clockRoomTypeId = self::clockRateRoomTypeId($item, $roomTypeIdByClockId);
                 $mappingRepo->save([
                     'provider' => ProviderManager::CLOCK_MODE,
                     'entity_type' => 'rate_plan',
@@ -859,13 +876,39 @@ final class SettingsPage
                     'local_id' => $localId,
                     'external_id' => $clockId,
                     'external_code' => (string) ($item['code'] ?? ''),
-                    'external_parent_id' => (string) ($item['parent_id'] ?? ''),
+                    'external_parent_id' => $clockRoomTypeId !== '' ? $clockRoomTypeId : (string) ($item['parent_id'] ?? ''),
                     'display_name' => $name,
                     'status' => (string) ($item['status'] ?? 'active'),
                     'metadata' => $item,
                     'last_synced_at' => \current_time('mysql'),
                 ]);
                 $summary['rates_mapped']++;
+
+                $localRoomTypeId = $clockRoomTypeId !== '' ? (int) ($roomTypeIdByClockId[$clockRoomTypeId] ?? 0) : 0;
+
+                if ($localRoomTypeId > 0 && $ratePlanRepo->roomTypeRatePlansTableExists()) {
+                    $assignmentId = $ratePlanRepo->saveRoomTypeAssignment(
+                        $localId,
+                        $localRoomTypeId,
+                        self::clockRateBasePrice($item),
+                        self::clockRateMaxOccupancy($roomRepo, $localRoomTypeId)
+                    );
+
+                    if ($assignmentId > 0) {
+                        $summary['rates_assigned']++;
+                    }
+                }
+            }
+        }
+
+        $reservationSync = (new ClockReservationSyncService())->syncBookingsWindow();
+        $summary['reservations_created'] = (int) ($reservationSync['created'] ?? 0);
+        $summary['reservations_updated'] = (int) ($reservationSync['updated'] ?? 0);
+        $summary['reservations_skipped'] = (int) ($reservationSync['skipped'] ?? 0);
+
+        if (empty($reservationSync['success']) && !empty($reservationSync['errors']) && \is_array($reservationSync['errors'])) {
+            foreach ($reservationSync['errors'] as $reservationSyncError) {
+                $summary['errors'][] = (string) $reservationSyncError;
             }
         }
 
@@ -910,6 +953,56 @@ final class SettingsPage
         }
 
         return $fallback;
+    }
+
+    /** @param array<string, mixed> $item @param array<string, int> $roomTypeIdByClockId */
+    private static function clockRateRoomTypeId(array $item, array $roomTypeIdByClockId): string
+    {
+        $metadata = isset($item['metadata']) && \is_array($item['metadata']) ? $item['metadata'] : [];
+        $candidates = [
+            $metadata['bookable_id'] ?? '',
+            $metadata['room_type_id'] ?? '',
+            $item['parent_id'] ?? '',
+            $metadata['parent_id'] ?? '',
+        ];
+
+        foreach ($candidates as $candidate) {
+            $candidate = \trim((string) $candidate);
+
+            if ($candidate !== '' && isset($roomTypeIdByClockId[$candidate])) {
+                return $candidate;
+            }
+        }
+
+        return '';
+    }
+
+    /** @param array<string, mixed> $item */
+    private static function clockRateBasePrice(array $item): float
+    {
+        $metadata = isset($item['metadata']) && \is_array($item['metadata']) ? $item['metadata'] : [];
+
+        foreach (['price_cents', 'base_price_cents', 'amount_cents', 'cents'] as $key) {
+            if (isset($metadata[$key]) && \is_numeric($metadata[$key])) {
+                return \round(((int) $metadata[$key]) / 100, 2);
+            }
+        }
+
+        foreach (['base_price', 'price', 'amount'] as $key) {
+            if (isset($metadata[$key]) && \is_numeric($metadata[$key])) {
+                return \round((float) $metadata[$key], 2);
+            }
+        }
+
+        return 0.0;
+    }
+
+    private static function clockRateMaxOccupancy(\MustHotelBooking\Database\RoomRepository $roomRepo, int $roomTypeId): int
+    {
+        $room = $roomRepo->getRoomById($roomTypeId);
+        $maxGuests = \is_array($room) && isset($room['max_guests']) ? (int) $room['max_guests'] : 0;
+
+        return \max(1, $maxGuests > 0 ? $maxGuests : 2);
     }
 
     private static function uniqueRoomSlug(\MustHotelBooking\Database\RoomRepository $roomRepo, string $name): string
@@ -2293,16 +2386,24 @@ final class SettingsPage
             $physicalRoomsMapped = isset($_GET['clock_physical_rooms_mapped']) ? \absint(\wp_unslash($_GET['clock_physical_rooms_mapped'])) : 0;
             $ratesImported = isset($_GET['clock_rates_imported']) ? \absint(\wp_unslash($_GET['clock_rates_imported'])) : 0;
             $ratesMapped = isset($_GET['clock_rates_mapped']) ? \absint(\wp_unslash($_GET['clock_rates_mapped'])) : 0;
+            $ratesAssigned = isset($_GET['clock_rates_assigned']) ? \absint(\wp_unslash($_GET['clock_rates_assigned'])) : 0;
+            $reservationsCreated = isset($_GET['clock_reservations_created']) ? \absint(\wp_unslash($_GET['clock_reservations_created'])) : 0;
+            $reservationsUpdated = isset($_GET['clock_reservations_updated']) ? \absint(\wp_unslash($_GET['clock_reservations_updated'])) : 0;
+            $reservationsSkipped = isset($_GET['clock_reservations_skipped']) ? \absint(\wp_unslash($_GET['clock_reservations_skipped'])) : 0;
 
             echo '<div class="notice notice-success"><p>' . \esc_html(\sprintf(
-                /* translators: 1: imported room types, 2: mapped room types, 3: imported physical rooms, 4: mapped physical rooms, 5: imported rates, 6: mapped rates. */
-                __('Clock full sync completed. Room types: %1$d imported / %2$d mapped. Physical rooms: %3$d imported / %4$d mapped. Rates: %5$d imported / %6$d mapped.', 'must-hotel-booking'),
+                /* translators: 1: imported room types, 2: mapped room types, 3: imported physical rooms, 4: mapped physical rooms, 5: imported rates, 6: mapped rates, 7: assigned rates, 8: created reservations, 9: updated reservations, 10: skipped reservations. */
+                __('Clock full sync completed. Room types: %1$d imported / %2$d mapped. Physical rooms: %3$d imported / %4$d mapped. Rates: %5$d imported / %6$d mapped / %7$d assigned. Reservations: %8$d created / %9$d updated / %10$d skipped.', 'must-hotel-booking'),
                 $roomTypesImported,
                 $roomTypesMapped,
                 $physicalRoomsImported,
                 $physicalRoomsMapped,
                 $ratesImported,
-                $ratesMapped
+                $ratesMapped,
+                $ratesAssigned,
+                $reservationsCreated,
+                $reservationsUpdated,
+                $reservationsSkipped
             ) . ' ' . __('Guests were not bulk synced because Clock provided a search endpoint, not a full guest export endpoint.', 'must-hotel-booking')) . '</p></div>';
             return;
         }
@@ -3376,7 +3477,7 @@ final class SettingsPage
         echo '<div class="must-clock-sync-hero">';
         echo '<div>';
         echo '<h3>' . \esc_html__('Sync website frontend with Clock PMS', 'must-hotel-booking') . '</h3>';
-        echo '<p>' . \esc_html__('This does not print secrets and does not create Clock bookings. It syncs room types, physical rooms, rates, and mappings. Guest, reservation, and staff bulk sync need Clock list/export endpoints before they can be safely enabled.', 'must-hotel-booking') . '</p>';
+        echo '<p>' . \esc_html__('This does not print secrets and does not create Clock bookings. It syncs room types, physical rooms, rates, rate assignments, mappings, and recent/future Clock booking mirrors. Guest and staff bulk sync still need Clock list/export endpoints before they can be safely enabled.', 'must-hotel-booking') . '</p>';
         echo '</div>';
         echo '<form method="post" action="' . \esc_url(get_admin_settings_page_url(['tab' => 'provider'])) . '">';
         \wp_nonce_field('must_settings_maintenance_action', 'must_settings_nonce');

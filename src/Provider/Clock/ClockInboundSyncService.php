@@ -44,7 +44,21 @@ final class ClockInboundSyncService
         );
 
         if (empty($rows)) {
-            return $this->result(false, 202, \__('Clock booking event was received, but no local mirror reservation matched the provider booking ID.', 'must-hotel-booking'), [
+            $externalId = $bookingId !== '' ? $bookingId : $reservationId;
+            $upsert = (new ClockReservationSyncService($this->client))->refreshBookingById($externalId, 'webhook_upsert');
+
+            if (!empty($upsert['success'])) {
+                return $this->result(true, 200, '', [
+                    'event_type' => $eventType,
+                    'provider_booking_id' => $bookingId,
+                    'provider_reservation_id' => $reservationId,
+                    'reservation_ids' => !empty($upsert['reservation_id']) ? [(int) $upsert['reservation_id']] : [],
+                    'created_count' => !empty($upsert['created']) ? 1 : 0,
+                    'updated_count' => !empty($upsert['updated']) ? 1 : 0,
+                ]);
+            }
+
+            return $this->result(false, 202, (string) ($upsert['message'] ?? \__('Clock booking event was received, but no local mirror reservation could be created or updated.', 'must-hotel-booking')), [
                 'unsupported' => true,
                 'event_type' => $eventType,
                 'provider_booking_id' => $bookingId,

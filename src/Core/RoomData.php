@@ -82,11 +82,49 @@ final class RoomData
      */
     public static function getRoomsForDisplay(string $category = 'all', int $limit = 50): array
     {
+        $limit = \max(1, \min(200, $limit));
+
+        if (RoomCatalog::isClockBackendMode() && \sanitize_key($category) === RoomCatalog::BOOKING_ALL_CATEGORY) {
+            $rooms = [];
+
+            foreach (\array_keys(RoomCatalog::getClockBookingRoomTypes()) as $bookingCategory) {
+                $roomId = RoomCatalog::resolveBookingRoomTypeId((string) $bookingCategory);
+                $room = $roomId > 0 ? self::getRoom($roomId) : null;
+
+                if (!\is_array($room)) {
+                    continue;
+                }
+
+                $physicalRooms = self::getPhysicalRoomsForDisplay($room);
+                $rooms = \array_merge($rooms, !empty($physicalRooms) ? $physicalRooms : [$room]);
+
+                if (\count($rooms) >= $limit) {
+                    break;
+                }
+            }
+
+            if (!empty($rooms)) {
+                return \array_slice($rooms, 0, $limit);
+            }
+        }
+
         if (RoomCatalog::isRoomTypeBookingValue($category)) {
             $roomId = RoomCatalog::resolveBookingRoomTypeId($category);
             $room = $roomId > 0 ? self::getRoom($roomId) : null;
 
-            return \is_array($room) ? [$room] : [];
+            if (!\is_array($room)) {
+                return [];
+            }
+
+            if (RoomCatalog::isClockBackendMode()) {
+                $physicalRooms = self::getPhysicalRoomsForDisplay($room);
+
+                if (!empty($physicalRooms)) {
+                    return \array_slice($physicalRooms, 0, $limit);
+                }
+            }
+
+            return [$room];
         }
 
         $normalizedCategory = $category !== '' && $category !== 'all'
@@ -94,6 +132,80 @@ final class RoomData
             : 'all';
 
         return self::repository()->getRoomsForDisplay($normalizedCategory, $limit);
+    }
+
+    /**
+     * @param array<string, mixed> $roomType
+     * @return array<int, array<string, mixed>>
+     */
+    private static function getPhysicalRoomsForDisplay(array $roomType): array
+    {
+        $roomTypeId = isset($roomType['id']) ? (int) $roomType['id'] : 0;
+
+        if ($roomTypeId <= 0) {
+            return [];
+        }
+
+        $inventory = \MustHotelBooking\Engine\get_inventory_repository();
+
+        if (!$inventory->inventoryRoomsTableExists()) {
+            return [];
+        }
+
+        $rows = $inventory->getRoomsByType($roomTypeId);
+        $rooms = [];
+
+        foreach ($rows as $row) {
+            if (!\is_array($row)) {
+                continue;
+            }
+
+            $isActive = !isset($row['is_active']) || (int) $row['is_active'] === 1;
+            $isBookable = !isset($row['is_bookable']) || (int) $row['is_bookable'] === 1;
+
+            if (!$isActive || !$isBookable) {
+                continue;
+            }
+
+            $roomNumber = \trim((string) ($row['room_number'] ?? ''));
+            $title = \trim((string) ($row['title'] ?? ''));
+            $name = $roomNumber !== '' ? $roomNumber : $title;
+
+            if ($name === '') {
+                $name = \sprintf(
+                    /* translators: %d is an inventory room ID. */
+                    \__('Room %d', 'must-hotel-booking'),
+                    (int) ($row['id'] ?? 0)
+                );
+            } elseif ($title !== '' && $title !== $name) {
+                $name .= ' - ' . $title;
+            }
+
+            $rooms[] = [
+                'id' => $roomTypeId,
+                'booking_room_id' => $roomTypeId,
+                'gallery_room_id' => $roomTypeId,
+                'physical_room_id' => isset($row['id']) ? (int) $row['id'] : 0,
+                'name' => $name,
+                'slug' => (string) ($roomType['slug'] ?? ''),
+                'details_slug' => (string) ($roomType['slug'] ?? ''),
+                'category' => (string) ($roomType['category'] ?? ''),
+                'description' => \sprintf(
+                    /* translators: %s is the room type name. */
+                    \__('Individual room under %s.', 'must-hotel-booking'),
+                    (string) ($roomType['name'] ?? \__('this room type', 'must-hotel-booking'))
+                ),
+                'max_guests' => isset($row['capacity_override']) && (int) $row['capacity_override'] > 0
+                    ? (int) $row['capacity_override']
+                    : (int) ($roomType['max_guests'] ?? 1),
+                'base_price' => (float) ($roomType['base_price'] ?? 0.0),
+                'room_size' => (string) ($roomType['room_size'] ?? ''),
+                'beds' => (string) ($roomType['beds'] ?? ''),
+                'is_clock_physical_room' => true,
+            ];
+        }
+
+        return $rooms;
     }
 
     public static function getRoomMainImageId(int $roomId): int

@@ -32,7 +32,9 @@ final class ClockBookingProvider implements BookingProviderInterface
 
     public function getCapabilities(): ProviderCapabilities
     {
-        return ProviderCapabilities::clockScaffold();
+        return ClockConfig::isDirectPublicBookingReady()
+            ? ProviderCapabilities::clockPublicBooking()
+            : ProviderCapabilities::clockScaffold();
     }
 
     public function availability(): AvailabilityProviderInterface

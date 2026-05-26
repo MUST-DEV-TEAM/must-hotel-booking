@@ -149,11 +149,13 @@ class Rooms_List_Widget extends \Elementor\Widget_Base
             }
 
             $room_id = isset($room['id']) ? (int) $room['id'] : 0;
+            $booking_room_id = isset($room['booking_room_id']) ? (int) $room['booking_room_id'] : $room_id;
+            $gallery_room_id = isset($room['gallery_room_id']) ? (int) $room['gallery_room_id'] : $room_id;
             $room_name = isset($room['name']) ? (string) $room['name'] : '';
-            $room_slug = isset($room['slug']) ? (string) $room['slug'] : '';
+            $room_slug = isset($room['details_slug']) ? (string) $room['details_slug'] : (isset($room['slug']) ? (string) $room['slug'] : '');
             $room_description = isset($room['description']) ? (string) $room['description'] : '';
-            $gallery_urls = $room_id > 0 ? get_room_gallery_urls_for_widget($room_id, 4) : [];
-            $primary_image = $room_id > 0 ? get_room_main_image_url_for_widget($room_id) : '';
+            $gallery_urls = $gallery_room_id > 0 ? get_room_gallery_urls_for_widget($gallery_room_id, 4) : [];
+            $primary_image = $gallery_room_id > 0 ? get_room_main_image_url_for_widget($gallery_room_id) : '';
             $thumbnail_urls = $gallery_urls;
 
             if ($primary_image === '' && !empty($gallery_urls)) {
@@ -192,7 +194,7 @@ class Rooms_List_Widget extends \Elementor\Widget_Base
             }
 
             $book_url = \add_query_arg(
-                ['room_id' => $room_id],
+                ['room_id' => $booking_room_id],
                 $booking_page_url
             );
 
