@@ -385,7 +385,7 @@ final class SettingsPage
         }
 
         $task = isset($source['maintenance_task']) ? \sanitize_key((string) \wp_unslash($source['maintenance_task'])) : '';
-        $allowedTasks = ['reinstall_pages', 'reschedule_cron', 'cleanup_expired_locks', 'send_test_email', 'flush_portal_routes', 'repair_inventory_mirror', 'test_clock_connection', 'fetch_clock_catalog', 'run_provider_sync_jobs', 'queue_clock_reservation_refresh'];
+        $allowedTasks = ['reinstall_pages', 'reschedule_cron', 'cleanup_expired_locks', 'send_test_email', 'flush_portal_routes', 'repair_inventory_mirror', 'apply_clock_api_defaults', 'test_clock_connection', 'fetch_clock_catalog', 'run_provider_sync_jobs', 'queue_clock_reservation_refresh'];
 
         if (!\in_array($task, $allowedTasks, true)) {
             return [
@@ -430,6 +430,19 @@ final class SettingsPage
                     'clock_http_status' => (int) ($result['http_status'] ?? 0),
                     'clock_duration_ms' => (int) ($result['duration_ms'] ?? 0),
                 ],
+            ];
+        }
+
+        if ($task === 'apply_clock_api_defaults') {
+            if ($persist) {
+                self::applyClockApiDefaults();
+            }
+
+            return [
+                'tab' => $tab,
+                'notice' => 'clock_api_defaults_applied',
+                'errors' => [],
+                'forms' => [],
             ];
         }
 
@@ -562,6 +575,28 @@ final class SettingsPage
             'errors' => [],
             'forms' => [],
         ];
+    }
+
+    private static function applyClockApiDefaults(): void
+    {
+        $provider = MustBookingConfig::get_group_settings('provider');
+        $provider = \array_merge($provider, [
+            'provider_mode' => ProviderManager::CLOCK_MODE,
+            'clock_enabled' => true,
+            'clock_pms_api_enabled' => true,
+            'clock_connection_path' => '/room_types',
+            'clock_room_types_path' => '/room_types',
+            'clock_rooms_path' => '/rooms',
+            'clock_rates_path' => '/rates',
+            'clock_rates_availability_path' => '/rates_availability',
+            'clock_products_path' => '/products',
+            'clock_reservation_create_path' => '/bookings/',
+            'clock_reservation_fetch_path' => '/bookings/{booking_id}',
+            'clock_timeout_seconds' => \max(1, (int) ($provider['clock_timeout_seconds'] ?? 15)),
+            'fallback_to_local_when_clock_unavailable' => false,
+        ]);
+
+        MustBookingConfig::set_group_settings('provider', $provider);
     }
 
     /**
@@ -1792,6 +1827,7 @@ final class SettingsPage
             'clock_connection_test_succeeded' => \__('Clock connection test succeeded.', 'must-hotel-booking'),
             'clock_catalog_fetched' => \__('Clock catalog fetched and cached for mapping.', 'must-hotel-booking'),
             'clock_catalog_fetched_with_warnings' => \__('Clock catalog fetch completed with warnings. Review the catalog diagnostics below.', 'must-hotel-booking'),
+            'clock_api_defaults_applied' => \__('Clock API defaults applied. Enter the PMS/Base API URLs, API user, and API key, then save and test the connection.', 'must-hotel-booking'),
             'provider_sync_jobs_processed' => \__('Provider sync jobs processed.', 'must-hotel-booking'),
             'clock_reservation_refresh_queued' => \__('Clock reservation refresh queued.', 'must-hotel-booking'),
             'managed_page_repaired' => \__('Managed page action completed.', 'must-hotel-booking'),
@@ -2834,7 +2870,7 @@ final class SettingsPage
         }
 
         if ((string) ($form['provider_mode'] ?? 'local') === 'clock' && empty($summary['clock_direct_public_booking_ready'])) {
-            $warnings[] = \__('Direct Clock API mode is selected, but the real public booking adapters are not implemented yet. Public booking fails closed unless explicit local fallback is enabled.', 'must-hotel-booking');
+            $warnings[] = \__('Direct Clock API mode is selected but still needs credentials, endpoint defaults, catalog sync, or mappings before plugin checkout can use Clock safely.', 'must-hotel-booking');
         }
 
         if (!empty($form['clock_enabled']) && empty($summary['clock_configured'])) {
@@ -2869,7 +2905,7 @@ final class SettingsPage
         echo '<article class="must-settings-summary-card"><span class="must-settings-summary-label">' . \esc_html__('Direct API config', 'must-hotel-booking') . '</span><strong>' . \esc_html(!empty($summary['clock_direct_api_configured']) ? __('Configured', 'must-hotel-booking') : __('Incomplete', 'must-hotel-booking')) . '</strong></article>';
         echo '<article class="must-settings-summary-card"><span class="must-settings-summary-label">' . \esc_html__('PMS API', 'must-hotel-booking') . '</span><strong>' . \esc_html(!empty($summary['clock_pms_api_configured']) ? __('Configured', 'must-hotel-booking') : (!empty($summary['clock_pms_api_enabled']) ? __('Enabled, incomplete', 'must-hotel-booking') : __('Disabled', 'must-hotel-booking'))) . '</strong></article>';
         echo '<article class="must-settings-summary-card"><span class="must-settings-summary-label">' . \esc_html__('Base API', 'must-hotel-booking') . '</span><strong>' . \esc_html(!empty($summary['clock_base_api_configured']) ? __('Configured', 'must-hotel-booking') : (!empty($summary['clock_base_api_enabled']) ? __('Enabled, incomplete', 'must-hotel-booking') : __('Disabled', 'must-hotel-booking'))) . '</strong></article>';
-        echo '<article class="must-settings-summary-card"><span class="must-settings-summary-label">' . \esc_html__('Direct booking readiness', 'must-hotel-booking') . '</span><strong>' . \esc_html(!empty($summary['clock_direct_public_booking_ready']) ? __('Ready', 'must-hotel-booking') : __('Not implemented', 'must-hotel-booking')) . '</strong></article>';
+        echo '<article class="must-settings-summary-card"><span class="must-settings-summary-label">' . \esc_html__('Direct booking readiness', 'must-hotel-booking') . '</span><strong>' . \esc_html(!empty($summary['clock_direct_public_booking_ready']) ? __('Ready', 'must-hotel-booking') : __('Needs setup', 'must-hotel-booking')) . '</strong></article>';
         echo '<article class="must-settings-summary-card"><span class="must-settings-summary-label">' . \esc_html__('Local fallback', 'must-hotel-booking') . '</span><strong>' . \esc_html(!empty($summary['fallback_to_local_when_clock_unavailable']) ? __('Explicitly enabled', 'must-hotel-booking') : __('Disabled', 'must-hotel-booking')) . '</strong></article>';
         echo '<article class="must-settings-summary-card"><span class="must-settings-summary-label">' . \esc_html__('Catalog paths', 'must-hotel-booking') . '</span><strong>' . \esc_html((string) ($summary['clock_catalog_paths_configured'] ?? 0)) . '</strong></article>';
         echo '<article class="must-settings-summary-card"><span class="must-settings-summary-label">' . \esc_html__('Clock API public booking paths', 'must-hotel-booking') . '</span><strong>' . \esc_html((string) ($summary['clock_public_booking_paths_configured'] ?? 0)) . '</strong></article>';
@@ -2942,6 +2978,13 @@ final class SettingsPage
         self::renderFormEnd(\__('Save Provider Settings', 'must-hotel-booking'));
 
         self::renderPanelStart(\__('Clock diagnostics', 'must-hotel-booking'), \__('Run a safe backend connection test. The request is logged without credentials for future troubleshooting.', 'must-hotel-booking'));
+        echo '<form method="post" action="' . \esc_url(get_admin_settings_page_url(['tab' => 'provider'])) . '" class="must-settings-secondary-action">';
+        \wp_nonce_field('must_settings_maintenance_action', 'must_settings_nonce');
+        echo '<input type="hidden" name="must_settings_action" value="maintenance_action" />';
+        echo '<input type="hidden" name="maintenance_task" value="apply_clock_api_defaults" />';
+        echo '<input type="hidden" name="return_tab" value="provider" />';
+        echo '<button type="submit" class="button button-secondary">' . \esc_html__('Apply Clock API defaults', 'must-hotel-booking') . '</button>';
+        echo '</form>';
         echo '<form method="post" action="' . \esc_url(get_admin_settings_page_url(['tab' => 'provider'])) . '" class="must-settings-secondary-action">';
         \wp_nonce_field('must_settings_maintenance_action', 'must_settings_nonce');
         echo '<input type="hidden" name="must_settings_action" value="maintenance_action" />';
@@ -3036,12 +3079,12 @@ final class SettingsPage
             [
                 'label' => \__('Public booking', 'must-hotel-booking'),
                 'ready' => $clockEnabled && $clockConfigured && $directPublicBookingReady,
-                'note' => \__('Direct Clock API public booking is not implemented yet. Credentials and mappings alone are not enough.', 'must-hotel-booking'),
+                'note' => \__('Direct Clock API booking needs configured credentials, default endpoint paths, catalog sync, and mappings before plugin checkout can create Clock bookings.', 'must-hotel-booking'),
             ],
             [
                 'label' => \__('Pricing / quote', 'must-hotel-booking'),
-                'ready' => false,
-                'note' => \__('Direct Clock API quote/rate adapter is not implemented yet.', 'must-hotel-booking'),
+                'ready' => $clockEnabled && $clockConfigured && ClockConfig::productsPath() !== '',
+                'note' => \__('Clock product pricing uses GET /products and mapped public rates.', 'must-hotel-booking'),
             ],
             [
                 'label' => \__('Provider mutations (cancel / status / stay / guest)', 'must-hotel-booking'),
@@ -3055,8 +3098,8 @@ final class SettingsPage
             ],
             [
                 'label' => \__('Inbound webhook sync', 'must-hotel-booking'),
-                'ready' => false,
-                'note' => \__('Webhook authentication and safe logging exist, but Clock Message Channel payload handling is not implemented yet.', 'must-hotel-booking'),
+                'ready' => !empty($summary['clock_webhook_secret_set']),
+                'note' => \__('Webhook authentication and booking payload handling are available. Add a shared secret and configure Clock to call this site URL.', 'must-hotel-booking'),
             ],
         ];
 

@@ -4,7 +4,7 @@ Tags: hotel, booking, reservation, accommodation
 Requires at least: 5.0
 Tested up to: 6.0
 Requires PHP: 7.4
-Stable tag: 0.4.6
+Stable tag: 0.4.7
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -31,6 +31,11 @@ Main features include:
 5. When updating, upload the new release ZIP or use the configured updater, then review **Diagnostics & Maintenance** after the update completes.
 
 == Changelog ==
+
+= 0.4.7 =
+* Added a one-click Clock API defaults action so endpoint paths self-configure and hotel-specific credentials stay as the only required manual inputs.
+* Updated Clock provider readiness messages to reflect the implemented availability, product search, booking creation, and webhook payload handling adapters.
+* Improved direct Clock setup defaults for booking create and booking fetch paths on existing installations with blank saved endpoint fields.
 
 = 0.4.6 =
 * Added Clock PMS sandbox credential settings, endpoint defaults, safe connection testing, and redacted request diagnostics for failed API calls.
