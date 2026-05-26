@@ -283,8 +283,8 @@ function get_rooms_list_widget_options_for_booking_search(): array
             ? \sanitize_key((string) $settings['room_category'])
             : 'all';
         $category_label = $selected_category !== '' && $selected_category !== 'all'
-            ? RoomCatalog::getCategoryLabel($selected_category)
-            : \__('All Categories', 'must-hotel-booking');
+            ? RoomCatalog::getBookingCategoryLabel($selected_category)
+            : \__('All room types', 'must-hotel-booking');
 
         $options[$widget_id] = \sprintf(
             /* translators: 1: widget index on the page, 2: room category label. */

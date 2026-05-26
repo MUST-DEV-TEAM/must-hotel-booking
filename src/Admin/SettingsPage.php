@@ -3372,18 +3372,18 @@ final class SettingsPage
         $catalogSummary = ClockCatalogService::getCachedCatalogSummary();
         $catalogCounts = isset($catalogSummary['counts']) && \is_array($catalogSummary['counts']) ? $catalogSummary['counts'] : [];
 
-        self::renderPanelStart(\__('Clock synchronization', 'must-hotel-booking'), \__('Use the full sync after connecting Clock. It refreshes Clock catalog data, imports missing local room/rate records needed by the website frontend, and creates provider mappings where safe.', 'must-hotel-booking'));
+        self::renderPanelStart(\__('Clock synchronization', 'must-hotel-booking'), \__('Use the sync after connecting Clock. It refreshes Clock catalog data, imports missing local room/rate records needed by the website frontend, and creates provider mappings where safe.', 'must-hotel-booking'));
         echo '<div class="must-clock-sync-hero">';
         echo '<div>';
         echo '<h3>' . \esc_html__('Sync website frontend with Clock PMS', 'must-hotel-booking') . '</h3>';
-        echo '<p>' . \esc_html__('This does not print secrets and does not create Clock bookings. Guests are not bulk-imported because Clock provided a guest search endpoint, not a full guest export endpoint.', 'must-hotel-booking') . '</p>';
+        echo '<p>' . \esc_html__('This does not print secrets and does not create Clock bookings. It syncs room types, physical rooms, rates, and mappings. Guest, reservation, and staff bulk sync need Clock list/export endpoints before they can be safely enabled.', 'must-hotel-booking') . '</p>';
         echo '</div>';
         echo '<form method="post" action="' . \esc_url(get_admin_settings_page_url(['tab' => 'provider'])) . '">';
         \wp_nonce_field('must_settings_maintenance_action', 'must_settings_nonce');
         echo '<input type="hidden" name="must_settings_action" value="maintenance_action" />';
         echo '<input type="hidden" name="maintenance_task" value="clock_full_sync" />';
         echo '<input type="hidden" name="return_tab" value="provider" />';
-        echo '<button type="submit" class="button button-primary button-hero">' . \esc_html__('Sync everything from Clock PMS', 'must-hotel-booking') . '</button>';
+        echo '<button type="submit" class="button button-primary button-hero">' . \esc_html__('Sync Clock catalog and mappings', 'must-hotel-booking') . '</button>';
         echo '</form>';
         echo '</div>';
         echo '<div class="must-settings-summary-grid">';
@@ -3392,6 +3392,8 @@ final class SettingsPage
         echo '<article class="must-settings-summary-card"><span class="must-settings-summary-label">' . \esc_html__('Clock rooms', 'must-hotel-booking') . '</span><strong>' . \esc_html((string) ($catalogCounts['rooms'] ?? 0)) . '</strong></article>';
         echo '<article class="must-settings-summary-card"><span class="must-settings-summary-label">' . \esc_html__('Clock rates', 'must-hotel-booking') . '</span><strong>' . \esc_html((string) ($catalogCounts['rates'] ?? 0)) . '</strong></article>';
         echo '<article class="must-settings-summary-card"><span class="must-settings-summary-label">' . \esc_html__('Guests', 'must-hotel-booking') . '</span><strong>' . \esc_html__('Search only', 'must-hotel-booking') . '</strong></article>';
+        echo '<article class="must-settings-summary-card"><span class="must-settings-summary-label">' . \esc_html__('Reservations', 'must-hotel-booking') . '</span><strong>' . \esc_html__('Needs list endpoint', 'must-hotel-booking') . '</strong></article>';
+        echo '<article class="must-settings-summary-card"><span class="must-settings-summary-label">' . \esc_html__('Staff', 'must-hotel-booking') . '</span><strong>' . \esc_html__('Needs endpoint', 'must-hotel-booking') . '</strong></article>';
         echo '</div>';
 
         echo '<details class="must-settings-advanced"><summary>' . \esc_html__('Advanced diagnostics actions', 'must-hotel-booking') . '</summary>';

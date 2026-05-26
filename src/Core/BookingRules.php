@@ -78,6 +78,14 @@ final class BookingRules
             return \max(1, (int) ($fixedRoom['max_guests'] ?? 0));
         }
 
+        if (RoomCatalog::isRoomTypeBookingValue($accommodationType)) {
+            $room = RoomData::getRoom(RoomCatalog::resolveBookingRoomTypeId($accommodationType));
+
+            if (\is_array($room)) {
+                return \max(1, (int) ($room['max_guests'] ?? 0));
+            }
+        }
+
         $capacityMap = self::getRoomCategoryCapacityMap();
         $normalizedCategory = RoomCatalog::normalizeBookingCategory($accommodationType);
 

@@ -4,7 +4,7 @@ Tags: hotel, booking, reservation, accommodation
 Requires at least: 5.0
 Tested up to: 6.0
 Requires PHP: 7.4
-Stable tag: 0.4.9
+Stable tag: 0.4.10
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -31,6 +31,11 @@ Main features include:
 5. When updating, upload the new release ZIP or use the configured updater, then review **Diagnostics & Maintenance** after the update completes.
 
 == Changelog ==
+
+= 0.4.10 =
+* Updated Clock backend mode so public booking selectors and room-list widgets use synced Clock room types instead of legacy local categories.
+* Routed Clock availability checks and disabled-date lookups through the selected synced Clock room type when guests choose a specific type.
+* Clarified the Clock sync panel so catalog/mapping sync is separate from guest, reservation, and staff bulk sync endpoints that still need exact Clock API support.
 
 = 0.4.9 =
 * Added a primary Clock full sync action that refreshes the catalog, imports missing local Clock room/rate records, and creates provider mappings where safe.

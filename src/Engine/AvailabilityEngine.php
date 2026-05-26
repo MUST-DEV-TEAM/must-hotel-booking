@@ -63,7 +63,15 @@ final class AvailabilityEngine
 
         $sessionId = LockEngine::getOrCreateSessionId();
         $filtered = [];
-        $roomTypes = get_room_repository()->getRoomsByType($category, $guests);
+        $roomTypes = [];
+
+        if (RoomCatalog::isRoomTypeBookingValue($category)) {
+            $room = RoomData::getRoom(RoomCatalog::resolveBookingRoomTypeId($category));
+            $maxGuests = \is_array($room) && isset($room['max_guests']) ? (int) $room['max_guests'] : 0;
+            $roomTypes = \is_array($room) && $maxGuests >= $guests ? [$room] : [];
+        } else {
+            $roomTypes = get_room_repository()->getRoomsByType($category, $guests);
+        }
 
         foreach ($roomTypes as $roomType) {
             if (!\is_array($roomType)) {

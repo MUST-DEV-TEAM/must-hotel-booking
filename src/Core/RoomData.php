@@ -82,6 +82,13 @@ final class RoomData
      */
     public static function getRoomsForDisplay(string $category = 'all', int $limit = 50): array
     {
+        if (RoomCatalog::isRoomTypeBookingValue($category)) {
+            $roomId = RoomCatalog::resolveBookingRoomTypeId($category);
+            $room = $roomId > 0 ? self::getRoom($roomId) : null;
+
+            return \is_array($room) ? [$room] : [];
+        }
+
         $normalizedCategory = $category !== '' && $category !== 'all'
             ? RoomCatalog::normalizeCategory($category)
             : 'all';

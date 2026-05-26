@@ -44,8 +44,7 @@ class Rooms_List_Widget extends \Elementor\Widget_Base
 
     protected function register_controls(): void
     {
-        $category_options = ['all' => \__('All Categories', 'must-hotel-booking')];
-        $category_options = \array_merge($category_options, RoomCatalog::getCategories());
+        $category_options = RoomCatalog::getWidgetFilterOptions();
 
         $this->start_controls_section(
             'section_content',
@@ -120,7 +119,7 @@ class Rooms_List_Widget extends \Elementor\Widget_Base
         $category_label = '';
 
         if ($selected_category !== 'all') {
-            $category_label = RoomCatalog::getCategoryLabel($selected_category);
+            $category_label = RoomCatalog::getBookingCategoryLabel($selected_category);
         }
 
         $rooms_page_url = get_rooms_widget_rooms_page_url();

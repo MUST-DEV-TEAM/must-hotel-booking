@@ -47,8 +47,17 @@ final class AvailabilityAjaxController
      */
     public static function get_available_room_ids_for_guests(int $guests, string $category = 'standard-rooms'): array
     {
+        $normalized = self::normalize_availability_room_category($category);
+
+        if (RoomCatalog::isRoomTypeBookingValue($normalized)) {
+            $room = get_room_repository()->getRoomById(RoomCatalog::resolveBookingRoomTypeId($normalized));
+            $maxGuests = \is_array($room) && isset($room['max_guests']) ? (int) $room['max_guests'] : 0;
+
+            return $maxGuests >= \max(1, $guests) ? [(int) ($room['id'] ?? 0)] : [];
+        }
+
         return get_room_repository()->getRoomIdsByTypeAndGuests(
-            self::normalize_availability_room_category($category),
+            $normalized,
             \max(1, $guests)
         );
     }

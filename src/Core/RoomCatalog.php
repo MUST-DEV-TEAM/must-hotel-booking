@@ -3,13 +3,19 @@
 namespace MustHotelBooking\Core;
 
 use MustHotelBooking\Database\AccommodationCategoryUpgradeService;
+use MustHotelBooking\Provider\ProviderManager;
+use MustHotelBooking\Provider\Storage\ProviderMappingRepository;
 
 final class RoomCatalog
 {
     public const BOOKING_ALL_CATEGORY = 'all';
+    public const BOOKING_ROOM_PREFIX = 'room-';
 
     /** @var array<string, string>|null */
     private static ?array $categories = null;
+
+    /** @var array<string, string>|null */
+    private static ?array $clockBookingRoomTypes = null;
 
     /**
      * @return array<string, string>
@@ -51,9 +57,87 @@ final class RoomCatalog
      */
     public static function getBookingCategories(): array
     {
+        if (self::isClockBackendMode()) {
+            $clockRoomTypes = self::getClockBookingRoomTypes();
+
+            if (!empty($clockRoomTypes)) {
+                return [
+                    self::BOOKING_ALL_CATEGORY => \__('All Clock room types', 'must-hotel-booking'),
+                ] + $clockRoomTypes;
+            }
+        }
+
         return [
             self::BOOKING_ALL_CATEGORY => \__('ALL', 'must-hotel-booking'),
         ] + self::getCategories();
+    }
+
+    /**
+     * @return array<string, string>
+     */
+    public static function getWidgetFilterOptions(): array
+    {
+        $allLabel = self::isClockBackendMode()
+            ? \__('All Clock room types', 'must-hotel-booking')
+            : \__('All Categories', 'must-hotel-booking');
+
+        return [
+            self::BOOKING_ALL_CATEGORY => $allLabel,
+        ] + (self::isClockBackendMode() && !empty(self::getClockBookingRoomTypes())
+            ? self::getClockBookingRoomTypes()
+            : self::getCategories());
+    }
+
+    /**
+     * @return array<string, string>
+     */
+    public static function getClockBookingRoomTypes(): array
+    {
+        if (\is_array(self::$clockBookingRoomTypes)) {
+            return self::$clockBookingRoomTypes;
+        }
+
+        self::$clockBookingRoomTypes = [];
+
+        if (!self::isClockBackendMode()) {
+            return self::$clockBookingRoomTypes;
+        }
+
+        $mappings = (new ProviderMappingRepository())->listForProvider(ProviderManager::CLOCK_MODE, 'accommodation');
+        $roomIds = [];
+
+        foreach ($mappings as $mapping) {
+            $roomId = isset($mapping['local_id']) ? (int) $mapping['local_id'] : 0;
+
+            if ($roomId > 0) {
+                $roomIds[$roomId] = $roomId;
+            }
+        }
+
+        if (empty($roomIds)) {
+            return self::$clockBookingRoomTypes;
+        }
+
+        $rooms = RoomData::getRoomsByIds(\array_values($roomIds));
+
+        foreach ($rooms as $room) {
+            if (!\is_array($room)) {
+                continue;
+            }
+
+            $roomId = isset($room['id']) ? (int) $room['id'] : 0;
+            $name = isset($room['name']) ? \trim((string) $room['name']) : '';
+            $isActive = !isset($room['is_active']) || (int) $room['is_active'] === 1;
+            $isBookable = !isset($room['is_bookable']) || (int) $room['is_bookable'] === 1;
+
+            if ($roomId <= 0 || $name === '' || !$isActive || !$isBookable) {
+                continue;
+            }
+
+            self::$clockBookingRoomTypes[self::roomTypeBookingValue($roomId)] = $name;
+        }
+
+        return self::$clockBookingRoomTypes;
     }
 
     public static function normalizeCategory(string $category): string
@@ -74,6 +158,14 @@ final class RoomCatalog
 
         if ($normalized === self::BOOKING_ALL_CATEGORY) {
             return self::BOOKING_ALL_CATEGORY;
+        }
+
+        if (self::isRoomTypeBookingValue($normalized)) {
+            $roomId = self::resolveBookingRoomTypeId($normalized);
+
+            if ($roomId > 0 && \is_array(RoomData::getRoom($roomId))) {
+                return self::roomTypeBookingValue($roomId);
+            }
         }
 
         return self::normalizeCategory($normalized);
@@ -114,6 +206,35 @@ final class RoomCatalog
     public static function isBookingAllCategory(string $category): bool
     {
         return self::normalizeBookingCategory($category) === self::BOOKING_ALL_CATEGORY;
+    }
+
+    public static function isRoomTypeBookingValue(string $value): bool
+    {
+        $value = \sanitize_key($value);
+
+        return \preg_match('/^' . \preg_quote(self::BOOKING_ROOM_PREFIX, '/') . '\d+$/', $value) === 1;
+    }
+
+    public static function roomTypeBookingValue(int $roomId): string
+    {
+        return self::BOOKING_ROOM_PREFIX . \max(0, $roomId);
+    }
+
+    public static function resolveBookingRoomTypeId(string $value): int
+    {
+        $value = \sanitize_key($value);
+
+        if (!self::isRoomTypeBookingValue($value)) {
+            return 0;
+        }
+
+        return \absint(\substr($value, \strlen(self::BOOKING_ROOM_PREFIX)));
+    }
+
+    public static function isClockBackendMode(): bool
+    {
+        return MustBookingConfig::get_provider_mode() === ProviderManager::CLOCK_MODE
+            && MustBookingConfig::is_clock_enabled();
     }
 
     /**

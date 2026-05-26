@@ -3,6 +3,8 @@
 namespace MustHotelBooking\Provider\Clock;
 
 use MustHotelBooking\Engine\AvailabilityEngine;
+use MustHotelBooking\Core\RoomCatalog;
+use MustHotelBooking\Core\RoomData;
 use MustHotelBooking\Provider\Contracts\AvailabilityProviderInterface;
 use MustHotelBooking\Provider\Dto\AvailabilitySearchRequest;
 use MustHotelBooking\Provider\Dto\DisabledDatesRequest;
@@ -33,7 +35,16 @@ final class ClockAvailabilityProvider implements AvailabilityProviderInterface
             return [];
         }
 
-        $candidates = \MustHotelBooking\Engine\get_room_repository()->getRoomsByType($request->getCategory(), $request->getGuests());
+        $category = RoomCatalog::normalizeBookingCategory($request->getCategory());
+        $candidates = [];
+
+        if (RoomCatalog::isRoomTypeBookingValue($category)) {
+            $room = RoomData::getRoom(RoomCatalog::resolveBookingRoomTypeId($category));
+            $maxGuests = \is_array($room) && isset($room['max_guests']) ? (int) $room['max_guests'] : 0;
+            $candidates = \is_array($room) && $maxGuests >= $request->getGuests() ? [$room] : [];
+        } else {
+            $candidates = \MustHotelBooking\Engine\get_room_repository()->getRoomsByType($category, $request->getGuests());
+        }
         $mapped = $this->mappedRooms($candidates);
         $rateIds = $this->mappedRateIds();
 
@@ -468,6 +479,14 @@ final class ClockAvailabilityProvider implements AvailabilityProviderInterface
 
         if ($roomId > 0) {
             $mapping = $this->catalog->findAccommodationMapping($roomId);
+
+            return $this->hasExternalId($mapping) ? [(string) ($mapping['external_id'] ?? '')] : [];
+        }
+
+        $category = RoomCatalog::normalizeBookingCategory($request->getCategory());
+
+        if (RoomCatalog::isRoomTypeBookingValue($category)) {
+            $mapping = $this->catalog->findAccommodationMapping(RoomCatalog::resolveBookingRoomTypeId($category));
 
             return $this->hasExternalId($mapping) ? [(string) ($mapping['external_id'] ?? '')] : [];
         }
