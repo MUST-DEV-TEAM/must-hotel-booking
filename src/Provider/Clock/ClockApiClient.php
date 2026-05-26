@@ -160,20 +160,26 @@ final class ClockApiClient
         }
 
         $data = $response->getData();
+        $responseSummary = [
+            'status_code' => $response->getStatusCode(),
+            'error_category' => $response->getErrorCode(),
+            'retryable' => $this->isRetryable($response),
+            'body_preview' => $this->bodyPreview($response->getBody()),
+            'decoded_type' => \gettype($data),
+            'decoded_keys' => \is_array($data) ? \array_slice(\array_keys($data), 0, 20) : [],
+        ];
+
+        if (!$response->isSuccess()) {
+            $responseSummary['body'] = $this->bodyForLog($response->getBody());
+        }
+
         $this->logs->complete($logId, [
             'http_status' => $response->getStatusCode(),
             'success' => $response->isSuccess() ? 1 : 0,
             'error_code' => $response->getErrorCode(),
             'error_message' => $response->getErrorMessage(),
             'duration_ms' => $response->getDurationMs(),
-            'response_summary' => [
-                'status_code' => $response->getStatusCode(),
-                'error_category' => $response->getErrorCode(),
-                'retryable' => $this->isRetryable($response),
-                'body_preview' => $this->bodyPreview($response->getBody()),
-                'decoded_type' => \gettype($data),
-                'decoded_keys' => \is_array($data) ? \array_slice(\array_keys($data), 0, 20) : [],
-            ],
+            'response_summary' => $responseSummary,
         ]);
     }
 
@@ -235,6 +241,27 @@ final class ClockApiClient
         $body = (string) \preg_replace('/("(?:authorization|token|secret|password|api[_-]?key|key)"\s*:\s*")[^"]+(")/i', '$1[redacted]$2', $body);
 
         return \substr($body, 0, 1000);
+    }
+
+    private function bodyForLog(string $body): string
+    {
+        $body = \trim($body);
+
+        if ($body === '') {
+            return '';
+        }
+
+        $decoded = \json_decode($body, true);
+
+        if (\json_last_error() === \JSON_ERROR_NONE && \is_array($decoded)) {
+            $encoded = \function_exists('wp_json_encode')
+                ? \wp_json_encode($this->redact($decoded))
+                : \json_encode($this->redact($decoded));
+
+            return \is_string($encoded) ? $encoded : '';
+        }
+
+        return (string) \preg_replace('/("(?:authorization|token|secret|password|api[_-]?key|key)"\s*:\s*")[^"]+(")/i', '$1[redacted]$2', $body);
     }
 
     /**

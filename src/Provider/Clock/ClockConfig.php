@@ -12,6 +12,8 @@ final class ClockConfig
         'room_types' => '/room_types',
         'rooms' => '/rooms',
         'rates' => '/rates',
+        'rates_availability' => '/rates_availability',
+        'products' => '/products',
         'wbe_room_type_rates' => '/rates',
         'rate_plans' => '/rate_plans',
     ];
@@ -45,6 +47,31 @@ final class ClockConfig
     public static function baseUrl(): string
     {
         return \rtrim((string) (self::settings()['clock_api_base_url'] ?? ''), "/ \t\n\r\0\x0B");
+    }
+
+    public static function pmsApiUrl(): string
+    {
+        return self::normalizeBaseUrl((string) (self::settings()['clock_pms_api_url'] ?? ''));
+    }
+
+    public static function baseApiUrl(): string
+    {
+        return self::normalizeBaseUrl((string) (self::settings()['clock_base_api_url'] ?? ''));
+    }
+
+    public static function apiBaseUrlForType(string $apiType): string
+    {
+        $apiType = ClockEndpointResolver::normalizeApiType($apiType);
+
+        if ($apiType === 'pms_api') {
+            return self::pmsApiUrl();
+        }
+
+        if ($apiType === 'base_api') {
+            return self::baseApiUrl();
+        }
+
+        return '';
     }
 
     public static function resolvedBaseUrl(string $apiType = ''): string
@@ -138,6 +165,16 @@ final class ClockConfig
         return self::publicBookingPaths()['availability'];
     }
 
+    public static function ratesAvailabilityPath(): string
+    {
+        return self::catalogPaths()['rates_availability'];
+    }
+
+    public static function productsPath(): string
+    {
+        return self::catalogPaths()['products'];
+    }
+
     public static function quotePath(): string
     {
         return self::publicBookingPaths()['quote'];
@@ -197,6 +234,8 @@ final class ClockConfig
             'room_types' => self::pathOrDefault((string) ($settings['clock_room_types_path'] ?? ''), self::CATALOG_DEFAULT_PATHS['room_types']),
             'rooms' => self::pathOrDefault((string) ($settings['clock_rooms_path'] ?? ''), self::CATALOG_DEFAULT_PATHS['rooms']),
             'rates' => self::pathOrDefault((string) ($settings['clock_rates_path'] ?? ''), self::CATALOG_DEFAULT_PATHS['rates']),
+            'rates_availability' => self::pathOrDefault((string) ($settings['clock_rates_availability_path'] ?? ''), self::CATALOG_DEFAULT_PATHS['rates_availability']),
+            'products' => self::pathOrDefault((string) ($settings['clock_products_path'] ?? ''), self::CATALOG_DEFAULT_PATHS['products']),
             'wbe_room_type_rates' => self::pathOrDefault((string) ($settings['clock_wbe_room_type_rates_path'] ?? ''), self::CATALOG_DEFAULT_PATHS['wbe_room_type_rates']),
             'rate_plans' => self::pathOrDefault((string) ($settings['clock_rate_plans_path'] ?? ''), self::CATALOG_DEFAULT_PATHS['rate_plans']),
         ];
@@ -248,6 +287,18 @@ final class ClockConfig
                 'operation' => 'clock.catalog.rate_plans',
                 'endpoint_name' => 'rate_plans',
             ],
+        ];
+    }
+
+    /** @return array<string, array<string, mixed>> */
+    public static function catalogSyncEndpoints(): array
+    {
+        $endpoints = self::catalogEndpoints();
+
+        return [
+            'room_types' => $endpoints['room_types'],
+            'rooms' => $endpoints['rooms'],
+            'rates' => $endpoints['rates'],
         ];
     }
 
@@ -311,7 +362,17 @@ final class ClockConfig
     {
         $errors = self::configurationErrors();
 
-        $errors[] = \__('Direct Clock API public booking adapters are not implemented yet. Availability, quote, and reservation-create schemas must be built against Clock PMS+ endpoints before this mode can take bookings.', 'must-hotel-booking');
+        if (self::ratesAvailabilityPath() === '') {
+            $errors[] = \__('Clock rates availability endpoint path is not configured.', 'must-hotel-booking');
+        }
+
+        if (self::productsPath() === '') {
+            $errors[] = \__('Clock products endpoint path is not configured.', 'must-hotel-booking');
+        }
+
+        if (self::reservationCreatePath() === '') {
+            $errors[] = \__('Clock booking create endpoint path is not configured.', 'must-hotel-booking');
+        }
 
         return \array_values(\array_unique($errors));
     }
@@ -400,6 +461,8 @@ final class ClockConfig
             'clock_pms_api_configured' => self::isPmsApiConfigured(),
             'clock_base_api_enabled' => self::baseApiEnabled(),
             'clock_base_api_configured' => self::isBaseApiConfigured(),
+            'clock_pms_api_url_configured' => self::pmsApiUrl() !== '',
+            'clock_base_api_url_configured' => self::baseApiUrl() !== '',
             'clock_region' => self::region(),
             'clock_api_type' => self::apiType(),
             'clock_subscription_id' => self::subscriptionId(),
@@ -416,6 +479,8 @@ final class ClockConfig
             'clock_connection_path' => self::connectionPath(),
             'clock_catalog_paths_configured' => $configuredCatalogPaths,
             'clock_catalog_endpoints' => self::catalogEndpoints(),
+            'clock_rates_availability_path' => $catalogPaths['rates_availability'],
+            'clock_products_path' => $catalogPaths['products'],
             'clock_public_booking_paths_configured' => $configuredPublicBookingPaths,
             'clock_public_booking_configured' => self::isPublicBookingConfigured(),
             'clock_availability_path' => $publicBookingPaths['availability'],
@@ -465,5 +530,16 @@ final class ClockConfig
         $path = self::normalizeOptionalPath($path);
 
         return $path !== '' ? $path : self::normalizePath($default);
+    }
+
+    private static function normalizeBaseUrl(string $url): string
+    {
+        $url = \trim($url);
+
+        if ($url === '' || \preg_match('#^https?://#i', $url) !== 1) {
+            return '';
+        }
+
+        return \rtrim(\esc_url_raw($url), "/ \t\n\r\0\x0B");
     }
 }

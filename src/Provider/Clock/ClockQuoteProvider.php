@@ -31,10 +31,12 @@ final class ClockQuoteProvider implements QuoteProviderInterface
         string $couponCode = '',
         int $ratePlanId = 0
     ): array {
-        if (!ClockConfig::isPublicBookingConfigured() || !$this->isValidStay($checkin, $checkout) || $roomId <= 0) {
+        unset($couponCode);
+
+        if (!$this->isConfiguredForProducts() || !$this->isValidStay($checkin, $checkout) || $roomId <= 0) {
             return [
                 'success' => false,
-                'message' => \__('Clock quote is not configured for this stay.', 'must-hotel-booking'),
+                'message' => \__('Clock products search is not configured for this stay.', 'must-hotel-booking'),
             ];
         }
 
@@ -50,6 +52,7 @@ final class ClockQuoteProvider implements QuoteProviderInterface
 
         $ratePlan = RatePlanEngine::getRoomRatePlan($roomId, $ratePlanId);
         $ratePlanMapping = null;
+        $rateIds = [];
 
         if ($ratePlanId > 0) {
             $ratePlanMapping = $this->catalog->findRatePlanMapping($ratePlanId);
@@ -60,25 +63,45 @@ final class ClockQuoteProvider implements QuoteProviderInterface
                     'message' => \__('The selected rate plan is not mapped to Clock.', 'must-hotel-booking'),
                 ];
             }
+
+            if (!$this->isMappingPublicVisible($ratePlanMapping)) {
+                return [
+                    'success' => false,
+                    'message' => \__('The selected Clock rate is not published for public booking.', 'must-hotel-booking'),
+                ];
+            }
+
+            $rateIds[] = (string) ($ratePlanMapping['external_id'] ?? '');
+        } else {
+            $rateIds = $this->publicMappedRateIdsForRoom($roomId);
         }
 
-        $response = $this->client->request(
-            'POST',
-            ClockConfig::quotePath(),
-            [
-                'body' => $this->quotePayload($roomId, $checkin, $checkout, $guests, $couponCode, $ratePlanId, $roomMapping, $ratePlanMapping),
-            ],
-            'clock.quote'
-        );
+        if (empty($rateIds)) {
+            return [
+                'success' => false,
+                'message' => \__('No public Clock rates are mapped for this accommodation.', 'must-hotel-booking'),
+            ];
+        }
+
+        $response = $this->productsRequest($checkin, $checkout, \max(1, $guests), 0, $rateIds, [(string) ($roomMapping['external_id'] ?? '')], 'clock.products.quote');
 
         if (!$response->isSuccess()) {
             return [
                 'success' => false,
-                'message' => $response->getErrorMessage() !== '' ? $response->getErrorMessage() : \__('Clock quote request failed.', 'must-hotel-booking'),
+                'message' => $response->getErrorMessage() !== '' ? $response->getErrorMessage() : \__('Clock products request failed.', 'must-hotel-booking'),
             ];
         }
 
-        return $this->normalizeQuote($response->getData(), $roomId, $checkin, $checkout, \max(1, $guests), $couponCode, $ratePlanId, \is_array($ratePlan) ? $ratePlan : []);
+        $product = $this->firstMatchingProduct($response->getData(), (string) ($roomMapping['external_id'] ?? ''), $rateIds);
+
+        if (!\is_array($product)) {
+            return [
+                'success' => false,
+                'message' => \__('Clock did not return a bookable product for this accommodation and stay.', 'must-hotel-booking'),
+            ];
+        }
+
+        return $this->normalizeProductQuote($product, $roomId, $checkin, $checkout, \max(1, $guests), $ratePlanId, \is_array($ratePlan) ? $ratePlan : []);
     }
 
     public function buildCheckoutRoomItems(QuoteRequest $request): array
@@ -211,8 +234,19 @@ final class ClockQuoteProvider implements QuoteProviderInterface
 
     public function getRoomRatePlansWithPricing(int $roomId, string $checkin, string $checkout, int $guests = 1): array
     {
+        if (!$this->isConfiguredForProducts() || !$this->isValidStay($checkin, $checkout) || $roomId <= 0) {
+            return [];
+        }
+
+        $roomMapping = $this->catalog->findAccommodationMapping($roomId);
+
+        if (!$this->hasExternalId($roomMapping)) {
+            return [];
+        }
+
         $plans = RatePlanEngine::getRatePlansForRoomType($roomId);
-        $items = [];
+        $mappedPlans = [];
+        $rateIds = [];
 
         foreach ($plans as $plan) {
             if (!\is_array($plan)) {
@@ -220,17 +254,53 @@ final class ClockQuoteProvider implements QuoteProviderInterface
             }
 
             $planId = isset($plan['id']) ? (int) $plan['id'] : 0;
+            $mapping = $planId > 0 ? $this->catalog->findRatePlanMapping($planId) : null;
+
+            if (!$this->hasExternalId($mapping) || !$this->isMappingPublicVisible($mapping)) {
+                continue;
+            }
+
+            $externalId = (string) ($mapping['external_id'] ?? '');
+            $mappedPlans[$externalId] = [
+                'plan' => $plan,
+                'mapping' => $mapping,
+            ];
+            $rateIds[$externalId] = $externalId;
+        }
+
+        if (empty($mappedPlans)) {
+            return [];
+        }
+
+        $response = $this->productsRequest($checkin, $checkout, \max(1, $guests), 0, \array_values($rateIds), [(string) ($roomMapping['external_id'] ?? '')], 'clock.products.rate_plans');
+
+        if (!$response->isSuccess()) {
+            return [];
+        }
+
+        $products = $this->products($response->getData());
+        $items = [];
+
+        foreach ($products as $product) {
+            if (!$this->isBookableProduct($product)) {
+                continue;
+            }
+
+            $rateId = $this->productRateId($product);
+
+            if ($rateId === '' || !isset($mappedPlans[$rateId])) {
+                continue;
+            }
+
+            $plan = $mappedPlans[$rateId]['plan'];
+            $planId = isset($plan['id']) ? (int) $plan['id'] : 0;
             $maxOccupancy = isset($plan['max_occupancy']) ? \max(1, (int) $plan['max_occupancy']) : 1;
 
             if ($guests > 0 && $maxOccupancy > 0 && $guests > $maxOccupancy) {
                 continue;
             }
 
-            if ($planId > 0 && !$this->hasExternalId($this->catalog->findRatePlanMapping($planId))) {
-                continue;
-            }
-
-            $pricing = $this->calculateTotal($roomId, $checkin, $checkout, \max(1, $guests), '', $planId);
+            $pricing = $this->normalizeProductQuote($product, $roomId, $checkin, $checkout, \max(1, $guests), $planId, $plan);
 
             if (empty($pricing['success'])) {
                 continue;
@@ -249,32 +319,322 @@ final class ClockQuoteProvider implements QuoteProviderInterface
                 'total_price' => isset($pricing['total_price']) ? (float) $pricing['total_price'] : 0.0,
                 'max_occupancy' => $maxOccupancy,
                 'is_fallback' => !empty($plan['is_fallback']),
+                'provider' => 'clock',
+                'provider_product_id' => $this->productId($product),
             ];
         }
 
         return $items;
     }
 
+    private function isConfiguredForProducts(): bool
+    {
+        return ClockConfig::isConfigured() && ClockConfig::productsPath() !== '';
+    }
+
     /**
-     * @param array<string, mixed> $roomMapping
-     * @param array<string, mixed>|null $ratePlanMapping
+     * @param array<int, string> $rateIds
+     * @param array<int, string> $roomTypeIds
+     */
+    private function productsRequest(string $arrival, string $departure, int $adults, int $children, array $rateIds, array $roomTypeIds, string $operation): ClockApiResponse
+    {
+        return $this->client->get(
+            ClockConfig::productsPath(),
+            [
+                'product_search' => [
+                    'arrival' => $arrival,
+                    'departure' => $departure,
+                    'adult_count' => \max(1, $adults),
+                    'children_count' => \max(0, $children),
+                    'room_type_id' => \array_values($roomTypeIds),
+                ],
+                'rates' => \array_values($rateIds),
+            ],
+            $operation,
+            [
+                'api_type' => 'pms_api',
+                'endpoint_name' => 'products',
+            ]
+        );
+    }
+
+    /** @return array<int, string> */
+    private function publicMappedRateIdsForRoom(int $roomId): array
+    {
+        $ids = [];
+
+        foreach (RatePlanEngine::getRatePlansForRoomType($roomId) as $plan) {
+            if (!\is_array($plan)) {
+                continue;
+            }
+
+            $planId = isset($plan['id']) ? (int) $plan['id'] : 0;
+
+            if ($planId <= 0) {
+                continue;
+            }
+
+            $mapping = $this->catalog->findRatePlanMapping($planId);
+
+            if (!$this->hasExternalId($mapping) || !$this->isMappingPublicVisible($mapping)) {
+                continue;
+            }
+
+            $externalId = (string) ($mapping['external_id'] ?? '');
+
+            if ($externalId !== '') {
+                $ids[$externalId] = $externalId;
+            }
+        }
+
+        return \array_values($ids);
+    }
+
+    /**
+     * @param mixed $data
+     * @param array<int, string> $rateIds
+     * @return array<string, mixed>|null
+     */
+    private function firstMatchingProduct($data, string $roomTypeId, array $rateIds): ?array
+    {
+        $rateLookup = \array_fill_keys(\array_map('strval', $rateIds), true);
+
+        foreach ($this->products($data) as $product) {
+            if (!$this->isBookableProduct($product)) {
+                continue;
+            }
+
+            $productRoomTypeId = $this->productRoomTypeId($product);
+            $productRateId = $this->productRateId($product);
+
+            if ($roomTypeId !== '' && $productRoomTypeId !== '' && $productRoomTypeId !== $roomTypeId) {
+                continue;
+            }
+
+            if (!empty($rateLookup) && $productRateId !== '' && empty($rateLookup[$productRateId])) {
+                continue;
+            }
+
+            return $product;
+        }
+
+        return null;
+    }
+
+    /**
+     * @param mixed $data
+     * @return array<int, array<string, mixed>>
+     */
+    private function products($data): array
+    {
+        if (!\is_array($data)) {
+            return [];
+        }
+
+        if ($this->isList($data)) {
+            return $this->onlyArrayItems($data);
+        }
+
+        foreach (['products', 'items', 'data', 'results', 'available_products'] as $key) {
+            if (!isset($data[$key]) || !\is_array($data[$key])) {
+                continue;
+            }
+
+            if ($this->isList($data[$key])) {
+                return $this->onlyArrayItems($data[$key]);
+            }
+        }
+
+        return $this->flattenProducts($data);
+    }
+
+    /** @param array<int|string, mixed> $items @return array<int, array<string, mixed>> */
+    private function onlyArrayItems(array $items): array
+    {
+        return \array_values(\array_filter($items, 'is_array'));
+    }
+
+    /** @param mixed $value @return array<int, array<string, mixed>> */
+    private function flattenProducts($value): array
+    {
+        if (!\is_array($value)) {
+            return [];
+        }
+
+        if (!$this->isList($value) && $this->looksLikeProduct($value)) {
+            return [$value];
+        }
+
+        $products = [];
+
+        foreach ($value as $item) {
+            foreach ($this->flattenProducts($item) as $product) {
+                $products[] = $product;
+            }
+        }
+
+        return $products;
+    }
+
+    /** @param array<string, mixed> $value */
+    private function looksLikeProduct(array $value): bool
+    {
+        return $this->hasAnyKey($value, ['rate_id', 'rate_plan_id', 'price', 'total', 'total_price', 'amount', 'room_type_id', 'bookable_id']);
+    }
+
+    /** @param array<int|string, mixed> $value */
+    private function isList(array $value): bool
+    {
+        return $value === [] || \array_keys($value) === \range(0, \count($value) - 1);
+    }
+
+    /** @param array<string, mixed> $product */
+    private function isBookableProduct(array $product): bool
+    {
+        foreach (['bookable', 'is_bookable', 'available', 'is_available', 'free'] as $key) {
+            if (\array_key_exists($key, $product)) {
+                return $this->truthy($product[$key]);
+            }
+        }
+
+        foreach (['available_count', 'rooms_available', 'units_available', 'room_type_free_rooms'] as $key) {
+            if (isset($product[$key]) && \is_numeric($product[$key])) {
+                return (int) $product[$key] > 0;
+            }
+        }
+
+        return true;
+    }
+
+    /** @param array<string, mixed> $product */
+    private function productRoomTypeId(array $product): string
+    {
+        $roomTypeId = $this->firstScalarString($product, ['room_type_id', 'bookable_id', 'provider_room_type_id']);
+
+        if ($roomTypeId !== '') {
+            return $roomTypeId;
+        }
+
+        foreach (['room_type', 'bookable'] as $key) {
+            if (isset($product[$key]) && \is_array($product[$key])) {
+                $roomTypeId = $this->firstScalarString($product[$key], ['id', 'room_type_id']);
+
+                if ($roomTypeId !== '') {
+                    return $roomTypeId;
+                }
+            }
+        }
+
+        return '';
+    }
+
+    /** @param array<string, mixed> $product */
+    private function productRateId(array $product): string
+    {
+        $rateId = $this->firstScalarString($product, ['rate_id', 'rate_plan_id', 'provider_rate_id']);
+
+        if ($rateId !== '') {
+            return $rateId;
+        }
+
+        foreach (['rate', 'rate_plan'] as $key) {
+            if (isset($product[$key]) && \is_array($product[$key])) {
+                $rateId = $this->firstScalarString($product[$key], ['id', 'rate_id']);
+
+                if ($rateId !== '') {
+                    return $rateId;
+                }
+            }
+        }
+
+        return '';
+    }
+
+    /** @param array<string, mixed> $product */
+    private function productId(array $product): string
+    {
+        return $this->firstScalarString($product, ['id', 'product_id', 'uuid']);
+    }
+
+    /** @param array<string, mixed> $product @param array<int, string> $keys */
+    private function firstScalarString(array $product, array $keys): string
+    {
+        foreach ($keys as $key) {
+            if (isset($product[$key]) && \is_scalar($product[$key])) {
+                return \trim((string) $product[$key]);
+            }
+        }
+
+        return '';
+    }
+
+    /**
+     * @param array<string, mixed> $product
+     * @param array<string, mixed> $ratePlan
      * @return array<string, mixed>
      */
-    private function quotePayload(int $roomId, string $checkin, string $checkout, int $guests, string $couponCode, int $ratePlanId, array $roomMapping, ?array $ratePlanMapping): array
+    private function normalizeProductQuote(array $product, int $roomId, string $checkin, string $checkout, int $guests, int $ratePlanId, array $ratePlan): array
     {
-        return [
-            'property_id' => ClockConfig::propertyId(),
-            'checkin' => $checkin,
-            'checkout' => $checkout,
-            'guests' => \max(1, $guests),
-            'coupon_code' => $couponCode,
-            'local_room_id' => $roomId,
-            'provider_room_id' => (string) ($roomMapping['external_id'] ?? ''),
-            'provider_room_code' => (string) ($roomMapping['external_code'] ?? ''),
-            'local_rate_plan_id' => $ratePlanId,
-            'provider_rate_plan_id' => \is_array($ratePlanMapping) ? (string) ($ratePlanMapping['external_id'] ?? '') : '',
-            'provider_rate_plan_code' => \is_array($ratePlanMapping) ? (string) ($ratePlanMapping['external_code'] ?? '') : '',
-        ];
+        $quote = $this->normalizeQuote($product, $roomId, $checkin, $checkout, $guests, '', $ratePlanId, $ratePlan);
+
+        if (!empty($quote['success'])) {
+            $quote['provider_product_id'] = $this->productId($product);
+            $quote['provider_product'] = $product;
+        }
+
+        return $quote;
+    }
+
+    /** @param array<string, mixed>|null $mapping */
+    private function isMappingPublicVisible(?array $mapping): bool
+    {
+        if (!\is_array($mapping)) {
+            return false;
+        }
+
+        $metadata = $this->mappingMetadata($mapping);
+        $visibility = isset($metadata['public_visible']) && \is_scalar($metadata['public_visible'])
+            ? (string) $metadata['public_visible']
+            : '';
+
+        return $visibility !== 'no';
+    }
+
+    /**
+     * @param array<string, mixed> $mapping
+     * @return array<string, mixed>
+     */
+    private function mappingMetadata(array $mapping): array
+    {
+        $metadata = $mapping['metadata'] ?? [];
+
+        if (\is_array($metadata)) {
+            return $metadata;
+        }
+
+        if (\is_string($metadata) && $metadata !== '') {
+            $decoded = \json_decode($metadata, true);
+
+            return \is_array($decoded) ? $decoded : [];
+        }
+
+        return [];
+    }
+
+    /** @param mixed $value */
+    private function truthy($value): bool
+    {
+        if (\is_bool($value)) {
+            return $value;
+        }
+
+        if (\is_numeric($value)) {
+            return (int) $value > 0;
+        }
+
+        $value = \strtolower(\trim((string) $value));
+
+        return \in_array($value, ['1', 'true', 'yes', 'y', 'on', 'available', 'bookable'], true);
     }
 
     /**
@@ -287,10 +647,15 @@ final class ClockQuoteProvider implements QuoteProviderInterface
         $source = $this->quoteSource($data);
         $total = $this->firstNumeric($source, ['total_price', 'total', 'gross_total', 'amount', 'price', 'grand_total']);
 
+        if ($total === null && isset($source['price']) && \is_array($source['price'])) {
+            $source = $source['price'];
+            $total = $this->firstNumeric($source, ['total_price', 'total', 'gross_total', 'amount', 'price', 'grand_total']);
+        }
+
         if ($total === null) {
             return [
                 'success' => false,
-                'message' => \__('Clock quote response did not include a total.', 'must-hotel-booking'),
+                'message' => \__('Clock product response did not include a total.', 'must-hotel-booking'),
             ];
         }
 

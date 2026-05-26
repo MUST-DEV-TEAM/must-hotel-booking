@@ -134,12 +134,31 @@ final class ProviderRequestLogRepository extends AbstractRepository
      */
     public function getInboundSummary(string $provider = ''): array
     {
+        return $this->getDirectionSummary('inbound', $provider);
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    public function getOutboundSummary(string $provider = ''): array
+    {
+        return $this->getDirectionSummary('outbound', $provider);
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function getDirectionSummary(string $direction, string $provider = ''): array
+    {
+        $direction = \in_array($this->key($direction, 20), ['inbound', 'outbound'], true) ? $this->key($direction, 20) : 'outbound';
         $provider = $this->key($provider, 50);
         $summary = [
             'total' => 0,
             'successful' => 0,
             'failed' => 0,
             'last_error' => '',
+            'last_error_operation' => '',
+            'last_error_http_status' => 0,
         ];
 
         if (!$this->providerRequestLogsTableExists()) {
@@ -147,7 +166,7 @@ final class ProviderRequestLogRepository extends AbstractRepository
         }
 
         $where = 'direction = %s';
-        $params = ['inbound'];
+        $params = [$direction];
 
         if ($provider !== '') {
             $where .= ' AND provider = %s';
@@ -180,7 +199,7 @@ final class ProviderRequestLogRepository extends AbstractRepository
             }
         }
 
-        $lastErrorParams = ['inbound'];
+        $lastErrorParams = [$direction];
         $lastErrorWhere = 'direction = %s AND success = 0 AND error_message IS NOT NULL AND error_message <> \'\'';
 
         if ($provider !== '') {
@@ -188,16 +207,23 @@ final class ProviderRequestLogRepository extends AbstractRepository
             $lastErrorParams[] = $provider;
         }
 
-        $summary['last_error'] = (string) $this->wpdb->get_var(
+        $lastErrorRow = $this->wpdb->get_row(
             $this->wpdb->prepare(
-                'SELECT error_message
+                'SELECT operation, http_status, error_message
                 FROM ' . $this->tableName() . '
                 WHERE ' . $lastErrorWhere . '
                 ORDER BY created_at DESC, id DESC
                 LIMIT 1',
                 ...$lastErrorParams
-            )
+            ),
+            ARRAY_A
         );
+
+        if (\is_array($lastErrorRow)) {
+            $summary['last_error'] = (string) ($lastErrorRow['error_message'] ?? '');
+            $summary['last_error_operation'] = (string) ($lastErrorRow['operation'] ?? '');
+            $summary['last_error_http_status'] = (int) ($lastErrorRow['http_status'] ?? 0);
+        }
 
         return $summary;
     }

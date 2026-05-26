@@ -25,12 +25,70 @@ final class ClockInboundSyncService
      */
     public function processInboundPayload(array $payload, string $eventId = ''): array
     {
-        unset($eventId);
+        $eventType = $this->eventType($payload);
+        $source = $this->reservationEventSource($payload);
+        $bookingId = $this->firstString($source, ['booking_id', 'id']);
+        $reservationId = $this->firstString($source, ['reservation_id']);
 
-        return $this->result(false, 202, \__('Clock webhook payload was authenticated and logged, but direct Clock Message Channel event handling is not implemented yet. No reservation was changed.', 'must-hotel-booking'), [
-            'unsupported' => true,
-            'event_type' => $this->firstString($payload, ['Subject', 'event_type', 'type', 'topic', 'action']),
-        ]);
+        if (!$this->isBookingEvent($eventType) || ($bookingId === '' && $reservationId === '')) {
+            return $this->result(false, 202, \__('Clock webhook payload was authenticated and logged, but this event type is not handled by the reservation sync adapter.', 'must-hotel-booking'), [
+                'unsupported' => true,
+                'event_type' => $eventType,
+            ]);
+        }
+
+        $rows = \MustHotelBooking\Engine\get_reservation_repository()->getProviderReservationRowsByExternalIds(
+            ProviderManager::CLOCK_MODE,
+            $reservationId !== '' ? $reservationId : $bookingId,
+            $bookingId
+        );
+
+        if (empty($rows)) {
+            return $this->result(false, 202, \__('Clock booking event was received, but no local mirror reservation matched the provider booking ID.', 'must-hotel-booking'), [
+                'unsupported' => true,
+                'event_type' => $eventType,
+                'provider_booking_id' => $bookingId,
+                'provider_reservation_id' => $reservationId,
+            ]);
+        }
+
+        $fetchPath = ClockConfig::reservationFetchPath();
+
+        if ($fetchPath !== '') {
+            $externalRow = $rows[0];
+            $resolvedPath = $this->applyPathTokens($fetchPath, $externalRow);
+
+            if ($resolvedPath !== '') {
+                $response = $this->client->request(
+                    'GET',
+                    $resolvedPath,
+                    [
+                        'external_id' => $bookingId !== '' ? $bookingId : $reservationId,
+                    ],
+                    'clock.reservation_webhook_refresh'
+                );
+
+                if ($response->isSuccess()) {
+                    $freshSource = $this->reservationSource($response->getData());
+
+                    if (!empty($freshSource)) {
+                        return $this->applyReservationPayloadToRows($rows, $freshSource, \is_array($response->getData()) ? $response->getData() : [], $eventId, 'webhook_refresh');
+                    }
+                }
+            }
+        }
+
+        $result = $this->applyReservationPayloadToRows($rows, $source, $payload, $eventId, 'webhook');
+
+        foreach ($rows as $row) {
+            $reservationLocalId = isset($row['id']) ? (int) $row['id'] : 0;
+
+            if ($reservationLocalId > 0 && $fetchPath !== '') {
+                $this->enqueueReservationRefresh($reservationLocalId, 'webhook');
+            }
+        }
+
+        return $result;
     }
 
     /**
@@ -247,6 +305,35 @@ final class ClockInboundSyncService
         }
 
         return $data;
+    }
+
+    /** @param array<string, mixed> $payload @return array<string, mixed> */
+    private function reservationEventSource(array $payload): array
+    {
+        $message = $payload['Message'] ?? $payload['message'] ?? null;
+
+        if (\is_string($message) && \trim($message) !== '') {
+            $decoded = \json_decode($message, true);
+
+            if (\is_array($decoded)) {
+                return $decoded;
+            }
+        }
+
+        return $this->reservationSource($payload);
+    }
+
+    /** @param array<string, mixed> $payload */
+    private function eventType(array $payload): string
+    {
+        return $this->firstString($payload, ['Subject', 'subject', 'event_type', 'type', 'topic', 'action']);
+    }
+
+    private function isBookingEvent(string $eventType): bool
+    {
+        $eventType = $this->normalizeStatus($eventType);
+
+        return \strpos($eventType, 'booking_') === 0 || \strpos($eventType, 'reservation_') === 0;
     }
 
     /** @param array<string, mixed> $source @param array<int, string> $keys */

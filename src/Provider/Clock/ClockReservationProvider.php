@@ -241,6 +241,7 @@ final class ClockReservationProvider implements ReservationProviderInterface
         $reservationStatus = isset($options['reservation_status']) ? \sanitize_key((string) $options['reservation_status']) : 'pending';
         $paymentStatus = isset($options['payment_status']) ? \sanitize_key((string) $options['payment_status']) : 'pending';
         $clearSelection = !isset($options['clear_selection']) || (bool) $options['clear_selection'];
+        $clockStatus = 'expected';
 
         if (!ClockConfig::isPublicBookingConfigured()) {
             return $this->errorResult(ClockConfig::publicBookingConfigurationErrors());
@@ -334,19 +335,20 @@ final class ClockReservationProvider implements ReservationProviderInterface
             return $this->errorResult([\__('Unable to save guest details.', 'must-hotel-booking')]);
         }
 
-        $providerReservation = $this->createClockReservation($context, $guestForm, $validatedRooms, $reservationStatus, $paymentStatus);
-
-        if (empty($providerReservation['success'])) {
-            return $this->errorResult([(string) ($providerReservation['message'] ?? \__('Unable to create the reservation in Clock.', 'must-hotel-booking'))]);
-        }
-
-        $providerData = isset($providerReservation['reservation']) && \is_array($providerReservation['reservation'])
-            ? $providerReservation['reservation']
-            : [];
+        $returningGuestId = $this->findReturningGuestId($guestForm);
         $reservationIds = [];
         $appliedCouponIds = [];
 
         foreach ($validatedRooms as $validatedRoom) {
+            $providerReservation = $this->createClockBooking($context, $guestForm, $validatedRoom, $clockStatus, $returningGuestId);
+
+            if (empty($providerReservation['success'])) {
+                return $this->errorResult([(string) ($providerReservation['message'] ?? \__('Unable to create the booking in Clock.', 'must-hotel-booking'))]);
+            }
+
+            $providerData = isset($providerReservation['reservation']) && \is_array($providerReservation['reservation'])
+                ? $providerReservation['reservation']
+                : [];
             $reservationId = $this->mirror->createMirrorReservation(
                 $context,
                 $guestForm,
@@ -406,36 +408,19 @@ final class ClockReservationProvider implements ReservationProviderInterface
     /**
      * @param array<string, mixed> $context
      * @param array<string, string> $guestForm
-     * @param array<int, array<string, mixed>> $validatedRooms
+     * @param array<string, mixed> $validatedRoom
      * @return array<string, mixed>
      */
-    private function createClockReservation(array $context, array $guestForm, array $validatedRooms, string $reservationStatus, string $paymentStatus): array
+    private function createClockBooking(array $context, array $guestForm, array $validatedRoom, string $clockStatus, string $returningGuestId = ''): array
     {
-        $idempotencyKey = $this->idempotencyKey($context, $guestForm, $validatedRooms, $reservationStatus, $paymentStatus);
+        $idempotencyKey = $this->idempotencyKey($context, $guestForm, [$validatedRoom], $clockStatus, 'clock_pms');
+        $body = $this->bookingCreatePayload($context, $guestForm, $validatedRoom, $clockStatus, $returningGuestId);
         $response = $this->client->request(
             'POST',
             ClockConfig::reservationCreatePath(),
             [
                 'idempotency_key' => $idempotencyKey,
-                'body' => [
-                    'property_id' => ClockConfig::propertyId(),
-                    'idempotency_key' => $idempotencyKey,
-                    'checkin' => (string) ($context['checkin'] ?? ''),
-                    'checkout' => (string) ($context['checkout'] ?? ''),
-                    'reservation_status' => $reservationStatus,
-                    'payment_status' => $paymentStatus,
-                    'guest' => [
-                        'first_name' => (string) ($guestForm['first_name'] ?? ''),
-                        'last_name' => (string) ($guestForm['last_name'] ?? ''),
-                        'email' => (string) ($guestForm['email'] ?? ''),
-                        'phone' => \MustHotelBooking\Frontend\combine_checkout_phone_value($guestForm),
-                        'country' => (string) ($guestForm['country'] ?? ''),
-                    ],
-                    'rooms' => $this->providerRoomPayloads($validatedRooms),
-                    'total_price' => $this->totalPrice($validatedRooms),
-                    'currency' => \MustHotelBooking\Core\MustBookingConfig::get_currency(),
-                    'source' => 'website',
-                ],
+                'body' => $body,
             ],
             'clock.reservation_create'
         );
@@ -461,6 +446,66 @@ final class ClockReservationProvider implements ReservationProviderInterface
             'success' => true,
             'reservation' => $reservation,
         ];
+    }
+
+    /**
+     * @param array<string, mixed> $context
+     * @param array<string, string> $guestForm
+     * @param array<string, mixed> $validatedRoom
+     * @return array<string, mixed>
+     */
+    private function bookingCreatePayload(array $context, array $guestForm, array $validatedRoom, string $clockStatus, string $returningGuestId): array
+    {
+        $roomMapping = isset($validatedRoom['room_mapping']) && \is_array($validatedRoom['room_mapping']) ? $validatedRoom['room_mapping'] : [];
+        $ratePlanMapping = isset($validatedRoom['rate_plan_mapping']) && \is_array($validatedRoom['rate_plan_mapping']) ? $validatedRoom['rate_plan_mapping'] : [];
+        $pricing = isset($validatedRoom['pricing']) && \is_array($validatedRoom['pricing']) ? $validatedRoom['pricing'] : [];
+        $roomId = isset($validatedRoom['room_id']) ? (int) $validatedRoom['room_id'] : 0;
+        $phone = \MustHotelBooking\Frontend\combine_checkout_phone_value($guestForm);
+        $booking = [
+            'arrival' => (string) ($context['checkin'] ?? ''),
+            'departure' => (string) ($context['checkout'] ?? ''),
+            'status' => $clockStatus,
+            'adults' => isset($validatedRoom['guests']) ? \max(1, (int) $validatedRoom['guests']) : \max(1, (int) ($context['guests'] ?? 1)),
+            'children' => 0,
+            'reference_number' => $this->clockReferenceNumber($context, $validatedRoom),
+            'is_guaranteed' => false,
+            'rate_id' => $this->nullableExternalId($ratePlanMapping),
+            'arrival_room_type_id' => $this->nullableExternalId($roomMapping),
+            'arrival_room_id' => null,
+            'links' => \function_exists('home_url') ? \home_url('/') : '',
+            'marketing_source' => 'Website',
+            'marketing_channel' => 'Website',
+            'marketing_segment' => '',
+            'accept_charge_transfers' => true,
+            'early_arrival' => false,
+            'late_departure' => false,
+            'manual_prices_as_text' => '',
+            'manual_currency' => '',
+            'note' => $this->bookingNote($roomId, $guestForm, $pricing),
+        ];
+
+        if ($returningGuestId === '') {
+            $booking += [
+                'guest_first_name' => (string) ($guestForm['first_name'] ?? ''),
+                'guest_last_name' => (string) ($guestForm['last_name'] ?? ''),
+                'guest_e_mail' => (string) ($guestForm['email'] ?? ''),
+                'guest_phone_number' => $phone,
+                'guest_country' => (string) ($guestForm['country'] ?? ''),
+                'guest_address' => (string) ($guestForm['address'] ?? ''),
+                'guest_city' => (string) ($guestForm['city'] ?? ''),
+                'guest_zip_code' => (string) ($guestForm['zip_code'] ?? ''),
+            ];
+        }
+
+        $payload = [
+            'booking' => $booking,
+        ];
+
+        if ($returningGuestId !== '') {
+            $payload['main_booking_guest'] = $returningGuestId;
+        }
+
+        return $payload;
     }
 
     /** @param array<int, array<string, mixed>> $validatedRooms @return array<int, array<string, mixed>> */
@@ -519,6 +564,122 @@ final class ClockReservationProvider implements ReservationProviderInterface
         }
 
         return $data;
+    }
+
+    /** @param array<string, mixed> $context @param array<string, mixed> $validatedRoom */
+    private function clockReferenceNumber(array $context, array $validatedRoom): string
+    {
+        $parts = [
+            'MHB',
+            \gmdate('YmdHis'),
+            isset($validatedRoom['room_id']) ? (string) (int) $validatedRoom['room_id'] : '0',
+            \substr(\hash('crc32b', (string) ($context['checkin'] ?? '') . (string) ($context['checkout'] ?? '') . $this->uuid()), 0, 8),
+        ];
+
+        return \implode('-', $parts);
+    }
+
+    /** @param array<string, string> $guestForm @param array<string, mixed> $pricing */
+    private function bookingNote(int $roomId, array $guestForm, array $pricing): string
+    {
+        $note = ReservationEngine::buildReservationNote($roomId, $guestForm);
+        $providerProductId = isset($pricing['provider_product_id']) ? (string) $pricing['provider_product_id'] : '';
+
+        if ($providerProductId !== '') {
+            $note = \trim($note);
+            $note .= ($note !== '' ? "\n\n" : '') . 'Clock product ID: ' . $providerProductId;
+        }
+
+        return $note;
+    }
+
+    /** @param array<string, string> $guestForm */
+    private function findReturningGuestId(array $guestForm): string
+    {
+        $terms = [];
+        $email = isset($guestForm['email']) ? \sanitize_email((string) $guestForm['email']) : '';
+        $phone = \MustHotelBooking\Frontend\combine_checkout_phone_value($guestForm);
+
+        if ($email !== '') {
+            $terms[] = $email;
+        }
+
+        if ($phone !== '') {
+            $terms[] = $phone;
+        }
+
+        if (empty($terms)) {
+            return '';
+        }
+
+        $response = $this->client->get(
+            '/guests/search',
+            [
+                'main_guest_free_text_search' => \array_values(\array_unique($terms)),
+            ],
+            'clock.guests.search',
+            [
+                'api_type' => 'pms_api',
+                'endpoint_name' => 'guests_search',
+            ]
+        );
+
+        if (!$response->isSuccess()) {
+            return '';
+        }
+
+        $guests = $this->guestSearchItems($response->getData());
+
+        if (\count($guests) !== 1) {
+            return '';
+        }
+
+        return $this->firstString($guests[0], ['guest_id', 'id']);
+    }
+
+    /** @param mixed $data @return array<int, array<string, mixed>> */
+    private function guestSearchItems($data): array
+    {
+        if (!\is_array($data)) {
+            return [];
+        }
+
+        if ($this->isList($data)) {
+            return \array_values(\array_filter($data, 'is_array'));
+        }
+
+        foreach (['guests', 'items', 'data', 'results'] as $key) {
+            if (isset($data[$key]) && \is_array($data[$key])) {
+                return $this->isList($data[$key])
+                    ? \array_values(\array_filter($data[$key], 'is_array'))
+                    : [];
+            }
+        }
+
+        return [];
+    }
+
+    /** @param array<int|string, mixed> $value */
+    private function isList(array $value): bool
+    {
+        return $value === [] || \array_keys($value) === \range(0, \count($value) - 1);
+    }
+
+    /** @param array<string, mixed> $mapping */
+    private function nullableExternalId(array $mapping)
+    {
+        $externalId = (string) ($mapping['external_id'] ?? '');
+
+        return $externalId !== '' && \is_numeric($externalId) ? (int) $externalId : ($externalId !== '' ? $externalId : null);
+    }
+
+    private function uuid(): string
+    {
+        if (\function_exists('wp_generate_uuid4')) {
+            return \wp_generate_uuid4();
+        }
+
+        return \bin2hex(\random_bytes(16));
     }
 
     /** @param array<string, mixed>|null $mapping @return array<string, mixed> */

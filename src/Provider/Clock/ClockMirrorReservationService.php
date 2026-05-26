@@ -79,9 +79,10 @@ final class ClockMirrorReservationService
             'provider_payload_ref' => $providerReservationId !== '' ? $providerReservationId : $providerBookingId,
             'provider_metadata' => [
                 'source' => 'public_booking_mvp',
-                'payment_strategy' => 'plugin_owned',
+                'payment_strategy' => 'clock_pms',
                 'provider_created_before_payment' => (string) ($options['payment_status'] ?? '') === 'pending',
-                'payment_reconciliation_required' => (string) ($options['payment_status'] ?? '') === 'pending',
+                'payment_reconciliation_required' => false,
+                'clock_payment_required' => (string) ($options['payment_status'] ?? '') === 'pending',
                 'provider_response' => $this->responseSummary($providerReservation),
                 'room_mapping' => $validatedRoom['room_mapping'] ?? null,
                 'rate_plan_mapping' => $validatedRoom['rate_plan_mapping'] ?? null,

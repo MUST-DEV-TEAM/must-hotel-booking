@@ -293,6 +293,7 @@ final class SettingsDiagnostics
         $catalogSummary = ClockCatalogService::getCachedCatalogSummary();
         $syncJobSummary = $syncJobs->getStatusSummary(ProviderManager::CLOCK_MODE);
         $inboundSummary = $requestLogs->getInboundSummary(ProviderManager::CLOCK_MODE);
+        $outboundSummary = $requestLogs->getOutboundSummary(ProviderManager::CLOCK_MODE);
         $syncJobCounts = isset($syncJobSummary['counts']) && \is_array($syncJobSummary['counts']) ? $syncJobSummary['counts'] : [];
 
         if ((string) $configuredMode === 'clock' && !empty($providerSummary['clock_direct_api_configured'])) {
@@ -348,6 +349,9 @@ final class SettingsDiagnostics
                 'webhook_secret_set' => !empty($providerSummary['clock_webhook_secret_set']),
                 'webhook_url' => (string) ($providerSummary['clock_webhook_url'] ?? ''),
                 'reservation_fetch_path' => (string) ($providerSummary['clock_reservation_fetch_path'] ?? ''),
+            ],
+            'request_logs' => [
+                'outbound_summary' => $outboundSummary,
             ],
         ];
 
@@ -458,6 +462,8 @@ final class SettingsDiagnostics
         $lines[] = 'Clock PMS API Configured: ' . (!empty($clock['clock_pms_api_configured']) ? 'yes' : 'no');
         $lines[] = 'Clock Base API Enabled: ' . (!empty($clock['clock_base_api_enabled']) ? 'yes' : 'no');
         $lines[] = 'Clock Base API Configured: ' . (!empty($clock['clock_base_api_configured']) ? 'yes' : 'no');
+        $lines[] = 'Clock PMS API URL Set: ' . (!empty($clock['clock_pms_api_url_configured']) ? 'yes' : 'no');
+        $lines[] = 'Clock Base API URL Set: ' . (!empty($clock['clock_base_api_url_configured']) ? 'yes' : 'no');
         $lines[] = 'Clock Region: ' . (string) ($clock['clock_region'] ?? '');
         $lines[] = 'Clock API Type: ' . (string) ($clock['clock_api_type'] ?? '');
         $lines[] = 'Clock Subscription ID: ' . (string) ($clock['clock_subscription_id'] ?? '');
@@ -476,9 +482,14 @@ final class SettingsDiagnostics
         $lines[] = 'Clock Catalog Room Types: ' . (string) ($catalogCounts['room_types'] ?? 0);
         $lines[] = 'Clock Catalog Rooms: ' . (string) ($catalogCounts['rooms'] ?? 0);
         $lines[] = 'Clock Catalog Rates: ' . (string) ($catalogCounts['rates'] ?? 0);
-        $lines[] = 'Clock Catalog WBE Rates: ' . (string) ($catalogCounts['wbe_room_type_rates'] ?? 0);
-        $lines[] = 'Clock Catalog Rate Plans: ' . (string) ($catalogCounts['rate_plans'] ?? 0);
         $lines[] = 'Clock Catalog Error Count: ' . (string) \count($catalogErrors);
+        $requestLogs = isset($data['provider']['request_logs']) && \is_array($data['provider']['request_logs']) ? $data['provider']['request_logs'] : [];
+        $outboundSummary = isset($requestLogs['outbound_summary']) && \is_array($requestLogs['outbound_summary']) ? $requestLogs['outbound_summary'] : [];
+        $lines[] = 'Clock Outbound Requests Total: ' . (string) ($outboundSummary['total'] ?? 0);
+        $lines[] = 'Clock Outbound Requests Failed: ' . (string) ($outboundSummary['failed'] ?? 0);
+        $lines[] = 'Clock Outbound Last Error Operation: ' . (string) ($outboundSummary['last_error_operation'] ?? '');
+        $lines[] = 'Clock Outbound Last Error HTTP Status: ' . (string) ($outboundSummary['last_error_http_status'] ?? 0);
+        $lines[] = 'Clock Outbound Last Error: ' . (string) ($outboundSummary['last_error'] ?? '');
         $lines[] = 'Clock Public Booking Configured: ' . (!empty($clock['clock_public_booking_configured']) ? 'yes' : 'no');
         $lines[] = 'Clock Public Booking Paths Configured: ' . (string) ($clock['clock_public_booking_paths_configured'] ?? 0);
         $lines[] = 'Clock Reconciliation Paths Configured: ' . (string) ($clock['clock_reconciliation_paths_configured'] ?? 0);

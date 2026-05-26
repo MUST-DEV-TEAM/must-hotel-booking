@@ -38,7 +38,7 @@ final class ClockBookingProvider implements BookingProviderInterface
     public function availability(): AvailabilityProviderInterface
     {
         if (!$this->availability instanceof AvailabilityProviderInterface) {
-            $this->availability = new ClockUnavailableAvailabilityProvider();
+            $this->availability = new ClockAvailabilityProvider();
         }
 
         return $this->availability;
@@ -47,7 +47,7 @@ final class ClockBookingProvider implements BookingProviderInterface
     public function quote(): QuoteProviderInterface
     {
         if (!$this->quote instanceof QuoteProviderInterface) {
-            $this->quote = new ClockUnavailableQuoteProvider();
+            $this->quote = new ClockQuoteProvider();
         }
 
         return $this->quote;
@@ -56,7 +56,7 @@ final class ClockBookingProvider implements BookingProviderInterface
     public function reservations(): ReservationProviderInterface
     {
         if (!$this->reservations instanceof ReservationProviderInterface) {
-            $this->reservations = new ClockUnavailableReservationProvider();
+            $this->reservations = new ClockReservationProvider();
         }
 
         return $this->reservations;

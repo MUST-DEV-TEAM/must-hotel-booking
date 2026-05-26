@@ -26,7 +26,7 @@ final class ClockCatalogService
     {
         $collections = [];
 
-        foreach (ClockConfig::catalogEndpoints() as $catalogKey => $endpoint) {
+        foreach (ClockConfig::catalogSyncEndpoints() as $catalogKey => $endpoint) {
             $collections[$catalogKey] = $this->fetchCollection($catalogKey, $endpoint);
         }
 
@@ -103,6 +103,8 @@ final class ClockCatalogService
                     'status' => (string) ($collection['status'] ?? 'unknown'),
                     'message' => (string) ($collection['message'] ?? ''),
                     'http_status' => (int) ($collection['http_status'] ?? 0),
+                    'endpoint_path' => (string) ($collection['endpoint_path'] ?? ''),
+                    'response_preview' => isset($collection['response_preview']) && \is_array($collection['response_preview']) ? $collection['response_preview'] : [],
                 ];
             }
         }
@@ -236,6 +238,9 @@ final class ClockCatalogService
                 'items' => [],
                 'message' => $response->getErrorMessage(),
                 'http_status' => $response->getStatusCode(),
+                'api_type' => (string) ($endpoint['api_type'] ?? 'pms_api'),
+                'endpoint_name' => (string) ($endpoint['endpoint_name'] ?? $catalogKey),
+                'endpoint_path' => $path,
                 'response_preview' => $this->previewData($response->getData(), $response->getBody()),
             ];
         }
@@ -248,6 +253,9 @@ final class ClockCatalogService
             'items' => $this->normalizeItems($rawItems, $catalogKey),
             'raw_item_count' => \count($rawItems),
             'http_status' => $response->getStatusCode(),
+            'api_type' => (string) ($endpoint['api_type'] ?? 'pms_api'),
+            'endpoint_name' => (string) ($endpoint['endpoint_name'] ?? $catalogKey),
+            'endpoint_path' => $path,
             'response_preview' => $this->previewData($response->getData(), $response->getBody()),
         ];
     }
@@ -323,6 +331,9 @@ final class ClockCatalogService
                 'items' => \array_slice($items, 0, 250),
                 'raw_item_count' => (int) ($collection['raw_item_count'] ?? \count($items)),
                 'http_status' => (int) ($collection['http_status'] ?? 0),
+                'api_type' => (string) ($collection['api_type'] ?? 'pms_api'),
+                'endpoint_name' => (string) ($collection['endpoint_name'] ?? $key),
+                'endpoint_path' => (string) ($collection['endpoint_path'] ?? ''),
                 'message' => (string) ($collection['message'] ?? ''),
                 'response_preview' => isset($collection['response_preview']) && \is_array($collection['response_preview']) ? $collection['response_preview'] : [],
             ];
@@ -382,6 +393,7 @@ final class ClockCatalogService
             'code' => $this->firstScalar($item, ['code', 'number', 'slug', 'short_name']),
             'status' => $this->firstScalar($item, ['status', 'state', 'active', 'enabled']),
             'parent_id' => $this->firstScalarOrNestedId($item, $parentKeys),
+            'public_visible' => $catalogKey === 'rates' ? $this->detectWrsVisibility($item) : '',
             'metadata' => $this->compactMetadata($item),
         ];
     }
@@ -444,6 +456,44 @@ final class ClockCatalogService
         }
 
         return '';
+    }
+
+    /** @param array<string, mixed> $item */
+    private function detectWrsVisibility(array $item): string
+    {
+        foreach (['publish_in_wrs', 'published_in_wrs', 'wrs_published', 'wrs', 'wbe', 'web_booking_engine', 'public', 'is_public'] as $key) {
+            if (\array_key_exists($key, $item) && \is_scalar($item[$key])) {
+                return $this->truthy($item[$key]) ? 'yes' : 'no';
+            }
+        }
+
+        foreach (['settings', 'visibility', 'publishing', 'wrs_settings'] as $containerKey) {
+            if (!isset($item[$containerKey]) || !\is_array($item[$containerKey])) {
+                continue;
+            }
+
+            foreach (['publish_in_wrs', 'published_in_wrs', 'wrs_published', 'wrs', 'wbe', 'public', 'is_public'] as $key) {
+                if (\array_key_exists($key, $item[$containerKey]) && \is_scalar($item[$containerKey][$key])) {
+                    return $this->truthy($item[$containerKey][$key]) ? 'yes' : 'no';
+                }
+            }
+        }
+
+        return 'unknown';
+    }
+
+    /** @param mixed $value */
+    private function truthy($value): bool
+    {
+        if (\is_bool($value)) {
+            return $value;
+        }
+
+        if (\is_numeric($value)) {
+            return (int) $value > 0;
+        }
+
+        return \in_array(\strtolower(\trim((string) $value)), ['1', 'true', 'yes', 'on', 'published', 'public', 'enabled'], true);
     }
 
     /**

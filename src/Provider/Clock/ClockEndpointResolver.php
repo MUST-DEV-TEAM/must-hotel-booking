@@ -29,17 +29,26 @@ final class ClockEndpointResolver
 
     public static function buildUrl(string $apiType, string $path): string
     {
-        $region = ClockConfig::region();
-        $subscriptionId = ClockConfig::subscriptionId();
-        $accountId = ClockConfig::accountId();
         $apiType = self::normalizeApiType($apiType !== '' ? $apiType : ClockConfig::apiType());
-
-        if ($region === '' || $subscriptionId === '' || $accountId === '') {
-            return '';
-        }
 
         if (\preg_match('#^https?://#i', $path) === 1) {
             return \esc_url_raw($path);
+        }
+
+        $explicitBaseUrl = ClockConfig::apiBaseUrlForType($apiType);
+
+        if ($explicitBaseUrl !== '') {
+            $path = self::normalizePath($path);
+
+            return $explicitBaseUrl . ($path === '/' ? '' : $path);
+        }
+
+        $region = ClockConfig::region();
+        $subscriptionId = ClockConfig::subscriptionId();
+        $accountId = ClockConfig::accountId();
+
+        if ($region === '' || $subscriptionId === '' || $accountId === '') {
+            return '';
         }
 
         $path = self::normalizePath($path);
@@ -70,6 +79,12 @@ final class ClockEndpointResolver
     public static function configurationErrors(): array
     {
         $errors = [];
+
+        $hasExplicitBaseUrl = ClockConfig::pmsApiUrl() !== '' || ClockConfig::baseApiUrl() !== '';
+
+        if ($hasExplicitBaseUrl) {
+            return $errors;
+        }
 
         if (ClockConfig::region() === '') {
             $errors[] = \__('Clock subscription region is missing.', 'must-hotel-booking');

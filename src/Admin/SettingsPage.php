@@ -400,10 +400,23 @@ final class SettingsPage
             $result = ClockConnectionDiagnostic::testConnection();
 
             if (empty($result['success'])) {
+                $httpStatus = (int) ($result['http_status'] ?? 0);
+                $message = (string) ($result['message'] ?? \__('Clock connection test failed.', 'must-hotel-booking'));
+
+                if ($httpStatus > 0) {
+                    $message .= ' ' . \sprintf(
+                        /* translators: %d is an HTTP status code. */
+                        \__('HTTP status: %d.', 'must-hotel-booking'),
+                        $httpStatus
+                    );
+                }
+
+                $message .= ' ' . \__('Technical details were saved in provider request logs without credentials.', 'must-hotel-booking');
+
                 return [
                     'tab' => $tab,
                     'notice' => '',
-                    'errors' => [(string) ($result['message'] ?? \__('Clock connection test failed.', 'must-hotel-booking'))],
+                    'errors' => [$message],
                     'forms' => [],
                 ];
             }
@@ -1495,6 +1508,8 @@ final class SettingsPage
         $form['clock_environment'] = \sanitize_key((string) \wp_unslash($source['clock_environment'] ?? $form['clock_environment']));
         $form['clock_pms_api_enabled'] = self::parseBool($source, 'clock_pms_api_enabled');
         $form['clock_base_api_enabled'] = self::parseBool($source, 'clock_base_api_enabled');
+        $form['clock_pms_api_url'] = \esc_url_raw((string) \wp_unslash($source['clock_pms_api_url'] ?? ''));
+        $form['clock_base_api_url'] = \esc_url_raw((string) \wp_unslash($source['clock_base_api_url'] ?? ''));
         $form['clock_api_base_url'] = \esc_url_raw((string) \wp_unslash($source['clock_api_base_url'] ?? ''));
         $form['clock_region'] = ClockEndpointResolver::normalizeRegion((string) \wp_unslash($source['clock_region'] ?? ''));
         $form['clock_api_type'] = ClockEndpointResolver::normalizeApiType((string) \wp_unslash($source['clock_api_type'] ?? 'pms_api'));
@@ -1509,6 +1524,8 @@ final class SettingsPage
         $form['clock_room_types_path'] = ClockConfig::normalizeOptionalPath((string) \wp_unslash($source['clock_room_types_path'] ?? ''));
         $form['clock_rooms_path'] = ClockConfig::normalizeOptionalPath((string) \wp_unslash($source['clock_rooms_path'] ?? ''));
         $form['clock_rates_path'] = ClockConfig::normalizeOptionalPath((string) \wp_unslash($source['clock_rates_path'] ?? ''));
+        $form['clock_rates_availability_path'] = ClockConfig::normalizeOptionalPath((string) \wp_unslash($source['clock_rates_availability_path'] ?? ''));
+        $form['clock_products_path'] = ClockConfig::normalizeOptionalPath((string) \wp_unslash($source['clock_products_path'] ?? ''));
         $form['clock_wbe_room_type_rates_path'] = ClockConfig::normalizeOptionalPath((string) \wp_unslash($source['clock_wbe_room_type_rates_path'] ?? ''));
         $form['clock_rate_plans_path'] = ClockConfig::normalizeOptionalPath((string) \wp_unslash($source['clock_rate_plans_path'] ?? ''));
         $form['clock_availability_path'] = ClockConfig::normalizeOptionalPath((string) \wp_unslash($source['clock_availability_path'] ?? ''));
@@ -1540,8 +1557,10 @@ final class SettingsPage
             $form['clock_environment'] = 'production';
         }
 
-        if ($form['clock_api_base_url'] !== '' && \filter_var($form['clock_api_base_url'], \FILTER_VALIDATE_URL) === false) {
-            $errors[] = \__('Clock API base URL must be a valid URL.', 'must-hotel-booking');
+        foreach (['clock_pms_api_url' => __('Clock PMS API URL must be a valid URL.', 'must-hotel-booking'), 'clock_base_api_url' => __('Clock Base API URL must be a valid URL.', 'must-hotel-booking'), 'clock_api_base_url' => __('Clock legacy API base URL must be a valid URL.', 'must-hotel-booking')] as $urlField => $message) {
+            if ((string) ($form[$urlField] ?? '') !== '' && \filter_var((string) $form[$urlField], \FILTER_VALIDATE_URL) === false) {
+                $errors[] = $message;
+            }
         }
 
         if ($form['clock_timeout_seconds'] < 1 || $form['clock_timeout_seconds'] > 60) {
@@ -1683,6 +1702,20 @@ final class SettingsPage
             }
 
             if ($persist) {
+                $catalogItem = self::findClockCatalogItemForMapping($entityType, $externalId);
+                $metadata = [
+                    'mapping_source' => 'admin_manual',
+                    'phase' => 'direct_clock_phase_3',
+                ];
+
+                if (!empty($catalogItem)) {
+                    $metadata['clock_catalog_item'] = $catalogItem;
+
+                    if ($entityType === 'rate_plan') {
+                        $metadata['public_visible'] = (string) ($catalogItem['public_visible'] ?? 'unknown');
+                    }
+                }
+
                 (new ProviderMappingRepository())->save([
                     'provider' => ProviderManager::CLOCK_MODE,
                     'entity_type' => $entityType,
@@ -1693,10 +1726,7 @@ final class SettingsPage
                     'external_parent_id' => $externalParentId,
                     'display_name' => $displayName,
                     'status' => 'active',
-                    'metadata' => [
-                        'mapping_source' => 'admin_manual',
-                        'phase' => 'direct_clock_phase_1',
-                    ],
+                    'metadata' => $metadata,
                     'last_synced_at' => \current_time('mysql'),
                 ]);
             }
@@ -1850,6 +1880,19 @@ final class SettingsPage
                 __('Clock refresh queued for local reservation #%1$d as sync job #%2$d.', 'must-hotel-booking'),
                 $reservationId,
                 $jobId
+            )) . '</p></div>';
+            return;
+        }
+
+        if ($notice === 'clock_connection_test_succeeded') {
+            $status = isset($_GET['clock_http_status']) ? \absint(\wp_unslash($_GET['clock_http_status'])) : 0;
+            $duration = isset($_GET['clock_duration_ms']) ? \absint(\wp_unslash($_GET['clock_duration_ms'])) : 0;
+
+            echo '<div class="notice notice-success"><p>' . \esc_html(\sprintf(
+                /* translators: 1: HTTP status code, 2: request duration in milliseconds. */
+                __('Clock PMS API connection succeeded. GET /room_types returned HTTP %1$d in %2$d ms.', 'must-hotel-booking'),
+                $status,
+                $duration
             )) . '</p></div>';
             return;
         }
@@ -2847,13 +2890,15 @@ final class SettingsPage
 
         echo '<div class="must-settings-grid must-settings-grid--2">';
         self::renderSectionIntro(\__('Direct Clock API connection', 'must-hotel-booking'), \__('Clock PMS+ API URLs are built from region, API type, subscription ID, and account ID. Credentials use Digest authentication with api_user and api_key.', 'must-hotel-booking'));
+        self::renderField(['label' => __('PMS API URL', 'must-hotel-booking'), 'name' => 'clock_pms_api_url', 'type' => 'url', 'value' => $form['clock_pms_api_url'] ?? '', 'description' => __('Preferred for the Clock sandbox. Example: https://sky-eu1.clock-software.com/pms_api/172528/16307', 'must-hotel-booking')]);
+        self::renderField(['label' => __('Base API URL', 'must-hotel-booking'), 'name' => 'clock_base_api_url', 'type' => 'url', 'value' => $form['clock_base_api_url'] ?? '', 'description' => __('Preferred for later Base API/webhook setup. Example: https://sky-eu1.clock-software.com/base_api/172528/16307', 'must-hotel-booking')]);
         self::renderField(['label' => __('Subscription region', 'must-hotel-booking'), 'name' => 'clock_region', 'value' => $form['clock_region'] ?? '', 'description' => __('Example: sky-eu1. Do not include https:// or clock-software.com.', 'must-hotel-booking')]);
         self::renderField(['label' => __('Default API type', 'must-hotel-booking'), 'name' => 'clock_api_type', 'type' => 'select', 'value' => $form['clock_api_type'] ?? 'pms_api', 'options' => ['pms_api' => 'pms_api', 'base_api' => 'base_api', 'yield_management_api' => 'yield_management_api', 'pos_api' => 'pos_api'], 'description' => __('Legacy default only. Phase 1 catalog calls explicitly use pms_api; future webhook setup will explicitly use base_api.', 'must-hotel-booking')]);
         self::renderField(['label' => __('Subscription ID', 'must-hotel-booking'), 'name' => 'clock_subscription_id', 'value' => $form['clock_subscription_id'] ?? '']);
         self::renderField(['label' => __('Account ID', 'must-hotel-booking'), 'name' => 'clock_account_id', 'value' => $form['clock_account_id'] ?? '']);
         self::renderField(['label' => __('API user', 'must-hotel-booking'), 'name' => 'clock_api_user', 'value' => $form['clock_api_user'] ?? '']);
         self::renderField(['label' => __('API key', 'must-hotel-booking'), 'name' => 'clock_api_key', 'type' => 'password', 'value' => $form['clock_api_key'] ?? '']);
-        self::renderField(['label' => __('Legacy API base URL override', 'must-hotel-booking'), 'name' => 'clock_api_base_url', 'type' => 'url', 'value' => $form['clock_api_base_url'] ?? '', 'description' => __('Retained for migration diagnostics only. Direct API requests use the structured Clock URL fields above.', 'must-hotel-booking')]);
+        self::renderField(['label' => __('Legacy API base URL override', 'must-hotel-booking'), 'name' => 'clock_api_base_url', 'type' => 'url', 'value' => $form['clock_api_base_url'] ?? '', 'description' => __('Retained for migration diagnostics only. Direct API requests prefer the explicit PMS/Base API URLs above, then fall back to the structured Clock URL fields.', 'must-hotel-booking')]);
         self::renderField(['label' => __('Legacy property / hotel ID', 'must-hotel-booking'), 'name' => 'clock_property_id', 'value' => $form['clock_property_id'] ?? '', 'description' => __('Retained for older mappings; direct API URL building uses Account ID above.', 'must-hotel-booking')]);
         self::renderField(['label' => __('Connection test path', 'must-hotel-booking'), 'name' => 'clock_connection_path', 'value' => $form['clock_connection_path'] ?? '/room_types', 'description' => __('Relative PMS API path used by the safe connection test. Phase 1 expects /room_types.', 'must-hotel-booking')]);
         echo '<p class="description"><strong>' . \esc_html__('Resolved PMS API URL:', 'must-hotel-booking') . '</strong> <code>' . \esc_html((string) ($summary['clock_pms_base_url'] ?? '')) . '</code></p>';
@@ -2861,10 +2906,12 @@ final class SettingsPage
         echo '</div>';
 
         echo '<div class="must-settings-grid must-settings-grid--3">';
-        self::renderSectionIntro(\__('Clock catalog paths', 'must-hotel-booking'), \__('Phase 1 uses these read-only PMS API endpoints for catalog fetch and mapping diagnostics only.', 'must-hotel-booking'));
+        self::renderSectionIntro(\__('Clock catalog paths', 'must-hotel-booking'), \__('Phase 2 uses these read-only PMS API endpoints for catalog fetch and mapping diagnostics only.', 'must-hotel-booking'));
         self::renderField(['label' => __('Room types path', 'must-hotel-booking'), 'name' => 'clock_room_types_path', 'value' => $form['clock_room_types_path'] ?? '']);
         self::renderField(['label' => __('Physical rooms path', 'must-hotel-booking'), 'name' => 'clock_rooms_path', 'value' => $form['clock_rooms_path'] ?? '']);
         self::renderField(['label' => __('Rates path', 'must-hotel-booking'), 'name' => 'clock_rates_path', 'value' => $form['clock_rates_path'] ?? '']);
+        self::renderField(['label' => __('Rates availability path', 'must-hotel-booking'), 'name' => 'clock_rates_availability_path', 'value' => $form['clock_rates_availability_path'] ?? '/rates_availability']);
+        self::renderField(['label' => __('Products path', 'must-hotel-booking'), 'name' => 'clock_products_path', 'value' => $form['clock_products_path'] ?? '/products']);
         self::renderField(['label' => __('WBE room-type rates path', 'must-hotel-booking'), 'name' => 'clock_wbe_room_type_rates_path', 'value' => $form['clock_wbe_room_type_rates_path'] ?? '', 'description' => __('Uses this path with fixed query wbe.eq=true and bookable_type.eq=Pms::RoomType.', 'must-hotel-booking')]);
         self::renderField(['label' => __('Rate plans path', 'must-hotel-booking'), 'name' => 'clock_rate_plans_path', 'value' => $form['clock_rate_plans_path'] ?? '']);
         echo '</div>';
@@ -2873,7 +2920,7 @@ final class SettingsPage
         self::renderSectionIntro(\__('Clock API public booking paths', 'must-hotel-booking'), \__('Endpoint paths used only by the real provider-based Clock API flow for availability, quotes, and reservation creation.', 'must-hotel-booking'));
         self::renderField(['label' => __('Availability path', 'must-hotel-booking'), 'name' => 'clock_availability_path', 'value' => $form['clock_availability_path'] ?? '']);
         self::renderField(['label' => __('Quote path', 'must-hotel-booking'), 'name' => 'clock_quote_path', 'value' => $form['clock_quote_path'] ?? '']);
-        self::renderField(['label' => __('Reservation create path', 'must-hotel-booking'), 'name' => 'clock_reservation_create_path', 'value' => $form['clock_reservation_create_path'] ?? '']);
+        self::renderField(['label' => __('Reservation create path', 'must-hotel-booking'), 'name' => 'clock_reservation_create_path', 'value' => $form['clock_reservation_create_path'] ?? '/bookings/']);
         echo '</div>';
 
         echo '<div class="must-settings-grid must-settings-grid--3">';
@@ -2887,7 +2934,7 @@ final class SettingsPage
 
         echo '<div class="must-settings-grid must-settings-grid--2">';
         self::renderSectionIntro(\__('Clock inbound sync', 'must-hotel-booking'), \__('Webhook updates refresh existing Clock mirror reservations only. Use a shared secret via token or HMAC signature. The endpoint URL is shown for Clock webhook setup.', 'must-hotel-booking'));
-        self::renderField(['label' => __('Reservation fetch path', 'must-hotel-booking'), 'name' => 'clock_reservation_fetch_path', 'value' => $form['clock_reservation_fetch_path'] ?? '', 'description' => __('Optional path for manual/deferred mirror refresh. Use {reservation_id} or {booking_id} if needed.', 'must-hotel-booking')]);
+        self::renderField(['label' => __('Reservation fetch path', 'must-hotel-booking'), 'name' => 'clock_reservation_fetch_path', 'value' => $form['clock_reservation_fetch_path'] ?? '/bookings/{booking_id}', 'description' => __('Optional path for manual/deferred mirror refresh. Use {reservation_id} or {booking_id} if needed.', 'must-hotel-booking')]);
         self::renderField(['label' => __('Webhook shared secret', 'must-hotel-booking'), 'name' => 'clock_webhook_secret', 'type' => 'password', 'value' => $form['clock_webhook_secret'] ?? '', 'description' => __('Inbound webhook calls must provide this secret as Bearer/X-MHB-Clock-Token or an HMAC SHA-256 signature.', 'must-hotel-booking')]);
         echo '<p class="description"><strong>' . \esc_html__('Webhook URL:', 'must-hotel-booking') . '</strong> <code>' . \esc_html((string) ($summary['clock_webhook_url'] ?? '')) . '</code></p>';
         echo '</div>';
@@ -3095,8 +3142,6 @@ final class SettingsPage
         echo '<article class="must-settings-summary-card"><span class="must-settings-summary-label">' . \esc_html__('Room types', 'must-hotel-booking') . '</span><strong>' . \esc_html((string) ($counts['room_types'] ?? 0)) . '</strong></article>';
         echo '<article class="must-settings-summary-card"><span class="must-settings-summary-label">' . \esc_html__('Rooms', 'must-hotel-booking') . '</span><strong>' . \esc_html((string) ($counts['rooms'] ?? 0)) . '</strong></article>';
         echo '<article class="must-settings-summary-card"><span class="must-settings-summary-label">' . \esc_html__('Rates', 'must-hotel-booking') . '</span><strong>' . \esc_html((string) ($counts['rates'] ?? 0)) . '</strong></article>';
-        echo '<article class="must-settings-summary-card"><span class="must-settings-summary-label">' . \esc_html__('WBE rates', 'must-hotel-booking') . '</span><strong>' . \esc_html((string) ($counts['wbe_room_type_rates'] ?? 0)) . '</strong></article>';
-        echo '<article class="must-settings-summary-card"><span class="must-settings-summary-label">' . \esc_html__('Rate plans', 'must-hotel-booking') . '</span><strong>' . \esc_html((string) ($counts['rate_plans'] ?? 0)) . '</strong></article>';
         echo '</div>';
 
         if (!empty($errors)) {
@@ -3108,13 +3153,26 @@ final class SettingsPage
                     continue;
                 }
 
-                echo '<li><strong>' . \esc_html((string) $key) . ':</strong> ' . \esc_html((string) ($error['status'] ?? 'unknown')) . ' ' . \esc_html((string) ($error['message'] ?? '')) . '</li>';
+                $preview = isset($error['response_preview']) && \is_array($error['response_preview']) ? $error['response_preview'] : [];
+                $previewText = !empty($preview) ? self::jsonPreview($preview) : '';
+
+                echo '<li><strong>' . \esc_html((string) $key) . ':</strong> ';
+                echo \esc_html((string) ($error['status'] ?? 'unknown'));
+                echo ' | ' . \esc_html__('HTTP', 'must-hotel-booking') . ' ' . \esc_html((string) ($error['http_status'] ?? 0));
+                echo ' | <code>' . \esc_html((string) ($error['endpoint_path'] ?? '')) . '</code>';
+                echo ' ' . \esc_html((string) ($error['message'] ?? ''));
+
+                if ($previewText !== '') {
+                    echo '<pre style="max-height:120px;overflow:auto;background:#f6f7f7;padding:8px;">' . \esc_html($previewText) . '</pre>';
+                }
+
+                echo '</li>';
             }
 
             echo '</ul>';
         }
 
-        foreach (ClockConfig::catalogEndpoints() as $key => $endpoint) {
+        foreach (ClockConfig::catalogSyncEndpoints() as $key => $endpoint) {
             $collection = isset($collections[$key]) && \is_array($collections[$key]) ? $collections[$key] : [];
             self::renderClockCatalogPreviewTable((string) ($endpoint['label'] ?? $key), $collection);
         }
@@ -3297,6 +3355,24 @@ final class SettingsPage
         self::renderClockCatalogDatalist('must-clock-rate-options', $catalogRates);
         self::renderClockCatalogDatalist('must-clock-rate-plan-options', $catalogRatePlans);
 
+        self::renderClockMappingDiagnostics(
+            [
+                'accommodation' => self::localEntityMap($localRooms, 'name'),
+                'physical_room' => self::localEntityMap($localPhysicalRooms, 'title', 'room_number'),
+                'rate_plan' => self::localEntityMap($localRatePlans, 'name'),
+            ],
+            [
+                'accommodation' => self::catalogEntityMap($catalogRoomTypes),
+                'physical_room' => self::catalogEntityMap($catalogRooms),
+                'rate_plan' => self::catalogEntityMap($catalogRates),
+            ],
+            [
+                'accommodation' => $accommodationMappings,
+                'physical_room' => $physicalRoomMappings,
+                'rate_plan' => $ratePlanMappings,
+            ]
+        );
+
         // --- Accommodation mappings ---
         $missingAccommodations = 0;
 
@@ -3381,6 +3457,7 @@ final class SettingsPage
             echo '<th>' . \esc_html__('Rate plan', 'must-hotel-booking') . '</th>';
             echo '<th>' . \esc_html__('Clock rate ID', 'must-hotel-booking') . '</th>';
             echo '<th>' . \esc_html__('Clock rate_plan ID', 'must-hotel-booking') . '</th>';
+            echo '<th>' . \esc_html__('WRS', 'must-hotel-booking') . '</th>';
             echo '<th>' . \esc_html__('Display name', 'must-hotel-booking') . '</th>';
             echo '<th>' . \esc_html__('Action', 'must-hotel-booking') . '</th>';
             echo '</tr></thead><tbody>';
@@ -3397,6 +3474,7 @@ final class SettingsPage
                 echo '<td>' . \esc_html((string) ($plan['name'] ?? '')) . '</td>';
                 echo '<td>' . \esc_html($mapping ? (string) ($mapping['external_id'] ?? '') : '-') . '</td>';
                 echo '<td>' . \esc_html($mapping ? (string) ($mapping['external_parent_id'] ?? '') : '-') . '</td>';
+                echo '<td>' . \esc_html($mapping ? self::mappingRateVisibilityLabel($mapping, $catalogRates) : '-') . '</td>';
                 echo '<td>' . \esc_html($mapping ? (string) ($mapping['display_name'] ?? '') : '-') . '</td>';
                 echo '<td>';
 
@@ -3508,6 +3586,239 @@ final class SettingsPage
         }
 
         return $out;
+    }
+
+    /**
+     * @param array<int, array<string, mixed>> $items
+     * @return array<string, array<string, mixed>>
+     */
+    private static function catalogEntityMap(array $items): array
+    {
+        $map = [];
+
+        foreach ($items as $item) {
+            $id = \trim((string) ($item['id'] ?? ''));
+
+            if ($id !== '') {
+                $map[$id] = $item;
+            }
+        }
+
+        return $map;
+    }
+
+    /**
+     * @param array<int, array<string, mixed>> $items
+     * @return array<int, string>
+     */
+    private static function localEntityMap(array $items, string $labelKey, string $fallbackKey = ''): array
+    {
+        $map = [];
+
+        foreach ($items as $item) {
+            if (!\is_array($item)) {
+                continue;
+            }
+
+            $id = isset($item['id']) ? (int) $item['id'] : 0;
+
+            if ($id <= 0) {
+                continue;
+            }
+
+            $label = (string) ($item[$labelKey] ?? '');
+
+            if ($label === '' && $fallbackKey !== '') {
+                $label = (string) ($item[$fallbackKey] ?? '');
+            }
+
+            $map[$id] = $label !== '' ? $label : '#' . $id;
+        }
+
+        return $map;
+    }
+
+    /**
+     * @param array<string, array<int, string>> $localMaps
+     * @param array<string, array<string, array<string, mixed>>> $catalogMaps
+     * @param array<string, array<int, array<string, mixed>>> $mappingGroups
+     */
+    private static function renderClockMappingDiagnostics(array $localMaps, array $catalogMaps, array $mappingGroups): void
+    {
+        $labels = [
+            'accommodation' => \__('Accommodations', 'must-hotel-booking'),
+            'physical_room' => \__('Physical rooms', 'must-hotel-booking'),
+            'rate_plan' => \__('Rate plans', 'must-hotel-booking'),
+        ];
+
+        echo '<h3 style="margin-bottom:4px;">' . \esc_html__('Mapping diagnostics', 'must-hotel-booking') . '</h3>';
+        echo '<table class="widefat striped" style="margin-bottom:12px;"><thead><tr>';
+        echo '<th>' . \esc_html__('Entity', 'must-hotel-booking') . '</th>';
+        echo '<th>' . \esc_html__('Unmapped local', 'must-hotel-booking') . '</th>';
+        echo '<th>' . \esc_html__('Unmapped Clock', 'must-hotel-booking') . '</th>';
+        echo '<th>' . \esc_html__('Missing local target', 'must-hotel-booking') . '</th>';
+        echo '<th>' . \esc_html__('Missing Clock source', 'must-hotel-booking') . '</th>';
+        echo '<th>' . \esc_html__('Stale mappings', 'must-hotel-booking') . '</th>';
+        echo '</tr></thead><tbody>';
+
+        foreach ($labels as $entityType => $label) {
+            $diagnostics = self::clockMappingDiagnosticsForEntity(
+                $localMaps[$entityType] ?? [],
+                $catalogMaps[$entityType] ?? [],
+                $mappingGroups[$entityType] ?? []
+            );
+
+            echo '<tr>';
+            echo '<td><strong>' . \esc_html($label) . '</strong></td>';
+            echo '<td>' . \esc_html((string) \count($diagnostics['unmapped_local'])) . '</td>';
+            echo '<td>' . \esc_html((string) \count($diagnostics['unmapped_clock'])) . '</td>';
+            echo '<td>' . \esc_html((string) \count($diagnostics['missing_local_target'])) . '</td>';
+            echo '<td>' . \esc_html((string) \count($diagnostics['missing_clock_source'])) . '</td>';
+            echo '<td>' . \esc_html((string) \count($diagnostics['stale_mappings'])) . '</td>';
+            echo '</tr>';
+
+            foreach ([
+                'unmapped_local' => \__('Unmapped local', 'must-hotel-booking'),
+                'unmapped_clock' => \__('Unmapped Clock', 'must-hotel-booking'),
+                'missing_local_target' => \__('Missing local target', 'must-hotel-booking'),
+                'missing_clock_source' => \__('Missing Clock source', 'must-hotel-booking'),
+            ] as $key => $itemLabel) {
+                if (empty($diagnostics[$key])) {
+                    continue;
+                }
+
+                echo '<tr><td></td><td colspan="5"><span class="description"><strong>' . \esc_html($label . ' - ' . $itemLabel) . ':</strong> ' . \esc_html(\implode(', ', \array_slice($diagnostics[$key], 0, 8))) . '</span></td></tr>';
+            }
+        }
+
+        echo '</tbody></table>';
+    }
+
+    /**
+     * @param array<int, string> $localMap
+     * @param array<string, array<string, mixed>> $catalogMap
+     * @param array<int, array<string, mixed>> $mappings
+     * @return array<string, array<int, string>>
+     */
+    private static function clockMappingDiagnosticsForEntity(array $localMap, array $catalogMap, array $mappings): array
+    {
+        $mappedLocalIds = [];
+        $mappedExternalIds = [];
+        $missingLocalTarget = [];
+        $missingClockSource = [];
+        $staleMappings = [];
+
+        foreach ($mappings as $mapping) {
+            if (!\is_array($mapping)) {
+                continue;
+            }
+
+            $mappingId = isset($mapping['id']) ? (int) $mapping['id'] : 0;
+            $localId = isset($mapping['local_id']) ? (int) $mapping['local_id'] : 0;
+            $externalId = \trim((string) ($mapping['external_id'] ?? ''));
+
+            if ($localId > 0) {
+                $mappedLocalIds[$localId] = true;
+
+                if (!isset($localMap[$localId])) {
+                    $missingLocalTarget[] = '#' . $mappingId . ' local ' . $localId;
+                    $staleMappings[] = '#' . $mappingId;
+                }
+            }
+
+            if ($externalId !== '') {
+                $mappedExternalIds[$externalId] = true;
+
+                if (!isset($catalogMap[$externalId])) {
+                    $missingClockSource[] = '#' . $mappingId . ' Clock ' . $externalId;
+                    $staleMappings[] = '#' . $mappingId;
+                }
+            }
+        }
+
+        $unmappedLocal = [];
+
+        foreach ($localMap as $id => $label) {
+            if (!isset($mappedLocalIds[(int) $id])) {
+                $unmappedLocal[] = '#' . (int) $id . ' ' . $label;
+            }
+        }
+
+        $unmappedClock = [];
+
+        foreach ($catalogMap as $id => $item) {
+            if (!isset($mappedExternalIds[(string) $id])) {
+                $name = (string) ($item['name'] ?? '');
+                $unmappedClock[] = $id . ($name !== '' ? ' ' . $name : '');
+            }
+        }
+
+        return [
+            'unmapped_local' => \array_values($unmappedLocal),
+            'unmapped_clock' => \array_values($unmappedClock),
+            'missing_local_target' => \array_values($missingLocalTarget),
+            'missing_clock_source' => \array_values($missingClockSource),
+            'stale_mappings' => \array_values(\array_unique($staleMappings)),
+        ];
+    }
+
+    /** @param array<string, mixed> $mapping @param array<int, array<string, mixed>> $catalogRates */
+    private static function mappingRateVisibilityLabel(array $mapping, array $catalogRates): string
+    {
+        $externalId = \trim((string) ($mapping['external_id'] ?? ''));
+
+        foreach ($catalogRates as $rate) {
+            if (!\is_array($rate) || (string) ($rate['id'] ?? '') !== $externalId) {
+                continue;
+            }
+
+            return self::publicVisibilityLabel((string) ($rate['public_visible'] ?? 'unknown'));
+        }
+
+        $metadata = \json_decode((string) ($mapping['metadata'] ?? ''), true);
+
+        if (\is_array($metadata) && isset($metadata['public_visible'])) {
+            return self::publicVisibilityLabel((string) $metadata['public_visible']);
+        }
+
+        return self::publicVisibilityLabel('unknown');
+    }
+
+    private static function publicVisibilityLabel(string $value): string
+    {
+        if ($value === 'yes') {
+            return \__('Published', 'must-hotel-booking');
+        }
+
+        if ($value === 'no') {
+            return \__('Hidden', 'must-hotel-booking');
+        }
+
+        return \__('Unknown', 'must-hotel-booking');
+    }
+
+    /** @return array<string, mixed> */
+    private static function findClockCatalogItemForMapping(string $entityType, string $externalId): array
+    {
+        $snapshot = ClockCatalogService::getCachedCatalogSnapshot();
+        $collections = isset($snapshot['collections']) && \is_array($snapshot['collections']) ? $snapshot['collections'] : [];
+        $collectionKey = [
+            'accommodation' => 'room_types',
+            'physical_room' => 'rooms',
+            'rate_plan' => 'rates',
+        ][$entityType] ?? '';
+
+        if ($collectionKey === '') {
+            return [];
+        }
+
+        foreach (self::clockCatalogItems($collections, $collectionKey) as $item) {
+            if ((string) ($item['id'] ?? '') === $externalId) {
+                return $item;
+            }
+        }
+
+        return [];
     }
 
     /** @param array<int, array<string, mixed>> $items */

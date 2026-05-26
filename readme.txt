@@ -4,7 +4,7 @@ Tags: hotel, booking, reservation, accommodation
 Requires at least: 5.0
 Tested up to: 6.0
 Requires PHP: 7.4
-Stable tag: 0.4.5
+Stable tag: 0.4.6
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -31,6 +31,12 @@ Main features include:
 5. When updating, upload the new release ZIP or use the configured updater, then review **Diagnostics & Maintenance** after the update completes.
 
 == Changelog ==
+
+= 0.4.6 =
+* Added Clock PMS sandbox credential settings, endpoint defaults, safe connection testing, and redacted request diagnostics for failed API calls.
+* Added Clock PMS catalog sync for room types, rooms, and rates, with admin counts, cached record display, and mapping diagnostics.
+* Added Clock PMS public availability and search adapters using `/rates_availability` and `/products`, including WRS public-rate visibility filtering.
+* Added Clock booking creation via `POST /bookings/`, returning guest lookup through `/guests/search`, local mirror reservation metadata, and booking webhook refresh support.
 
 = 0.4.5 =
 * Added PokPay payment method integration for booking deposits and reservation payment tracking.
