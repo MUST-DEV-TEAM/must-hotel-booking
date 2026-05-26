@@ -1536,6 +1536,7 @@ final class SettingsPage
     private static function sanitizeProviderForm(array $source): array
     {
         $form = self::getProviderForm([]);
+        $setupChoice = \sanitize_key((string) \wp_unslash($source['provider_setup_choice'] ?? ''));
         $form['website_booking_flow_mode'] = \sanitize_key((string) \wp_unslash($source['website_booking_flow_mode'] ?? $form['website_booking_flow_mode']));
         $form['clock_wbe_inline_head_snippet'] = (string) \wp_unslash($source['clock_wbe_inline_head_snippet'] ?? $form['clock_wbe_inline_head_snippet']);
         $form['provider_mode'] = \sanitize_key((string) \wp_unslash($source['provider_mode'] ?? $form['provider_mode']));
@@ -1543,36 +1544,36 @@ final class SettingsPage
         $form['clock_environment'] = \sanitize_key((string) \wp_unslash($source['clock_environment'] ?? $form['clock_environment']));
         $form['clock_pms_api_enabled'] = self::parseBool($source, 'clock_pms_api_enabled');
         $form['clock_base_api_enabled'] = self::parseBool($source, 'clock_base_api_enabled');
-        $form['clock_pms_api_url'] = \esc_url_raw((string) \wp_unslash($source['clock_pms_api_url'] ?? ''));
-        $form['clock_base_api_url'] = \esc_url_raw((string) \wp_unslash($source['clock_base_api_url'] ?? ''));
-        $form['clock_api_base_url'] = \esc_url_raw((string) \wp_unslash($source['clock_api_base_url'] ?? ''));
+        $form['clock_pms_api_url'] = \esc_url_raw((string) \wp_unslash($source['clock_pms_api_url'] ?? ($form['clock_pms_api_url'] ?? '')));
+        $form['clock_base_api_url'] = \esc_url_raw((string) \wp_unslash($source['clock_base_api_url'] ?? ($form['clock_base_api_url'] ?? '')));
+        $form['clock_api_base_url'] = \esc_url_raw((string) \wp_unslash($source['clock_api_base_url'] ?? ($form['clock_api_base_url'] ?? '')));
         $form['clock_region'] = ClockEndpointResolver::normalizeRegion((string) \wp_unslash($source['clock_region'] ?? ''));
         $form['clock_api_type'] = ClockEndpointResolver::normalizeApiType((string) \wp_unslash($source['clock_api_type'] ?? 'pms_api'));
         $form['clock_subscription_id'] = ClockEndpointResolver::normalizeNumericId((string) \wp_unslash($source['clock_subscription_id'] ?? ''));
         $form['clock_account_id'] = ClockEndpointResolver::normalizeNumericId((string) \wp_unslash($source['clock_account_id'] ?? ''));
-        $form['clock_api_user'] = \sanitize_text_field((string) \wp_unslash($source['clock_api_user'] ?? ''));
-        $form['clock_api_key'] = \sanitize_text_field((string) \wp_unslash($source['clock_api_key'] ?? ''));
-        $form['clock_property_id'] = \sanitize_text_field((string) \wp_unslash($source['clock_property_id'] ?? ''));
+        $form['clock_api_user'] = \sanitize_text_field((string) \wp_unslash($source['clock_api_user'] ?? ($form['clock_api_user'] ?? '')));
+        $form['clock_api_key'] = \sanitize_text_field((string) \wp_unslash($source['clock_api_key'] ?? ($form['clock_api_key'] ?? '')));
+        $form['clock_property_id'] = \sanitize_text_field((string) \wp_unslash($source['clock_property_id'] ?? ($form['clock_property_id'] ?? '')));
         $form['clock_wbe_hotel_id'] = ClockEndpointResolver::normalizeNumericId((string) \wp_unslash($source['clock_wbe_hotel_id'] ?? ''));
         $form['fallback_to_local_when_clock_unavailable'] = self::parseBool($source, 'fallback_to_local_when_clock_unavailable');
         $form['clock_connection_path'] = ClockConfig::normalizePath((string) \wp_unslash($source['clock_connection_path'] ?? ($form['clock_connection_path'] ?? '/room_types')));
-        $form['clock_room_types_path'] = ClockConfig::normalizeOptionalPath((string) \wp_unslash($source['clock_room_types_path'] ?? ''));
-        $form['clock_rooms_path'] = ClockConfig::normalizeOptionalPath((string) \wp_unslash($source['clock_rooms_path'] ?? ''));
-        $form['clock_rates_path'] = ClockConfig::normalizeOptionalPath((string) \wp_unslash($source['clock_rates_path'] ?? ''));
-        $form['clock_rates_availability_path'] = ClockConfig::normalizeOptionalPath((string) \wp_unslash($source['clock_rates_availability_path'] ?? ''));
-        $form['clock_products_path'] = ClockConfig::normalizeOptionalPath((string) \wp_unslash($source['clock_products_path'] ?? ''));
-        $form['clock_wbe_room_type_rates_path'] = ClockConfig::normalizeOptionalPath((string) \wp_unslash($source['clock_wbe_room_type_rates_path'] ?? ''));
-        $form['clock_rate_plans_path'] = ClockConfig::normalizeOptionalPath((string) \wp_unslash($source['clock_rate_plans_path'] ?? ''));
-        $form['clock_availability_path'] = ClockConfig::normalizeOptionalPath((string) \wp_unslash($source['clock_availability_path'] ?? ''));
-        $form['clock_quote_path'] = ClockConfig::normalizeOptionalPath((string) \wp_unslash($source['clock_quote_path'] ?? ''));
-        $form['clock_reservation_create_path'] = ClockConfig::normalizeOptionalPath((string) \wp_unslash($source['clock_reservation_create_path'] ?? ''));
-        $form['clock_reservation_status_update_path'] = ClockConfig::normalizeOptionalPath((string) \wp_unslash($source['clock_reservation_status_update_path'] ?? ''));
-        $form['clock_reservation_cancel_path'] = ClockConfig::normalizeOptionalPath((string) \wp_unslash($source['clock_reservation_cancel_path'] ?? ''));
-        $form['clock_reservation_room_update_path'] = ClockConfig::normalizeOptionalPath((string) \wp_unslash($source['clock_reservation_room_update_path'] ?? ''));
-        $form['clock_reservation_stay_update_path'] = ClockConfig::normalizeOptionalPath((string) \wp_unslash($source['clock_reservation_stay_update_path'] ?? ''));
-        $form['clock_reservation_guest_update_path'] = ClockConfig::normalizeOptionalPath((string) \wp_unslash($source['clock_reservation_guest_update_path'] ?? ''));
-        $form['clock_reservation_fetch_path'] = ClockConfig::normalizeOptionalPath((string) \wp_unslash($source['clock_reservation_fetch_path'] ?? ''));
-        $form['clock_webhook_secret'] = \sanitize_text_field((string) \wp_unslash($source['clock_webhook_secret'] ?? ''));
+        $form['clock_room_types_path'] = ClockConfig::normalizeOptionalPath((string) \wp_unslash($source['clock_room_types_path'] ?? ($form['clock_room_types_path'] ?? '')));
+        $form['clock_rooms_path'] = ClockConfig::normalizeOptionalPath((string) \wp_unslash($source['clock_rooms_path'] ?? ($form['clock_rooms_path'] ?? '')));
+        $form['clock_rates_path'] = ClockConfig::normalizeOptionalPath((string) \wp_unslash($source['clock_rates_path'] ?? ($form['clock_rates_path'] ?? '')));
+        $form['clock_rates_availability_path'] = ClockConfig::normalizeOptionalPath((string) \wp_unslash($source['clock_rates_availability_path'] ?? ($form['clock_rates_availability_path'] ?? '')));
+        $form['clock_products_path'] = ClockConfig::normalizeOptionalPath((string) \wp_unslash($source['clock_products_path'] ?? ($form['clock_products_path'] ?? '')));
+        $form['clock_wbe_room_type_rates_path'] = ClockConfig::normalizeOptionalPath((string) \wp_unslash($source['clock_wbe_room_type_rates_path'] ?? ($form['clock_wbe_room_type_rates_path'] ?? '')));
+        $form['clock_rate_plans_path'] = ClockConfig::normalizeOptionalPath((string) \wp_unslash($source['clock_rate_plans_path'] ?? ($form['clock_rate_plans_path'] ?? '')));
+        $form['clock_availability_path'] = ClockConfig::normalizeOptionalPath((string) \wp_unslash($source['clock_availability_path'] ?? ($form['clock_availability_path'] ?? '')));
+        $form['clock_quote_path'] = ClockConfig::normalizeOptionalPath((string) \wp_unslash($source['clock_quote_path'] ?? ($form['clock_quote_path'] ?? '')));
+        $form['clock_reservation_create_path'] = ClockConfig::normalizeOptionalPath((string) \wp_unslash($source['clock_reservation_create_path'] ?? ($form['clock_reservation_create_path'] ?? '')));
+        $form['clock_reservation_status_update_path'] = ClockConfig::normalizeOptionalPath((string) \wp_unslash($source['clock_reservation_status_update_path'] ?? ($form['clock_reservation_status_update_path'] ?? '')));
+        $form['clock_reservation_cancel_path'] = ClockConfig::normalizeOptionalPath((string) \wp_unslash($source['clock_reservation_cancel_path'] ?? ($form['clock_reservation_cancel_path'] ?? '')));
+        $form['clock_reservation_room_update_path'] = ClockConfig::normalizeOptionalPath((string) \wp_unslash($source['clock_reservation_room_update_path'] ?? ($form['clock_reservation_room_update_path'] ?? '')));
+        $form['clock_reservation_stay_update_path'] = ClockConfig::normalizeOptionalPath((string) \wp_unslash($source['clock_reservation_stay_update_path'] ?? ($form['clock_reservation_stay_update_path'] ?? '')));
+        $form['clock_reservation_guest_update_path'] = ClockConfig::normalizeOptionalPath((string) \wp_unslash($source['clock_reservation_guest_update_path'] ?? ($form['clock_reservation_guest_update_path'] ?? '')));
+        $form['clock_reservation_fetch_path'] = ClockConfig::normalizeOptionalPath((string) \wp_unslash($source['clock_reservation_fetch_path'] ?? ($form['clock_reservation_fetch_path'] ?? '')));
+        $form['clock_webhook_secret'] = \sanitize_text_field((string) \wp_unslash($source['clock_webhook_secret'] ?? ($form['clock_webhook_secret'] ?? '')));
         $form['clock_timeout_seconds'] = (int) \absint(\wp_unslash($source['clock_timeout_seconds'] ?? $form['clock_timeout_seconds']));
         $errors = [];
 
@@ -1586,6 +1587,43 @@ final class SettingsPage
 
         if (!\in_array($form['provider_mode'], ['local', 'clock'], true)) {
             $form['provider_mode'] = 'local';
+        }
+
+        if (!\in_array($setupChoice, ['local_plugin', 'clock_wbe_inline', 'clock_api_backend'], true)) {
+            $setupChoice = '';
+        }
+
+        if ($setupChoice === 'local_plugin') {
+            $form['website_booking_flow_mode'] = 'plugin_checkout';
+            $form['provider_mode'] = 'local';
+            $form['clock_enabled'] = false;
+            $form['clock_pms_api_enabled'] = false;
+            $form['clock_base_api_enabled'] = false;
+            $form['fallback_to_local_when_clock_unavailable'] = false;
+        } elseif ($setupChoice === 'clock_wbe_inline') {
+            $form['website_booking_flow_mode'] = 'clock_wbe_inline';
+            $form['provider_mode'] = 'local';
+            $form['clock_enabled'] = false;
+            $form['clock_pms_api_enabled'] = false;
+            $form['clock_base_api_enabled'] = false;
+            $form['fallback_to_local_when_clock_unavailable'] = false;
+        } elseif ($setupChoice === 'clock_api_backend') {
+            $form['website_booking_flow_mode'] = 'plugin_checkout';
+            $form['provider_mode'] = 'clock';
+            $form['clock_enabled'] = true;
+            $form['clock_pms_api_enabled'] = true;
+            $form['clock_base_api_enabled'] = (string) ($form['clock_base_api_url'] ?? '') !== '' || !empty($form['clock_base_api_enabled']);
+            $form['fallback_to_local_when_clock_unavailable'] = false;
+
+            $form['clock_connection_path'] = $form['clock_connection_path'] ?: '/room_types';
+            $form['clock_room_types_path'] = $form['clock_room_types_path'] ?: '/room_types';
+            $form['clock_rooms_path'] = $form['clock_rooms_path'] ?: '/rooms';
+            $form['clock_rates_path'] = $form['clock_rates_path'] ?: '/rates';
+            $form['clock_rates_availability_path'] = $form['clock_rates_availability_path'] ?: '/rates_availability';
+            $form['clock_products_path'] = $form['clock_products_path'] ?: '/products';
+            $form['clock_reservation_create_path'] = $form['clock_reservation_create_path'] ?: '/bookings/';
+            $form['clock_reservation_fetch_path'] = $form['clock_reservation_fetch_path'] ?: '/bookings/{booking_id}';
+            $form['clock_timeout_seconds'] = $form['clock_timeout_seconds'] ?: 15;
         }
 
         if (!\in_array($form['clock_environment'], ['sandbox', 'production', 'custom'], true)) {
@@ -2881,101 +2919,93 @@ final class SettingsPage
             $warnings[] = (string) $providerData['mode_warning'];
         }
 
+        $setupChoice = 'local_plugin';
+        if ($websiteBookingFlowMode === 'clock_wbe_inline') {
+            $setupChoice = 'clock_wbe_inline';
+        } elseif ((string) ($form['provider_mode'] ?? 'local') === 'clock') {
+            $setupChoice = 'clock_api_backend';
+        }
+
         self::renderFormStart('provider');
         self::renderWarnings($warnings);
-        self::renderPanelStart(\__('Website Booking Flow', 'must-hotel-booking'), \__('Choose how public website visitors start booking. Clock WBE Inline launches Clock directly from website buttons and forms on the current page and does not use the plugin checkout flow.', 'must-hotel-booking'));
+        self::renderPanelStart(\__('Provider Setup', 'must-hotel-booking'), \__('Choose who owns booking data. The setup only asks for the fields needed by the selected mode; Clock endpoint paths are configured automatically.', 'must-hotel-booking'));
         echo '<div class="must-settings-summary-grid">';
-        echo '<article class="must-settings-summary-card"><span class="must-settings-summary-label">' . \esc_html__('Website flow mode', 'must-hotel-booking') . '</span><strong>' . \esc_html($websiteBookingFlowMode === 'clock_wbe_inline' ? __('Clock WBE Inline', 'must-hotel-booking') : __('Plugin checkout', 'must-hotel-booking')) . '</strong></article>';
-        echo '<article class="must-settings-summary-card"><span class="must-settings-summary-label">' . \esc_html__('WBE snippet', 'must-hotel-booking') . '</span><strong>' . \esc_html($wbeSnippetConfigured ? __('Configured', 'must-hotel-booking') : __('Missing', 'must-hotel-booking')) . '</strong></article>';
-        echo '<article class="must-settings-summary-card"><span class="must-settings-summary-label">' . \esc_html__('Public booking ownership', 'must-hotel-booking') . '</span><strong>' . \esc_html($websiteBookingFlowMode === 'clock_wbe_inline' ? __('Clock WBE', 'must-hotel-booking') : __('Plugin checkout', 'must-hotel-booking')) . '</strong></article>';
+        echo '<article class="must-settings-summary-card"><span class="must-settings-summary-label">' . \esc_html__('Current setup', 'must-hotel-booking') . '</span><strong>' . \esc_html($setupChoice === 'clock_api_backend' ? __('Clock PMS backend', 'must-hotel-booking') : ($setupChoice === 'clock_wbe_inline' ? __('Clock WBE inline', 'must-hotel-booking') : __('Plugin backend', 'must-hotel-booking'))) . '</strong></article>';
+        echo '<article class="must-settings-summary-card"><span class="must-settings-summary-label">' . \esc_html__('Website checkout', 'must-hotel-booking') . '</span><strong>' . \esc_html($setupChoice === 'clock_wbe_inline' ? __('Clock WBE', 'must-hotel-booking') : __('Plugin frontend', 'must-hotel-booking')) . '</strong></article>';
+        echo '<article class="must-settings-summary-card"><span class="must-settings-summary-label">' . \esc_html__('Clock API', 'must-hotel-booking') . '</span><strong>' . \esc_html(!empty($summary['clock_direct_api_configured']) ? __('Connected settings', 'must-hotel-booking') : __('Needs credentials', 'must-hotel-booking')) . '</strong></article>';
+        echo '<article class="must-settings-summary-card"><span class="must-settings-summary-label">' . \esc_html__('Catalog', 'must-hotel-booking') . '</span><strong>' . \esc_html(!empty($summary['clock_direct_public_booking_ready']) ? __('Mapped', 'must-hotel-booking') : __('Needs sync/mapping', 'must-hotel-booking')) . '</strong></article>';
         echo '</div>';
-        echo '<div class="must-settings-grid must-settings-grid--2">';
-        self::renderSectionIntro(\__('Website flow mode', 'must-hotel-booking'), \__('Keep provider mode for backend integrations only. Use this separate setting to choose whether the public website uses the plugin checkout flow or opens Clock WBE Inline directly from frontend buttons and forms.', 'must-hotel-booking'));
-        self::renderField(['label' => __('Website booking flow mode', 'must-hotel-booking'), 'name' => 'website_booking_flow_mode', 'type' => 'select', 'value' => $websiteBookingFlowMode, 'options' => ['plugin_checkout' => __('Plugin checkout', 'must-hotel-booking'), 'clock_wbe_inline' => __('Clock WBE Inline', 'must-hotel-booking')]]);
-        self::renderField(['label' => __('Clock WBE head snippet', 'must-hotel-booking'), 'name' => 'clock_wbe_inline_head_snippet', 'type' => 'textarea', 'rows' => 10, 'value' => $form['clock_wbe_inline_head_snippet'] ?? '', 'description' => __('Paste the Clock head snippet exactly as provided by Clock. The plugin injects it on normal public frontend pages while Clock WBE Inline mode is active. Public WBE bookings are created in Clock and may not appear locally until real Clock API sync is configured.', 'must-hotel-booking')]);
-        self::renderField(['label' => __('Clock WBE hotel ID', 'must-hotel-booking'), 'name' => 'clock_wbe_hotel_id', 'value' => $form['clock_wbe_hotel_id'] ?? '', 'description' => __('Diagnostic reference only. This comes from the WBE URL and is not used as the direct API subscription ID or account ID.', 'must-hotel-booking')]);
+
+        echo '<div class="must-settings-module-grid must-provider-mode-grid">';
+        $providerChoices = [
+            'local_plugin' => [
+                'icon' => 'dashicons-admin-home',
+                'label' => \__('Plugin backend', 'must-hotel-booking'),
+                'description' => \__('Rooms, rates, calendar, checkout, payments, and reservations are managed by this WordPress plugin.', 'must-hotel-booking'),
+            ],
+            'clock_wbe_inline' => [
+                'icon' => 'dashicons-external',
+                'label' => \__('Clock WBE inline', 'must-hotel-booking'),
+                'description' => \__('Website buttons open Clock WBE. Clock owns booking, availability, checkout, and payment.', 'must-hotel-booking'),
+            ],
+            'clock_api_backend' => [
+                'icon' => 'dashicons-cloud',
+                'label' => \__('Clock PMS backend', 'must-hotel-booking'),
+                'description' => \__('The plugin keeps the frontend, while Clock PMS supplies catalog, rates, availability, guests, reservations, and payment handling.', 'must-hotel-booking'),
+            ],
+        ];
+        foreach ($providerChoices as $value => $choice) {
+            echo '<label class="must-settings-module-card">';
+            echo '<input type="radio" name="provider_setup_choice" value="' . \esc_attr($value) . '"' . \checked($setupChoice, $value, false) . ' />';
+            echo '<span class="dashicons ' . \esc_attr((string) $choice['icon']) . ' must-settings-module-icon"></span>';
+            echo '<strong>' . \esc_html((string) $choice['label']) . '</strong>';
+            echo '<small>' . \esc_html((string) $choice['description']) . '</small>';
+            echo '</label>';
+        }
         echo '</div>';
-        echo '<p class="description">' . \esc_html__('Clock WBE Inline requirements: use HTTPS, allowlist the hotel domain in Clock WBE settings, and place launcher buttons/forms only on pages where guests should start booking.', 'must-hotel-booking') . '</p>';
+
+        if ($setupChoice === 'clock_wbe_inline') {
+            echo '<div class="must-settings-grid must-settings-grid--2">';
+            self::renderSectionIntro(\__('Clock WBE Inline', 'must-hotel-booking'), \__('Use this when Clock owns the full guest booking and payment flow, and the website only launches the Clock widget.', 'must-hotel-booking'));
+            self::renderField(['label' => __('Clock WBE head snippet', 'must-hotel-booking'), 'name' => 'clock_wbe_inline_head_snippet', 'type' => 'textarea', 'rows' => 10, 'value' => $form['clock_wbe_inline_head_snippet'] ?? '', 'description' => __('Paste the Clock head snippet exactly as provided by Clock. The plugin injects it on normal public frontend pages while Clock WBE Inline mode is active.', 'must-hotel-booking')]);
+            self::renderField(['label' => __('Clock WBE hotel ID', 'must-hotel-booking'), 'name' => 'clock_wbe_hotel_id', 'value' => $form['clock_wbe_hotel_id'] ?? '', 'description' => __('Optional diagnostic reference from the WBE URL.', 'must-hotel-booking')]);
+            echo '</div>';
+            echo '<p class="description">' . \esc_html__('Requirements: HTTPS, hotel domain allowlisted in Clock WBE settings, and launcher buttons/forms placed only where guests should start booking.', 'must-hotel-booking') . '</p>';
+        } elseif ($setupChoice === 'clock_api_backend') {
+            echo '<div class="must-settings-grid must-settings-grid--2">';
+            self::renderSectionIntro(\__('Clock PMS Backend Connection', 'must-hotel-booking'), \__('These are the only required account-specific fields for Clock PMS API mode. Endpoint paths are kept on defaults unless Clock tells you otherwise.', 'must-hotel-booking'));
+            self::renderField(['label' => __('PMS API URL', 'must-hotel-booking'), 'name' => 'clock_pms_api_url', 'type' => 'url', 'value' => $form['clock_pms_api_url'] ?? '', 'description' => __('Example: https://sky-eu1.clock-software.com/pms_api/172528/16307', 'must-hotel-booking')]);
+            self::renderField(['label' => __('Base API URL', 'must-hotel-booking'), 'name' => 'clock_base_api_url', 'type' => 'url', 'value' => $form['clock_base_api_url'] ?? '', 'description' => __('Optional now. Needed for Base API/payment/webhook features when Clock grants access.', 'must-hotel-booking')]);
+            self::renderField(['label' => __('API user', 'must-hotel-booking'), 'name' => 'clock_api_user', 'value' => $form['clock_api_user'] ?? '']);
+            self::renderField(['label' => __('API key', 'must-hotel-booking'), 'name' => 'clock_api_key', 'type' => 'password', 'value' => $form['clock_api_key'] ?? '']);
+            self::renderField(['label' => __('Clock environment', 'must-hotel-booking'), 'name' => 'clock_environment', 'type' => 'select', 'value' => $form['clock_environment'] ?? 'production', 'options' => ['production' => __('Production', 'must-hotel-booking'), 'sandbox' => __('Sandbox / test', 'must-hotel-booking'), 'custom' => __('Custom', 'must-hotel-booking')]]);
+            self::renderField(['label' => __('Request timeout (seconds)', 'must-hotel-booking'), 'name' => 'clock_timeout_seconds', 'type' => 'number', 'min' => 1, 'max' => 60, 'value' => $form['clock_timeout_seconds'] ?? 15]);
+            self::renderField(['label' => __('Webhook shared secret', 'must-hotel-booking'), 'name' => 'clock_webhook_secret', 'type' => 'password', 'value' => $form['clock_webhook_secret'] ?? '', 'description' => __('Optional. Use when enabling Clock push/webhook sync.', 'must-hotel-booking')]);
+            echo '<p class="description"><strong>' . \esc_html__('Resolved PMS API URL:', 'must-hotel-booking') . '</strong> <code>' . \esc_html((string) ($summary['clock_pms_base_url'] ?? '')) . '</code></p>';
+            echo '<p class="description"><strong>' . \esc_html__('Webhook URL:', 'must-hotel-booking') . '</strong> <code>' . \esc_html((string) ($summary['clock_webhook_url'] ?? '')) . '</code></p>';
+            echo '</div>';
+
+            echo '<details class="must-settings-advanced"><summary>' . \esc_html__('Advanced Clock endpoint paths', 'must-hotel-booking') . '</summary>';
+            echo '<p class="description">' . \esc_html__('Leave these on defaults unless Clock support gives you a different endpoint. They are shown for diagnostics, not normal setup.', 'must-hotel-booking') . '</p>';
+            echo '<div class="must-settings-grid must-settings-grid--3">';
+            self::renderField(['label' => __('Connection test path', 'must-hotel-booking'), 'name' => 'clock_connection_path', 'value' => $form['clock_connection_path'] ?? '/room_types']);
+            self::renderField(['label' => __('Room types path', 'must-hotel-booking'), 'name' => 'clock_room_types_path', 'value' => $form['clock_room_types_path'] ?? '/room_types']);
+            self::renderField(['label' => __('Physical rooms path', 'must-hotel-booking'), 'name' => 'clock_rooms_path', 'value' => $form['clock_rooms_path'] ?? '/rooms']);
+            self::renderField(['label' => __('Rates path', 'must-hotel-booking'), 'name' => 'clock_rates_path', 'value' => $form['clock_rates_path'] ?? '/rates']);
+            self::renderField(['label' => __('Rates availability path', 'must-hotel-booking'), 'name' => 'clock_rates_availability_path', 'value' => $form['clock_rates_availability_path'] ?? '/rates_availability']);
+            self::renderField(['label' => __('Products path', 'must-hotel-booking'), 'name' => 'clock_products_path', 'value' => $form['clock_products_path'] ?? '/products']);
+            self::renderField(['label' => __('Reservation create path', 'must-hotel-booking'), 'name' => 'clock_reservation_create_path', 'value' => $form['clock_reservation_create_path'] ?? '/bookings/']);
+            self::renderField(['label' => __('Reservation fetch path', 'must-hotel-booking'), 'name' => 'clock_reservation_fetch_path', 'value' => $form['clock_reservation_fetch_path'] ?? '/bookings/{booking_id}']);
+            self::renderField(['label' => __('Rate plans path', 'must-hotel-booking'), 'name' => 'clock_rate_plans_path', 'value' => $form['clock_rate_plans_path'] ?? '']);
+            echo '</div>';
+            echo '</details>';
+        } else {
+            echo '<p class="description">' . \esc_html__('Plugin backend mode uses the local accommodation, rate, availability, checkout, payment, and reservation settings already configured in the other tabs.', 'must-hotel-booking') . '</p>';
+        }
+
+        self::renderHiddenProviderFields($form, $setupChoice);
         self::renderPanelEnd();
-
-        self::renderPanelStart(\__('Backend Provider Mode', 'must-hotel-booking'), \__('Configure the backend reservation provider. This remains separate from the website booking flow mode above.', 'must-hotel-booking'));
-        echo '<div class="must-settings-summary-grid">';
-        echo '<article class="must-settings-summary-card"><span class="must-settings-summary-label">' . \esc_html__('Configured mode', 'must-hotel-booking') . '</span><strong>' . \esc_html((string) ($summary['provider_mode'] ?? 'local')) . '</strong></article>';
-        echo '<article class="must-settings-summary-card"><span class="must-settings-summary-label">' . \esc_html__('Active booking runtime', 'must-hotel-booking') . '</span><strong>' . \esc_html((string) ($summary['active_booking_provider'] ?? ProviderManager::activeKey())) . '</strong></article>';
-        echo '<article class="must-settings-summary-card"><span class="must-settings-summary-label">' . \esc_html__('Direct API config', 'must-hotel-booking') . '</span><strong>' . \esc_html(!empty($summary['clock_direct_api_configured']) ? __('Configured', 'must-hotel-booking') : __('Incomplete', 'must-hotel-booking')) . '</strong></article>';
-        echo '<article class="must-settings-summary-card"><span class="must-settings-summary-label">' . \esc_html__('PMS API', 'must-hotel-booking') . '</span><strong>' . \esc_html(!empty($summary['clock_pms_api_configured']) ? __('Configured', 'must-hotel-booking') : (!empty($summary['clock_pms_api_enabled']) ? __('Enabled, incomplete', 'must-hotel-booking') : __('Disabled', 'must-hotel-booking'))) . '</strong></article>';
-        echo '<article class="must-settings-summary-card"><span class="must-settings-summary-label">' . \esc_html__('Base API', 'must-hotel-booking') . '</span><strong>' . \esc_html(!empty($summary['clock_base_api_configured']) ? __('Configured', 'must-hotel-booking') : (!empty($summary['clock_base_api_enabled']) ? __('Enabled, incomplete', 'must-hotel-booking') : __('Disabled', 'must-hotel-booking'))) . '</strong></article>';
-        echo '<article class="must-settings-summary-card"><span class="must-settings-summary-label">' . \esc_html__('Direct booking readiness', 'must-hotel-booking') . '</span><strong>' . \esc_html(!empty($summary['clock_direct_public_booking_ready']) ? __('Ready', 'must-hotel-booking') : __('Needs setup', 'must-hotel-booking')) . '</strong></article>';
-        echo '<article class="must-settings-summary-card"><span class="must-settings-summary-label">' . \esc_html__('Local fallback', 'must-hotel-booking') . '</span><strong>' . \esc_html(!empty($summary['fallback_to_local_when_clock_unavailable']) ? __('Explicitly enabled', 'must-hotel-booking') : __('Disabled', 'must-hotel-booking')) . '</strong></article>';
-        echo '<article class="must-settings-summary-card"><span class="must-settings-summary-label">' . \esc_html__('Catalog paths', 'must-hotel-booking') . '</span><strong>' . \esc_html((string) ($summary['clock_catalog_paths_configured'] ?? 0)) . '</strong></article>';
-        echo '<article class="must-settings-summary-card"><span class="must-settings-summary-label">' . \esc_html__('Clock API public booking paths', 'must-hotel-booking') . '</span><strong>' . \esc_html((string) ($summary['clock_public_booking_paths_configured'] ?? 0)) . '</strong></article>';
-        echo '<article class="must-settings-summary-card"><span class="must-settings-summary-label">' . \esc_html__('Reconciliation paths', 'must-hotel-booking') . '</span><strong>' . \esc_html((string) ($summary['clock_reconciliation_paths_configured'] ?? 0)) . '</strong></article>';
-        echo '<article class="must-settings-summary-card"><span class="must-settings-summary-label">' . \esc_html__('Inbound webhook', 'must-hotel-booking') . '</span><strong>' . \esc_html(!empty($summary['clock_webhook_secret_set']) ? __('Secret set', 'must-hotel-booking') : __('Secret missing', 'must-hotel-booking')) . '</strong></article>';
-        echo '</div>';
-
-        echo '<div class="must-settings-grid must-settings-grid--2">';
-        self::renderSectionIntro(\__('Mode selection', 'must-hotel-booking'), \__('Local is the default backend provider. Clock means direct Clock PMS+ API mode through ProviderManager; it is separate from Clock WBE Inline above.', 'must-hotel-booking'));
-        self::renderField(['label' => __('Provider mode', 'must-hotel-booking'), 'name' => 'provider_mode', 'type' => 'select', 'value' => $form['provider_mode'] ?? 'local', 'options' => ['local' => __('Local', 'must-hotel-booking'), 'clock' => __('Clock', 'must-hotel-booking')]]);
-        self::renderField(['label' => __('Enable Clock configuration', 'must-hotel-booking'), 'name' => 'clock_enabled', 'type' => 'checkbox', 'value' => !empty($form['clock_enabled']), 'description' => __('Allows backend diagnostics and future endpoint-specific Clock API adapters. It does not make WBE Inline count as direct API readiness.', 'must-hotel-booking')]);
-        self::renderField(['label' => __('PMS API enabled', 'must-hotel-booking'), 'name' => 'clock_pms_api_enabled', 'type' => 'checkbox', 'value' => !empty($form['clock_pms_api_enabled']), 'description' => __('Required for direct Clock API catalog, availability, rates, and reservations.', 'must-hotel-booking')]);
-        self::renderField(['label' => __('Base API enabled', 'must-hotel-booking'), 'name' => 'clock_base_api_enabled', 'type' => 'checkbox', 'value' => !empty($form['clock_base_api_enabled']), 'description' => __('Optional for Phase 1. Required later for webhook/message-channel setup if Clock grants Base API access.', 'must-hotel-booking')]);
-        self::renderField(['label' => __('Clock environment', 'must-hotel-booking'), 'name' => 'clock_environment', 'type' => 'select', 'value' => $form['clock_environment'] ?? 'production', 'options' => ['production' => __('Production', 'must-hotel-booking'), 'sandbox' => __('Sandbox / test', 'must-hotel-booking'), 'custom' => __('Custom', 'must-hotel-booking')]]);
-        self::renderField(['label' => __('Request timeout (seconds)', 'must-hotel-booking'), 'name' => 'clock_timeout_seconds', 'type' => 'number', 'min' => 1, 'max' => 60, 'value' => $form['clock_timeout_seconds'] ?? 15]);
-        self::renderField(['label' => __('Fallback to local if Clock is unavailable', 'must-hotel-booking'), 'name' => 'fallback_to_local_when_clock_unavailable', 'type' => 'checkbox', 'value' => !empty($form['fallback_to_local_when_clock_unavailable']), 'description' => __('Disabled by default. When disabled, direct Clock API mode must not silently create local bookings if Clock is not ready or fails.', 'must-hotel-booking')]);
-        echo '</div>';
-
-        echo '<div class="must-settings-grid must-settings-grid--2">';
-        self::renderSectionIntro(\__('Direct Clock API connection', 'must-hotel-booking'), \__('Clock PMS+ API URLs are built from region, API type, subscription ID, and account ID. Credentials use Digest authentication with api_user and api_key.', 'must-hotel-booking'));
-        self::renderField(['label' => __('PMS API URL', 'must-hotel-booking'), 'name' => 'clock_pms_api_url', 'type' => 'url', 'value' => $form['clock_pms_api_url'] ?? '', 'description' => __('Preferred for the Clock sandbox. Example: https://sky-eu1.clock-software.com/pms_api/172528/16307', 'must-hotel-booking')]);
-        self::renderField(['label' => __('Base API URL', 'must-hotel-booking'), 'name' => 'clock_base_api_url', 'type' => 'url', 'value' => $form['clock_base_api_url'] ?? '', 'description' => __('Preferred for later Base API/webhook setup. Example: https://sky-eu1.clock-software.com/base_api/172528/16307', 'must-hotel-booking')]);
-        self::renderField(['label' => __('Subscription region', 'must-hotel-booking'), 'name' => 'clock_region', 'value' => $form['clock_region'] ?? '', 'description' => __('Example: sky-eu1. Do not include https:// or clock-software.com.', 'must-hotel-booking')]);
-        self::renderField(['label' => __('Default API type', 'must-hotel-booking'), 'name' => 'clock_api_type', 'type' => 'select', 'value' => $form['clock_api_type'] ?? 'pms_api', 'options' => ['pms_api' => 'pms_api', 'base_api' => 'base_api', 'yield_management_api' => 'yield_management_api', 'pos_api' => 'pos_api'], 'description' => __('Legacy default only. Phase 1 catalog calls explicitly use pms_api; future webhook setup will explicitly use base_api.', 'must-hotel-booking')]);
-        self::renderField(['label' => __('Subscription ID', 'must-hotel-booking'), 'name' => 'clock_subscription_id', 'value' => $form['clock_subscription_id'] ?? '']);
-        self::renderField(['label' => __('Account ID', 'must-hotel-booking'), 'name' => 'clock_account_id', 'value' => $form['clock_account_id'] ?? '']);
-        self::renderField(['label' => __('API user', 'must-hotel-booking'), 'name' => 'clock_api_user', 'value' => $form['clock_api_user'] ?? '']);
-        self::renderField(['label' => __('API key', 'must-hotel-booking'), 'name' => 'clock_api_key', 'type' => 'password', 'value' => $form['clock_api_key'] ?? '']);
-        self::renderField(['label' => __('Legacy API base URL override', 'must-hotel-booking'), 'name' => 'clock_api_base_url', 'type' => 'url', 'value' => $form['clock_api_base_url'] ?? '', 'description' => __('Retained for migration diagnostics only. Direct API requests prefer the explicit PMS/Base API URLs above, then fall back to the structured Clock URL fields.', 'must-hotel-booking')]);
-        self::renderField(['label' => __('Legacy property / hotel ID', 'must-hotel-booking'), 'name' => 'clock_property_id', 'value' => $form['clock_property_id'] ?? '', 'description' => __('Retained for older mappings; direct API URL building uses Account ID above.', 'must-hotel-booking')]);
-        self::renderField(['label' => __('Connection test path', 'must-hotel-booking'), 'name' => 'clock_connection_path', 'value' => $form['clock_connection_path'] ?? '/room_types', 'description' => __('Relative PMS API path used by the safe connection test. Phase 1 expects /room_types.', 'must-hotel-booking')]);
-        echo '<p class="description"><strong>' . \esc_html__('Resolved PMS API URL:', 'must-hotel-booking') . '</strong> <code>' . \esc_html((string) ($summary['clock_pms_base_url'] ?? '')) . '</code></p>';
-        echo '<p class="description"><strong>' . \esc_html__('Resolved Base API URL:', 'must-hotel-booking') . '</strong> <code>' . \esc_html((string) ($summary['clock_base_api_url'] ?? '')) . '</code></p>';
-        echo '</div>';
-
-        echo '<div class="must-settings-grid must-settings-grid--3">';
-        self::renderSectionIntro(\__('Clock catalog paths', 'must-hotel-booking'), \__('Phase 2 uses these read-only PMS API endpoints for catalog fetch and mapping diagnostics only.', 'must-hotel-booking'));
-        self::renderField(['label' => __('Room types path', 'must-hotel-booking'), 'name' => 'clock_room_types_path', 'value' => $form['clock_room_types_path'] ?? '']);
-        self::renderField(['label' => __('Physical rooms path', 'must-hotel-booking'), 'name' => 'clock_rooms_path', 'value' => $form['clock_rooms_path'] ?? '']);
-        self::renderField(['label' => __('Rates path', 'must-hotel-booking'), 'name' => 'clock_rates_path', 'value' => $form['clock_rates_path'] ?? '']);
-        self::renderField(['label' => __('Rates availability path', 'must-hotel-booking'), 'name' => 'clock_rates_availability_path', 'value' => $form['clock_rates_availability_path'] ?? '/rates_availability']);
-        self::renderField(['label' => __('Products path', 'must-hotel-booking'), 'name' => 'clock_products_path', 'value' => $form['clock_products_path'] ?? '/products']);
-        self::renderField(['label' => __('WBE room-type rates path', 'must-hotel-booking'), 'name' => 'clock_wbe_room_type_rates_path', 'value' => $form['clock_wbe_room_type_rates_path'] ?? '', 'description' => __('Uses this path with fixed query wbe.eq=true and bookable_type.eq=Pms::RoomType.', 'must-hotel-booking')]);
-        self::renderField(['label' => __('Rate plans path', 'must-hotel-booking'), 'name' => 'clock_rate_plans_path', 'value' => $form['clock_rate_plans_path'] ?? '']);
-        echo '</div>';
-
-        echo '<div class="must-settings-grid must-settings-grid--3">';
-        self::renderSectionIntro(\__('Clock API public booking paths', 'must-hotel-booking'), \__('Endpoint paths used only by the real provider-based Clock API flow for availability, quotes, and reservation creation.', 'must-hotel-booking'));
-        self::renderField(['label' => __('Availability path', 'must-hotel-booking'), 'name' => 'clock_availability_path', 'value' => $form['clock_availability_path'] ?? '']);
-        self::renderField(['label' => __('Quote path', 'must-hotel-booking'), 'name' => 'clock_quote_path', 'value' => $form['clock_quote_path'] ?? '']);
-        self::renderField(['label' => __('Reservation create path', 'must-hotel-booking'), 'name' => 'clock_reservation_create_path', 'value' => $form['clock_reservation_create_path'] ?? '/bookings/']);
-        echo '</div>';
-
-        echo '<div class="must-settings-grid must-settings-grid--3">';
-        self::renderSectionIntro(\__('Clock reconciliation paths', 'must-hotel-booking'), \__('Optional endpoint paths used to update paid reservations, cancel/expire bookings, assign physical rooms, edit stay dates, or sync guest contact details. Use {reservation_id}, {booking_id}, {provider_room_id}, {checkin}, or {checkout} tokens if the endpoint path needs them.', 'must-hotel-booking'));
-        self::renderField(['label' => __('Reservation status update path', 'must-hotel-booking'), 'name' => 'clock_reservation_status_update_path', 'value' => $form['clock_reservation_status_update_path'] ?? '']);
-        self::renderField(['label' => __('Reservation cancel path', 'must-hotel-booking'), 'name' => 'clock_reservation_cancel_path', 'value' => $form['clock_reservation_cancel_path'] ?? '']);
-        self::renderField(['label' => __('Reservation room update path', 'must-hotel-booking'), 'name' => 'clock_reservation_room_update_path', 'value' => $form['clock_reservation_room_update_path'] ?? '', 'description' => __('Used by provider-aware room assignment and room moves for Clock mirrors.', 'must-hotel-booking')]);
-        self::renderField(['label' => __('Reservation stay update path', 'must-hotel-booking'), 'name' => 'clock_reservation_stay_update_path', 'value' => $form['clock_reservation_stay_update_path'] ?? '', 'description' => __('Used by provider-aware stay-date edits for Clock mirrors.', 'must-hotel-booking')]);
-        self::renderField(['label' => __('Reservation guest update path', 'must-hotel-booking'), 'name' => 'clock_reservation_guest_update_path', 'value' => $form['clock_reservation_guest_update_path'] ?? '', 'description' => __('Used by provider-aware guest/contact edits for Clock mirrors.', 'must-hotel-booking')]);
-        echo '</div>';
-
-        echo '<div class="must-settings-grid must-settings-grid--2">';
-        self::renderSectionIntro(\__('Clock inbound sync', 'must-hotel-booking'), \__('Webhook updates refresh existing Clock mirror reservations only. Use a shared secret via token or HMAC signature. The endpoint URL is shown for Clock webhook setup.', 'must-hotel-booking'));
-        self::renderField(['label' => __('Reservation fetch path', 'must-hotel-booking'), 'name' => 'clock_reservation_fetch_path', 'value' => $form['clock_reservation_fetch_path'] ?? '/bookings/{booking_id}', 'description' => __('Optional path for manual/deferred mirror refresh. Use {reservation_id} or {booking_id} if needed.', 'must-hotel-booking')]);
-        self::renderField(['label' => __('Webhook shared secret', 'must-hotel-booking'), 'name' => 'clock_webhook_secret', 'type' => 'password', 'value' => $form['clock_webhook_secret'] ?? '', 'description' => __('Inbound webhook calls must provide this secret as Bearer/X-MHB-Clock-Token or an HMAC SHA-256 signature.', 'must-hotel-booking')]);
-        echo '<p class="description"><strong>' . \esc_html__('Webhook URL:', 'must-hotel-booking') . '</strong> <code>' . \esc_html((string) ($summary['clock_webhook_url'] ?? '')) . '</code></p>';
-        echo '</div>';
-        self::renderPanelEnd();
-        self::renderFormEnd(\__('Save Provider Settings', 'must-hotel-booking'));
+        self::renderFormEnd(\__('Save Provider Setup', 'must-hotel-booking'));
 
         self::renderPanelStart(\__('Clock diagnostics', 'must-hotel-booking'), \__('Run a safe backend connection test. The request is logged without credentials for future troubleshooting.', 'must-hotel-booking'));
         echo '<form method="post" action="' . \esc_url(get_admin_settings_page_url(['tab' => 'provider'])) . '" class="must-settings-secondary-action">';
@@ -3014,6 +3044,65 @@ final class SettingsPage
         self::renderClockCatalogPanel();
         self::renderClockSyncHealthPanel($providerData);
         self::renderClockMappingsPanel();
+    }
+
+    /**
+     * Preserve legacy/internal provider values while the guided setup hides them.
+     *
+     * @param array<string, mixed> $form
+     */
+    private static function renderHiddenProviderFields(array $form, string $setupChoice): void
+    {
+        $hidden = [
+            'website_booking_flow_mode' => $setupChoice === 'clock_wbe_inline' ? 'clock_wbe_inline' : 'plugin_checkout',
+            'provider_mode' => $setupChoice === 'clock_api_backend' ? 'clock' : 'local',
+            'clock_enabled' => $setupChoice === 'clock_api_backend' ? '1' : '',
+            'clock_pms_api_enabled' => $setupChoice === 'clock_api_backend' ? '1' : '',
+            'clock_base_api_enabled' => $setupChoice === 'clock_api_backend' && ((string) ($form['clock_base_api_url'] ?? '') !== '' || !empty($form['clock_base_api_enabled'])) ? '1' : '',
+            'fallback_to_local_when_clock_unavailable' => '',
+            'clock_api_base_url' => (string) ($form['clock_api_base_url'] ?? ''),
+            'clock_region' => (string) ($form['clock_region'] ?? ''),
+            'clock_api_type' => (string) ($form['clock_api_type'] ?? 'pms_api'),
+            'clock_subscription_id' => (string) ($form['clock_subscription_id'] ?? ''),
+            'clock_account_id' => (string) ($form['clock_account_id'] ?? ''),
+            'clock_property_id' => (string) ($form['clock_property_id'] ?? ''),
+            'clock_wbe_room_type_rates_path' => (string) ($form['clock_wbe_room_type_rates_path'] ?? '/rates'),
+            'clock_availability_path' => (string) ($form['clock_availability_path'] ?? ''),
+            'clock_quote_path' => (string) ($form['clock_quote_path'] ?? ''),
+            'clock_reservation_status_update_path' => (string) ($form['clock_reservation_status_update_path'] ?? ''),
+            'clock_reservation_cancel_path' => (string) ($form['clock_reservation_cancel_path'] ?? ''),
+            'clock_reservation_room_update_path' => (string) ($form['clock_reservation_room_update_path'] ?? ''),
+            'clock_reservation_stay_update_path' => (string) ($form['clock_reservation_stay_update_path'] ?? ''),
+            'clock_reservation_guest_update_path' => (string) ($form['clock_reservation_guest_update_path'] ?? ''),
+        ];
+
+        if ($setupChoice !== 'clock_wbe_inline') {
+            $hidden['clock_wbe_hotel_id'] = (string) ($form['clock_wbe_hotel_id'] ?? '');
+        }
+
+        if ($setupChoice !== 'clock_api_backend') {
+            $hidden['clock_pms_api_url'] = (string) ($form['clock_pms_api_url'] ?? '');
+            $hidden['clock_base_api_url'] = (string) ($form['clock_base_api_url'] ?? '');
+            $hidden['clock_api_user'] = (string) ($form['clock_api_user'] ?? '');
+            $hidden['clock_connection_path'] = (string) ($form['clock_connection_path'] ?? '/room_types');
+            $hidden['clock_room_types_path'] = (string) ($form['clock_room_types_path'] ?? '/room_types');
+            $hidden['clock_rooms_path'] = (string) ($form['clock_rooms_path'] ?? '/rooms');
+            $hidden['clock_rates_path'] = (string) ($form['clock_rates_path'] ?? '/rates');
+            $hidden['clock_rates_availability_path'] = (string) ($form['clock_rates_availability_path'] ?? '/rates_availability');
+            $hidden['clock_products_path'] = (string) ($form['clock_products_path'] ?? '/products');
+            $hidden['clock_rate_plans_path'] = (string) ($form['clock_rate_plans_path'] ?? '/rate_plans');
+            $hidden['clock_reservation_create_path'] = (string) ($form['clock_reservation_create_path'] ?? '/bookings/');
+            $hidden['clock_reservation_fetch_path'] = (string) ($form['clock_reservation_fetch_path'] ?? '/bookings/{booking_id}');
+            $hidden['clock_timeout_seconds'] = (string) ($form['clock_timeout_seconds'] ?? 15);
+        }
+
+        foreach ($hidden as $name => $value) {
+            if ($value === '') {
+                continue;
+            }
+
+            echo '<input type="hidden" name="' . \esc_attr((string) $name) . '" value="' . \esc_attr((string) $value) . '" />';
+        }
     }
 
     /**

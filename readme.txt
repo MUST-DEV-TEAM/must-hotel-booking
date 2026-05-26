@@ -4,7 +4,7 @@ Tags: hotel, booking, reservation, accommodation
 Requires at least: 5.0
 Tested up to: 6.0
 Requires PHP: 7.4
-Stable tag: 0.4.7
+Stable tag: 0.4.8
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -31,6 +31,11 @@ Main features include:
 5. When updating, upload the new release ZIP or use the configured updater, then review **Diagnostics & Maintenance** after the update completes.
 
 == Changelog ==
+
+= 0.4.8 =
+* Reworked the Provider settings tab into a guided setup choice for Plugin backend, Clock WBE inline, or Clock PMS backend.
+* Hid normal Clock endpoint paths behind an advanced diagnostics section and defaulted them automatically for Clock PMS backend mode.
+* Reduced Clock setup fields to the account-specific inputs needed for the selected mode.
 
 = 0.4.7 =
 * Added a one-click Clock API defaults action so endpoint paths self-configure and hotel-specific credentials stay as the only required manual inputs.
