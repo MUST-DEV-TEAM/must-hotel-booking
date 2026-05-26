@@ -62,7 +62,7 @@ final class RoomCatalog
 
             if (!empty($clockRoomTypes)) {
                 return [
-                    self::BOOKING_ALL_CATEGORY => \__('All Clock room types', 'must-hotel-booking'),
+                    self::BOOKING_ALL_CATEGORY => \__('All Room Types', 'must-hotel-booking'),
                 ] + $clockRoomTypes;
             }
         }
@@ -78,7 +78,7 @@ final class RoomCatalog
     public static function getWidgetFilterOptions(): array
     {
         $allLabel = self::isClockBackendMode()
-            ? \__('All Clock room types', 'must-hotel-booking')
+            ? \__('All Room Types', 'must-hotel-booking')
             : \__('All Categories', 'must-hotel-booking');
 
         return [

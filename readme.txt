@@ -4,7 +4,7 @@ Tags: hotel, booking, reservation, accommodation
 Requires at least: 5.0
 Tested up to: 6.0
 Requires PHP: 7.4
-Stable tag: 0.4.11
+Stable tag: 0.4.12
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -31,6 +31,10 @@ Main features include:
 5. When updating, upload the new release ZIP or use the configured updater, then review **Diagnostics & Maintenance** after the update completes.
 
 == Changelog ==
+
+= 0.4.12 =
+* Preserved the selected arrival date when the booking calendar refreshes disabled-date diagnostics after a guest selects dates.
+* Renamed the Clock backend booking selector default from "All Clock room types" to "All Room Types".
 
 = 0.4.11 =
 * Expanded Clock full sync to assign synced rates to Clock room types and mirror recent/future Clock bookings into local reservations.

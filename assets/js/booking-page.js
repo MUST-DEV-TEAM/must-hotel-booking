@@ -933,18 +933,17 @@
         var checkinDates = Array.isArray(disabledCheckinDates) ? disabledCheckinDates : [];
         var checkoutDates = Array.isArray(disabledCheckoutDates) ? disabledCheckoutDates : [];
         var currentCheckin = String(checkinInput.value || '').trim();
+        var hasSelectedCheckin = isValidDateString(currentCheckin);
 
-        state.disabledCheckinDates = checkinDates.slice();
+        state.disabledCheckinDates = hasSelectedCheckin
+            ? checkinDates.filter(function (date) {
+                return String(date) !== currentCheckin;
+            })
+            : checkinDates.slice();
         state.disabledCheckoutDates = checkoutDates.slice();
 
         if (state.checkinPicker) {
-            state.checkinPicker.set('disable', checkinDates);
-
-            if (currentCheckin && checkinDates.indexOf(currentCheckin) !== -1) {
-                state.checkinPicker.clear();
-                checkinInput.value = '';
-                currentCheckin = '';
-            }
+            state.checkinPicker.set('disable', state.disabledCheckinDates);
         }
 
         if (!state.checkoutPicker) {
