@@ -4,7 +4,7 @@ Tags: hotel, booking, reservation, accommodation
 Requires at least: 5.0
 Tested up to: 6.0
 Requires PHP: 7.4
-Stable tag: 0.4.8
+Stable tag: 0.4.9
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -31,6 +31,11 @@ Main features include:
 5. When updating, upload the new release ZIP or use the configured updater, then review **Diagnostics & Maintenance** after the update completes.
 
 == Changelog ==
+
+= 0.4.9 =
+* Added a primary Clock full sync action that refreshes the catalog, imports missing local Clock room/rate records, and creates provider mappings where safe.
+* Reworked Clock diagnostics into a clearer synchronization panel with catalog counts and advanced troubleshooting actions.
+* Simplified Clock catalog previews so admin users see readable room/rate lists instead of raw metadata blobs.
 
 = 0.4.8 =
 * Reworked the Provider settings tab into a guided setup choice for Plugin backend, Clock WBE inline, or Clock PMS backend.
