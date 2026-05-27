@@ -119,56 +119,53 @@ final class ClockAvailabilityProvider implements AvailabilityProviderInterface
         $startDate = $request->getCheckin() !== '' && AvailabilityEngine::isValidBookingDate($request->getCheckin())
             ? $request->getCheckin()
             : (\function_exists('current_time') ? \current_time('Y-m-d') : \gmdate('Y-m-d'));
-        $disabledCheckinDates = $this->allDatesFrom($startDate, $windowDays);
 
         if (!$this->isConfiguredForRatesAvailability()) {
-            return [
-                'disabled_checkin_dates' => $disabledCheckinDates,
-                'disabled_checkout_dates' => [],
-            ];
+            return $this->disabledDatesFailOpen('clock_rates_availability_not_configured');
         }
 
         $roomTypeIds = $this->roomTypeIdsForDisabledDates($request);
         $rateIds = $this->mappedRateIds();
 
         if (empty($roomTypeIds) || empty($rateIds)) {
-            return [
-                'disabled_checkin_dates' => $disabledCheckinDates,
-                'disabled_checkout_dates' => [],
-            ];
+            return $this->disabledDatesFailOpen(empty($roomTypeIds) ? 'clock_room_mapping_missing' : 'clock_rate_mapping_missing');
         }
 
         try {
             $endDate = (new \DateTimeImmutable($startDate))->modify('+' . $windowDays . ' days')->format('Y-m-d');
         } catch (\Exception $exception) {
-            return [
-                'disabled_checkin_dates' => $disabledCheckinDates,
-                'disabled_checkout_dates' => [],
-            ];
+            return $this->disabledDatesFailOpen('invalid_disabled_dates_window');
         }
 
         $response = $this->ratesAvailabilityRequest($startDate, $endDate, $rateIds, $roomTypeIds, 'clock.rates_availability.disabled_dates');
 
         if (!$response->isSuccess()) {
-            return [
-                'disabled_checkin_dates' => $disabledCheckinDates,
-                'disabled_checkout_dates' => [],
-            ];
+            return $this->disabledDatesFailOpen(
+                'clock_rates_availability_request_failed',
+                $response->getErrorMessage()
+            );
         }
 
         $availableDates = $this->availableDatesFromRatesAvailability($response->getData());
-        $disabledCheckinDates = [];
 
+        if (empty($availableDates)) {
+            return $this->disabledDatesFailOpen('clock_rates_availability_response_unparseable');
+        }
+
+        $disabledCheckinDates = [];
         foreach ($this->allDatesFrom($startDate, $windowDays) as $date) {
             if (empty($availableDates[$date])) {
                 $disabledCheckinDates[] = $date;
             }
         }
 
-        return [
-            'disabled_checkin_dates' => $disabledCheckinDates,
-            'disabled_checkout_dates' => [],
-        ];
+        return $this->disabledDatesResponse(
+            $disabledCheckinDates,
+            [],
+            'clock_rates_availability',
+            'ok',
+            ''
+        );
     }
 
     public function checkAvailability(int $roomId, string $checkin, string $checkout, string $excludeSessionId = ''): bool
@@ -587,5 +584,33 @@ final class ClockAvailabilityProvider implements AvailabilityProviderInterface
         return AvailabilityEngine::isValidBookingDate($checkin)
             && AvailabilityEngine::isValidBookingDate($checkout)
             && $checkin < $checkout;
+    }
+
+    /**
+     * Disabled-date calendars are only a frontend hint. If Clock cannot return
+     * a confidently parsed window, fail open here and let search/checkout keep
+     * enforcing provider availability strictly.
+     *
+     * @return array<string, mixed>
+     */
+    private function disabledDatesFailOpen(string $reason, string $message = ''): array
+    {
+        return $this->disabledDatesResponse([], [], 'clock_rates_availability', $reason, $message);
+    }
+
+    /**
+     * @param array<int, string> $checkinDates
+     * @param array<int, string> $checkoutDates
+     * @return array<string, mixed>
+     */
+    private function disabledDatesResponse(array $checkinDates, array $checkoutDates, string $source, string $status, string $message): array
+    {
+        return [
+            'disabled_checkin_dates' => \array_values($checkinDates),
+            'disabled_checkout_dates' => \array_values($checkoutDates),
+            'disabled_dates_source' => $source,
+            'disabled_dates_status' => $status,
+            'disabled_dates_message' => $message,
+        ];
     }
 }

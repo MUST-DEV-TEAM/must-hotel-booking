@@ -13,7 +13,7 @@ interface AvailabilityProviderInterface
     /** @return array<string, mixed>|null */
     public function getAvailableRoomById(int $roomId, string $checkin, string $checkout, int $guests = 1): ?array;
 
-    /** @return array{disabled_checkin_dates: array<int, string>, disabled_checkout_dates: array<int, string>} */
+    /** @return array<string, mixed> */
     public function getDisabledDates(DisabledDatesRequest $request): array;
 
     public function checkAvailability(int $roomId, string $checkin, string $checkout, string $excludeSessionId = ''): bool;

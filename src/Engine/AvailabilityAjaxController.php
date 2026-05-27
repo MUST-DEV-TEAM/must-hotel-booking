@@ -505,6 +505,15 @@ final class AvailabilityAjaxController
             'window_days' => $windowDays,
             'disabled_checkin_dates' => $disabledCheckinDates,
             'disabled_checkout_dates' => $disabledCheckoutDates,
+            'disabled_dates_source' => isset($disabledDates['disabled_dates_source']) && \is_scalar($disabledDates['disabled_dates_source'])
+                ? (string) $disabledDates['disabled_dates_source']
+                : '',
+            'disabled_dates_status' => isset($disabledDates['disabled_dates_status']) && \is_scalar($disabledDates['disabled_dates_status'])
+                ? (string) $disabledDates['disabled_dates_status']
+                : '',
+            'disabled_dates_message' => isset($disabledDates['disabled_dates_message']) && \is_scalar($disabledDates['disabled_dates_message'])
+                ? (string) $disabledDates['disabled_dates_message']
+                : '',
         ]);
     }
 
