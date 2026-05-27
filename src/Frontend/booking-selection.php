@@ -3,11 +3,9 @@
 namespace MustHotelBooking\Frontend;
 
 use MustHotelBooking\Core\BookingRules;
-use MustHotelBooking\Core\RoomData;
 use MustHotelBooking\Core\RoomViewBuilder;
 use MustHotelBooking\Engine\LockEngine;
 use MustHotelBooking\Engine\PaymentEngine;
-use MustHotelBooking\Engine\PricingEngine;
 use MustHotelBooking\Provider\ProviderManager;
 
 /**
@@ -537,7 +535,7 @@ function get_booking_selection_room_view_items(): array
             continue;
         }
 
-        $room = RoomData::getRoom($room_id);
+        $room = ProviderManager::active()->reservations()->getCheckoutRoomData($room_id);
 
         if (!\is_array($room)) {
             continue;
@@ -548,7 +546,10 @@ function get_booking_selection_room_view_items(): array
             (string) $context['checkin'] !== '' &&
             (string) $context['checkout'] !== ''
         ) {
-            $rate_plan = \MustHotelBooking\Engine\RatePlanEngine::getRoomRatePlan($room_id, $rate_plan_id);
+            $rate_plan_room_id = isset($room['room_type_id']) && (int) $room['room_type_id'] > 0
+                ? (int) $room['room_type_id']
+                : $room_id;
+            $rate_plan = \MustHotelBooking\Engine\RatePlanEngine::getRoomRatePlan($rate_plan_room_id, $rate_plan_id);
 
             if (\is_array($rate_plan)) {
                 $room['selected_rate_plan_id'] = $rate_plan_id;
@@ -560,7 +561,7 @@ function get_booking_selection_room_view_items(): array
                     : \max(1, (int) ($room['max_guests'] ?? 1));
             }
 
-            $pricing = PricingEngine::calculateTotal(
+            $pricing = ProviderManager::active()->quote()->calculateTotal(
                 $room_id,
                 (string) $context['checkin'],
                 (string) $context['checkout'],

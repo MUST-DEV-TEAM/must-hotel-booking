@@ -193,10 +193,17 @@ class Rooms_List_Widget extends \Elementor\Widget_Base
                 );
             }
 
-            $book_url = \add_query_arg(
-                ['room_id' => $booking_room_id],
-                $booking_page_url
-            );
+            $book_args = ['room_id' => $booking_room_id];
+            $physical_room_id = isset($room['physical_room_id']) ? (int) $room['physical_room_id'] : 0;
+
+            if ($physical_room_id > 0) {
+                $book_args = [
+                    'room_id' => $gallery_room_id > 0 ? $gallery_room_id : $booking_room_id,
+                    'inventory_room_id' => $physical_room_id,
+                ];
+            }
+
+            $book_url = \add_query_arg($book_args, $booking_page_url);
 
             echo '<article class="must-hotel-booking-rooms-list-card" data-lightbox-images="' . $lightbox_images_attr . '" data-lightbox-title="' . $room_name_attr . '">';
             echo '<div class="must-hotel-booking-rooms-list-media">';

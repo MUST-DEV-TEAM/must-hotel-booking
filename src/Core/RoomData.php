@@ -131,6 +131,28 @@ final class RoomData
             ? RoomCatalog::normalizeCategory($category)
             : 'all';
 
+        if (RoomCatalog::isClockBackendMode()) {
+            $roomTypes = self::repository()->getRoomsForDisplay($normalizedCategory, $limit);
+            $rooms = [];
+
+            foreach ($roomTypes as $roomType) {
+                if (!\is_array($roomType)) {
+                    continue;
+                }
+
+                $physicalRooms = self::getPhysicalRoomsForDisplay($roomType);
+                $rooms = \array_merge($rooms, !empty($physicalRooms) ? $physicalRooms : [$roomType]);
+
+                if (\count($rooms) >= $limit) {
+                    break;
+                }
+            }
+
+            if (!empty($rooms)) {
+                return \array_slice($rooms, 0, $limit);
+            }
+        }
+
         return self::repository()->getRoomsForDisplay($normalizedCategory, $limit);
     }
 
@@ -181,11 +203,18 @@ final class RoomData
                 $name .= ' - ' . $title;
             }
 
+            $physicalRoomId = isset($row['id']) ? (int) $row['id'] : 0;
+
+            if ($physicalRoomId <= 0) {
+                continue;
+            }
+
             $rooms[] = [
-                'id' => $roomTypeId,
-                'booking_room_id' => $roomTypeId,
+                'id' => $physicalRoomId,
+                'booking_room_id' => $physicalRoomId,
                 'gallery_room_id' => $roomTypeId,
-                'physical_room_id' => isset($row['id']) ? (int) $row['id'] : 0,
+                'room_type_id' => $roomTypeId,
+                'physical_room_id' => $physicalRoomId,
                 'name' => $name,
                 'slug' => (string) ($roomType['slug'] ?? ''),
                 'details_slug' => (string) ($roomType['slug'] ?? ''),

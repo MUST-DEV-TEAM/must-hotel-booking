@@ -17,10 +17,14 @@ final class ClockQuoteProvider implements QuoteProviderInterface
     /** @var ClockCatalogService */
     private $catalog;
 
-    public function __construct(?ClockApiClient $client = null, ?ClockCatalogService $catalog = null)
+    /** @var ClockRoomSelection */
+    private $roomSelection;
+
+    public function __construct(?ClockApiClient $client = null, ?ClockCatalogService $catalog = null, ?ClockRoomSelection $roomSelection = null)
     {
         $this->client = $client ?: new ClockApiClient();
         $this->catalog = $catalog ?: new ClockCatalogService($this->client);
+        $this->roomSelection = $roomSelection ?: new ClockRoomSelection($this->catalog);
     }
 
     public function calculateTotal(
@@ -40,8 +44,10 @@ final class ClockQuoteProvider implements QuoteProviderInterface
             ];
         }
 
-        $room = \MustHotelBooking\Engine\get_room_repository()->getRoomById($roomId);
-        $roomMapping = $this->catalog->findAccommodationMapping($roomId);
+        $selection = $this->roomSelection->resolve($roomId);
+        $roomTypeId = \is_array($selection) ? (int) ($selection['room_type_id'] ?? 0) : 0;
+        $room = \is_array($selection) && isset($selection['room_type']) && \is_array($selection['room_type']) ? $selection['room_type'] : null;
+        $roomMapping = \is_array($selection) && isset($selection['room_mapping']) && \is_array($selection['room_mapping']) ? $selection['room_mapping'] : null;
 
         if (!\is_array($room) || !$this->hasExternalId($roomMapping)) {
             return [
@@ -50,7 +56,7 @@ final class ClockQuoteProvider implements QuoteProviderInterface
             ];
         }
 
-        $ratePlan = RatePlanEngine::getRoomRatePlan($roomId, $ratePlanId);
+        $ratePlan = $this->ratePlanForRoomType($roomTypeId, $ratePlanId);
         $ratePlanMapping = null;
         $rateIds = [];
 
@@ -73,7 +79,7 @@ final class ClockQuoteProvider implements QuoteProviderInterface
 
             $rateIds[] = (string) ($ratePlanMapping['external_id'] ?? '');
         } else {
-            $rateIds = $this->publicMappedRateIdsForRoom($roomId);
+            $rateIds = $this->publicMappedRateIdsForRoom($roomTypeId);
         }
 
         if (empty($rateIds)) {
@@ -124,13 +130,15 @@ final class ClockQuoteProvider implements QuoteProviderInterface
         foreach (\MustHotelBooking\Frontend\get_booking_selected_rooms() as $selectedRoom) {
             $roomId = isset($selectedRoom['room_id']) ? (int) $selectedRoom['room_id'] : 0;
             $ratePlanId = isset($selectedRoom['rate_plan_id']) ? (int) $selectedRoom['rate_plan_id'] : 0;
-            $room = ReservationEngine::getCheckoutRoomData($roomId);
+            $selection = $this->roomSelection->resolve($roomId);
+            $room = \is_array($selection) && isset($selection['room']) && \is_array($selection['room']) ? $selection['room'] : null;
+            $roomTypeId = \is_array($selection) ? (int) ($selection['room_type_id'] ?? 0) : 0;
 
             if (!\is_array($room)) {
                 continue;
             }
 
-            $ratePlan = RatePlanEngine::getRoomRatePlan($roomId, $ratePlanId);
+            $ratePlan = $this->ratePlanForRoomType($roomTypeId, $ratePlanId);
 
             if (\is_array($ratePlan)) {
                 $room['selected_rate_plan_id'] = $ratePlanId;
@@ -238,18 +246,24 @@ final class ClockQuoteProvider implements QuoteProviderInterface
             return [];
         }
 
-        $roomMapping = $this->catalog->findAccommodationMapping($roomId);
+        $selection = $this->roomSelection->resolve($roomId);
+        $roomTypeId = \is_array($selection) ? (int) ($selection['room_type_id'] ?? 0) : 0;
+        $roomMapping = \is_array($selection) && isset($selection['room_mapping']) && \is_array($selection['room_mapping']) ? $selection['room_mapping'] : null;
 
         if (!$this->hasExternalId($roomMapping)) {
             return [];
         }
 
-        $plans = RatePlanEngine::getRatePlansForRoomType($roomId);
+        $plans = $this->ratePlansForRoomType($roomTypeId);
         $mappedPlans = [];
         $rateIds = [];
 
         foreach ($plans as $plan) {
             if (!\is_array($plan)) {
+                continue;
+            }
+
+            if (isset($plan['is_active']) && (int) $plan['is_active'] !== 1) {
                 continue;
             }
 
@@ -414,7 +428,7 @@ final class ClockQuoteProvider implements QuoteProviderInterface
     {
         $ids = [];
 
-        foreach (RatePlanEngine::getRatePlansForRoomType($roomId) as $plan) {
+        foreach ($this->ratePlansForRoomType($roomId) as $plan) {
             if (!\is_array($plan)) {
                 continue;
             }
@@ -438,7 +452,129 @@ final class ClockQuoteProvider implements QuoteProviderInterface
             }
         }
 
+        return !empty($ids) ? \array_values($ids) : $this->allPublicMappedRateIds();
+    }
+
+    /**
+     * @return array<int, array<string, mixed>>
+     */
+    private function ratePlansForRoomType(int $roomTypeId): array
+    {
+        if ($roomTypeId <= 0) {
+            return [];
+        }
+
+        $plans = RatePlanEngine::getRatePlansForRoomType($roomTypeId);
+
+        if (!$this->onlyFallbackRatePlans($plans)) {
+            return $plans;
+        }
+
+        $mapped = [];
+
+        foreach ($this->catalogMappedRatePlans() as $plan) {
+            $maxOccupancy = isset($plan['max_occupancy']) ? (int) $plan['max_occupancy'] : 0;
+
+            if ($maxOccupancy <= 0) {
+                $maxOccupancy = $this->roomTypeMaxGuests($roomTypeId);
+            }
+
+            $plan['room_type_id'] = $roomTypeId;
+            $plan['base_price'] = isset($plan['base_price']) ? (float) $plan['base_price'] : 0.0;
+            $plan['max_occupancy'] = \max(1, $maxOccupancy);
+            $plan['is_fallback'] = false;
+            $mapped[] = $plan;
+        }
+
+        return !empty($mapped) ? $mapped : $plans;
+    }
+
+    /**
+     * @return array<string, mixed>|null
+     */
+    private function ratePlanForRoomType(int $roomTypeId, int $ratePlanId): ?array
+    {
+        foreach ($this->ratePlansForRoomType($roomTypeId) as $plan) {
+            if (!\is_array($plan)) {
+                continue;
+            }
+
+            if ($ratePlanId > 0 && (int) ($plan['id'] ?? 0) !== $ratePlanId) {
+                continue;
+            }
+
+            return $plan;
+        }
+
+        return null;
+    }
+
+    /**
+     * @param array<int, array<string, mixed>> $plans
+     */
+    private function onlyFallbackRatePlans(array $plans): bool
+    {
+        if (empty($plans)) {
+            return true;
+        }
+
+        foreach ($plans as $plan) {
+            if (\is_array($plan) && empty($plan['is_fallback']) && (int) ($plan['id'] ?? 0) > 0) {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    /**
+     * @return array<int, array<string, mixed>>
+     */
+    private function catalogMappedRatePlans(): array
+    {
+        $plans = [];
+
+        foreach (\MustHotelBooking\Engine\get_rate_plan_repository()->getRatePlans(true) as $plan) {
+            if (!\is_array($plan)) {
+                continue;
+            }
+
+            $planId = isset($plan['id']) ? (int) $plan['id'] : 0;
+            $mapping = $planId > 0 ? $this->catalog->findRatePlanMapping($planId) : null;
+
+            if (!$this->hasExternalId($mapping) || !$this->isMappingPublicVisible($mapping)) {
+                continue;
+            }
+
+            $plans[] = $plan;
+        }
+
+        return $plans;
+    }
+
+    /** @return array<int, string> */
+    private function allPublicMappedRateIds(): array
+    {
+        $ids = [];
+
+        foreach ($this->catalogMappedRatePlans() as $plan) {
+            $planId = isset($plan['id']) ? (int) $plan['id'] : 0;
+            $mapping = $planId > 0 ? $this->catalog->findRatePlanMapping($planId) : null;
+            $externalId = \is_array($mapping) ? (string) ($mapping['external_id'] ?? '') : '';
+
+            if ($externalId !== '') {
+                $ids[$externalId] = $externalId;
+            }
+        }
+
         return \array_values($ids);
+    }
+
+    private function roomTypeMaxGuests(int $roomTypeId): int
+    {
+        $room = $roomTypeId > 0 ? \MustHotelBooking\Engine\get_room_repository()->getRoomById($roomTypeId) : null;
+
+        return \is_array($room) && isset($room['max_guests']) ? \max(1, (int) $room['max_guests']) : 1;
     }
 
     /**

@@ -16,11 +16,17 @@ final class RoomViewBuilder
             return null;
         }
 
+        $galleryRoomId = isset($room['gallery_room_id']) ? \max(0, (int) $room['gallery_room_id']) : $roomId;
+
+        if ($galleryRoomId <= 0) {
+            $galleryRoomId = $roomId;
+        }
+
         $roomSlug = isset($room['slug']) ? (string) $room['slug'] : '';
         $roomCategory = isset($room['category']) ? (string) $room['category'] : RoomCatalog::getDefaultCategory();
         $currency = MustBookingConfig::get_currency();
-        $primaryImageUrl = RoomData::getRoomMainImageUrl($roomId, 'large');
-        $galleryImages = RoomData::getRoomGalleryImageUrls($roomId, 12, 'large');
+        $primaryImageUrl = RoomData::getRoomMainImageUrl($galleryRoomId, 'large');
+        $galleryImages = RoomData::getRoomGalleryImageUrls($galleryRoomId, 12, 'large');
         $galleryImages = \array_values(
             \array_filter(
                 \array_map('strval', \is_array($galleryImages) ? $galleryImages : []),
@@ -69,6 +75,14 @@ final class RoomViewBuilder
 
         return [
             'id' => $roomId,
+            'gallery_room_id' => $galleryRoomId,
+            'room_type_id' => isset($room['room_type_id']) ? (int) $room['room_type_id'] : 0,
+            'physical_room_id' => isset($room['physical_room_id']) ? (int) $room['physical_room_id'] : 0,
+            'provider' => isset($room['provider']) ? (string) $room['provider'] : '',
+            'provider_room_id' => isset($room['provider_room_id']) ? (string) $room['provider_room_id'] : '',
+            'provider_room_type_id' => isset($room['provider_room_type_id']) ? (string) $room['provider_room_type_id'] : '',
+            'provider_physical_room_id' => isset($room['provider_physical_room_id']) ? (string) $room['provider_physical_room_id'] : '',
+            'is_clock_physical_room' => !empty($room['is_clock_physical_room']),
             'name' => isset($room['name']) ? (string) $room['name'] : '',
             'slug' => $roomSlug,
             'category' => $roomCategory,
@@ -96,8 +110,8 @@ final class RoomViewBuilder
             'primary_image_url' => $primaryImageUrl,
             'gallery_images' => \array_slice($galleryImages, 0, 3),
             'lightbox_images' => $lightboxImages,
-            'room_rules' => RoomData::getRoomRulesText($roomId),
-            'amenities' => RoomData::getRoomAmenityDisplayItems($roomId),
+            'room_rules' => RoomData::getRoomRulesText($galleryRoomId),
+            'amenities' => RoomData::getRoomAmenityDisplayItems($galleryRoomId),
             'people_icon_url' => MUST_HOTEL_BOOKING_URL . 'assets/img/PeopleFill.svg',
             'surface_icon_url' => MUST_HOTEL_BOOKING_URL . 'assets/img/Surface.svg',
         ];

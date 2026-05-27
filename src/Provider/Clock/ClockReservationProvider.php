@@ -3,9 +3,12 @@
 namespace MustHotelBooking\Provider\Clock;
 
 use MustHotelBooking\Core\ManagedPages;
+use MustHotelBooking\Core\BookingRules;
 use MustHotelBooking\Engine\BookingAbuseProtection;
 use MustHotelBooking\Engine\BookingValidationEngine;
+use MustHotelBooking\Engine\LockEngine;
 use MustHotelBooking\Engine\ReservationEngine;
+use MustHotelBooking\Engine\RatePlanEngine;
 use MustHotelBooking\Provider\Contracts\ReservationProviderInterface;
 use MustHotelBooking\Provider\Dto\QuoteRequest;
 use MustHotelBooking\Provider\Dto\ReservationCreateRequest;
@@ -27,18 +30,23 @@ final class ClockReservationProvider implements ReservationProviderInterface
     /** @var ClockMirrorReservationService */
     private $mirror;
 
+    /** @var ClockRoomSelection */
+    private $roomSelection;
+
     public function __construct(
         ?ClockApiClient $client = null,
         ?ClockCatalogService $catalog = null,
         ?ClockAvailabilityProvider $availability = null,
         ?ClockQuoteProvider $quote = null,
-        ?ClockMirrorReservationService $mirror = null
+        ?ClockMirrorReservationService $mirror = null,
+        ?ClockRoomSelection $roomSelection = null
     ) {
         $this->client = $client ?: new ClockApiClient();
         $this->catalog = $catalog ?: new ClockCatalogService($this->client);
         $this->availability = $availability ?: new ClockAvailabilityProvider($this->client, $this->catalog);
         $this->quote = $quote ?: new ClockQuoteProvider($this->client, $this->catalog);
         $this->mirror = $mirror ?: new ClockMirrorReservationService();
+        $this->roomSelection = $roomSelection ?: new ClockRoomSelection($this->catalog);
     }
 
     public function buildReservationNote(int $roomId, array $guestForm): string
@@ -48,7 +56,11 @@ final class ClockReservationProvider implements ReservationProviderInterface
 
     public function getCheckoutRoomData(int $roomId): ?array
     {
-        return ReservationEngine::getCheckoutRoomData($roomId);
+        $selection = $this->roomSelection->resolve($roomId);
+
+        return \is_array($selection) && isset($selection['room']) && \is_array($selection['room'])
+            ? $selection['room']
+            : null;
     }
 
     public function getRoomGuestAllocations(array $rooms, int $totalGuests, array $guestForm = [], bool $strict = false): array
@@ -60,8 +72,26 @@ final class ClockReservationProvider implements ReservationProviderInterface
     {
         // This is only a local UI/session lock. It is not a Clock PMS+ inventory hold.
         // A real Clock adapter must re-check provider availability immediately before create.
-        if (!$this->availability->checkAvailability($roomId, $checkin, $checkout)) {
+        $sessionId = LockEngine::getOrCreateSessionId();
+
+        if (!$this->availability->checkAvailability($roomId, $checkin, $checkout, $sessionId)) {
             return false;
+        }
+
+        $selection = $this->roomSelection->resolve($roomId);
+
+        if (\is_array($selection) && !empty($selection['is_physical'])) {
+            if (LockEngine::hasExactLock($roomId, $checkin, $checkout, $sessionId)) {
+                return true;
+            }
+
+            return \MustHotelBooking\Engine\get_availability_repository()->upsertRoomLock(
+                $roomId,
+                $checkin,
+                $checkout,
+                $sessionId,
+                LockEngine::getExpiryDatetime()
+            );
         }
 
         return ReservationEngine::ensureRoomLock($roomId, $checkin, $checkout);
@@ -80,6 +110,12 @@ final class ClockReservationProvider implements ReservationProviderInterface
 
     public function releaseRoomSelectionLock(int $roomId, string $checkin, string $checkout): bool
     {
+        $selection = $this->roomSelection->resolve($roomId);
+
+        if (\is_array($selection) && !empty($selection['is_physical'])) {
+            return \MustHotelBooking\Engine\LockEngine::releaseExactLock($roomId, $checkin, $checkout);
+        }
+
         if (\MustHotelBooking\Engine\InventoryEngine::hasInventoryForRoomType($roomId)) {
             return \MustHotelBooking\Engine\InventoryEngine::releaseLocksForRoomType($roomId, $checkin, $checkout);
         }
@@ -96,27 +132,161 @@ final class ClockReservationProvider implements ReservationProviderInterface
     {
         $precheck = $this->precheckSelectionSource($source, 'room_id');
 
-        return !empty($precheck) ? $precheck : ReservationEngine::bootstrapCheckoutSelectionFromRequest($source);
+        if (!empty($precheck)) {
+            return $precheck;
+        }
+
+        $roomId = $this->selectionRoomIdFromSource($source, 'room_id');
+        $ratePlanId = isset($source['rate_plan_id']) ? \absint(\wp_unslash($source['rate_plan_id'])) : 0;
+        $selection = $this->roomSelection->resolve($roomId);
+        $room = \is_array($selection) && isset($selection['room']) && \is_array($selection['room']) ? $selection['room'] : null;
+
+        if ($roomId <= 0) {
+            return [];
+        }
+
+        if (!\is_array($selection) || !\is_array($room)) {
+            return [\__('The selected room could not be found.', 'must-hotel-booking')];
+        }
+
+        $context = BookingValidationEngine::parseRequestContext($source, true);
+        $context = BookingValidationEngine::applyFixedRoomContext($context, $room);
+
+        if (empty($context['is_valid'])) {
+            return (array) ($context['errors'] ?? []);
+        }
+
+        if ($ratePlanId > 0 && !$this->isValidRatePlanForSelection($selection, $ratePlanId)) {
+            return [\__('The selected rate plan is no longer available for this room.', 'must-hotel-booking')];
+        }
+
+        $selectionState = \MustHotelBooking\Frontend\get_booking_selection();
+        $selectedRoomIds = \MustHotelBooking\Frontend\get_booking_selected_room_ids();
+        $selectedRatePlanMap = \MustHotelBooking\Frontend\get_booking_selected_room_rate_plan_map();
+        $hasSameFixedRoomSelection =
+            (string) ($selectionState['flow_data']['booking_mode'] ?? '') === 'fixed-room' &&
+            (int) ($selectionState['flow_data']['fixed_room_id'] ?? 0) === $roomId &&
+            \count($selectedRoomIds) === 1 &&
+            (int) $selectedRoomIds[0] === $roomId &&
+            (int) ($selectedRatePlanMap[$roomId] ?? 0) === $ratePlanId &&
+            \MustHotelBooking\Frontend\do_booking_selection_contexts_match($selectionState['context'] ?? [], $context);
+
+        if (!$hasSameFixedRoomSelection) {
+            \MustHotelBooking\Frontend\clear_booking_selection();
+        }
+
+        if (!$this->ensureRoomLock($roomId, (string) $context['checkin'], (string) $context['checkout'])) {
+            return [\__('The room is no longer available for the selected dates.', 'must-hotel-booking')];
+        }
+
+        $added = \MustHotelBooking\Frontend\add_room_to_booking_selection(
+            $roomId,
+            [
+                'checkin' => (string) $context['checkin'],
+                'checkout' => (string) $context['checkout'],
+                'guests' => (int) $context['guests'],
+                'room_count' => (int) ($context['room_count'] ?? 1),
+                'accommodation_type' => (string) $context['accommodation_type'],
+            ],
+            $ratePlanId
+        );
+
+        if (!$added) {
+            return [\__('Unable to store the selected room.', 'must-hotel-booking')];
+        }
+
+        \MustHotelBooking\Frontend\update_booking_selection_flow_data([
+            'booking_mode' => 'fixed-room',
+            'fixed_room_id' => $roomId,
+        ]);
+
+        return [];
     }
 
     public function handleBookingRoomSelectionRequest(array $requestSource): array
     {
         $action = isset($requestSource['must_booking_action']) ? \sanitize_key((string) \wp_unslash($requestSource['must_booking_action'])) : '';
 
-        if ($action === 'select_room') {
-            $precheck = $this->precheckSelectionSource($requestSource, 'room_id');
-
-            if (!empty($precheck)) {
-                return [
-                    'handled' => true,
-                    'success' => false,
-                    'message' => $precheck[0],
-                    'redirect_url' => '',
-                ];
-            }
+        if ($action !== 'select_room') {
+            return [
+                'handled' => false,
+                'success' => false,
+                'message' => '',
+                'redirect_url' => '',
+            ];
         }
 
-        return ReservationEngine::handleBookingRoomSelectionRequest($requestSource);
+        $nonce = isset($requestSource['must_booking_nonce']) ? (string) \wp_unslash($requestSource['must_booking_nonce']) : '';
+
+        if (!\wp_verify_nonce($nonce, 'must_booking_select_room')) {
+            return [
+                'handled' => true,
+                'success' => false,
+                'message' => \__('Security check failed. Please try again.', 'must-hotel-booking'),
+                'redirect_url' => '',
+            ];
+        }
+
+        $roomId = $this->selectionRoomIdFromSource($requestSource, 'room_id');
+        $ratePlanId = isset($requestSource['rate_plan_id']) ? \absint(\wp_unslash($requestSource['rate_plan_id'])) : 0;
+        $context = BookingValidationEngine::parseRequestContext($requestSource, true);
+        $selection = $this->roomSelection->resolve($roomId);
+
+        if (empty($context['is_valid'])) {
+            $firstError = isset($context['errors'][0]) ? (string) $context['errors'][0] : '';
+
+            return [
+                'handled' => true,
+                'success' => false,
+                'message' => $firstError !== '' ? $firstError : \__('Booking request is invalid.', 'must-hotel-booking'),
+                'redirect_url' => '',
+            ];
+        }
+
+        if ($roomId <= 0 || !\is_array($selection)) {
+            return [
+                'handled' => true,
+                'success' => false,
+                'message' => \__('Please select a room to continue.', 'must-hotel-booking'),
+                'redirect_url' => '',
+            ];
+        }
+
+        if ($ratePlanId > 0 && !$this->isValidRatePlanForSelection($selection, $ratePlanId)) {
+            return [
+                'handled' => true,
+                'success' => false,
+                'message' => \__('The selected rate plan is no longer available for this room.', 'must-hotel-booking'),
+                'redirect_url' => '',
+            ];
+        }
+
+        if (!$this->ensureRoomLock($roomId, (string) $context['checkin'], (string) $context['checkout'])) {
+            return [
+                'handled' => true,
+                'success' => false,
+                'message' => \__('This room is no longer available for the selected dates.', 'must-hotel-booking'),
+                'redirect_url' => '',
+            ];
+        }
+
+        return [
+            'handled' => true,
+            'success' => true,
+            'message' => '',
+            'redirect_url' => \add_query_arg(
+                [
+                    'room_id' => $roomId,
+                    'checkin' => (string) $context['checkin'],
+                    'checkout' => (string) $context['checkout'],
+                    'guests' => (int) $context['guests'],
+                    'room_count' => (int) ($context['room_count'] ?? 1),
+                    'accommodation_type' => (string) $context['accommodation_type'],
+                    'rate_plan_id' => $ratePlanId,
+                ],
+                \MustHotelBooking\Frontend\get_checkout_page_url()
+            ),
+        ];
     }
 
     public function handleAccommodationRoomSelectionRequest(array $requestSource): array
@@ -125,22 +295,175 @@ final class ClockReservationProvider implements ReservationProviderInterface
             ? \sanitize_key((string) \wp_unslash($requestSource['must_accommodation_action']))
             : '';
 
-        if ($action === 'select_room') {
-            $context = BookingValidationEngine::parseRequestContext($requestSource, true);
-            $roomId = isset($requestSource['room_id']) ? \absint(\wp_unslash($requestSource['room_id'])) : 0;
+        if (!\in_array($action, ['select_room', 'remove_selected_room'], true)) {
+            return [
+                'success' => false,
+                'messages' => [],
+                'context' => BookingValidationEngine::parseRequestContext($requestSource, false),
+                'redirect_url' => '',
+                'should_redirect' => false,
+            ];
+        }
 
-            if (!empty($context['is_valid']) && !$this->availability->checkAvailability($roomId, (string) $context['checkin'], (string) $context['checkout'])) {
+        $roomId = $this->selectionRoomIdFromSource($requestSource, 'room_id');
+        $ratePlanId = isset($requestSource['rate_plan_id']) ? \absint(\wp_unslash($requestSource['rate_plan_id'])) : 0;
+        $context = BookingValidationEngine::parseRequestContext($requestSource, true);
+        $selection = $this->roomSelection->resolve($roomId);
+
+        if (empty($context['is_valid'])) {
+            return [
+                'success' => false,
+                'messages' => (array) ($context['errors'] ?? []),
+                'context' => $context,
+                'redirect_url' => '',
+                'should_redirect' => false,
+            ];
+        }
+
+        if ($roomId <= 0 || !\is_array($selection)) {
+            return [
+                'success' => false,
+                'messages' => [\__('Please select a room to continue.', 'must-hotel-booking')],
+                'context' => $context,
+                'redirect_url' => '',
+                'should_redirect' => false,
+            ];
+        }
+
+        if ($action === 'select_room' && $ratePlanId > 0 && !$this->isValidRatePlanForSelection($selection, $ratePlanId)) {
+            return [
+                'success' => false,
+                'messages' => [\__('The selected rate plan is no longer available for this room.', 'must-hotel-booking')],
+                'context' => $context,
+                'redirect_url' => '',
+                'should_redirect' => false,
+            ];
+        }
+
+        $nonce = isset($requestSource['must_accommodation_nonce']) ? (string) \wp_unslash($requestSource['must_accommodation_nonce']) : '';
+        $nonceAction = $action === 'remove_selected_room'
+            ? 'must_accommodation_remove_room_' . $roomId
+            : 'must_accommodation_select_room';
+
+        if (!\wp_verify_nonce($nonce, $nonceAction)) {
+            return [
+                'success' => false,
+                'messages' => [\__('Security check failed. Please try again.', 'must-hotel-booking')],
+                'context' => $context,
+                'redirect_url' => '',
+                'should_redirect' => false,
+            ];
+        }
+
+        if (\MustHotelBooking\Frontend\is_fixed_room_booking_flow()) {
+            \MustHotelBooking\Frontend\clear_booking_selection();
+        }
+
+        if ($action === 'remove_selected_room') {
+            if (!\MustHotelBooking\Frontend\remove_room_from_booking_selection($roomId)) {
                 return [
                     'success' => false,
-                    'messages' => [\__('This room is no longer available in Clock for the selected dates.', 'must-hotel-booking')],
+                    'messages' => [\__('Unable to remove the selected room.', 'must-hotel-booking')],
                     'context' => $context,
                     'redirect_url' => '',
                     'should_redirect' => false,
                 ];
             }
+
+            return [
+                'success' => true,
+                'messages' => [],
+                'context' => $context,
+                'redirect_url' => \MustHotelBooking\Frontend\get_booking_accommodation_context_url($context),
+                'should_redirect' => false,
+            ];
         }
 
-        return ReservationEngine::handleAccommodationRoomSelectionRequest($requestSource);
+        if (!$this->availability->checkAvailability($roomId, (string) $context['checkin'], (string) $context['checkout'], LockEngine::getOrCreateSessionId())) {
+            return [
+                'success' => false,
+                'messages' => [\__('This room is no longer available in Clock for the selected dates.', 'must-hotel-booking')],
+                'context' => $context,
+                'redirect_url' => '',
+                'should_redirect' => false,
+            ];
+        }
+
+        $targetRoomCount = BookingRules::resolveRoomCount(
+            (int) ($context['guests'] ?? 1),
+            (int) ($context['room_count'] ?? 0),
+            (string) ($context['accommodation_type'] ?? 'standard-rooms')
+        );
+        $selectedRoomIds = \MustHotelBooking\Frontend\get_booking_selected_room_ids();
+
+        if (!\in_array($roomId, $selectedRoomIds, true) && \count($selectedRoomIds) >= $targetRoomCount) {
+            return [
+                'success' => false,
+                'messages' => [\__('You have already selected the maximum number of rooms for this stay. Remove one before adding another.', 'must-hotel-booking')],
+                'context' => $context,
+                'redirect_url' => '',
+                'should_redirect' => false,
+            ];
+        }
+
+        $lockCreated = \in_array($roomId, $selectedRoomIds, true)
+            ? true
+            : $this->ensureRoomLock($roomId, (string) $context['checkin'], (string) $context['checkout']);
+
+        if (!$lockCreated) {
+            return [
+                'success' => false,
+                'messages' => [\__('This room is no longer available for the selected dates.', 'must-hotel-booking')],
+                'context' => $context,
+                'redirect_url' => '',
+                'should_redirect' => false,
+            ];
+        }
+
+        $selectionAdded = \MustHotelBooking\Frontend\add_room_to_booking_selection(
+            $roomId,
+            [
+                'checkin' => (string) $context['checkin'],
+                'checkout' => (string) $context['checkout'],
+                'guests' => (int) $context['guests'],
+                'room_count' => (int) ($context['room_count'] ?? 0),
+                'accommodation_type' => (string) $context['accommodation_type'],
+            ],
+            $ratePlanId
+        );
+
+        if (!$selectionAdded) {
+            return [
+                'success' => false,
+                'messages' => [\__('Unable to store the selected room.', 'must-hotel-booking')],
+                'context' => $context,
+                'redirect_url' => '',
+                'should_redirect' => false,
+            ];
+        }
+
+        \MustHotelBooking\Frontend\update_booking_selection_flow_data([
+            'booking_mode' => '',
+            'fixed_room_id' => 0,
+        ]);
+
+        if ($targetRoomCount <= 1) {
+            return [
+                'success' => true,
+                'messages' => [],
+                'context' => $context,
+                'redirect_url' => \MustHotelBooking\Frontend\get_checkout_context_url($context),
+                'should_redirect' => true,
+            ];
+        }
+
+        return [
+            'success' => true,
+            'messages' => [],
+            'context' => $context,
+            'redirect_url' => \MustHotelBooking\Frontend\get_booking_accommodation_context_url($context),
+            'should_redirect' => false,
+        ];
     }
 
     public function continueCheckout(array $context, array $guestForm, string $couponCode = ''): array
@@ -290,12 +613,13 @@ final class ClockReservationProvider implements ReservationProviderInterface
         foreach ($selectedRoomIds as $roomId) {
             $roomId = (int) $roomId;
             $ratePlanId = isset($selectedRatePlanMap[$roomId]) ? (int) $selectedRatePlanMap[$roomId] : 0;
+            $selection = $this->roomSelection->resolve($roomId);
 
             if (!$this->ensureRoomLock($roomId, (string) $context['checkin'], (string) $context['checkout'])) {
                 return $this->errorResult([\__('One of your selected room locks has expired. Please return to accommodation and confirm your selection again.', 'must-hotel-booking')]);
             }
 
-            if (!$this->availability->checkAvailability($roomId, (string) $context['checkin'], (string) $context['checkout'])) {
+            if (!$this->availability->checkAvailability($roomId, (string) $context['checkin'], (string) $context['checkout'], LockEngine::getOrCreateSessionId())) {
                 return $this->errorResult([\__('One of your selected rooms is no longer available in Clock for the selected dates.', 'must-hotel-booking')]);
             }
 
@@ -312,7 +636,8 @@ final class ClockReservationProvider implements ReservationProviderInterface
                 return $this->errorResult([\__('Unable to calculate final Clock booking total for one of the selected rooms.', 'must-hotel-booking')]);
             }
 
-            $roomMapping = $this->catalog->findAccommodationMapping($roomId);
+            $roomMapping = \is_array($selection) && isset($selection['room_mapping']) && \is_array($selection['room_mapping']) ? $selection['room_mapping'] : null;
+            $physicalMapping = \is_array($selection) && isset($selection['physical_mapping']) && \is_array($selection['physical_mapping']) ? $selection['physical_mapping'] : null;
             $ratePlanMapping = $ratePlanId > 0 ? $this->catalog->findRatePlanMapping($ratePlanId) : null;
 
             if (!$this->hasExternalId($roomMapping) || ($ratePlanId > 0 && !$this->hasExternalId($ratePlanMapping))) {
@@ -325,6 +650,9 @@ final class ClockReservationProvider implements ReservationProviderInterface
                 'guests' => isset($roomGuestCounts[$roomId]) ? (int) $roomGuestCounts[$roomId] : (int) $context['guests'],
                 'pricing' => $pricing,
                 'room_mapping' => $this->mappingSummary($roomMapping),
+                'physical_room_id' => \is_array($selection) ? (int) ($selection['physical_room_id'] ?? 0) : 0,
+                'room_type_id' => \is_array($selection) ? (int) ($selection['room_type_id'] ?? $roomId) : $roomId,
+                'physical_mapping' => $this->mappingSummary($physicalMapping),
                 'rate_plan_mapping' => $this->mappingSummary($ratePlanMapping),
             ];
         }
@@ -388,7 +716,7 @@ final class ClockReservationProvider implements ReservationProviderInterface
     /** @param array<string, mixed> $source @return array<int, string> */
     private function precheckSelectionSource(array $source, string $roomKey): array
     {
-        $roomId = isset($source[$roomKey]) ? \absint(\wp_unslash($source[$roomKey])) : 0;
+        $roomId = $this->selectionRoomIdFromSource($source, $roomKey);
 
         if ($roomId <= 0) {
             return [];
@@ -400,9 +728,63 @@ final class ClockReservationProvider implements ReservationProviderInterface
             return [];
         }
 
-        return $this->availability->checkAvailability($roomId, (string) $context['checkin'], (string) $context['checkout'])
+        return $this->availability->checkAvailability($roomId, (string) $context['checkin'], (string) $context['checkout'], LockEngine::getOrCreateSessionId())
             ? []
             : [\__('This room is no longer available in Clock for the selected dates.', 'must-hotel-booking')];
+    }
+
+    /** @param array<string, mixed> $source */
+    private function selectionRoomIdFromSource(array $source, string $roomKey): int
+    {
+        foreach (['inventory_room_id', 'physical_room_id', $roomKey] as $key) {
+            if (!isset($source[$key])) {
+                continue;
+            }
+
+            $roomId = \absint(\wp_unslash($source[$key]));
+
+            if ($roomId > 0) {
+                if ($key === $roomKey && !\is_array($this->roomSelection->resolve($roomId))) {
+                    $selection = $this->roomSelection->resolvePhysicalByExternalId((string) \wp_unslash($source[$key]));
+
+                    if (\is_array($selection)) {
+                        return isset($selection['selection_id']) ? (int) $selection['selection_id'] : $roomId;
+                    }
+                }
+
+                return $roomId;
+            }
+        }
+
+        return 0;
+    }
+
+    /** @param array<string, mixed> $selection */
+    private function isValidRatePlanForSelection(array $selection, int $ratePlanId): bool
+    {
+        if ($ratePlanId <= 0) {
+            return true;
+        }
+
+        $mapping = $this->catalog->findRatePlanMapping($ratePlanId);
+
+        if (!$this->hasExternalId($mapping)) {
+            return false;
+        }
+
+        $roomTypeId = isset($selection['room_type_id']) ? (int) $selection['room_type_id'] : 0;
+
+        if ($roomTypeId <= 0) {
+            return false;
+        }
+
+        if (\is_array(RatePlanEngine::getRoomRatePlan($roomTypeId, $ratePlanId))) {
+            return true;
+        }
+
+        $ratePlan = \MustHotelBooking\Engine\get_rate_plan_repository()->getRatePlanById($ratePlanId);
+
+        return \is_array($ratePlan) && (!isset($ratePlan['is_active']) || (int) $ratePlan['is_active'] === 1);
     }
 
     /**
@@ -457,9 +839,12 @@ final class ClockReservationProvider implements ReservationProviderInterface
     private function bookingCreatePayload(array $context, array $guestForm, array $validatedRoom, string $clockStatus, string $returningGuestId): array
     {
         $roomMapping = isset($validatedRoom['room_mapping']) && \is_array($validatedRoom['room_mapping']) ? $validatedRoom['room_mapping'] : [];
+        $physicalMapping = isset($validatedRoom['physical_mapping']) && \is_array($validatedRoom['physical_mapping']) ? $validatedRoom['physical_mapping'] : [];
         $ratePlanMapping = isset($validatedRoom['rate_plan_mapping']) && \is_array($validatedRoom['rate_plan_mapping']) ? $validatedRoom['rate_plan_mapping'] : [];
         $pricing = isset($validatedRoom['pricing']) && \is_array($validatedRoom['pricing']) ? $validatedRoom['pricing'] : [];
-        $roomId = isset($validatedRoom['room_id']) ? (int) $validatedRoom['room_id'] : 0;
+        $selectionRoomId = isset($validatedRoom['room_id']) ? (int) $validatedRoom['room_id'] : 0;
+        $roomTypeId = isset($validatedRoom['room_type_id']) ? (int) $validatedRoom['room_type_id'] : $selectionRoomId;
+        $noteRoomId = $roomTypeId > 0 ? $roomTypeId : $selectionRoomId;
         $phone = \MustHotelBooking\Frontend\combine_checkout_phone_value($guestForm);
         $booking = [
             'arrival' => (string) ($context['checkin'] ?? ''),
@@ -471,7 +856,7 @@ final class ClockReservationProvider implements ReservationProviderInterface
             'is_guaranteed' => false,
             'rate_id' => $this->nullableExternalId($ratePlanMapping),
             'arrival_room_type_id' => $this->nullableExternalId($roomMapping),
-            'arrival_room_id' => null,
+            'arrival_room_id' => $this->nullableExternalId($physicalMapping),
             'links' => \function_exists('home_url') ? \home_url('/') : '',
             'marketing_source' => 'Website',
             'marketing_channel' => 'Website',
@@ -481,7 +866,7 @@ final class ClockReservationProvider implements ReservationProviderInterface
             'late_departure' => false,
             'manual_prices_as_text' => '',
             'manual_currency' => '',
-            'note' => $this->bookingNote($roomId, $guestForm, $pricing),
+            'note' => $this->bookingNote($noteRoomId, $guestForm, $pricing),
         ];
 
         if ($returningGuestId === '') {
@@ -516,12 +901,20 @@ final class ClockReservationProvider implements ReservationProviderInterface
         foreach ($validatedRooms as $validatedRoom) {
             $pricing = isset($validatedRoom['pricing']) && \is_array($validatedRoom['pricing']) ? $validatedRoom['pricing'] : [];
             $roomMapping = isset($validatedRoom['room_mapping']) && \is_array($validatedRoom['room_mapping']) ? $validatedRoom['room_mapping'] : [];
+            $physicalMapping = isset($validatedRoom['physical_mapping']) && \is_array($validatedRoom['physical_mapping']) ? $validatedRoom['physical_mapping'] : [];
             $ratePlanMapping = isset($validatedRoom['rate_plan_mapping']) && \is_array($validatedRoom['rate_plan_mapping']) ? $validatedRoom['rate_plan_mapping'] : [];
+            $providerPhysicalId = (string) ($physicalMapping['external_id'] ?? '');
 
             $rooms[] = [
                 'local_room_id' => isset($validatedRoom['room_id']) ? (int) $validatedRoom['room_id'] : 0,
-                'provider_room_id' => (string) ($roomMapping['external_id'] ?? ''),
-                'provider_room_code' => (string) ($roomMapping['external_code'] ?? ''),
+                'local_room_type_id' => isset($validatedRoom['room_type_id']) ? (int) $validatedRoom['room_type_id'] : 0,
+                'local_physical_room_id' => isset($validatedRoom['physical_room_id']) ? (int) $validatedRoom['physical_room_id'] : 0,
+                'provider_room_id' => $providerPhysicalId !== '' ? $providerPhysicalId : (string) ($roomMapping['external_id'] ?? ''),
+                'provider_room_code' => $providerPhysicalId !== '' ? (string) ($physicalMapping['external_code'] ?? '') : (string) ($roomMapping['external_code'] ?? ''),
+                'provider_room_type_id' => (string) ($roomMapping['external_id'] ?? ''),
+                'provider_room_type_code' => (string) ($roomMapping['external_code'] ?? ''),
+                'provider_physical_room_id' => $providerPhysicalId,
+                'provider_physical_room_code' => (string) ($physicalMapping['external_code'] ?? ''),
                 'local_rate_plan_id' => isset($validatedRoom['rate_plan_id']) ? (int) $validatedRoom['rate_plan_id'] : 0,
                 'provider_rate_plan_id' => (string) ($ratePlanMapping['external_id'] ?? ''),
                 'provider_rate_plan_code' => (string) ($ratePlanMapping['external_code'] ?? ''),

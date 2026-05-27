@@ -618,6 +618,13 @@ final class AvailabilityAjaxController
 
             $roomPayload = [
                 'id' => $currentRoomId,
+                'gallery_room_id' => isset($room['gallery_room_id']) ? (int) $room['gallery_room_id'] : 0,
+                'room_type_id' => isset($room['room_type_id']) ? (int) $room['room_type_id'] : 0,
+                'physical_room_id' => isset($room['physical_room_id']) ? (int) $room['physical_room_id'] : 0,
+                'provider' => isset($room['provider']) ? (string) $room['provider'] : '',
+                'provider_room_id' => isset($room['provider_room_id']) ? (string) $room['provider_room_id'] : '',
+                'provider_room_type_id' => isset($room['provider_room_type_id']) ? (string) $room['provider_room_type_id'] : '',
+                'provider_physical_room_id' => isset($room['provider_physical_room_id']) ? (string) $room['provider_physical_room_id'] : '',
                 'name' => isset($room['name']) ? (string) $room['name'] : '',
                 'slug' => isset($room['slug']) ? (string) $room['slug'] : '',
                 'category' => isset($room['category']) ? (string) $room['category'] : 'standard-rooms',

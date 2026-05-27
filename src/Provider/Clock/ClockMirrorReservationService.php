@@ -26,10 +26,13 @@ final class ClockMirrorReservationService
         array $options
     ): int {
         $roomId = isset($validatedRoom['room_id']) ? (int) $validatedRoom['room_id'] : 0;
+        $roomTypeId = isset($validatedRoom['room_type_id']) ? (int) $validatedRoom['room_type_id'] : $roomId;
+        $assignedRoomId = isset($validatedRoom['physical_room_id']) ? (int) $validatedRoom['physical_room_id'] : 0;
+        $noteRoomId = $roomTypeId > 0 ? $roomTypeId : $roomId;
         $ratePlanId = isset($validatedRoom['rate_plan_id']) ? (int) $validatedRoom['rate_plan_id'] : 0;
         $pricing = isset($validatedRoom['pricing']) && \is_array($validatedRoom['pricing']) ? $validatedRoom['pricing'] : [];
         $bookingId = $this->generateBookingId();
-        $note = ReservationEngine::buildReservationNote($roomId, $guestForm);
+        $note = ReservationEngine::buildReservationNote($noteRoomId, $guestForm);
         $cancellationPolicy = $ratePlanId > 0 ? CancellationEngine::getCancellationPolicy($ratePlanId) : null;
 
         if (\is_array($cancellationPolicy) && (string) ($cancellationPolicy['name'] ?? '') !== '') {
@@ -53,9 +56,9 @@ final class ClockMirrorReservationService
         $repository = \MustHotelBooking\Engine\get_reservation_repository();
         $reservationId = $repository->createProviderMirrorReservation([
             'booking_id' => $bookingId,
-            'room_id' => $roomId,
-            'room_type_id' => $roomId,
-            'assigned_room_id' => 0,
+            'room_id' => $roomTypeId,
+            'room_type_id' => $roomTypeId,
+            'assigned_room_id' => $assignedRoomId,
             'rate_plan_id' => \max(0, $ratePlanId),
             'guest_id' => $guestId,
             'checkin' => (string) ($context['checkin'] ?? ''),
@@ -84,7 +87,10 @@ final class ClockMirrorReservationService
                 'payment_reconciliation_required' => false,
                 'clock_payment_required' => (string) ($options['payment_status'] ?? '') === 'pending',
                 'provider_response' => $this->responseSummary($providerReservation),
+                'selected_room_id' => $roomId,
+                'physical_room_id' => $assignedRoomId,
                 'room_mapping' => $validatedRoom['room_mapping'] ?? null,
+                'physical_mapping' => $validatedRoom['physical_mapping'] ?? null,
                 'rate_plan_mapping' => $validatedRoom['rate_plan_mapping'] ?? null,
             ],
             'created_at' => $now,
@@ -94,7 +100,11 @@ final class ClockMirrorReservationService
             return 0;
         }
 
-        $this->releaseSelectionLock($roomId, (string) ($context['checkin'] ?? ''), (string) ($context['checkout'] ?? ''));
+        $this->releaseSelectionLock(
+            $assignedRoomId > 0 ? $assignedRoomId : $roomId,
+            (string) ($context['checkin'] ?? ''),
+            (string) ($context['checkout'] ?? '')
+        );
 
         \do_action('must_hotel_booking/reservation_created', $reservationId);
 

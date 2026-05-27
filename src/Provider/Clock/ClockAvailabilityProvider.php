@@ -3,6 +3,8 @@
 namespace MustHotelBooking\Provider\Clock;
 
 use MustHotelBooking\Engine\AvailabilityEngine;
+use MustHotelBooking\Engine\InventoryEngine;
+use MustHotelBooking\Engine\LockEngine;
 use MustHotelBooking\Core\RoomCatalog;
 use MustHotelBooking\Core\RoomData;
 use MustHotelBooking\Provider\Contracts\AvailabilityProviderInterface;
@@ -22,11 +24,15 @@ final class ClockAvailabilityProvider implements AvailabilityProviderInterface
     /** @var ProviderMappingRepository */
     private $mappings;
 
-    public function __construct(?ClockApiClient $client = null, ?ClockCatalogService $catalog = null, ?ProviderMappingRepository $mappings = null)
+    /** @var ClockRoomSelection */
+    private $roomSelection;
+
+    public function __construct(?ClockApiClient $client = null, ?ClockCatalogService $catalog = null, ?ProviderMappingRepository $mappings = null, ?ClockRoomSelection $roomSelection = null)
     {
         $this->client = $client ?: new ClockApiClient();
         $this->catalog = $catalog ?: new ClockCatalogService($this->client);
         $this->mappings = $mappings ?: new ProviderMappingRepository();
+        $this->roomSelection = $roomSelection ?: new ClockRoomSelection($this->catalog, $this->mappings);
     }
 
     public function getAvailableRooms(AvailabilitySearchRequest $request): array
@@ -35,17 +41,7 @@ final class ClockAvailabilityProvider implements AvailabilityProviderInterface
             return [];
         }
 
-        $category = RoomCatalog::normalizeBookingCategory($request->getCategory());
-        $candidates = [];
-
-        if (RoomCatalog::isRoomTypeBookingValue($category)) {
-            $room = RoomData::getRoom(RoomCatalog::resolveBookingRoomTypeId($category));
-            $maxGuests = \is_array($room) && isset($room['max_guests']) ? (int) $room['max_guests'] : 0;
-            $candidates = \is_array($room) && $maxGuests >= $request->getGuests() ? [$room] : [];
-        } else {
-            $candidates = \MustHotelBooking\Engine\get_room_repository()->getRoomsByType($category, $request->getGuests());
-        }
-        $mapped = $this->mappedRooms($candidates);
+        $mapped = $this->mappedSelectionsForSearch($request);
         $rateIds = $this->mappedRateIds();
 
         if (empty($mapped) || empty($rateIds)) {
@@ -70,16 +66,26 @@ final class ClockAvailabilityProvider implements AvailabilityProviderInterface
         foreach ($mapped as $row) {
             $room = isset($row['room']) && \is_array($row['room']) ? $row['room'] : [];
             $mapping = isset($row['mapping']) && \is_array($row['mapping']) ? $row['mapping'] : [];
+            $selection = isset($row['selection']) && \is_array($row['selection']) ? $row['selection'] : [];
+            $physicalMapping = isset($selection['physical_mapping']) && \is_array($selection['physical_mapping']) ? $selection['physical_mapping'] : [];
             $availability = $this->findAvailabilityForMapping($items, $mapping, \count($mapped) === 1 ? $response->getData() : null);
 
             if (!$this->isAvailableForStay($availability, $request->getCheckin(), $request->getCheckout())) {
                 continue;
             }
 
-            $room['available_count'] = $this->availableCount($availability);
+            if (!$this->isSelectionLocallyAvailable($selection, $request->getCheckin(), $request->getCheckout(), LockEngine::getOrCreateSessionId())) {
+                continue;
+            }
+
+            $room['available_count'] = !empty($selection['is_physical']) ? 1 : $this->availableCount($availability);
             $room['provider'] = 'clock';
             $room['provider_mapping_id'] = isset($mapping['id']) ? (int) $mapping['id'] : 0;
-            $room['provider_room_id'] = (string) ($mapping['external_id'] ?? '');
+            $room['provider_room_type_id'] = (string) ($mapping['external_id'] ?? '');
+            $room['provider_physical_room_id'] = (string) ($physicalMapping['external_id'] ?? '');
+            $room['provider_room_id'] = (string) ($physicalMapping['external_id'] ?? '') !== ''
+                ? (string) ($physicalMapping['external_id'] ?? '')
+                : (string) ($mapping['external_id'] ?? '');
             $available[] = $room;
         }
 
@@ -88,7 +94,8 @@ final class ClockAvailabilityProvider implements AvailabilityProviderInterface
 
     public function getAvailableRoomById(int $roomId, string $checkin, string $checkout, int $guests = 1): ?array
     {
-        $room = \MustHotelBooking\Engine\get_room_repository()->getRoomById($roomId);
+        $selection = $this->roomSelection->resolve($roomId);
+        $room = \is_array($selection) && isset($selection['room']) && \is_array($selection['room']) ? $selection['room'] : null;
 
         if (!\is_array($room)) {
             return null;
@@ -104,11 +111,16 @@ final class ClockAvailabilityProvider implements AvailabilityProviderInterface
             return null;
         }
 
-        $mapping = $this->catalog->findAccommodationMapping($roomId);
-        $room['available_count'] = 1;
+        $mapping = isset($selection['room_mapping']) && \is_array($selection['room_mapping']) ? $selection['room_mapping'] : null;
+        $physicalMapping = isset($selection['physical_mapping']) && \is_array($selection['physical_mapping']) ? $selection['physical_mapping'] : [];
+        $room['available_count'] = !empty($selection['is_physical']) ? 1 : $this->availableCountForSelection($selection);
         $room['provider'] = 'clock';
         $room['provider_mapping_id'] = \is_array($mapping) && isset($mapping['id']) ? (int) $mapping['id'] : 0;
-        $room['provider_room_id'] = \is_array($mapping) ? (string) ($mapping['external_id'] ?? '') : '';
+        $room['provider_room_type_id'] = \is_array($mapping) ? (string) ($mapping['external_id'] ?? '') : '';
+        $room['provider_physical_room_id'] = (string) ($physicalMapping['external_id'] ?? '');
+        $room['provider_room_id'] = (string) ($physicalMapping['external_id'] ?? '') !== ''
+            ? (string) ($physicalMapping['external_id'] ?? '')
+            : (\is_array($mapping) ? (string) ($mapping['external_id'] ?? '') : '');
 
         return $room;
     }
@@ -159,6 +171,16 @@ final class ClockAvailabilityProvider implements AvailabilityProviderInterface
             }
         }
 
+        $selection = $request->getRoomId() > 0 ? $this->roomSelection->resolve($request->getRoomId()) : null;
+
+        if (\is_array($selection) && !empty($selection['is_physical'])) {
+            $disabledCheckinDates = \array_values(\array_unique(\array_merge(
+                $disabledCheckinDates,
+                $this->disabledCheckinDatesForPhysicalSelection($selection, $startDate, $windowDays)
+            )));
+            \sort($disabledCheckinDates);
+        }
+
         return $this->disabledDatesResponse(
             $disabledCheckinDates,
             [],
@@ -170,17 +192,15 @@ final class ClockAvailabilityProvider implements AvailabilityProviderInterface
 
     public function checkAvailability(int $roomId, string $checkin, string $checkout, string $excludeSessionId = ''): bool
     {
-        unset($excludeSessionId);
-
         if (!$this->isConfiguredForRatesAvailability() || !$this->isValidStay($checkin, $checkout)) {
             return false;
         }
 
-        $room = \MustHotelBooking\Engine\get_room_repository()->getRoomById($roomId);
-        $mapping = $this->catalog->findAccommodationMapping($roomId);
+        $selection = $this->roomSelection->resolve($roomId);
+        $mapping = \is_array($selection) && isset($selection['room_mapping']) && \is_array($selection['room_mapping']) ? $selection['room_mapping'] : null;
         $rateIds = $this->mappedRateIds();
 
-        if (!\is_array($room) || !$this->hasExternalId($mapping) || empty($rateIds)) {
+        if (!\is_array($selection) || !$this->hasExternalId($mapping) || empty($rateIds)) {
             return false;
         }
 
@@ -198,7 +218,8 @@ final class ClockAvailabilityProvider implements AvailabilityProviderInterface
 
         $availability = $this->findAvailabilityForMapping($this->extractItems($response->getData()), $mapping, $response->getData());
 
-        return $this->isAvailableForStay($availability, $checkin, $checkout);
+        return $this->isAvailableForStay($availability, $checkin, $checkout)
+            && $this->isSelectionLocallyAvailable($selection, $checkin, $checkout, $excludeSessionId);
     }
 
     public function checkBookingRestrictions(int $roomId, string $checkin, string $checkout): bool
@@ -207,24 +228,79 @@ final class ClockAvailabilityProvider implements AvailabilityProviderInterface
             return false;
         }
 
-        return $roomId > 0 && $this->hasExternalId($this->catalog->findAccommodationMapping($roomId));
+        $selection = $this->roomSelection->resolve($roomId);
+
+        return \is_array($selection) && $this->hasExternalId($selection['room_mapping'] ?? null);
     }
 
     /**
-     * @param array<int, array<string, mixed>> $rooms
-     * @return array<int, array{room: array<string, mixed>, mapping: array<string, mixed>}>
+     * @return array<int, array{room: array<string, mixed>, mapping: array<string, mixed>, selection: array<string, mixed>}>
      */
-    private function mappedRooms(array $rooms): array
+    private function mappedSelectionsForSearch(AvailabilitySearchRequest $request): array
     {
+        $category = RoomCatalog::normalizeBookingCategory($request->getCategory());
+        $selections = [];
         $mapped = [];
 
-        foreach ($rooms as $room) {
-            if (!\is_array($room)) {
+        if (RoomCatalog::isRoomTypeBookingValue($category)) {
+            $roomTypeId = RoomCatalog::resolveBookingRoomTypeId($category);
+            $selections = $this->roomSelection->physicalRoomSelectionsForType($roomTypeId);
+
+            if (empty($selections)) {
+                $selection = $this->roomSelection->resolve($roomTypeId);
+                $selections = \is_array($selection) ? [$selection] : [];
+            }
+        } elseif (RoomCatalog::isBookingAllCategory($category) && RoomCatalog::isClockBackendMode()) {
+            foreach (\array_keys(RoomCatalog::getClockBookingRoomTypes()) as $bookingCategory) {
+                $roomTypeId = RoomCatalog::resolveBookingRoomTypeId((string) $bookingCategory);
+
+                if ($roomTypeId <= 0) {
+                    continue;
+                }
+
+                $typeSelections = $this->roomSelection->physicalRoomSelectionsForType($roomTypeId);
+
+                if (!empty($typeSelections)) {
+                    $selections = \array_merge($selections, $typeSelections);
+                    continue;
+                }
+
+                $selection = $this->roomSelection->resolve($roomTypeId);
+
+                if (\is_array($selection)) {
+                    $selections[] = $selection;
+                }
+            }
+        } else {
+            foreach (\MustHotelBooking\Engine\get_room_repository()->getRoomsByType($category, $request->getGuests()) as $room) {
+                if (!\is_array($room)) {
+                    continue;
+                }
+
+                $roomId = isset($room['id']) ? (int) $room['id'] : 0;
+                $typeSelections = $this->roomSelection->physicalRoomSelectionsForType($roomId);
+
+                if (!empty($typeSelections)) {
+                    $selections = \array_merge($selections, $typeSelections);
+                    continue;
+                }
+
+                $selection = $this->roomSelection->resolve($roomId);
+
+                if (\is_array($selection)) {
+                    $selections[] = $selection;
+                }
+            }
+        }
+
+        foreach ($selections as $selection) {
+            $room = isset($selection['room']) && \is_array($selection['room']) ? $selection['room'] : [];
+            $mapping = isset($selection['room_mapping']) && \is_array($selection['room_mapping']) ? $selection['room_mapping'] : [];
+            $maxGuests = isset($room['max_guests']) ? (int) $room['max_guests'] : 0;
+
+            if ($maxGuests > 0 && $request->getGuests() > $maxGuests) {
                 continue;
             }
-
-            $roomId = isset($room['id']) ? (int) $room['id'] : 0;
-            $mapping = $this->catalog->findAccommodationMapping($roomId);
 
             if (!$this->hasExternalId($mapping)) {
                 continue;
@@ -233,6 +309,7 @@ final class ClockAvailabilityProvider implements AvailabilityProviderInterface
             $mapped[] = [
                 'room' => $room,
                 'mapping' => $mapping,
+                'selection' => $selection,
             ];
         }
 
@@ -240,7 +317,7 @@ final class ClockAvailabilityProvider implements AvailabilityProviderInterface
     }
 
     /**
-     * @param array<int, array{room: array<string, mixed>, mapping: array<string, mixed>}> $mapped
+     * @param array<int, array{room: array<string, mixed>, mapping: array<string, mixed>, selection: array<string, mixed>}> $mapped
      * @return array<int, string>
      */
     private function mappedExternalIds(array $mapped): array
@@ -567,7 +644,8 @@ final class ClockAvailabilityProvider implements AvailabilityProviderInterface
         $roomId = $request->getRoomId();
 
         if ($roomId > 0) {
-            $mapping = $this->catalog->findAccommodationMapping($roomId);
+            $selection = $this->roomSelection->resolve($roomId);
+            $mapping = \is_array($selection) && isset($selection['room_mapping']) && \is_array($selection['room_mapping']) ? $selection['room_mapping'] : null;
 
             return $this->hasExternalId($mapping) ? [(string) ($mapping['external_id'] ?? '')] : [];
         }
@@ -581,6 +659,68 @@ final class ClockAvailabilityProvider implements AvailabilityProviderInterface
         }
 
         return $this->mappedAccommodationIds();
+    }
+
+    /** @param array<string, mixed> $selection */
+    private function isSelectionLocallyAvailable(array $selection, string $checkin, string $checkout, string $excludeSessionId = ''): bool
+    {
+        if (empty($selection['is_physical'])) {
+            return true;
+        }
+
+        $physicalRoomId = isset($selection['physical_room_id']) ? (int) $selection['physical_room_id'] : 0;
+        $roomTypeId = isset($selection['room_type_id']) ? (int) $selection['room_type_id'] : 0;
+
+        if ($physicalRoomId <= 0 || $roomTypeId <= 0) {
+            return false;
+        }
+
+        $availableRooms = InventoryEngine::getAvailableRooms($roomTypeId, $checkin, $checkout, $excludeSessionId);
+
+        foreach ($availableRooms as $room) {
+            if (\is_array($room) && (int) ($room['id'] ?? 0) === $physicalRoomId) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /** @param array<string, mixed>|null $selection */
+    private function availableCountForSelection(?array $selection): int
+    {
+        if (\is_array($selection) && !empty($selection['is_physical'])) {
+            return 1;
+        }
+
+        return 1;
+    }
+
+    /**
+     * @param array<string, mixed> $selection
+     * @return array<int, string>
+     */
+    private function disabledCheckinDatesForPhysicalSelection(array $selection, string $startDate, int $windowDays): array
+    {
+        $disabled = [];
+        $roomTypeId = isset($selection['room_type_id']) ? (int) $selection['room_type_id'] : 0;
+        $physicalRoomId = isset($selection['physical_room_id']) ? (int) $selection['physical_room_id'] : 0;
+
+        if ($roomTypeId <= 0 || $physicalRoomId <= 0) {
+            return $disabled;
+        }
+
+        foreach ($this->allDatesFrom($startDate, $windowDays) as $date) {
+            $checkout = $this->nextDate($date);
+
+            if ($checkout === '' || $this->isSelectionLocallyAvailable($selection, $date, $checkout, LockEngine::getOrCreateSessionId())) {
+                continue;
+            }
+
+            $disabled[] = $date;
+        }
+
+        return $disabled;
     }
 
     /**
@@ -808,6 +948,19 @@ final class ClockAvailabilityProvider implements AvailabilityProviderInterface
         }
 
         return $dates;
+    }
+
+    private function nextDate(string $date): string
+    {
+        if (!AvailabilityEngine::isValidBookingDate($date)) {
+            return '';
+        }
+
+        try {
+            return (new \DateTimeImmutable($date))->modify('+1 day')->format('Y-m-d');
+        } catch (\Exception $exception) {
+            return '';
+        }
     }
 
     /** @param mixed $value */

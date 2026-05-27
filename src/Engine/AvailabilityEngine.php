@@ -7,6 +7,7 @@ use MustHotelBooking\Core\ReservationStatus;
 use MustHotelBooking\Core\RoomCatalog;
 use MustHotelBooking\Core\RoomData;
 use MustHotelBooking\Core\RoomViewBuilder;
+use MustHotelBooking\Provider\ProviderManager;
 
 final class AvailabilityEngine
 {
@@ -283,14 +284,17 @@ final class AvailabilityEngine
                 continue;
             }
 
-            $room = RoomData::getRoom($roomId);
+            $room = ProviderManager::active()->reservations()->getCheckoutRoomData($roomId);
 
             if (!\is_array($room)) {
                 continue;
             }
 
             $ratePlanId = isset($selectedRatePlanMap[$roomId]) ? (int) $selectedRatePlanMap[$roomId] : 0;
-            $ratePlan = RatePlanEngine::getRoomRatePlan($roomId, $ratePlanId);
+            $ratePlanRoomId = isset($room['room_type_id']) && (int) $room['room_type_id'] > 0
+                ? (int) $room['room_type_id']
+                : $roomId;
+            $ratePlan = RatePlanEngine::getRoomRatePlan($ratePlanRoomId, $ratePlanId);
 
             if (\is_array($ratePlan)) {
                 $room['selected_rate_plan_id'] = $ratePlanId;

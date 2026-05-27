@@ -9,6 +9,7 @@ use MustHotelBooking\Core\RoomCatalog;
 use MustHotelBooking\Core\RoomData;
 use MustHotelBooking\Core\RoomViewBuilder;
 use MustHotelBooking\Engine\BookingValidationEngine;
+use MustHotelBooking\Provider\Clock\ClockRoomSelection;
 use MustHotelBooking\Provider\ProviderManager;
 
 /**
@@ -245,11 +246,52 @@ function get_booking_page_url(): string
  */
 function get_requested_booking_room_id(array $source): int
 {
+    $inventory_room_id = get_requested_booking_inventory_room_id($source);
+
+    if ($inventory_room_id > 0) {
+        return $inventory_room_id;
+    }
+
     if (!isset($source['room_id'])) {
         return 0;
     }
 
-    return \absint(\wp_unslash($source['room_id']));
+    $room_id = \absint(\wp_unslash($source['room_id']));
+
+    if (
+        $room_id > 0 &&
+        RoomCatalog::isClockBackendMode() &&
+        !\is_array(RoomData::getRoom($room_id)) &&
+        \class_exists(ClockRoomSelection::class)
+    ) {
+        $selection = (new ClockRoomSelection())->resolvePhysicalByExternalId((string) \wp_unslash($source['room_id']));
+
+        if (\is_array($selection)) {
+            return isset($selection['selection_id']) ? (int) $selection['selection_id'] : $room_id;
+        }
+    }
+
+    return $room_id;
+}
+
+/**
+ * Resolve the physical inventory room ID from booking entry URLs.
+ *
+ * @param array<string, mixed> $source
+ */
+function get_requested_booking_inventory_room_id(array $source): int
+{
+    foreach (['inventory_room_id', 'physical_room_id'] as $key) {
+        if (isset($source[$key])) {
+            $room_id = \absint(\wp_unslash($source[$key]));
+
+            if ($room_id > 0) {
+                return $room_id;
+            }
+        }
+    }
+
+    return 0;
 }
 
 /**
@@ -260,7 +302,21 @@ function get_requested_booking_room_id(array $source): int
  */
 function get_requested_booking_room_data(array $source): ?array
 {
-    return RoomData::getRoom(get_requested_booking_room_id($source));
+    $room_id = get_requested_booking_room_id($source);
+
+    if ($room_id <= 0) {
+        return null;
+    }
+
+    if (RoomCatalog::isClockBackendMode() && \class_exists(ClockRoomSelection::class)) {
+        $selection = (new ClockRoomSelection())->resolve($room_id);
+
+        if (\is_array($selection) && isset($selection['room']) && \is_array($selection['room'])) {
+            return $selection['room'];
+        }
+    }
+
+    return RoomData::getRoom($room_id);
 }
 
 /**

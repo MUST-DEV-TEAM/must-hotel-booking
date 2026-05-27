@@ -4,7 +4,7 @@ Tags: hotel, booking, reservation, accommodation
 Requires at least: 5.0
 Tested up to: 6.0
 Requires PHP: 7.4
-Stable tag: 0.4.16
+Stable tag: 0.4.17
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -31,6 +31,12 @@ Main features include:
 5. When updating, upload the new release ZIP or use the configured updater, then review **Diagnostics & Maintenance** after the update completes.
 
 == Changelog ==
+
+= 0.4.17 =
+* Changed Clock backend room-list cards and booking-page selection to use synced physical rooms as the bookable item while keeping the parent Clock room type for gallery, rates, and room-type availability.
+* Filtered Clock search, disabled dates, checkout locks, and local mirrors by the selected physical room when one is selected.
+* Sent selected Clock physical room IDs in reservation creation and stored local mirrors as parent room type plus assigned physical room.
+* Added fallback Clock rate-plan pricing from public mapped rates when a synced Clock room type has no local rate assignment.
 
 = 0.4.16 =
 * Fixed Clock rates availability requests to use Clock's documented GET bracket-array query format instead of POST JSON or WordPress indexed query arrays.
