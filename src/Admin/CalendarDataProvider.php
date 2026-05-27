@@ -35,7 +35,7 @@ final class CalendarDataProvider
     public function getPageData(CalendarViewQuery $query): array
     {
         $rooms = $this->getFilteredRooms($query);
-        $roomIds = $this->extractRoomIds($rooms);
+        $roomIds = $this->extractSourceRoomTypeIds($rooms);
         $range = [
             'month' => $query->getMonth(),
             'label' => $query->getRangeLabel(),
@@ -130,7 +130,7 @@ final class CalendarDataProvider
             }
 
             $reservationId = isset($reservation['id']) ? (int) $reservation['id'] : 0;
-            $roomId = isset($reservation['room_id']) ? (int) $reservation['room_id'] : 0;
+            $roomId = $this->calendarReservationIndexId($reservation);
 
             if ($reservationId <= 0 || $roomId <= 0) {
                 continue;
@@ -221,12 +221,7 @@ final class CalendarDataProvider
                 continue;
             }
 
-            $inventory = isset($indexes['inventory'][$roomId]) && \is_array($indexes['inventory'][$roomId])
-                ? $indexes['inventory'][$roomId]
-                : [
-                    'total_units' => 1,
-                    'unavailable_units' => 0,
-                ];
+            $inventory = $this->rowInventory($room, $indexes);
             $monthTotals = [
                 'booked' => 0,
                 'pending' => 0,
@@ -259,6 +254,8 @@ final class CalendarDataProvider
             $rows[] = [
                 'id' => $roomId,
                 'name' => (string) ($room['name'] ?? ''),
+                'room_type_id' => $this->rowSourceRoomTypeId($room),
+                'physical_room_id' => isset($room['physical_room_id']) ? (int) $room['physical_room_id'] : 0,
                 'category' => (string) ($room['category'] ?? ''),
                 'category_label' => (string) ($room['category_label'] ?? ''),
                 'max_guests' => isset($room['max_guests']) ? (int) $room['max_guests'] : 1,
@@ -280,13 +277,14 @@ final class CalendarDataProvider
     private function buildCellData(array $room, string $date, array $indexes, array $inventory, CalendarViewQuery $query): array
     {
         $roomId = isset($room['id']) ? (int) $room['id'] : 0;
+        $sourceRoomTypeId = $this->rowSourceRoomTypeId($room);
         $stays = isset($indexes['stays'][$roomId][$date]) && \is_array($indexes['stays'][$roomId][$date]) ? $indexes['stays'][$roomId][$date] : [];
         $arrivals = isset($indexes['arrivals'][$roomId][$date]) && \is_array($indexes['arrivals'][$roomId][$date]) ? $indexes['arrivals'][$roomId][$date] : [];
         $departures = isset($indexes['departures'][$roomId][$date]) && \is_array($indexes['departures'][$roomId][$date]) ? $indexes['departures'][$roomId][$date] : [];
-        $roomRestrictions = isset($indexes['restrictions'][$roomId][$date]) && \is_array($indexes['restrictions'][$roomId][$date]) ? $indexes['restrictions'][$roomId][$date] : [];
+        $roomRestrictions = isset($indexes['restrictions'][$sourceRoomTypeId][$date]) && \is_array($indexes['restrictions'][$sourceRoomTypeId][$date]) ? $indexes['restrictions'][$sourceRoomTypeId][$date] : [];
         $globalRestrictions = isset($indexes['restrictions'][0][$date]) && \is_array($indexes['restrictions'][0][$date]) ? $indexes['restrictions'][0][$date] : [];
         $restrictions = \array_merge($globalRestrictions, $roomRestrictions);
-        $locks = isset($indexes['locks'][$roomId][$date]) && \is_array($indexes['locks'][$roomId][$date]) ? $indexes['locks'][$roomId][$date] : [];
+        $locks = isset($indexes['locks'][$sourceRoomTypeId][$date]) && \is_array($indexes['locks'][$sourceRoomTypeId][$date]) ? $indexes['locks'][$sourceRoomTypeId][$date] : [];
         $counts = [
             'booked' => 0,
             'pending' => 0,
@@ -496,20 +494,23 @@ final class CalendarDataProvider
         $stays = isset($indexes['stays'][$roomId][$focusDate]) && \is_array($indexes['stays'][$roomId][$focusDate]) ? $indexes['stays'][$roomId][$focusDate] : [];
         $arrivals = isset($indexes['arrivals'][$roomId][$focusDate]) && \is_array($indexes['arrivals'][$roomId][$focusDate]) ? $indexes['arrivals'][$roomId][$focusDate] : [];
         $departures = isset($indexes['departures'][$roomId][$focusDate]) && \is_array($indexes['departures'][$roomId][$focusDate]) ? $indexes['departures'][$roomId][$focusDate] : [];
+        $sourceRoomTypeId = $this->rowSourceRoomTypeId($room);
         $rules = [];
 
         if (isset($indexes['restrictions'][0][$focusDate]) && \is_array($indexes['restrictions'][0][$focusDate])) {
             $rules = \array_merge($rules, $indexes['restrictions'][0][$focusDate]);
         }
 
-        if (isset($indexes['restrictions'][$roomId][$focusDate]) && \is_array($indexes['restrictions'][$roomId][$focusDate])) {
-            $rules = \array_merge($rules, $indexes['restrictions'][$roomId][$focusDate]);
+        if (isset($indexes['restrictions'][$sourceRoomTypeId][$focusDate]) && \is_array($indexes['restrictions'][$sourceRoomTypeId][$focusDate])) {
+            $rules = \array_merge($rules, $indexes['restrictions'][$sourceRoomTypeId][$focusDate]);
         }
 
-        $locks = isset($indexes['locks'][$roomId][$focusDate]) && \is_array($indexes['locks'][$roomId][$focusDate]) ? $indexes['locks'][$roomId][$focusDate] : [];
-        $inventory = isset($indexes['inventory'][$roomId]) && \is_array($indexes['inventory'][$roomId]) ? $indexes['inventory'][$roomId] : ['total_units' => 1, 'unavailable_units' => 0];
+        $locks = isset($indexes['locks'][$sourceRoomTypeId][$focusDate]) && \is_array($indexes['locks'][$sourceRoomTypeId][$focusDate]) ? $indexes['locks'][$sourceRoomTypeId][$focusDate] : [];
+        $inventory = $this->rowInventory($room, $indexes);
         $cell = $this->buildCellData($room, $focusDate, $indexes, $inventory, $query);
         $nextDate = (new \DateTimeImmutable($focusDate))->modify('+1 day')->format('Y-m-d');
+        $sourceRoomTypeId = $this->rowSourceRoomTypeId($room);
+        $isPhysicalRoomRow = isset($room['physical_room_id']) && (int) $room['physical_room_id'] > 0;
 
         return [
             'room' => $room,
@@ -553,12 +554,14 @@ final class CalendarDataProvider
             'locks' => $this->formatLockItems($locks),
             'actions' => [
                 'room_url' => \function_exists(__NAMESPACE__ . '\get_admin_rooms_page_url')
-                    ? get_admin_rooms_page_url(['tab' => 'rooms', 'action' => 'edit_room', 'type_id' => $roomId])
+                    ? ($isPhysicalRoomRow
+                        ? get_admin_rooms_page_url(['tab' => 'units', 'action' => 'edit_unit', 'unit_id' => $roomId])
+                        : get_admin_rooms_page_url(['tab' => 'rooms', 'action' => 'edit_room', 'type_id' => $roomId]))
                     : '',
                 'availability_rules_url' => \function_exists(__NAMESPACE__ . '\get_admin_availability_rules_page_url')
                     ? get_admin_availability_rules_page_url(
                         [
-                            'room_id' => $roomId,
+                            'room_id' => $sourceRoomTypeId,
                             'start_date' => $focusDate,
                             'end_date' => $nextDate,
                             'mode' => 'blocked',
@@ -568,13 +571,13 @@ final class CalendarDataProvider
                 'reservations_url' => \function_exists(__NAMESPACE__ . '\get_admin_reservations_page_url')
                     ? get_admin_reservations_page_url(
                         [
-                            'room_id' => $roomId,
+                            'room_id' => $sourceRoomTypeId,
                             'checkin_month' => \substr($focusDate, 0, 7),
                         ]
                     )
                     : '',
                 'quick_booking_form' => [
-                    'room_id' => $roomId,
+                    'room_id' => $sourceRoomTypeId,
                     'checkin' => $focusDate,
                     'checkout' => $nextDate,
                     'guests' => 1,
@@ -600,7 +603,7 @@ final class CalendarDataProvider
      */
     private function buildTodaySummary(array $rooms): array
     {
-        $roomIds = $this->extractRoomIds($rooms);
+        $roomIds = $this->extractSourceRoomTypeIds($rooms);
         $today = \current_time('Y-m-d');
         $tomorrow = (new \DateTimeImmutable($today))->modify('+1 day')->format('Y-m-d');
         $source = $this->loadSourceData($roomIds, $today, $tomorrow);
@@ -624,9 +627,7 @@ final class CalendarDataProvider
                 continue;
             }
 
-            $inventory = isset($indexes['inventory'][$roomId]) && \is_array($indexes['inventory'][$roomId])
-                ? $indexes['inventory'][$roomId]
-                : ['total_units' => 1, 'unavailable_units' => 0];
+            $inventory = $this->rowInventory($room, $indexes);
             $cell = $this->buildCellData($room, $today, $indexes, $inventory, $defaultQuery);
             $unitsShown += \max(1, (int) ($inventory['total_units'] ?? 1));
             $bookedToday += (int) (($cell['counts']['booked'] ?? 0));
@@ -673,6 +674,19 @@ final class CalendarDataProvider
      */
     private function buildRoomOptions(CalendarViewQuery $query): array
     {
+        if (RoomCatalog::isClockBackendMode()) {
+            return \array_map(
+                static function (array $row): array {
+                    return [
+                        'id' => isset($row['id']) ? (int) $row['id'] : 0,
+                        'name' => (string) ($row['name'] ?? ''),
+                        'category_label' => (string) ($row['category_label'] ?? ''),
+                    ];
+                },
+                $this->getFilteredPhysicalRooms($query)
+            );
+        }
+
         $rooms = $this->roomRepository->getRoomsForDisplay(RoomCatalog::BOOKING_ALL_CATEGORY, 500);
         $options = [];
 
@@ -737,10 +751,191 @@ final class CalendarDataProvider
     }
 
     /**
+     * @param array<int, array<string, mixed>> $rows
+     * @return array<int, int>
+     */
+    private function extractSourceRoomTypeIds(array $rows): array
+    {
+        $ids = [];
+
+        foreach ($rows as $row) {
+            if (!\is_array($row)) {
+                continue;
+            }
+
+            $roomTypeId = $this->rowSourceRoomTypeId($row);
+
+            if ($roomTypeId > 0) {
+                $ids[$roomTypeId] = $roomTypeId;
+            }
+        }
+
+        return \array_values($ids);
+    }
+
+    /** @param array<string, mixed> $row */
+    private function rowSourceRoomTypeId(array $row): int
+    {
+        $roomTypeId = isset($row['room_type_id']) ? (int) $row['room_type_id'] : 0;
+
+        return $roomTypeId > 0 ? $roomTypeId : (isset($row['id']) ? (int) $row['id'] : 0);
+    }
+
+    /**
+     * @param array<string, mixed> $reservation
+     */
+    private function calendarReservationIndexId(array $reservation): int
+    {
+        if (RoomCatalog::isClockBackendMode()) {
+            $assignedRoomId = isset($reservation['assigned_room_id']) ? (int) $reservation['assigned_room_id'] : 0;
+
+            if ($assignedRoomId > 0) {
+                return $assignedRoomId;
+            }
+        }
+
+        return isset($reservation['room_id']) ? (int) $reservation['room_id'] : 0;
+    }
+
+    /**
+     * @param array<string, mixed> $row
+     * @param array<string, mixed> $indexes
+     * @return array<string, int>
+     */
+    private function rowInventory(array $row, array $indexes): array
+    {
+        if (isset($row['physical_room_id']) && (int) $row['physical_room_id'] > 0) {
+            return [
+                'total_units' => 1,
+                'unavailable_units' => !empty($row['is_calendar_unavailable']) ? 1 : 0,
+            ];
+        }
+
+        $roomId = isset($row['id']) ? (int) $row['id'] : 0;
+
+        return isset($indexes['inventory'][$roomId]) && \is_array($indexes['inventory'][$roomId])
+            ? $indexes['inventory'][$roomId]
+            : ['total_units' => 1, 'unavailable_units' => 0];
+    }
+
+    /**
+     * @return array<int, array<string, mixed>>
+     */
+    private function getFilteredPhysicalRooms(CalendarViewQuery $query): array
+    {
+        if (!$this->inventoryRepository->inventoryRoomsTableExists()) {
+            return [];
+        }
+
+        $units = $this->inventoryRepository->getInventoryUnitAdminRows();
+        $roomTypeIds = [];
+
+        foreach ($units as $unit) {
+            if (\is_array($unit) && isset($unit['room_type_id'])) {
+                $roomTypeId = (int) $unit['room_type_id'];
+
+                if ($roomTypeId > 0) {
+                    $roomTypeIds[$roomTypeId] = $roomTypeId;
+                }
+            }
+        }
+
+        $roomTypes = !empty($roomTypeIds)
+            ? $this->roomRepository->getRoomsByIds(\array_values($roomTypeIds))
+            : [];
+        $roomTypeIndex = [];
+
+        foreach ($roomTypes as $roomType) {
+            if (!\is_array($roomType) || !isset($roomType['id'])) {
+                continue;
+            }
+
+            $roomTypeIndex[(int) $roomType['id']] = $roomType;
+        }
+
+        $filtered = [];
+
+        foreach ($units as $unit) {
+            if (!\is_array($unit)) {
+                continue;
+            }
+
+            $unitId = isset($unit['id']) ? (int) $unit['id'] : 0;
+            $roomTypeId = isset($unit['room_type_id']) ? (int) $unit['room_type_id'] : 0;
+            $roomType = $roomTypeIndex[$roomTypeId] ?? null;
+
+            if ($unitId <= 0 || $roomTypeId <= 0 || !\is_array($roomType)) {
+                continue;
+            }
+
+            $isActive = !isset($unit['is_active']) || (int) $unit['is_active'] === 1;
+            $isCalendarVisible = !isset($unit['is_calendar_visible']) || (int) $unit['is_calendar_visible'] === 1;
+
+            if (!$isActive || !$isCalendarVisible) {
+                continue;
+            }
+
+            $category = isset($roomType['category']) ? RoomCatalog::normalizeCategory((string) $roomType['category']) : RoomCatalog::getDefaultCategory();
+
+            if (!RoomCatalog::isBookingAllCategory($query->getCategory()) && $category !== RoomCatalog::normalizeCategory($query->getCategory())) {
+                continue;
+            }
+
+            if ($query->getRoomId() > 0 && $unitId !== $query->getRoomId()) {
+                continue;
+            }
+
+            $roomNumber = \trim((string) ($unit['room_number'] ?? ''));
+            $title = \trim((string) ($unit['title'] ?? ''));
+            $name = $roomNumber !== '' ? $roomNumber : $title;
+
+            if ($name === '') {
+                $name = \sprintf(
+                    /* translators: %d is a physical room ID. */
+                    \__('Room %d', 'must-hotel-booking'),
+                    $unitId
+                );
+            }
+
+            $filtered[] = [
+                'id' => $unitId,
+                'physical_room_id' => $unitId,
+                'room_type_id' => $roomTypeId,
+                'name' => $name,
+                'category' => $category,
+                'category_label' => (string) ($roomType['name'] ?? RoomCatalog::getCategoryLabel($category)),
+                'max_guests' => isset($unit['capacity_override']) && (int) $unit['capacity_override'] > 0
+                    ? (int) $unit['capacity_override']
+                    : (int) ($roomType['max_guests'] ?? 1),
+                'is_calendar_unavailable' => isset($unit['status']) && \sanitize_key((string) $unit['status']) !== 'available',
+            ];
+        }
+
+        \usort(
+            $filtered,
+            static function (array $left, array $right): int {
+                $typeComparison = \strcmp((string) ($left['category_label'] ?? ''), (string) ($right['category_label'] ?? ''));
+
+                if ($typeComparison !== 0) {
+                    return $typeComparison;
+                }
+
+                return \strnatcasecmp((string) ($left['name'] ?? ''), (string) ($right['name'] ?? ''));
+            }
+        );
+
+        return $filtered;
+    }
+
+    /**
      * @return array<int, array<string, mixed>>
      */
     private function getFilteredRooms(CalendarViewQuery $query): array
     {
+        if (RoomCatalog::isClockBackendMode()) {
+            return $this->getFilteredPhysicalRooms($query);
+        }
+
         $rows = $this->roomRepository->getRoomsForDisplay(RoomCatalog::BOOKING_ALL_CATEGORY, 500);
         $filtered = [];
 
