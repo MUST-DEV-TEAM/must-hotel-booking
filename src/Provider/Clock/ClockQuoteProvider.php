@@ -339,23 +339,74 @@ final class ClockQuoteProvider implements QuoteProviderInterface
     private function productsRequest(string $arrival, string $departure, int $adults, int $children, array $rateIds, array $roomTypeIds, string $operation): ClockApiResponse
     {
         return $this->client->get(
-            ClockConfig::productsPath(),
-            [
-                'product_search' => [
-                    'arrival' => $arrival,
-                    'departure' => $departure,
-                    'adult_count' => \max(1, $adults),
-                    'children_count' => \max(0, $children),
-                    'room_type_id' => \array_values($roomTypeIds),
-                ],
-                'rates' => \array_values($rateIds),
-            ],
+            $this->productsPathWithQuery($arrival, $departure, $adults, $children, $rateIds, $roomTypeIds),
+            [],
             $operation,
             [
                 'api_type' => 'pms_api',
                 'endpoint_name' => 'products',
             ]
         );
+    }
+
+    /**
+     * Clock documents products as GET with product_search[room_type_id][]=ID
+     * and rates[]=ID. WordPress add_query_arg uses indexed arrays, which the
+     * Clock API contract does not accept for these endpoints.
+     *
+     * @param array<int, string> $rateIds
+     * @param array<int, string> $roomTypeIds
+     */
+    private function productsPathWithQuery(string $arrival, string $departure, int $adults, int $children, array $rateIds, array $roomTypeIds): string
+    {
+        $parts = [
+            $this->queryPair('product_search[arrival]', $arrival),
+            $this->queryPair('product_search[departure]', $departure),
+            $this->queryPair('product_search[adult_count]', (string) \max(1, $adults)),
+            $this->queryPair('product_search[children_count]', (string) \max(0, $children)),
+        ];
+
+        foreach ($this->numericIds($roomTypeIds) as $roomTypeId) {
+            $parts[] = $this->queryPair('product_search[room_type_id][]', $roomTypeId);
+        }
+
+        foreach ($this->numericIds($rateIds) as $rateId) {
+            $parts[] = $this->queryPair('rates[]', $rateId);
+        }
+
+        return $this->appendQuery(ClockConfig::productsPath(), $parts);
+    }
+
+    /**
+     * @param array<int, string> $ids
+     * @return array<int, string>
+     */
+    private function numericIds(array $ids): array
+    {
+        $out = [];
+
+        foreach ($ids as $id) {
+            $id = \trim((string) $id);
+
+            if ($id !== '' && \ctype_digit($id)) {
+                $out[(int) $id] = $id;
+            }
+        }
+
+        return \array_values($out);
+    }
+
+    /** @param array<int, string> $parts */
+    private function appendQuery(string $path, array $parts): string
+    {
+        $separator = \strpos($path, '?') === false ? '?' : '&';
+
+        return $path . $separator . \implode('&', $parts);
+    }
+
+    private function queryPair(string $key, string $value): string
+    {
+        return \rawurlencode($key) . '=' . \rawurlencode($value);
     }
 
     /** @return array<int, string> */
@@ -431,6 +482,12 @@ final class ClockQuoteProvider implements QuoteProviderInterface
             return [];
         }
 
+        $clockProducts = $this->clockProductsFromNode($data);
+
+        if (!empty($clockProducts)) {
+            return $clockProducts;
+        }
+
         if ($this->isList($data)) {
             return $this->onlyArrayItems($data);
         }
@@ -446,6 +503,101 @@ final class ClockQuoteProvider implements QuoteProviderInterface
         }
 
         return $this->flattenProducts($data);
+    }
+
+    /**
+     * Clock PMS /products groups bookable products under room-type rows:
+     * [{ id: ROOM_TYPE_ID, rates: { RATE_ID: [product, ...] } }].
+     *
+     * Preserve that parent context so later matching sees room_type_id/rate_id
+     * on the actual product row instead of the wrapper.
+     *
+     * @param mixed $value
+     * @return array<int, array<string, mixed>>
+     */
+    private function clockProductsFromNode($value, string $roomTypeId = ''): array
+    {
+        if (!\is_array($value)) {
+            return [];
+        }
+
+        $currentRoomTypeId = $roomTypeId;
+        $directRoomTypeId = $this->firstScalarString($value, ['room_type_id', 'bookable_id', 'provider_room_type_id']);
+
+        $hasClockRatesMap = isset($value['rates']) && \is_array($value['rates']) && !$this->isList($value['rates']);
+
+        if ($directRoomTypeId !== '') {
+            $currentRoomTypeId = $directRoomTypeId;
+        } elseif ($hasClockRatesMap && isset($value['id']) && \is_scalar($value['id'])) {
+            $currentRoomTypeId = \trim((string) $value['id']);
+        }
+
+        $products = [];
+
+        if ($hasClockRatesMap) {
+            foreach ($value['rates'] as $rateId => $rateRows) {
+                $rateId = \is_scalar($rateId) ? \trim((string) $rateId) : '';
+
+                foreach ($this->productsFromRateRows($rateRows) as $product) {
+                    $products[] = $this->withClockProductContext($product, $currentRoomTypeId, $rateId);
+                }
+            }
+        }
+
+        foreach ($value as $key => $child) {
+            if ($key === 'rates' || !\is_array($child)) {
+                continue;
+            }
+
+            foreach ($this->clockProductsFromNode($child, $currentRoomTypeId) as $product) {
+                $products[] = $product;
+            }
+        }
+
+        return $products;
+    }
+
+    /**
+     * @param mixed $rateRows
+     * @return array<int, array<string, mixed>>
+     */
+    private function productsFromRateRows($rateRows): array
+    {
+        if (!\is_array($rateRows)) {
+            return [];
+        }
+
+        if ($this->isList($rateRows)) {
+            return $this->onlyArrayItems($rateRows);
+        }
+
+        if ($this->looksLikeProduct($rateRows)) {
+            return [$rateRows];
+        }
+
+        $products = [];
+
+        foreach ($rateRows as $row) {
+            if (\is_array($row) && $this->looksLikeProduct($row)) {
+                $products[] = $row;
+            }
+        }
+
+        return $products;
+    }
+
+    /** @param array<string, mixed> $product */
+    private function withClockProductContext(array $product, string $roomTypeId, string $rateId): array
+    {
+        if ($roomTypeId !== '' && !isset($product['room_type_id'])) {
+            $product['room_type_id'] = $roomTypeId;
+        }
+
+        if ($rateId !== '' && !isset($product['rate_id'])) {
+            $product['rate_id'] = $rateId;
+        }
+
+        return $product;
     }
 
     /** @param array<int|string, mixed> $items @return array<int, array<string, mixed>> */
@@ -645,11 +797,11 @@ final class ClockQuoteProvider implements QuoteProviderInterface
     private function normalizeQuote($data, int $roomId, string $checkin, string $checkout, int $guests, string $couponCode, int $ratePlanId, array $ratePlan): array
     {
         $source = $this->quoteSource($data);
-        $total = $this->firstNumeric($source, ['total_price', 'total', 'gross_total', 'amount', 'price', 'grand_total']);
+        $total = $this->firstNumeric($source, ['total_price', 'total', 'gross_total', 'amount', 'price', 'grand_total', 'cents', 'amount_cents']);
 
         if ($total === null && isset($source['price']) && \is_array($source['price'])) {
             $source = $source['price'];
-            $total = $this->firstNumeric($source, ['total_price', 'total', 'gross_total', 'amount', 'price', 'grand_total']);
+            $total = $this->firstNumeric($source, ['total_price', 'total', 'gross_total', 'amount', 'price', 'grand_total', 'cents', 'amount_cents']);
         }
 
         if ($total === null) {
@@ -727,7 +879,13 @@ final class ClockQuoteProvider implements QuoteProviderInterface
     {
         foreach ($keys as $key) {
             if (isset($source[$key]) && \is_numeric($source[$key])) {
-                return \round((float) $source[$key], 2);
+                $amount = (float) $source[$key];
+
+                if (\strpos($key, 'cents') !== false) {
+                    $amount = $amount / 100;
+                }
+
+                return \round($amount, 2);
             }
         }
 

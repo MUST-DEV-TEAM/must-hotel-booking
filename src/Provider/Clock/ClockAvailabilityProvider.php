@@ -72,7 +72,7 @@ final class ClockAvailabilityProvider implements AvailabilityProviderInterface
             $mapping = isset($row['mapping']) && \is_array($row['mapping']) ? $row['mapping'] : [];
             $availability = $this->findAvailabilityForMapping($items, $mapping, \count($mapped) === 1 ? $response->getData() : null);
 
-            if (!$this->isAvailable($availability)) {
+            if (!$this->isAvailableForStay($availability, $request->getCheckin(), $request->getCheckout())) {
                 continue;
             }
 
@@ -198,7 +198,7 @@ final class ClockAvailabilityProvider implements AvailabilityProviderInterface
 
         $availability = $this->findAvailabilityForMapping($this->extractItems($response->getData()), $mapping, $response->getData());
 
-        return $this->isAvailable($availability);
+        return $this->isAvailableForStay($availability, $checkin, $checkout);
     }
 
     public function checkBookingRestrictions(int $roomId, string $checkin, string $checkout): bool
@@ -327,6 +327,40 @@ final class ClockAvailabilityProvider implements AvailabilityProviderInterface
         return $availability !== null && $this->availabilitySignal($availability) === true;
     }
 
+    /** @param array<string, mixed>|null $availability */
+    private function isAvailableForStay(?array $availability, string $checkin, string $checkout): bool
+    {
+        if ($availability === null || !$this->isValidStay($checkin, $checkout)) {
+            return false;
+        }
+
+        $stayDates = $this->stayDates($checkin, $checkout);
+
+        if (empty($stayDates)) {
+            return false;
+        }
+
+        $rateEntries = $this->rateAvailabilityEntries($availability);
+
+        foreach ($rateEntries as $entries) {
+            if ($this->entriesAvailableForStay($entries, $stayDates)) {
+                return true;
+            }
+        }
+
+        if (!empty($rateEntries)) {
+            return false;
+        }
+
+        $entries = $this->availabilityEntries($availability);
+
+        if (!empty($entries)) {
+            return $this->entriesAvailableForStay($entries, $stayDates);
+        }
+
+        return $this->isAvailable($availability);
+    }
+
     /** @param array<string, mixed> $availability */
     private function availableCount(array $availability): int
     {
@@ -427,30 +461,22 @@ final class ClockAvailabilityProvider implements AvailabilityProviderInterface
      */
     private function ratesAvailabilityRequest(string $from, string $to, array $rateIds, array $roomTypeIds, string $operation): ClockApiResponse
     {
-        return $this->client->request(
-            'POST',
-            ClockConfig::ratesAvailabilityPath(),
+        return $this->client->get(
+            $this->ratesAvailabilityPathWithQuery($from, $to, $rateIds, $roomTypeIds),
+            [],
+            $operation,
             [
-                'body' => [
-                    'from' => $from,
-                    'to' => $to,
-                    'rates' => $this->integerIds($rateIds),
-                    'room_types' => $this->integerIds($roomTypeIds),
-                ],
                 'api_type' => 'pms_api',
                 'endpoint_name' => 'rates_availability',
-            ],
-            $operation
+            ]
         );
     }
 
     /**
-     * Clock rates_availability validates IDs as JSON integers, not query strings.
-     *
      * @param array<int, string> $ids
-     * @return array<int, int>
+     * @return array<int, string>
      */
-    private function integerIds(array $ids): array
+    private function numericIds(array $ids): array
     {
         $out = [];
 
@@ -458,11 +484,49 @@ final class ClockAvailabilityProvider implements AvailabilityProviderInterface
             $id = \trim((string) $id);
 
             if ($id !== '' && \ctype_digit($id)) {
-                $out[(int) $id] = (int) $id;
+                $out[(int) $id] = $id;
             }
         }
 
         return \array_values($out);
+    }
+
+    /**
+     * Clock documents rates_availability as GET with rates[]=ID and room_types[]=ID.
+     * WordPress add_query_arg serializes arrays as rates[0]=ID, which Clock rejects.
+     *
+     * @param array<int, string> $rateIds
+     * @param array<int, string> $roomTypeIds
+     */
+    private function ratesAvailabilityPathWithQuery(string $from, string $to, array $rateIds, array $roomTypeIds): string
+    {
+        $parts = [
+            $this->queryPair('from', $from),
+            $this->queryPair('to', $to),
+        ];
+
+        foreach ($this->numericIds($rateIds) as $rateId) {
+            $parts[] = $this->queryPair('rates[]', $rateId);
+        }
+
+        foreach ($this->numericIds($roomTypeIds) as $roomTypeId) {
+            $parts[] = $this->queryPair('room_types[]', $roomTypeId);
+        }
+
+        return $this->appendQuery(ClockConfig::ratesAvailabilityPath(), $parts);
+    }
+
+    /** @param array<int, string> $parts */
+    private function appendQuery(string $path, array $parts): string
+    {
+        $separator = \strpos($path, '?') === false ? '?' : '&';
+
+        return $path . $separator . \implode('&', $parts);
+    }
+
+    private function queryPair(string $key, string $value): string
+    {
+        return \rawurlencode($key) . '=' . \rawurlencode($value);
     }
 
     /** @return array<int, string> */
@@ -645,6 +709,60 @@ final class ClockAvailabilityProvider implements AvailabilityProviderInterface
         return $entries;
     }
 
+    /**
+     * @param array<string, mixed> $item
+     * @return array<int, array<string, array<string, mixed>>>
+     */
+    private function rateAvailabilityEntries(array $item): array
+    {
+        $rates = isset($item['rates']) && \is_array($item['rates']) ? $item['rates'] : [];
+        $out = [];
+
+        foreach ($rates as $rateRows) {
+            if (!\is_array($rateRows)) {
+                continue;
+            }
+
+            $entries = [];
+
+            foreach ($rateRows as $date => $entry) {
+                if (\is_string($date) && $this->isIsoDate($date) && \is_array($entry)) {
+                    $entries[$date] = $entry;
+                    continue;
+                }
+
+                if (\is_array($entry)) {
+                    $rowDate = $this->dateFromAvailabilityRow($entry);
+
+                    if ($rowDate !== '') {
+                        $entries[$rowDate] = $entry;
+                    }
+                }
+            }
+
+            if (!empty($entries)) {
+                $out[] = $entries;
+            }
+        }
+
+        return $out;
+    }
+
+    /**
+     * @param array<string, array<string, mixed>> $entries
+     * @param array<int, string> $stayDates
+     */
+    private function entriesAvailableForStay(array $entries, array $stayDates): bool
+    {
+        foreach ($stayDates as $date) {
+            if (!isset($entries[$date]) || $this->availabilitySignal($entries[$date]) !== true) {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
     private function isIsoDate(string $value): bool
     {
         return \preg_match('/^\d{4}-\d{2}-\d{2}$/', $value) === 1;
@@ -662,6 +780,30 @@ final class ClockAvailabilityProvider implements AvailabilityProviderInterface
         }
 
         for ($index = 0; $index < $days; $index++) {
+            $dates[] = $start->modify('+' . $index . ' days')->format('Y-m-d');
+        }
+
+        return $dates;
+    }
+
+    /** @return array<int, string> */
+    private function stayDates(string $checkin, string $checkout): array
+    {
+        if (!$this->isValidStay($checkin, $checkout)) {
+            return [];
+        }
+
+        try {
+            $start = new \DateTimeImmutable($checkin);
+            $end = new \DateTimeImmutable($checkout);
+        } catch (\Exception $exception) {
+            return [];
+        }
+
+        $nights = (int) $start->diff($end)->days;
+        $dates = [];
+
+        for ($index = 0; $index < $nights; $index++) {
             $dates[] = $start->modify('+' . $index . ' days')->format('Y-m-d');
         }
 

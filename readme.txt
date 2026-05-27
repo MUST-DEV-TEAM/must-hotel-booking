@@ -4,7 +4,7 @@ Tags: hotel, booking, reservation, accommodation
 Requires at least: 5.0
 Tested up to: 6.0
 Requires PHP: 7.4
-Stable tag: 0.4.15
+Stable tag: 0.4.16
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -31,6 +31,11 @@ Main features include:
 5. When updating, upload the new release ZIP or use the configured updater, then review **Diagnostics & Maintenance** after the update completes.
 
 == Changelog ==
+
+= 0.4.16 =
+* Fixed Clock rates availability requests to use Clock's documented GET bracket-array query format instead of POST JSON or WordPress indexed query arrays.
+* Fixed Clock product search requests and parsing so nested Clock room-type/rate products produce public rate plans and prices.
+* Tightened Clock stay availability checks so a stay is available only when the same Clock rate is available for every booked night.
 
 = 0.4.15 =
 * Sent Clock rates availability checks as JSON POST requests with integer rate and room type IDs so Clock can validate availability requests correctly.
