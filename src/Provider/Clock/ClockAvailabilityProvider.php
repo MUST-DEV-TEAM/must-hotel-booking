@@ -427,20 +427,42 @@ final class ClockAvailabilityProvider implements AvailabilityProviderInterface
      */
     private function ratesAvailabilityRequest(string $from, string $to, array $rateIds, array $roomTypeIds, string $operation): ClockApiResponse
     {
-        return $this->client->get(
+        return $this->client->request(
+            'POST',
             ClockConfig::ratesAvailabilityPath(),
             [
-                'from' => $from,
-                'to' => $to,
-                'rates' => \array_values($rateIds),
-                'room_types' => \array_values($roomTypeIds),
-            ],
-            $operation,
-            [
+                'body' => [
+                    'from' => $from,
+                    'to' => $to,
+                    'rates' => $this->integerIds($rateIds),
+                    'room_types' => $this->integerIds($roomTypeIds),
+                ],
                 'api_type' => 'pms_api',
                 'endpoint_name' => 'rates_availability',
-            ]
+            ],
+            $operation
         );
+    }
+
+    /**
+     * Clock rates_availability validates IDs as JSON integers, not query strings.
+     *
+     * @param array<int, string> $ids
+     * @return array<int, int>
+     */
+    private function integerIds(array $ids): array
+    {
+        $out = [];
+
+        foreach ($ids as $id) {
+            $id = \trim((string) $id);
+
+            if ($id !== '' && \ctype_digit($id)) {
+                $out[(int) $id] = (int) $id;
+            }
+        }
+
+        return \array_values($out);
     }
 
     /** @return array<int, string> */

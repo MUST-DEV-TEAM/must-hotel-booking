@@ -4,7 +4,7 @@ Tags: hotel, booking, reservation, accommodation
 Requires at least: 5.0
 Tested up to: 6.0
 Requires PHP: 7.4
-Stable tag: 0.4.14
+Stable tag: 0.4.15
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -31,6 +31,10 @@ Main features include:
 5. When updating, upload the new release ZIP or use the configured updater, then review **Diagnostics & Maintenance** after the update completes.
 
 == Changelog ==
+
+= 0.4.15 =
+* Sent Clock rates availability checks as JSON POST requests with integer rate and room type IDs so Clock can validate availability requests correctly.
+* Kept Clock availability strict for room search and checkout while preserving calendar diagnostics when Clock rejects a request.
 
 = 0.4.14 =
 * Improved Clock disabled-date parsing so the calendar can read flat, nested, and date-keyed availability rows instead of showing unknown dates as free.
