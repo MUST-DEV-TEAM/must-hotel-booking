@@ -146,15 +146,15 @@ final class ClockAvailabilityProvider implements AvailabilityProviderInterface
             );
         }
 
-        $availableDates = $this->availableDatesFromRatesAvailability($response->getData());
+        $dateAvailability = $this->dateAvailabilityFromRatesAvailability($response->getData());
 
-        if (empty($availableDates)) {
+        if (empty($dateAvailability)) {
             return $this->disabledDatesFailOpen('clock_rates_availability_response_unparseable');
         }
 
         $disabledCheckinDates = [];
         foreach ($this->allDatesFrom($startDate, $windowDays) as $date) {
-            if (empty($availableDates[$date])) {
+            if (empty($dateAvailability[$date])) {
                 $disabledCheckinDates[] = $date;
             }
         }
@@ -360,9 +360,15 @@ final class ClockAvailabilityProvider implements AvailabilityProviderInterface
             }
         }
 
-        foreach (['available_count', 'rooms_available', 'units_available', 'room_type_free_rooms', 'count', 'quantity'] as $key) {
+        foreach (['available_count', 'rooms_available', 'units_available', 'room_type_free_rooms', 'free_rooms', 'available_units', 'available_rooms_count', 'availability', 'count', 'quantity'] as $key) {
             if (isset($availability[$key]) && \is_numeric($availability[$key])) {
                 return (int) $availability[$key] > 0;
+            }
+        }
+
+        foreach (['closed', 'stop_sell', 'stop_sales', 'sold_out'] as $key) {
+            if (\array_key_exists($key, $availability) && $this->truthy($availability[$key])) {
+                return false;
             }
         }
 
@@ -374,7 +380,7 @@ final class ClockAvailabilityProvider implements AvailabilityProviderInterface
                     return true;
                 }
 
-                if (\in_array($status, ['unavailable', 'closed', 'sold_out', 'sold-out', 'not_available'], true)) {
+                if (\in_array($status, ['unavailable', 'closed', 'sold_out', 'sold-out', 'not_available', 'no_availability', 'fully_booked'], true)) {
                     return false;
                 }
             }
@@ -494,19 +500,95 @@ final class ClockAvailabilityProvider implements AvailabilityProviderInterface
     /**
      * @return array<string, bool>
      */
-    private function availableDatesFromRatesAvailability($data): array
+    private function dateAvailabilityFromRatesAvailability($data): array
     {
         $dates = [];
 
         foreach ($this->extractItems($data) as $item) {
-            foreach ($this->availabilityEntries($item) as $date => $entry) {
-                if ($date !== '' && $this->isAvailable($entry)) {
-                    $dates[$date] = true;
+            $this->collectDateAvailability($item, $dates);
+        }
+
+        if (\is_array($data)) {
+            $this->collectDateAvailability($data, $dates);
+        }
+
+        return $dates;
+    }
+
+    /**
+     * @param mixed $value
+     * @param array<string, bool> $dates
+     */
+    private function collectDateAvailability($value, array &$dates): void
+    {
+        if (!\is_array($value)) {
+            return;
+        }
+
+        $rowDate = $this->dateFromAvailabilityRow($value);
+
+        if ($rowDate !== '') {
+            $this->recordDateAvailability($rowDate, $value, $dates);
+        }
+
+        foreach ($value as $key => $entry) {
+            if (!\is_array($entry)) {
+                continue;
+            }
+
+            if (\is_string($key) && $this->isIsoDate($key)) {
+                $this->recordDateAvailability($key, $entry, $dates);
+            }
+
+            $this->collectDateAvailability($entry, $dates);
+        }
+    }
+
+    /**
+     * @param array<string, mixed> $entry
+     * @param array<string, bool> $dates
+     */
+    private function recordDateAvailability(string $date, array $entry, array &$dates): void
+    {
+        if (!$this->isIsoDate($date)) {
+            return;
+        }
+
+        $signal = $this->availabilitySignal($entry);
+
+        if ($signal === null) {
+            foreach ($entry as $child) {
+                if (\is_array($child)) {
+                    $this->recordDateAvailability($date, $child, $dates);
+                }
+            }
+
+            return;
+        }
+
+        if (!isset($dates[$date])) {
+            $dates[$date] = false;
+        }
+
+        if ($signal) {
+            $dates[$date] = true;
+        }
+    }
+
+    /** @param array<string, mixed> $row */
+    private function dateFromAvailabilityRow(array $row): string
+    {
+        foreach (['date', 'day', 'business_date', 'arrival', 'from', 'start_date'] as $key) {
+            if (isset($row[$key]) && \is_scalar($row[$key])) {
+                $date = \substr((string) $row[$key], 0, 10);
+
+                if ($this->isIsoDate($date)) {
+                    return $date;
                 }
             }
         }
 
-        return $dates;
+        return '';
     }
 
     /**
@@ -524,7 +606,7 @@ final class ClockAvailabilityProvider implements AvailabilityProviderInterface
             }
 
             foreach ($rateRows as $date => $entry) {
-                if (\is_string($date) && \preg_match('/^\d{4}-\d{2}-\d{2}$/', $date) === 1 && \is_array($entry)) {
+                if (\is_string($date) && $this->isIsoDate($date) && \is_array($entry)) {
                     $entries[$date] = $entry;
                 }
             }
@@ -532,13 +614,18 @@ final class ClockAvailabilityProvider implements AvailabilityProviderInterface
 
         if (empty($entries)) {
             foreach ($item as $date => $entry) {
-                if (\is_string($date) && \preg_match('/^\d{4}-\d{2}-\d{2}$/', $date) === 1 && \is_array($entry)) {
+                if (\is_string($date) && $this->isIsoDate($date) && \is_array($entry)) {
                     $entries[$date] = $entry;
                 }
             }
         }
 
         return $entries;
+    }
+
+    private function isIsoDate(string $value): bool
+    {
+        return \preg_match('/^\d{4}-\d{2}-\d{2}$/', $value) === 1;
     }
 
     /** @return array<int, string> */

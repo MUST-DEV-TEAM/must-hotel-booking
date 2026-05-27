@@ -4,7 +4,7 @@ Tags: hotel, booking, reservation, accommodation
 Requires at least: 5.0
 Tested up to: 6.0
 Requires PHP: 7.4
-Stable tag: 0.4.13
+Stable tag: 0.4.14
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -31,6 +31,10 @@ Main features include:
 5. When updating, upload the new release ZIP or use the configured updater, then review **Diagnostics & Maintenance** after the update completes.
 
 == Changelog ==
+
+= 0.4.14 =
+* Improved Clock disabled-date parsing so the calendar can read flat, nested, and date-keyed availability rows instead of showing unknown dates as free.
+* Preserved strict Clock search and checkout validation while making calendar hints reflect unavailable Clock dates when the response contains parseable per-day signals.
 
 = 0.4.13 =
 * Fixed Clock disabled-date loading so incomplete Clock configuration, mappings, or API responses no longer disable every public check-in date.
