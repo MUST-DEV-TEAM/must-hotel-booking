@@ -708,8 +708,8 @@
             var detailsLinkHtml = detailsUrl !== ''
                 ? (
                     '<a class="must-booking-room-details" href="' + escapeHtml(detailsUrl) + '">' +
-                        '<span>' + escapeHtml(strings.additionalDetails || 'Additional Details') + '</span>' +
-                        bedIconHtml +
+                    '<span>' + escapeHtml(strings.additionalDetails || 'Additional Details') + '</span>' +
+                    bedIconHtml +
                     '</a>'
                 )
                 : '';
@@ -724,54 +724,54 @@
                 if (ratePlanDescription !== '' || (Number.isFinite(totalPrice) && totalPrice > 0)) {
                     metaHtml =
                         '<div class="must-booking-room-rate-plan-meta">' +
-                            (ratePlanDescription !== '' ? '<p>' + escapeHtml(ratePlanDescription) + '</p>' : '') +
-                            ((Number.isFinite(totalPrice) && totalPrice > 0)
-                                ? '<p>' + escapeHtml(formatTemplate(strings.stayTotalFormat || 'Stay Total: %s', formatPrice(totalPrice))) + '</p>'
-                                : '') +
+                        (ratePlanDescription !== '' ? '<p>' + escapeHtml(ratePlanDescription) + '</p>' : '') +
+                        ((Number.isFinite(totalPrice) && totalPrice > 0)
+                            ? '<p>' + escapeHtml(formatTemplate(strings.stayTotalFormat || 'Stay Total: %s', formatPrice(totalPrice))) + '</p>'
+                            : '') +
                         '</div>';
                 }
 
                 return (
                     '<div class="must-booking-room-rate-plan">' +
-                        '<div class="must-booking-room-rate-plan-copy">' +
-                            '<strong>' + escapeHtml(ratePlanName) + '</strong>' +
-                            '<span>' + escapeHtml(formatPrice(nightlyPrice)) + '</span>' +
-                        '</div>' +
-                        metaHtml +
-                        '<form class="must-hotel-booking-select-room-form" method="post" action="' + escapeHtml(bookingUrl) + '">' +
-                            '<input type="hidden" name="must_booking_nonce" value="' + escapeHtml(nonce) + '" />' +
-                            '<input type="hidden" name="must_booking_action" value="select_room" />' +
-                            '<input type="hidden" name="room_id" value="' + escapeHtml(roomId) + '" />' +
-                            '<input type="hidden" name="rate_plan_id" value="' + escapeHtml(ratePlanId) + '" />' +
-                            '<input class="must-booking-hidden-checkin" type="hidden" name="checkin" value="' + escapeHtml(context.checkin) + '" />' +
-                            '<input class="must-booking-hidden-checkout" type="hidden" name="checkout" value="' + escapeHtml(context.checkout) + '" />' +
-                            '<input class="must-booking-hidden-guests" type="hidden" name="guests" value="' + escapeHtml(context.guests) + '" />' +
-                            '<input class="must-booking-room-count" type="hidden" name="room_count" value="' + escapeHtml(context.roomCount || 0) + '" />' +
-                            '<input class="must-booking-hidden-accommodation-type" type="hidden" name="accommodation_type" value="' + escapeHtml(context.accommodationType || '') + '" />' +
-                            '<button type="submit" class="must-booking-room-book-button">' +
-                                '<span>' + escapeHtml(strings.bookNow || 'Book Now') + '</span>' +
-                                arrowIconHtml +
-                            '</button>' +
-                        '</form>' +
+                    '<div class="must-booking-room-rate-plan-copy">' +
+                    '<strong>' + escapeHtml(ratePlanName) + '</strong>' +
+                    '<span>' + escapeHtml(formatPrice(nightlyPrice)) + '</span>' +
+                    '</div>' +
+                    metaHtml +
+                    '<form class="must-hotel-booking-select-room-form" method="post" action="' + escapeHtml(bookingUrl) + '">' +
+                    '<input type="hidden" name="must_booking_nonce" value="' + escapeHtml(nonce) + '" />' +
+                    '<input type="hidden" name="must_booking_action" value="select_room" />' +
+                    '<input type="hidden" name="room_id" value="' + escapeHtml(roomId) + '" />' +
+                    '<input type="hidden" name="rate_plan_id" value="' + escapeHtml(ratePlanId) + '" />' +
+                    '<input class="must-booking-hidden-checkin" type="hidden" name="checkin" value="' + escapeHtml(context.checkin) + '" />' +
+                    '<input class="must-booking-hidden-checkout" type="hidden" name="checkout" value="' + escapeHtml(context.checkout) + '" />' +
+                    '<input class="must-booking-hidden-guests" type="hidden" name="guests" value="' + escapeHtml(context.guests) + '" />' +
+                    '<input class="must-booking-room-count" type="hidden" name="room_count" value="' + escapeHtml(context.roomCount || 0) + '" />' +
+                    '<input class="must-booking-hidden-accommodation-type" type="hidden" name="accommodation_type" value="' + escapeHtml(context.accommodationType || '') + '" />' +
+                    '<button type="submit" class="must-booking-room-book-button">' +
+                    '<span>' + escapeHtml(strings.bookNow || 'Book Now') + '</span>' +
+                    arrowIconHtml +
+                    '</button>' +
+                    '</form>' +
                     '</div>'
                 );
             }).join('');
 
             return (
                 '<article class="must-hotel-booking-room-card">' +
-                    mediaHtml +
-                    '<div class="must-booking-room-content">' +
-                        '<div class="must-booking-room-header">' +
-                            '<h3>' + escapeHtml(roomName) + '</h3>' +
-                            descriptionHtml +
-                            metaHtml +
-                        '</div>' +
-                        '<div class="must-booking-room-thumbs">' + thumbsHtml + '</div>' +
-                        '<div class="must-booking-room-actions">' +
-                            (ratePlansHtml !== '' ? ('<div class="must-booking-room-rate-plans">' + ratePlansHtml + '</div>') : '') +
-                            detailsLinkHtml +
-                        '</div>' +
-                    '</div>' +
+                mediaHtml +
+                '<div class="must-booking-room-content">' +
+                '<div class="must-booking-room-header">' +
+                '<h3>' + escapeHtml(roomName) + '</h3>' +
+                descriptionHtml +
+                metaHtml +
+                '</div>' +
+                '<div class="must-booking-room-thumbs">' + thumbsHtml + '</div>' +
+                '<div class="must-booking-room-actions">' +
+                (ratePlansHtml !== '' ? ('<div class="must-booking-room-rate-plans">' + ratePlansHtml + '</div>') : '') +
+                detailsLinkHtml +
+                '</div>' +
+                '</div>' +
                 '</article>'
             );
         }).join('');
@@ -929,42 +929,186 @@
         syncUnavailableDayClasses(state.checkoutPicker, state.disabledCheckoutDates);
     }
 
-    function applyDisabledDatesToPickers(disabledCheckinDates, disabledCheckoutDates, checkinInput, checkoutInput) {
-        var checkinDates = Array.isArray(disabledCheckinDates) ? disabledCheckinDates : [];
-        var checkoutDates = Array.isArray(disabledCheckoutDates) ? disabledCheckoutDates : [];
-        var currentCheckin = String(checkinInput.value || '').trim();
-        var hasSelectedCheckin = isValidDateString(currentCheckin);
+    function normalizeDateList(value) {
+        if (!Array.isArray(value)) {
+            return [];
+        }
 
-        state.disabledCheckinDates = hasSelectedCheckin
-            ? checkinDates.filter(function (date) {
-                return String(date) !== currentCheckin;
-            })
-            : checkinDates.slice();
+        return value.filter(function (date) {
+            return isValidDateString(date);
+        }).map(function (date) {
+            return String(date);
+        });
+    }
+
+    function isDateInList(date, dates) {
+        return dates.indexOf(String(date || '')) !== -1;
+    }
+
+    function findFirstAvailableDate(startDate, disabledDates) {
+        var start = parseDateString(startDate || config.today || '');
+        var windowDays = parseInt(String(config.windowDays || '180'), 10);
+        var dates = normalizeDateList(disabledDates);
+
+        if (!start) {
+            return '';
+        }
+
+        if (!Number.isFinite(windowDays) || windowDays < 1) {
+            windowDays = 180;
+        }
+
+        for (var index = 0; index < windowDays; index++) {
+            var candidate = new Date(start.getTime());
+            candidate.setDate(candidate.getDate() + index);
+
+            var formatted = formatDate(candidate);
+
+            if (dates.indexOf(formatted) === -1) {
+                return formatted;
+            }
+        }
+
+        return '';
+    }
+
+    function findFirstAvailableCheckout(checkin, disabledCheckoutDates) {
+        var start = parseDateString(checkin);
+        var windowDays = parseInt(String(config.windowDays || '180'), 10);
+        var dates = normalizeDateList(disabledCheckoutDates);
+
+        if (!start) {
+            return '';
+        }
+
+        if (!Number.isFinite(windowDays) || windowDays < 1) {
+            windowDays = 180;
+        }
+
+        for (var nights = 1; nights <= windowDays; nights++) {
+            var candidate = new Date(start.getTime());
+            candidate.setDate(candidate.getDate() + nights);
+
+            var formatted = formatDate(candidate);
+
+            if (dates.indexOf(formatted) === -1) {
+                return formatted;
+            }
+        }
+
+        return '';
+    }
+
+    function getInitialDisabledDatesPayload() {
+        return config.initialDisabledDates && typeof config.initialDisabledDates === 'object'
+            ? config.initialDisabledDates
+            : {};
+    }
+
+    function applyInitialDisabledDatesBeforePickers(checkinInput, checkoutInput) {
+        var payload = getInitialDisabledDatesPayload();
+        var disabledCheckinDates = normalizeDateList(payload.disabled_checkin_dates);
+        var disabledCheckoutDates = normalizeDateList(payload.disabled_checkout_dates);
+        var today = isValidDateString(config.today || '') ? String(config.today) : formatDate(new Date());
+        var firstAvailableCheckin = isValidDateString(payload.first_available_checkin || '')
+            ? String(payload.first_available_checkin)
+            : findFirstAvailableDate(today, disabledCheckinDates);
+
+        state.disabledCheckinDates = disabledCheckinDates;
+        state.disabledCheckoutDates = disabledCheckoutDates;
+
+        if (!firstAvailableCheckin) {
+            return;
+        }
+
+        var currentCheckin = String(checkinInput.value || '').trim();
+
+        if (
+            !isValidDateString(currentCheckin) ||
+            currentCheckin < today ||
+            isDateInList(currentCheckin, disabledCheckinDates)
+        ) {
+            checkinInput.value = firstAvailableCheckin;
+            currentCheckin = firstAvailableCheckin;
+        }
+
+        var currentCheckout = String(checkoutInput.value || '').trim();
+        var firstAvailableCheckout = isValidDateString(payload.first_available_checkout || '')
+            ? String(payload.first_available_checkout)
+            : findFirstAvailableCheckout(currentCheckin, disabledCheckoutDates);
+
+        if (
+            firstAvailableCheckout &&
+            (
+                !isValidDateString(currentCheckout) ||
+                currentCheckout <= currentCheckin ||
+                isDateInList(currentCheckout, disabledCheckoutDates)
+            )
+        ) {
+            checkoutInput.value = firstAvailableCheckout;
+        }
+    }
+
+    function applyDisabledDatesToPickers(disabledCheckinDates, disabledCheckoutDates, checkinInput, checkoutInput, payload) {
+        var checkinDates = normalizeDateList(disabledCheckinDates);
+        var checkoutDates = normalizeDateList(disabledCheckoutDates);
+        var today = isValidDateString(config.today || '') ? String(config.today) : formatDate(new Date());
+        var currentCheckin = String(checkinInput.value || '').trim();
+        var nextCheckin = currentCheckin;
+        var responsePayload = payload && typeof payload === 'object' ? payload : {};
+        var firstAvailableCheckin = isValidDateString(responsePayload.first_available_checkin || '')
+            ? String(responsePayload.first_available_checkin)
+            : findFirstAvailableDate(today, checkinDates);
+
+        state.disabledCheckinDates = checkinDates.slice();
         state.disabledCheckoutDates = checkoutDates.slice();
+
+        if (
+            firstAvailableCheckin &&
+            (
+                !isValidDateString(nextCheckin) ||
+                nextCheckin < today ||
+                isDateInList(nextCheckin, checkinDates)
+            )
+        ) {
+            nextCheckin = firstAvailableCheckin;
+            checkinInput.value = nextCheckin;
+
+            if (state.checkinPicker) {
+                state.checkinPicker.setDate(nextCheckin, false);
+                state.checkinPicker.jumpToDate(nextCheckin, true);
+            }
+        }
 
         if (state.checkinPicker) {
             state.checkinPicker.set('disable', state.disabledCheckinDates);
         }
 
         if (!state.checkoutPicker) {
+            refreshUnavailableDayClasses();
             return;
         }
 
-        var minCheckout = currentCheckin ? addDays(currentCheckin, 1) : (config.today || 'today');
-        state.checkoutPicker.set('minDate', minCheckout || (config.today || 'today'));
+        var minCheckout = isValidDateString(nextCheckin) ? addDays(nextCheckin, 1) : today;
+        var currentCheckout = String(checkoutInput.value || '').trim();
+        var firstAvailableCheckout = isValidDateString(responsePayload.first_available_checkout || '')
+            ? String(responsePayload.first_available_checkout)
+            : findFirstAvailableCheckout(nextCheckin, checkoutDates);
+
+        state.checkoutPicker.set('minDate', minCheckout || today);
         state.checkoutPicker.set('disable', checkoutDates);
 
-        var currentCheckout = String(checkoutInput.value || '').trim();
-
         if (
-            currentCheckout &&
+            firstAvailableCheckout &&
             (
-                (minCheckout && currentCheckout <= currentCheckin) ||
-                checkoutDates.indexOf(currentCheckout) !== -1
+                !isValidDateString(currentCheckout) ||
+                currentCheckout <= nextCheckin ||
+                isDateInList(currentCheckout, checkoutDates)
             )
         ) {
-            state.checkoutPicker.clear();
-            checkoutInput.value = '';
+            checkoutInput.value = firstAvailableCheckout;
+            state.checkoutPicker.setDate(firstAvailableCheckout, false);
+            state.checkoutPicker.jumpToDate(firstAvailableCheckout, true);
         }
 
         refreshUnavailableDayClasses();
@@ -1021,7 +1165,7 @@
                 return;
             }
 
-            applyDisabledDatesToPickers(disabledCheckinDates, disabledCheckoutDates, checkinInput, checkoutInput);
+            applyDisabledDatesToPickers(disabledCheckinDates, disabledCheckoutDates, checkinInput, checkoutInput, data);
             var guestsInput = document.getElementById('must-booking-guests');
             var roomCountInput = document.getElementById('must-booking-room-count-select') || document.getElementById('must-booking-room-count');
 
@@ -1115,7 +1259,7 @@
             var rooms = Array.isArray(payload.data.rooms) ? payload.data.rooms : [];
             state.lastAvailabilityMessage = typeof payload.data.message === 'string' ? payload.data.message : '';
             syncHiddenSelectionFields(context);
-            
+
             if (!suppressRender) {
                 renderRooms(roomListEl, noRoomsEl, resultsEl, rooms, context);
             }
@@ -1157,6 +1301,7 @@
                 disableMobile: true,
                 dateFormat: 'Y-m-d',
                 allowInput: false,
+                disable: state.disabledCheckoutDates,
                 locale: {
                     firstDayOfWeek: 1
                 },
@@ -1187,6 +1332,7 @@
                 disableMobile: true,
                 dateFormat: 'Y-m-d',
                 allowInput: false,
+                disable: state.disabledCheckinDates,
                 locale: {
                     firstDayOfWeek: 1
                 },
@@ -1553,6 +1699,7 @@
             }, 220);
         }
 
+        applyInitialDisabledDatesBeforePickers(checkinInput, checkoutInput);
         initializeDatePickers(checkinInput, checkoutInput, scheduleRefresh);
 
         var initialContext = getContext(checkinInput, checkoutInput, guestsInput, accommodationTypeSelect, roomCountSelect);

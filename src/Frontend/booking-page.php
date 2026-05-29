@@ -8,8 +8,10 @@ use MustHotelBooking\Core\MustBookingConfig;
 use MustHotelBooking\Core\RoomCatalog;
 use MustHotelBooking\Core\RoomData;
 use MustHotelBooking\Core\RoomViewBuilder;
+use MustHotelBooking\Engine\AvailabilityAjaxController;
 use MustHotelBooking\Engine\BookingValidationEngine;
 use MustHotelBooking\Provider\Clock\ClockRoomSelection;
+use MustHotelBooking\Provider\Dto\DisabledDatesRequest;
 use MustHotelBooking\Provider\ProviderManager;
 
 /**
@@ -652,8 +654,168 @@ function maybe_sync_frontend_pages(): void
 }
 
 /**
+ * Find the first date in the disabled-dates window that is not disabled.
+ *
+ * @param array<int, string> $disabled_dates
+ */
+function get_first_available_booking_date(array $disabled_dates, string $start_date, int $window_days): string
+{
+    if (!\preg_match('/^\d{4}-\d{2}-\d{2}$/', $start_date)) {
+        $start_date = \current_time('Y-m-d');
+    }
+
+    $disabled_lookup = \array_fill_keys(
+        \array_values(
+            \array_filter(
+                \array_map('strval', $disabled_dates),
+                static function (string $date): bool {
+                    return \preg_match('/^\d{4}-\d{2}-\d{2}$/', $date) === 1;
+                }
+            )
+        ),
+        true
+    );
+
+    try {
+        $start = new \DateTimeImmutable($start_date);
+    } catch (\Exception $exception) {
+        return '';
+    }
+
+    for ($index = 0; $index < $window_days; $index++) {
+        $date = $start->modify('+' . $index . ' days')->format('Y-m-d');
+
+        if (empty($disabled_lookup[$date])) {
+            return $date;
+        }
+    }
+
+    return '';
+}
+
+/**
+ * Find the first valid checkout date after check-in.
+ *
+ * @param array<int, string> $disabled_checkout_dates
+ */
+function get_first_available_booking_checkout_date(string $checkin, array $disabled_checkout_dates, int $window_days): string
+{
+    if (!\preg_match('/^\d{4}-\d{2}-\d{2}$/', $checkin)) {
+        return '';
+    }
+
+    $disabled_lookup = \array_fill_keys(
+        \array_values(
+            \array_filter(
+                \array_map('strval', $disabled_checkout_dates),
+                static function (string $date): bool {
+                    return \preg_match('/^\d{4}-\d{2}-\d{2}$/', $date) === 1;
+                }
+            )
+        ),
+        true
+    );
+
+    try {
+        $checkin_date = new \DateTimeImmutable($checkin);
+    } catch (\Exception $exception) {
+        return '';
+    }
+
+    for ($nights = 1; $nights <= $window_days; $nights++) {
+        $checkout = $checkin_date->modify('+' . $nights . ' days')->format('Y-m-d');
+
+        if (empty($disabled_lookup[$checkout])) {
+            return $checkout;
+        }
+    }
+
+    return '';
+}
+
+/**
+ * Build initial disabled-date payload before JS initializes Flatpickr.
+ *
+ * @param array<string, mixed> $context
+ * @return array<string, mixed>
+ */
+function get_initial_booking_disabled_dates_payload(array $context, bool $fixed_room_mode, int $fixed_room_id): array
+{
+    $window_days = AvailabilityAjaxController::normalize_disabled_dates_window_days(180);
+    $guests = \max(1, (int) ($context['guests'] ?? 1));
+    $room_count = $fixed_room_mode ? 1 : BookingRules::normalizeRoomCount($context['room_count'] ?? 0);
+    $room_id = $fixed_room_mode ? \max(0, $fixed_room_id) : 0;
+    $accommodation_type = AvailabilityAjaxController::normalize_availability_room_category(
+        (string) ($context['accommodation_type'] ?? 'standard-rooms')
+    );
+    $today = \current_time('Y-m-d');
+    $requested_checkin = (string) ($context['checkin'] ?? '');
+
+    try {
+        $base_disabled_dates = ProviderManager::active()->availability()->getDisabledDates(
+            new DisabledDatesRequest('', $guests, $room_count, $room_id, $accommodation_type, $window_days)
+        );
+    } catch (\Throwable $throwable) {
+        return [
+            'disabled_checkin_dates' => [],
+            'disabled_checkout_dates' => [],
+            'first_available_checkin' => $today,
+            'first_available_checkout' => '',
+            'selected_checkin' => '',
+            'selected_checkout' => '',
+        ];
+    }
+
+    $disabled_checkin_dates = isset($base_disabled_dates['disabled_checkin_dates']) && \is_array($base_disabled_dates['disabled_checkin_dates'])
+        ? \array_values(\array_map('strval', $base_disabled_dates['disabled_checkin_dates']))
+        : [];
+
+    $first_available_checkin = get_first_available_booking_date($disabled_checkin_dates, $today, $window_days);
+    $selected_checkin = $requested_checkin;
+
+    if (
+        $selected_checkin === '' ||
+        !\preg_match('/^\d{4}-\d{2}-\d{2}$/', $selected_checkin) ||
+        $selected_checkin < $today ||
+        \in_array($selected_checkin, $disabled_checkin_dates, true)
+    ) {
+        $selected_checkin = $first_available_checkin;
+    }
+
+    $disabled_checkout_dates = [];
+
+    if ($selected_checkin !== '') {
+        try {
+            $checkout_disabled_dates = ProviderManager::active()->availability()->getDisabledDates(
+                new DisabledDatesRequest($selected_checkin, $guests, $room_count, $room_id, $accommodation_type, $window_days)
+            );
+
+            $disabled_checkout_dates = isset($checkout_disabled_dates['disabled_checkout_dates']) && \is_array($checkout_disabled_dates['disabled_checkout_dates'])
+                ? \array_values(\array_map('strval', $checkout_disabled_dates['disabled_checkout_dates']))
+                : [];
+        } catch (\Throwable $throwable) {
+            $disabled_checkout_dates = [];
+        }
+    }
+
+    $first_available_checkout = $selected_checkin !== ''
+        ? get_first_available_booking_checkout_date($selected_checkin, $disabled_checkout_dates, $window_days)
+        : '';
+
+    return [
+        'disabled_checkin_dates' => $disabled_checkin_dates,
+        'disabled_checkout_dates' => $disabled_checkout_dates,
+        'first_available_checkin' => $first_available_checkin,
+        'first_available_checkout' => $first_available_checkout,
+        'selected_checkin' => $selected_checkin,
+        'selected_checkout' => $first_available_checkout,
+    ];
+}
+
+/**
  * Enqueue booking page assets for dynamic availability updates.
  */
+
 function enqueue_booking_page_assets(): void
 {
     if (!is_frontend_booking_page()) {
@@ -686,10 +848,31 @@ function enqueue_booking_page_assets(): void
 
     $fixed_room_id = $fixed_room_mode ? (int) ($fixed_room['id'] ?? 0) : 0;
     $fixed_room_name = $fixed_room_mode ? (string) ($fixed_room['name'] ?? '') : '';
-    $fixed_room_category_label = $fixed_room_mode
-        ? RoomCatalog::getCategoryLabel((string) ($fixed_room['category'] ?? 'standard-rooms'))
-        : '';
-    $arrow_icon_url = MUST_HOTEL_BOOKING_URL . 'assets/img/ArrowRight.svg';
+$fixed_room_category_label = $fixed_room_mode
+    ? RoomCatalog::getCategoryLabel((string) ($fixed_room['category'] ?? 'standard-rooms'))
+    : '';
+
+$initial_disabled_dates = get_initial_booking_disabled_dates_payload($context, $fixed_room_mode, $fixed_room_id);
+
+if (
+    isset($initial_disabled_dates['selected_checkin']) &&
+    \is_string($initial_disabled_dates['selected_checkin']) &&
+    $initial_disabled_dates['selected_checkin'] !== ''
+) {
+    $initial_checkin = $initial_disabled_dates['selected_checkin'];
+}
+
+if (
+    isset($initial_disabled_dates['selected_checkout']) &&
+    \is_string($initial_disabled_dates['selected_checkout']) &&
+    $initial_disabled_dates['selected_checkout'] !== ''
+) {
+    if ($initial_checkout === '' || $initial_checkout <= $initial_checkin) {
+        $initial_checkout = $initial_disabled_dates['selected_checkout'];
+    }
+}
+
+$arrow_icon_url = MUST_HOTEL_BOOKING_URL . 'assets/img/ArrowRight.svg';
     $bed_icon_url = MUST_HOTEL_BOOKING_URL . 'assets/img/bed.svg';
 
     \wp_enqueue_style(
@@ -739,6 +922,7 @@ function enqueue_booking_page_assets(): void
             'selectRoomNonce' => \wp_create_nonce('must_booking_select_room'),
             'windowDays' => 180,
             'today' => \current_time('Y-m-d'),
+            'initialDisabledDates' => $initial_disabled_dates,
             'defaultAccommodationType' => $initial_accommodation_type,
             'maxGuests' => $max_booking_guests,
             'maxRooms' => $max_booking_rooms,

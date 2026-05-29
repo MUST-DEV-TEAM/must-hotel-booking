@@ -125,71 +125,102 @@ final class ClockAvailabilityProvider implements AvailabilityProviderInterface
         return $room;
     }
 
-    public function getDisabledDates(DisabledDatesRequest $request): array
-    {
-        $windowDays = \max(1, \min(365, $request->getWindowDays()));
-        $startDate = $request->getCheckin() !== '' && AvailabilityEngine::isValidBookingDate($request->getCheckin())
-            ? $request->getCheckin()
-            : (\function_exists('current_time') ? \current_time('Y-m-d') : \gmdate('Y-m-d'));
+public function getDisabledDates(DisabledDatesRequest $request): array
+{
+    $windowDays = \max(1, \min(365, $request->getWindowDays()));
+    $today = \function_exists('current_time') ? \current_time('Y-m-d') : \gmdate('Y-m-d');
 
-        if (!$this->isConfiguredForRatesAvailability()) {
-            return $this->disabledDatesFailOpen('clock_rates_availability_not_configured');
-        }
+    // The check-in disabled-date window must always start from today.
+    // Do not start it from the selected check-in date, or earlier unavailable days disappear.
+    $startDate = $today;
 
-        $roomTypeIds = $this->roomTypeIdsForDisabledDates($request);
-        $rateIds = $this->mappedRateIds();
+    // This is only used for calculating the second calendar / checkout dates.
+    $checkoutCheckin = $request->getCheckin();
 
-        if (empty($roomTypeIds) || empty($rateIds)) {
-            return $this->disabledDatesFailOpen(empty($roomTypeIds) ? 'clock_room_mapping_missing' : 'clock_rate_mapping_missing');
-        }
+    if ($checkoutCheckin !== '' && !AvailabilityEngine::isValidBookingDate($checkoutCheckin)) {
+        $checkoutCheckin = '';
+    }
 
-        try {
-            $endDate = (new \DateTimeImmutable($startDate))->modify('+' . $windowDays . ' days')->format('Y-m-d');
-        } catch (\Exception $exception) {
-            return $this->disabledDatesFailOpen('invalid_disabled_dates_window');
-        }
+    if (!$this->isConfiguredForRatesAvailability()) {
+        return $this->disabledDatesFailOpen('clock_rates_availability_not_configured');
+    }
 
-        $response = $this->ratesAvailabilityRequest($startDate, $endDate, $rateIds, $roomTypeIds, 'clock.rates_availability.disabled_dates');
+    $roomTypeIds = $this->roomTypeIdsForDisabledDates($request);
+    $rateIds = $this->mappedRateIds();
 
-        if (!$response->isSuccess()) {
-            return $this->disabledDatesFailOpen(
-                'clock_rates_availability_request_failed',
-                $response->getErrorMessage()
-            );
-        }
+    if (empty($roomTypeIds) || empty($rateIds)) {
+        return $this->disabledDatesFailOpen(empty($roomTypeIds) ? 'clock_room_mapping_missing' : 'clock_rate_mapping_missing');
+    }
 
-        $dateAvailability = $this->dateAvailabilityFromRatesAvailability($response->getData());
+    try {
+        $endDate = (new \DateTimeImmutable($startDate))->modify('+' . $windowDays . ' days')->format('Y-m-d');
+    } catch (\Exception $exception) {
+        return $this->disabledDatesFailOpen('invalid_disabled_dates_window');
+    }
 
-        if (empty($dateAvailability)) {
-            return $this->disabledDatesFailOpen('clock_rates_availability_response_unparseable');
-        }
+    $response = $this->ratesAvailabilityRequest(
+        $startDate,
+        $endDate,
+        $rateIds,
+        $roomTypeIds,
+        'clock.rates_availability.disabled_dates'
+    );
 
-        $disabledCheckinDates = [];
-        foreach ($this->allDatesFrom($startDate, $windowDays) as $date) {
-            if (empty($dateAvailability[$date])) {
-                $disabledCheckinDates[] = $date;
-            }
-        }
-
-        $selection = $request->getRoomId() > 0 ? $this->roomSelection->resolve($request->getRoomId()) : null;
-
-        if (\is_array($selection) && !empty($selection['is_physical'])) {
-            $disabledCheckinDates = \array_values(\array_unique(\array_merge(
-                $disabledCheckinDates,
-                $this->disabledCheckinDatesForPhysicalSelection($selection, $startDate, $windowDays)
-            )));
-            \sort($disabledCheckinDates);
-        }
-
-        return $this->disabledDatesResponse(
-            $disabledCheckinDates,
-            [],
-            'clock_rates_availability',
-            'ok',
-            ''
+    if (!$response->isSuccess()) {
+        return $this->disabledDatesFailOpen(
+            'clock_rates_availability_request_failed',
+            $response->getErrorMessage()
         );
     }
 
+    $dateAvailability = $this->dateAvailabilityFromRatesAvailability($response->getData());
+
+    if (empty($dateAvailability)) {
+        return $this->disabledDatesFailOpen('clock_rates_availability_response_unparseable');
+    }
+
+    $disabledCheckinDates = [];
+
+    foreach ($this->allDatesFrom($startDate, $windowDays) as $date) {
+        if (empty($dateAvailability[$date])) {
+            $disabledCheckinDates[] = $date;
+        }
+    }
+
+    $selection = $request->getRoomId() > 0 ? $this->roomSelection->resolve($request->getRoomId()) : null;
+
+    if (\is_array($selection) && !empty($selection['is_physical'])) {
+        $disabledCheckinDates = \array_values(\array_unique(\array_merge(
+            $disabledCheckinDates,
+            $this->disabledCheckinDatesForPhysicalSelection($selection, $startDate, $windowDays)
+        )));
+
+        \sort($disabledCheckinDates);
+    }
+
+    // If no check-in was selected, or the selected check-in is unavailable,
+    // calculate checkout availability from the first available check-in date.
+    if ($checkoutCheckin === '' || \in_array($checkoutCheckin, $disabledCheckinDates, true)) {
+        $checkoutCheckin = $this->firstAvailableDateFromDailyAvailability($dateAvailability, $startDate, $windowDays);
+    }
+
+    $disabledCheckoutDates = $checkoutCheckin !== ''
+        ? $this->disabledCheckoutDatesFromDailyAvailability(
+            $checkoutCheckin,
+            $dateAvailability,
+            $windowDays,
+            \is_array($selection) ? $selection : null
+        )
+        : [];
+
+    return $this->disabledDatesResponse(
+        $disabledCheckinDates,
+        $disabledCheckoutDates,
+        'clock_rates_availability',
+        'ok',
+        ''
+    );
+}
     public function checkAvailability(int $roomId, string $checkin, string $checkout, string $excludeSessionId = ''): bool
     {
         if (!$this->isConfiguredForRatesAvailability() || !$this->isValidStay($checkin, $checkout)) {
@@ -718,6 +749,68 @@ final class ClockAvailabilityProvider implements AvailabilityProviderInterface
             }
 
             $disabled[] = $date;
+        }
+
+        return $disabled;
+    }
+
+    /**
+     * @param array<string, bool> $dateAvailability
+     */
+    private function firstAvailableDateFromDailyAvailability(array $dateAvailability, string $startDate, int $windowDays): string
+    {
+        foreach ($this->allDatesFrom($startDate, $windowDays) as $date) {
+            if (!empty($dateAvailability[$date])) {
+                return $date;
+            }
+        }
+
+        return '';
+    }
+
+    /**
+     * @param array<string, bool> $dateAvailability
+     * @param array<string, mixed>|null $selection
+     * @return array<int, string>
+     */
+    private function disabledCheckoutDatesFromDailyAvailability(string $checkin, array $dateAvailability, int $windowDays, ?array $selection = null): array
+    {
+        if (!AvailabilityEngine::isValidBookingDate($checkin)) {
+            return [];
+        }
+
+        $disabled = [];
+
+        try {
+            $checkinDate = new \DateTimeImmutable($checkin);
+        } catch (\Exception $exception) {
+            return $disabled;
+        }
+
+        for ($nights = 1; $nights <= $windowDays; $nights++) {
+            $checkout = $checkinDate->modify('+' . $nights . ' days')->format('Y-m-d');
+            $stayDates = $this->stayDates($checkin, $checkout);
+            $available = !empty($stayDates);
+
+            foreach ($stayDates as $stayDate) {
+                if (empty($dateAvailability[$stayDate])) {
+                    $available = false;
+                    break;
+                }
+            }
+
+            if (
+                $available &&
+                \is_array($selection) &&
+                !empty($selection['is_physical']) &&
+                !$this->isSelectionLocallyAvailable($selection, $checkin, $checkout, LockEngine::getOrCreateSessionId())
+            ) {
+                $available = false;
+            }
+
+            if (!$available) {
+                $disabled[] = $checkout;
+            }
         }
 
         return $disabled;

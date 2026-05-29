@@ -463,6 +463,86 @@ final class AvailabilityAjaxController
         );
     }
 
+    /**
+     * @param array<int, string> $disabledCheckinDates
+     */
+    public static function get_first_available_checkin_date(array $disabledCheckinDates, int $windowDays, string $startDate = ''): string
+    {
+        $windowDays = self::normalize_disabled_dates_window_days($windowDays);
+        $startDate = $startDate !== '' ? $startDate : \current_time('Y-m-d');
+
+        if (!AvailabilityEngine::isValidBookingDate($startDate)) {
+            $startDate = \current_time('Y-m-d');
+        }
+
+        $disabledLookup = \array_fill_keys(
+            \array_values(
+                \array_filter(
+                    \array_map('strval', $disabledCheckinDates),
+                    static function (string $date): bool {
+                        return AvailabilityEngine::isValidBookingDate($date);
+                    }
+                )
+            ),
+            true
+        );
+
+        try {
+            $start = new \DateTimeImmutable($startDate);
+        } catch (\Exception $exception) {
+            return '';
+        }
+
+        for ($index = 0; $index < $windowDays; $index++) {
+            $date = $start->modify('+' . $index . ' day')->format('Y-m-d');
+
+            if (empty($disabledLookup[$date])) {
+                return $date;
+            }
+        }
+
+        return '';
+    }
+
+    /**
+     * @param array<int, string> $disabledCheckoutDates
+     */
+    public static function get_first_available_checkout_date(string $checkin, array $disabledCheckoutDates, int $windowDays): string
+    {
+        if (!AvailabilityEngine::isValidBookingDate($checkin)) {
+            return '';
+        }
+
+        $windowDays = self::normalize_disabled_dates_window_days($windowDays);
+        $disabledLookup = \array_fill_keys(
+            \array_values(
+                \array_filter(
+                    \array_map('strval', $disabledCheckoutDates),
+                    static function (string $date): bool {
+                        return AvailabilityEngine::isValidBookingDate($date);
+                    }
+                )
+            ),
+            true
+        );
+
+        try {
+            $checkinDate = new \DateTimeImmutable($checkin);
+        } catch (\Exception $exception) {
+            return '';
+        }
+
+        for ($nights = 1; $nights <= $windowDays; $nights++) {
+            $checkout = $checkinDate->modify('+' . $nights . ' day')->format('Y-m-d');
+
+            if (empty($disabledLookup[$checkout])) {
+                return $checkout;
+            }
+        }
+
+        return '';
+    }
+
     public static function ajax_must_get_disabled_dates(): void
     {
         $nonce = isset($_REQUEST['nonce']) ? (string) \wp_unslash($_REQUEST['nonce']) : '';
@@ -496,6 +576,41 @@ final class AvailabilityAjaxController
             ? $disabledDates['disabled_checkout_dates']
             : [];
 
+        $firstAvailableCheckin = self::get_first_available_checkin_date(
+            $disabledCheckinDates,
+            $windowDays,
+            \current_time('Y-m-d')
+        );
+
+        $selectedCheckinForCheckout = $checkin;
+
+        if (
+            $selectedCheckinForCheckout === '' ||
+            !AvailabilityEngine::isValidBookingDate($selectedCheckinForCheckout) ||
+            \in_array($selectedCheckinForCheckout, $disabledCheckinDates, true)
+        ) {
+            $selectedCheckinForCheckout = $firstAvailableCheckin;
+        }
+
+        if (
+            $selectedCheckinForCheckout !== '' &&
+            $selectedCheckinForCheckout !== $checkin
+        ) {
+            $checkoutDisabledDates = self::availabilityProvider()->getDisabledDates(
+                new DisabledDatesRequest($selectedCheckinForCheckout, $guests, $roomCount, $roomId, $accommodationType, $windowDays)
+            );
+
+            $disabledCheckoutDates = isset($checkoutDisabledDates['disabled_checkout_dates']) && \is_array($checkoutDisabledDates['disabled_checkout_dates'])
+                ? $checkoutDisabledDates['disabled_checkout_dates']
+                : [];
+        }
+
+        $firstAvailableCheckout = self::get_first_available_checkout_date(
+            $selectedCheckinForCheckout,
+            $disabledCheckoutDates,
+            $windowDays
+        );
+
         \wp_send_json_success([
             'room_id' => $roomId,
             'guests' => $guests,
@@ -505,6 +620,9 @@ final class AvailabilityAjaxController
             'window_days' => $windowDays,
             'disabled_checkin_dates' => $disabledCheckinDates,
             'disabled_checkout_dates' => $disabledCheckoutDates,
+            'first_available_checkin' => $firstAvailableCheckin,
+            'first_available_checkout' => $firstAvailableCheckout,
+            'selected_checkin' => $selectedCheckinForCheckout,
             'disabled_dates_source' => isset($disabledDates['disabled_dates_source']) && \is_scalar($disabledDates['disabled_dates_source'])
                 ? (string) $disabledDates['disabled_dates_source']
                 : '',

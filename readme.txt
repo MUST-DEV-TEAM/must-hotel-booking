@@ -4,7 +4,7 @@ Tags: hotel, booking, reservation, accommodation
 Requires at least: 5.0
 Tested up to: 6.0
 Requires PHP: 7.4
-Stable tag: 0.4.17
+Stable tag: 0.4.18
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -31,6 +31,13 @@ Main features include:
 5. When updating, upload the new release ZIP or use the configured updater, then review **Diagnostics & Maintenance** after the update completes.
 
 == Changelog ==
+
+= 0.4.18 =
+* Preloaded booking-calendar disabled dates before Flatpickr initialization so unavailable dates render immediately on direct room booking URLs.
+* Added first-available check-in and checkout fallback dates when the current selected dates are unavailable.
+* Added disabled checkout/departure dates for the second booking calendar in Clock backend mode.
+* Kept Clock disabled-date windows anchored from today while using the selected check-in only for departure-date calculation.
+3. Commi
 
 = 0.4.17 =
 * Changed Clock backend room-list cards and booking-page selection to use synced physical rooms as the bookable item while keeping the parent Clock room type for gallery, rates, and room-type availability.
