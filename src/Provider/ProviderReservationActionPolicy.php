@@ -53,6 +53,16 @@ final class ProviderReservationActionPolicy
             );
         }
 
+        if ($surface === self::SURFACE_ADMIN_GET) {
+            return \in_array(
+                $action,
+                [
+                    'cancel',
+                ],
+                true
+            );
+        }
+
         if ($surface === self::SURFACE_PORTAL) {
             return \in_array(
                 $action,
