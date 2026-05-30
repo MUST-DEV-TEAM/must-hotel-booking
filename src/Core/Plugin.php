@@ -14,7 +14,8 @@ final class Plugin
         \MustHotelBooking\Provider\Sync\ProviderSyncJobRunner::registerHooks();
         \MustHotelBooking\Provider\Sync\ProviderSyncJobRunner::scheduleCron();
         \MustHotelBooking\Portal\PortalBootstrap::registerRewriteRules();
-
+        \MustHotelBooking\Provider\Clock\ClockReservationAutoSyncScheduler::registerHooks();
+        \MustHotelBooking\Provider\Clock\ClockReservationAutoSyncScheduler::scheduleCron();
         \flush_rewrite_rules();
     }
 
@@ -22,6 +23,7 @@ final class Plugin
     {
         \MustHotelBooking\Engine\LockEngine::unscheduleCleanupCron();
         \MustHotelBooking\Provider\Sync\ProviderSyncJobRunner::unscheduleCron();
+        \MustHotelBooking\Provider\Clock\ClockReservationAutoSyncScheduler::unscheduleCron();
 
         \flush_rewrite_rules();
     }
@@ -49,6 +51,8 @@ final class Plugin
         \MustHotelBooking\Engine\LockEngine::registerHooks();
         \MustHotelBooking\Provider\Sync\ProviderSyncJobRunner::registerHooks();
         \MustHotelBooking\Provider\Sync\ProviderSyncJobRunner::scheduleCron();
+        \MustHotelBooking\Provider\Clock\ClockReservationAutoSyncScheduler::registerHooks();
+        \MustHotelBooking\Provider\Clock\ClockReservationAutoSyncScheduler::scheduleCron();
         \MustHotelBooking\Engine\PaymentEngine::registerHooks();
         \MustHotelBooking\Provider\Clock\ClockInboundSyncController::registerHooks();
         \MustHotelBooking\Engine\AvailabilityAjaxController::registerHooks();

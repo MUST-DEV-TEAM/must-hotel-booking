@@ -1,19 +1,15 @@
 <?php
-
 namespace MustHotelBooking\Database;
-
 final class ReservationRepository extends AbstractRepository
 {
     public function reservationsTableExists(): bool
     {
         return $this->tableExists('reservations');
     }
-
     private function inventoryLockTable(): string
     {
         return $this->wpdb->prefix . 'mhb_inventory_locks';
     }
-
     private function inventoryLockTableExists(): bool
     {
         $tableName = $this->inventoryLockTable();
@@ -23,35 +19,28 @@ final class ReservationRepository extends AbstractRepository
                 $tableName
             )
         );
-
         return \is_string($result) && $result !== '';
     }
-
     private function lockTableName(): string
     {
         if ($this->inventoryLockTableExists()) {
             return $this->inventoryLockTable();
         }
-
         return $this->table('locks');
     }
-
     public function bookingIdExists(string $bookingId): bool
     {
         if (\trim($bookingId) === '') {
             return false;
         }
-
         $count = (int) $this->wpdb->get_var(
             $this->wpdb->prepare(
                 'SELECT COUNT(*) FROM ' . $this->table('reservations') . ' WHERE booking_id = %s',
                 $bookingId
             )
         );
-
         return $count > 0;
     }
-
     /**
      * @return array<string, mixed>
      */
@@ -60,7 +49,6 @@ final class ReservationRepository extends AbstractRepository
         if ($reservationId <= 0) {
             return [];
         }
-
         $row = $this->wpdb->get_row(
             $this->wpdb->prepare(
                 'SELECT provider, provider_booking_id, provider_reservation_id, provider_status, provider_payment_status, provider_sync_status, provider_synced_at, provider_sync_error, provider_payload_ref, provider_metadata
@@ -71,10 +59,8 @@ final class ReservationRepository extends AbstractRepository
             ),
             ARRAY_A
         );
-
         return \is_array($row) ? $row : [];
     }
-
     /**
      * @param array<int, int> $reservationIds
      * @return array<int, array<string, mixed>>
@@ -82,11 +68,9 @@ final class ReservationRepository extends AbstractRepository
     public function getProviderReservationRowsByIds(array $reservationIds): array
     {
         $reservationIds = $this->normalizeIds($reservationIds);
-
         if (empty($reservationIds)) {
             return [];
         }
-
         $sql = $this->wpdb->prepare(
             'SELECT id, booking_id, room_id, room_type_id, assigned_room_id, checkin, checkout, status, payment_status, checked_in_at, checked_out_at, provider, provider_booking_id, provider_reservation_id, provider_status, provider_payment_status, provider_sync_status, provider_synced_at, provider_sync_error, provider_payload_ref, provider_metadata
             FROM ' . $this->table('reservations') . '
@@ -95,10 +79,8 @@ final class ReservationRepository extends AbstractRepository
             ...$reservationIds
         );
         $rows = $this->wpdb->get_results($sql, ARRAY_A);
-
         return \is_array($rows) ? $rows : [];
     }
-
     /**
      * @return array<int, array<string, mixed>>
      */
@@ -107,28 +89,23 @@ final class ReservationRepository extends AbstractRepository
         $provider = $this->providerKey($provider, 50);
         $providerReservationId = $this->providerText($providerReservationId, 191);
         $providerBookingId = $this->providerText($providerBookingId, 191);
-
         if ($provider === '' || ($providerReservationId === '' && $providerBookingId === '')) {
             return [];
         }
-
         $clauses = [];
         $params = [$provider];
-
         if ($providerReservationId !== '') {
             $clauses[] = 'provider_reservation_id = %s';
             $params[] = $providerReservationId;
             $clauses[] = 'provider_payload_ref = %s';
             $params[] = $providerReservationId;
         }
-
         if ($providerBookingId !== '') {
             $clauses[] = 'provider_booking_id = %s';
             $params[] = $providerBookingId;
             $clauses[] = 'provider_payload_ref = %s';
             $params[] = $providerBookingId;
         }
-
         $sql = $this->wpdb->prepare(
             'SELECT id, booking_id, room_id, room_type_id, assigned_room_id, rate_plan_id, guest_id, checkin, checkout, status, payment_status, checked_in_at, checked_out_at, provider, provider_booking_id, provider_reservation_id, provider_status, provider_payment_status, provider_sync_status, provider_synced_at, provider_sync_error, provider_payload_ref, provider_metadata
             FROM ' . $this->table('reservations') . '
@@ -138,9 +115,63 @@ final class ReservationRepository extends AbstractRepository
             ...$params
         );
         $rows = $this->wpdb->get_results($sql, ARRAY_A);
+        return \is_array($rows) ? $rows : [];
+    }
+
+    /**
+     * @return array<int, array<string, mixed>>
+     */
+    public function getProviderAutoSyncReservationRows(string $provider, int $pastDays = 2, int $futureDays = 365, int $limit = 25): array
+    {
+        if (!$this->reservationsTableExists()) {
+            return [];
+        }
+
+        $provider = $this->providerKey($provider, 50);
+
+        if ($provider === '') {
+            return [];
+        }
+
+        $pastDays = \max(0, \min(90, $pastDays));
+        $futureDays = \max(1, \min(1095, $futureDays));
+        $limit = \max(1, \min(100, $limit));
+
+        $today = \function_exists('current_time') ? \current_time('Y-m-d') : \gmdate('Y-m-d');
+        $fromTimestamp = \strtotime($today . ' -' . $pastDays . ' days');
+        $toTimestamp = \strtotime($today . ' +' . $futureDays . ' days');
+
+        $from = $fromTimestamp !== false ? \date('Y-m-d', $fromTimestamp) : $today;
+        $to = $toTimestamp !== false ? \date('Y-m-d', $toTimestamp) : $today;
+
+        $rows = $this->wpdb->get_results(
+            $this->wpdb->prepare(
+                'SELECT id, booking_id, room_id, room_type_id, assigned_room_id, rate_plan_id, guest_id, checkin, checkout, status, payment_status, checked_in_at, checked_out_at, provider, provider_booking_id, provider_reservation_id, provider_status, provider_payment_status, provider_sync_status, provider_synced_at, provider_sync_error, provider_payload_ref, provider_metadata
+            FROM ' . $this->table('reservations') . '
+            WHERE provider = %s
+                AND (provider_booking_id <> "" OR provider_reservation_id <> "" OR provider_payload_ref <> "")
+                AND status IN (%s, %s, %s)
+                AND checkout >= %s
+                AND checkin <= %s
+            ORDER BY
+                CASE WHEN provider_synced_at IS NULL OR provider_synced_at = "" THEN 0 ELSE 1 END ASC,
+                provider_synced_at ASC,
+                id ASC
+            LIMIT %d',
+                $provider,
+                'pending',
+                'pending_payment',
+                'confirmed',
+                $from,
+                $to,
+                $limit
+            ),
+            ARRAY_A
+        );
 
         return \is_array($rows) ? $rows : [];
     }
+
 
     /**
      * @param array<string, mixed> $metadata
@@ -150,14 +181,11 @@ final class ReservationRepository extends AbstractRepository
         if ($reservationId <= 0) {
             return false;
         }
-
         $data = [];
-
         foreach ($metadata as $key => $value) {
             if (!\is_string($key)) {
                 continue;
             }
-
             switch ($key) {
                 case 'provider':
                     $data[$key] = $this->providerKey((string) $value, 50);
@@ -185,11 +213,9 @@ final class ReservationRepository extends AbstractRepository
                     break;
             }
         }
-
         if (empty($data)) {
             return true;
         }
-
         return $this->wpdb->update(
             $this->table('reservations'),
             $data,
@@ -198,7 +224,6 @@ final class ReservationRepository extends AbstractRepository
             ['%d']
         ) !== false;
     }
-
     /**
      * @param array<string, mixed> $reservationData
      * @param array<int, string> $nonBlockingStatuses
@@ -226,7 +251,6 @@ final class ReservationRepository extends AbstractRepository
         $statuses = $this->normalizeNonBlockingStatuses($nonBlockingStatuses);
         $availabilityColumn = $assignedRoomId > 0 ? 'assigned_room_id' : 'room_id';
         $availabilityTargetId = $assignedRoomId > 0 ? $assignedRoomId : $roomId;
-
         $sql = $this->wpdb->prepare(
             'INSERT INTO ' . $this->table('reservations') . '
                 (booking_id, room_id, room_type_id, assigned_room_id, rate_plan_id, guest_id, checkin, checkout, guests, status, booking_source, notes, total_price, coupon_id, coupon_code, coupon_discount_total, payment_status, created_at)
@@ -265,16 +289,12 @@ final class ReservationRepository extends AbstractRepository
             $statuses[1],
             $statuses[2]
         );
-
         $inserted = $this->wpdb->query($sql);
-
         if (!\is_int($inserted) || $inserted < 1) {
             return 0;
         }
-
         return (int) $this->wpdb->insert_id;
     }
-
     /**
      * @param array<string, mixed> $reservationData
      * @param array<int, string> $nonBlockingStatuses
@@ -302,7 +322,6 @@ final class ReservationRepository extends AbstractRepository
         $lockRoomId = $assignedRoomId > 0 ? $assignedRoomId : $roomId;
         $availabilityColumn = $assignedRoomId > 0 ? 'assigned_room_id' : 'room_id';
         $availabilityTargetId = $assignedRoomId > 0 ? $assignedRoomId : $roomId;
-
         $sql = $this->wpdb->prepare(
             'INSERT INTO ' . $this->table('reservations') . '
                 (booking_id, room_id, room_type_id, assigned_room_id, rate_plan_id, guest_id, checkin, checkout, guests, status, total_price, coupon_id, coupon_code, coupon_discount_total, payment_status, created_at)
@@ -353,16 +372,12 @@ final class ReservationRepository extends AbstractRepository
             $statuses[1],
             $statuses[2]
         );
-
         $inserted = $this->wpdb->query($sql);
-
         if (!\is_int($inserted) || $inserted < 1) {
             return 0;
         }
-
         return (int) $this->wpdb->insert_id;
     }
-
     /**
      * @param array<string, mixed> $reservationData
      */
@@ -373,11 +388,9 @@ final class ReservationRepository extends AbstractRepository
         $guestId = isset($reservationData['guest_id']) ? (int) $reservationData['guest_id'] : 0;
         $checkin = isset($reservationData['checkin']) ? (string) $reservationData['checkin'] : '';
         $checkout = isset($reservationData['checkout']) ? (string) $reservationData['checkout'] : '';
-
         if ($bookingId === '' || $roomId <= 0 || $guestId <= 0 || $checkin === '' || $checkout === '') {
             return 0;
         }
-
         $data = [
             'booking_id' => $bookingId,
             'room_id' => $roomId,
@@ -408,60 +421,46 @@ final class ReservationRepository extends AbstractRepository
             'provider_metadata' => $this->providerJson($reservationData['provider_metadata'] ?? null),
             'created_at' => isset($reservationData['created_at']) ? (string) $reservationData['created_at'] : \current_time('mysql'),
         ];
-
         $inserted = $this->wpdb->insert(
             $this->table('reservations'),
             $data,
             $this->resolveReservationFormats($data)
         );
-
         return $inserted !== false ? (int) $this->wpdb->insert_id : 0;
     }
-
     /** @param array<string, mixed> $data @return array<int, string> */
     private function providerMetadataFormats(array $data): array
     {
         return \array_fill(0, \count($data), '%s');
     }
-
     private function providerKey(string $value, int $maxLength): string
     {
         $value = \function_exists('sanitize_key') ? \sanitize_key($value) : \strtolower(\preg_replace('/[^a-zA-Z0-9_\-]/', '', $value) ?? '');
-
         return \substr($value, 0, $maxLength);
     }
-
     private function providerText(string $value, int $maxLength): string
     {
         $value = \function_exists('sanitize_text_field') ? \sanitize_text_field($value) : \trim(\strip_tags($value));
-
         return \substr($value, 0, $maxLength);
     }
-
     /** @param mixed $value */
     private function providerNullableText($value): ?string
     {
         $value = \is_scalar($value) ? \trim((string) $value) : '';
-
         return $value !== '' ? $value : null;
     }
-
     /** @param mixed $value */
     private function providerJson($value): ?string
     {
         if ($value === null || $value === '') {
             return null;
         }
-
         if (\is_string($value)) {
             return $value;
         }
-
         $json = \function_exists('wp_json_encode') ? \wp_json_encode($value) : \json_encode($value);
-
         return \is_string($json) ? $json : null;
     }
-
     /**
      * @return array<string, mixed>|null
      */
@@ -470,7 +469,6 @@ final class ReservationRepository extends AbstractRepository
         if ($reservationId <= 0) {
             return null;
         }
-
         $row = $this->wpdb->get_row(
             $this->wpdb->prepare(
                 'SELECT *
@@ -481,10 +479,8 @@ final class ReservationRepository extends AbstractRepository
             ),
             ARRAY_A
         );
-
         return \is_array($row) ? $row : null;
     }
-
     /**
      * @return array<int, array<string, mixed>>
      */
@@ -493,7 +489,6 @@ final class ReservationRepository extends AbstractRepository
         if (!$this->reservationsTableExists()) {
             return [];
         }
-
         $filters = $this->normalizeAdminReservationFilters($filters);
         $hasRoomsTable = $this->tableExists('rooms');
         $hasGuestsTable = $this->tableExists('guests');
@@ -506,19 +501,16 @@ final class ReservationRepository extends AbstractRepository
         $guestJoin = '';
         $paymentSelect = '\'\' AS payment_method, \'\' AS payment_record_status';
         $paymentJoin = '';
-
         if ($hasRoomsTable) {
             $roomSelect = 'COALESCE(rm.name, \'\') AS room_name';
             $roomJoin = ' LEFT JOIN ' . $this->table('rooms') . ' rm ON rm.id = r.room_id';
         }
-
         if ($hasGuestsTable) {
             $guestSelect = 'CONCAT_WS(\' \', g.first_name, g.last_name) AS guest_name';
             $guestEmailSelect = 'COALESCE(g.email, \'\') AS guest_email';
             $guestPhoneSelect = 'COALESCE(g.phone, \'\') AS guest_phone';
             $guestJoin = ' LEFT JOIN ' . $this->table('guests') . ' g ON g.id = r.guest_id';
         }
-
         if ($hasPaymentsTable) {
             $paymentSelect = 'COALESCE(p.method, \'\') AS payment_method, COALESCE(p.status, \'\') AS payment_record_status';
             $paymentJoin = ' LEFT JOIN ' . $this->table('payments') . ' p
@@ -530,7 +522,6 @@ final class ReservationRepository extends AbstractRepository
                     LIMIT 1
                 )';
         }
-
         $where = $this->buildAdminReservationWhereClause($filters, $hasRoomsTable, $hasGuestsTable, $hasPaymentsTable);
         $params = $where['params'];
         $sql = 'SELECT
@@ -572,7 +563,6 @@ final class ReservationRepository extends AbstractRepository
             ' . $paymentJoin .
             $where['sql'] . '
             ORDER BY r.created_at DESC, r.id DESC';
-
         if ($filters['limit'] > 0) {
             $sql .= ' LIMIT %d';
             $params[] = $filters['limit'];
@@ -581,7 +571,6 @@ final class ReservationRepository extends AbstractRepository
             $params[] = $filters['per_page'];
             $params[] = $filters['offset'];
         }
-
         if (empty($params)) {
             $rows = $this->wpdb->get_results($sql, ARRAY_A);
         } else {
@@ -590,10 +579,8 @@ final class ReservationRepository extends AbstractRepository
                 ARRAY_A
             );
         }
-
         return \is_array($rows) ? $rows : [];
     }
-
     /**
      * @return array<int, array<string, mixed>>
      */
@@ -602,7 +589,6 @@ final class ReservationRepository extends AbstractRepository
         if (!$this->reservationsTableExists()) {
             return [];
         }
-
         $limit = \max(1, \min(20, $limit));
         $hasRoomsTable = $this->tableExists('rooms');
         $hasGuestsTable = $this->tableExists('guests');
@@ -610,17 +596,14 @@ final class ReservationRepository extends AbstractRepository
         $roomJoin = '';
         $guestSelect = '\'\' AS guest_name';
         $guestJoin = '';
-
         if ($hasRoomsTable) {
             $roomSelect = 'COALESCE(rm.name, \'\') AS room_name';
             $roomJoin = ' LEFT JOIN ' . $this->table('rooms') . ' rm ON rm.id = r.room_id';
         }
-
         if ($hasGuestsTable) {
             $guestSelect = 'CONCAT_WS(\' \', g.first_name, g.last_name) AS guest_name';
             $guestJoin = ' LEFT JOIN ' . $this->table('guests') . ' g ON g.id = r.guest_id';
         }
-
         $rows = $this->wpdb->get_results(
             $this->wpdb->prepare(
                 'SELECT
@@ -650,10 +633,8 @@ final class ReservationRepository extends AbstractRepository
             ),
             ARRAY_A
         );
-
         return \is_array($rows) ? $rows : [];
     }
-
     /**
      * @return array<int, array<string, mixed>>
      */
@@ -661,7 +642,6 @@ final class ReservationRepository extends AbstractRepository
     {
         return $this->getFrontDeskQueueRows($today, 'checkin', $limit);
     }
-
     /**
      * @return array<int, array<string, mixed>>
      */
@@ -669,7 +649,6 @@ final class ReservationRepository extends AbstractRepository
     {
         return $this->getFrontDeskQueueRows($today, 'checkout', $limit);
     }
-
     /**
      * @return array<int, array<string, mixed>>
      */
@@ -678,7 +657,6 @@ final class ReservationRepository extends AbstractRepository
         if (!$this->reservationsTableExists()) {
             return [];
         }
-
         $limit = \max(1, \min(100, $limit));
         $hasRoomsTable = $this->tableExists('rooms');
         $hasGuestsTable = $this->tableExists('guests');
@@ -687,18 +665,15 @@ final class ReservationRepository extends AbstractRepository
         $guestSelect = '\'\' AS guest_name';
         $guestEmailSelect = '\'\' AS guest_email';
         $guestJoin = '';
-
         if ($hasRoomsTable) {
             $roomSelect = 'COALESCE(rm.name, \'\') AS room_name';
             $roomJoin = ' LEFT JOIN ' . $this->table('rooms') . ' rm ON rm.id = r.room_id';
         }
-
         if ($hasGuestsTable) {
             $guestSelect = 'CONCAT_WS(\' \', g.first_name, g.last_name) AS guest_name';
             $guestEmailSelect = 'COALESCE(g.email, \'\') AS guest_email';
             $guestJoin = ' LEFT JOIN ' . $this->table('guests') . ' g ON g.id = r.guest_id';
         }
-
         $rows = $this->wpdb->get_results(
             $this->wpdb->prepare(
                 'SELECT
@@ -750,16 +725,13 @@ final class ReservationRepository extends AbstractRepository
             ),
             ARRAY_A
         );
-
         return \is_array($rows) ? $rows : [];
     }
-
     public function countAdminReservationListRows(array $filters = []): int
     {
         if (!$this->reservationsTableExists()) {
             return 0;
         }
-
         $filters = $this->normalizeAdminReservationFilters($filters);
         $hasRoomsTable = $this->tableExists('rooms');
         $hasGuestsTable = $this->tableExists('guests');
@@ -767,7 +739,6 @@ final class ReservationRepository extends AbstractRepository
         $roomJoin = $hasRoomsTable ? ' LEFT JOIN ' . $this->table('rooms') . ' rm ON rm.id = r.room_id' : '';
         $guestJoin = $hasGuestsTable ? ' LEFT JOIN ' . $this->table('guests') . ' g ON g.id = r.guest_id' : '';
         $paymentJoin = '';
-
         if ($hasPaymentsTable) {
             $paymentJoin = ' LEFT JOIN ' . $this->table('payments') . ' p
                 ON p.id = (
@@ -778,7 +749,6 @@ final class ReservationRepository extends AbstractRepository
                     LIMIT 1
                 )';
         }
-
         $where = $this->buildAdminReservationWhereClause($filters, $hasRoomsTable, $hasGuestsTable, $hasPaymentsTable);
         $params = $where['params'];
         $sql = 'SELECT COUNT(*)
@@ -787,14 +757,11 @@ final class ReservationRepository extends AbstractRepository
             ' . $guestJoin . '
             ' . $paymentJoin .
             $where['sql'];
-
         $count = empty($params)
             ? $this->wpdb->get_var($sql)
             : $this->wpdb->get_var($this->wpdb->prepare($sql, ...$params));
-
         return $count !== null ? (int) $count : 0;
     }
-
     /**
      * @return array<string, int>
      */
@@ -813,11 +780,9 @@ final class ReservationRepository extends AbstractRepository
             'cancelled' => 0,
             'failed_payment' => 0,
         ];
-
         if ($today === '' || !$this->reservationsTableExists()) {
             return $counts;
         }
-
         $stayStatuses = \MustHotelBooking\Core\ReservationStatus::getConfirmedStatuses();
         $activeStatuses = ['pending', 'pending_payment', 'confirmed', 'completed'];
         $pendingStatuses = $this->getPendingReservationStatuses();
@@ -868,11 +833,9 @@ final class ReservationRepository extends AbstractRepository
             ),
             ARRAY_A
         );
-
         if (!\is_array($row)) {
             return $counts;
         }
-
         $counts['all'] = isset($row['all_total']) ? (int) $row['all_total'] : 0;
         $counts['arrivals_today'] = isset($row['arrivals_today']) ? (int) $row['arrivals_today'] : 0;
         $counts['departures_today'] = isset($row['departures_today']) ? (int) $row['departures_today'] : 0;
@@ -884,10 +847,8 @@ final class ReservationRepository extends AbstractRepository
         $counts['paid'] = isset($row['paid']) ? (int) $row['paid'] : 0;
         $counts['cancelled'] = isset($row['cancelled']) ? (int) $row['cancelled'] : 0;
         $counts['failed_payment'] = isset($row['failed_payment']) ? (int) $row['failed_payment'] : 0;
-
         return $counts;
     }
-
     /**
      * @return array<int, array<string, mixed>>
      */
@@ -896,7 +857,6 @@ final class ReservationRepository extends AbstractRepository
         if (!$this->reservationsTableExists()) {
             return [];
         }
-
         $rows = $this->wpdb->get_results(
             'SELECT
                 id,
@@ -909,10 +869,8 @@ final class ReservationRepository extends AbstractRepository
             ORDER BY id ASC',
             ARRAY_A
         );
-
         return \is_array($rows) ? $rows : [];
     }
-
     /**
      * @return array<int, array<string, mixed>>
      */
@@ -921,7 +879,6 @@ final class ReservationRepository extends AbstractRepository
         if ($today === '' || !$this->reservationsTableExists()) {
             return [];
         }
-
         $limit = \max(1, \min(100, $limit));
         $hasRoomsTable = $this->tableExists('rooms');
         $hasGuestsTable = $this->tableExists('guests');
@@ -930,18 +887,15 @@ final class ReservationRepository extends AbstractRepository
         $guestSelect = '\'\' AS guest_name';
         $guestEmailSelect = '\'\' AS guest_email';
         $guestJoin = '';
-
         if ($hasRoomsTable) {
             $roomSelect = 'COALESCE(rm.name, \'\') AS room_name';
             $roomJoin = ' LEFT JOIN ' . $this->table('rooms') . ' rm ON rm.id = r.room_id';
         }
-
         if ($hasGuestsTable) {
             $guestSelect = 'CONCAT_WS(\' \', g.first_name, g.last_name) AS guest_name';
             $guestEmailSelect = 'COALESCE(g.email, \'\') AS guest_email';
             $guestJoin = ' LEFT JOIN ' . $this->table('guests') . ' g ON g.id = r.guest_id';
         }
-
         if ($mode === 'checkout') {
             $sql = $this->wpdb->prepare(
                 'SELECT
@@ -1045,12 +999,9 @@ final class ReservationRepository extends AbstractRepository
                 $limit
             );
         }
-
         $rows = $this->wpdb->get_results($sql, ARRAY_A);
-
         return \is_array($rows) ? $rows : [];
     }
-
     /**
      * @return array{arrivals_reservations: int, arrivals_guests: int, departures_reservations: int, departures_guests: int, in_house_stays: int, in_house_guests: int, pending_reservations: int, unpaid_reservations: int, blocked_units: int, occupied_units: int}
      */
@@ -1068,11 +1019,9 @@ final class ReservationRepository extends AbstractRepository
             'blocked_units' => 0,
             'occupied_units' => 0,
         ];
-
         if ($today === '' || !$this->reservationsTableExists()) {
             return $summary;
         }
-
         $stayStatuses = \MustHotelBooking\Core\ReservationStatus::getConfirmedStatuses();
         $pendingStatuses = $this->getPendingReservationStatuses();
         $paymentRelevantStatuses = ['pending', 'pending_payment', 'confirmed', 'completed'];
@@ -1146,18 +1095,14 @@ final class ReservationRepository extends AbstractRepository
             ),
             ARRAY_A
         );
-
         if (!\is_array($row)) {
             return $summary;
         }
-
         foreach (\array_keys($summary) as $key) {
             $summary[$key] = isset($row[$key]) ? (int) $row[$key] : 0;
         }
-
         return $summary;
     }
-
     /**
      * @return array<int, array<string, mixed>>
      */
@@ -1165,7 +1110,6 @@ final class ReservationRepository extends AbstractRepository
     {
         return $this->getAdminReservationListRows(['limit' => $limit]);
     }
-
     /**
      * @return array<int, array<string, mixed>>
      */
@@ -1174,17 +1118,14 @@ final class ReservationRepository extends AbstractRepository
         if ($today === '' || !$this->reservationsTableExists() || !$this->tableExists('guests')) {
             return [];
         }
-
         $limit = \max(1, \min(20, $limit));
         $statuses = $this->getOperationalReservationStatuses();
         $roomSelect = '\'\' AS room_name';
         $roomJoin = '';
-
         if ($this->tableExists('rooms')) {
             $roomSelect = 'COALESCE(rm.name, \'\') AS room_name';
             $roomJoin = ' LEFT JOIN ' . $this->table('rooms') . ' rm ON rm.id = r.room_id';
         }
-
         $rows = $this->wpdb->get_results(
             $this->wpdb->prepare(
                 'SELECT
@@ -1219,10 +1160,8 @@ final class ReservationRepository extends AbstractRepository
             ),
             ARRAY_A
         );
-
         return \is_array($rows) ? $rows : [];
     }
-
     /**
      * @return array<int, array<string, mixed>>
      */
@@ -1231,23 +1170,19 @@ final class ReservationRepository extends AbstractRepository
         if ($today === '' || !$this->reservationsTableExists()) {
             return [];
         }
-
         $limit = \max(1, \min(20, $limit));
         $roomSelect = '\'\' AS room_name';
         $roomJoin = '';
         $guestSelect = '\'\' AS guest_name';
         $guestJoin = '';
-
         if ($this->tableExists('rooms')) {
             $roomSelect = 'COALESCE(rm.name, \'\') AS room_name';
             $roomJoin = ' LEFT JOIN ' . $this->table('rooms') . ' rm ON rm.id = r.room_id';
         }
-
         if ($this->tableExists('guests')) {
             $guestSelect = 'CONCAT_WS(\' \', g.first_name, g.last_name) AS guest_name';
             $guestJoin = ' LEFT JOIN ' . $this->table('guests') . ' g ON g.id = r.guest_id';
         }
-
         $rows = $this->wpdb->get_results(
             $this->wpdb->prepare(
                 'SELECT
@@ -1273,10 +1208,8 @@ final class ReservationRepository extends AbstractRepository
             ),
             ARRAY_A
         );
-
         return \is_array($rows) ? $rows : [];
     }
-
     /**
      * @return array<int, array<string, mixed>>
      */
@@ -1285,17 +1218,14 @@ final class ReservationRepository extends AbstractRepository
         if (!$this->reservationsTableExists()) {
             return [];
         }
-
         $limit = \max(1, \min(20, $limit));
         $statuses = $this->getOperationalReservationStatuses();
         $roomSelect = '\'\' AS room_name';
         $roomJoin = '';
-
         if ($this->tableExists('rooms')) {
             $roomSelect = 'COALESCE(rm.name, \'\') AS room_name';
             $roomJoin = ' LEFT JOIN ' . $this->table('rooms') . ' rm ON rm.id = a.room_id';
         }
-
         $rows = $this->wpdb->get_results(
             $this->wpdb->prepare(
                 'SELECT
@@ -1334,10 +1264,8 @@ final class ReservationRepository extends AbstractRepository
             ),
             ARRAY_A
         );
-
         return \is_array($rows) ? $rows : [];
     }
-
     /**
      * @return array<int, array<string, mixed>>
      */
@@ -1346,24 +1274,20 @@ final class ReservationRepository extends AbstractRepository
         if (!$this->reservationsTableExists() || !$this->tableExists('payments')) {
             return [];
         }
-
         $limit = \max(1, \min(20, $limit));
         $statuses = $this->getOperationalReservationStatuses();
         $roomSelect = '\'\' AS room_name';
         $roomJoin = '';
         $guestSelect = '\'\' AS guest_name';
         $guestJoin = '';
-
         if ($this->tableExists('rooms')) {
             $roomSelect = 'COALESCE(rm.name, \'\') AS room_name';
             $roomJoin = ' LEFT JOIN ' . $this->table('rooms') . ' rm ON rm.id = r.room_id';
         }
-
         if ($this->tableExists('guests')) {
             $guestSelect = 'CONCAT_WS(\' \', g.first_name, g.last_name) AS guest_name';
             $guestJoin = ' LEFT JOIN ' . $this->table('guests') . ' g ON g.id = r.guest_id';
         }
-
         $rows = $this->wpdb->get_results(
             $this->wpdb->prepare(
                 'SELECT
@@ -1396,10 +1320,8 @@ final class ReservationRepository extends AbstractRepository
             ),
             ARRAY_A
         );
-
         return \is_array($rows) ? $rows : [];
     }
-
     /**
      * @return array<string, mixed>|null
      */
@@ -1408,7 +1330,6 @@ final class ReservationRepository extends AbstractRepository
         if ($reservationId <= 0 || !$this->reservationsTableExists()) {
             return null;
         }
-
         $sql = $this->wpdb->prepare(
             'SELECT
                 r.*,
@@ -1426,10 +1347,8 @@ final class ReservationRepository extends AbstractRepository
             $reservationId
         );
         $row = $this->wpdb->get_row($sql, ARRAY_A);
-
         return \is_array($row) ? $row : null;
     }
-
     /**
      * @param array<int, string> $nonBlockingStatuses
      */
@@ -1449,7 +1368,6 @@ final class ReservationRepository extends AbstractRepository
         ) {
             return false;
         }
-
         $statuses = $this->normalizeNonBlockingStatuses($nonBlockingStatuses);
         $sql = $this->wpdb->prepare(
             'SELECT 1
@@ -1468,10 +1386,8 @@ final class ReservationRepository extends AbstractRepository
             $statuses[1],
             $statuses[2]
         );
-
         return $this->wpdb->get_var($sql) !== null;
     }
-
     /**
      * @param array<int, string> $nonBlockingStatuses
      */
@@ -1491,7 +1407,6 @@ final class ReservationRepository extends AbstractRepository
         ) {
             return false;
         }
-
         $statuses = $this->normalizeNonBlockingStatuses($nonBlockingStatuses);
         $sql = $this->wpdb->prepare(
             'SELECT 1
@@ -1510,10 +1425,8 @@ final class ReservationRepository extends AbstractRepository
             $statuses[1],
             $statuses[2]
         );
-
         return $this->wpdb->get_var($sql) !== null;
     }
-
     /**
      * @param array<string, mixed> $reservationData
      */
@@ -1522,7 +1435,6 @@ final class ReservationRepository extends AbstractRepository
         if ($reservationId <= 0 || empty($reservationData) || !$this->reservationsTableExists()) {
             return false;
         }
-
         $updated = $this->wpdb->update(
             $this->table('reservations'),
             $reservationData,
@@ -1530,16 +1442,13 @@ final class ReservationRepository extends AbstractRepository
             $this->resolveReservationFormats($reservationData),
             ['%d']
         );
-
         return $updated !== false;
     }
-
     public function createBlockedReservation(int $roomId, string $checkin, string $checkout, string $createdAt = ''): int
     {
         if ($roomId <= 0 || $checkin === '' || $checkout === '' || !$this->reservationsTableExists()) {
             return 0;
         }
-
         $inserted = $this->wpdb->insert(
             $this->table('reservations'),
             [
@@ -1555,14 +1464,11 @@ final class ReservationRepository extends AbstractRepository
             ],
             ['%d', '%d', '%s', '%s', '%d', '%s', '%f', '%s', '%s']
         );
-
         if ($inserted === false) {
             return 0;
         }
-
         return (int) $this->wpdb->insert_id;
     }
-
     /**
      * @param array<string, mixed> $filters
      * @return array<int, array<string, mixed>>
@@ -1572,7 +1478,6 @@ final class ReservationRepository extends AbstractRepository
         if (!$this->reservationsTableExists()) {
             return [];
         }
-
         $roomId = isset($filters['room_id']) ? (int) $filters['room_id'] : 0;
         $timeline = isset($filters['timeline']) ? \sanitize_key((string) $filters['timeline']) : '';
         $search = isset($filters['search']) ? \sanitize_text_field((string) $filters['search']) : '';
@@ -1580,13 +1485,11 @@ final class ReservationRepository extends AbstractRepository
         $limit = isset($filters['limit']) ? \max(1, (int) $filters['limit']) : 500;
         $where = ['r.status = %s'];
         $params = ['blocked'];
-
         if ($roomId > 0) {
             $where[] = '(r.room_id = %d OR r.room_type_id = %d)';
             $params[] = $roomId;
             $params[] = $roomId;
         }
-
         if ($timeline === 'current') {
             $where[] = 'r.checkin <= %s AND r.checkout > %s';
             $params[] = $today;
@@ -1598,7 +1501,6 @@ final class ReservationRepository extends AbstractRepository
             $where[] = 'r.checkout <= %s';
             $params[] = $today;
         }
-
         if ($search !== '') {
             $where[] = '(COALESCE(r.booking_id, \'\') LIKE %s OR COALESCE(rm.name, \'\') LIKE %s OR COALESCE(r.notes, \'\') LIKE %s)';
             $like = '%' . $this->wpdb->esc_like($search) . '%';
@@ -1606,7 +1508,6 @@ final class ReservationRepository extends AbstractRepository
             $params[] = $like;
             $params[] = $like;
         }
-
         $sql = 'SELECT
                 r.id,
                 r.booking_id,
@@ -1629,10 +1530,8 @@ final class ReservationRepository extends AbstractRepository
             LIMIT %d';
         $params[] = $limit;
         $rows = $this->wpdb->get_results($this->wpdb->prepare($sql, ...$params), ARRAY_A);
-
         return \is_array($rows) ? $rows : [];
     }
-
     /**
      * @return array<int, array<string, mixed>>
      */
@@ -1641,7 +1540,6 @@ final class ReservationRepository extends AbstractRepository
         if ($roomId <= 0 || $checkin === '' || $checkout === '' || !$this->reservationsTableExists()) {
             return [];
         }
-
         $excluded = ['cancelled', 'expired', 'payment_failed'];
         $sql = 'SELECT
                 id,
@@ -1661,41 +1559,32 @@ final class ReservationRepository extends AbstractRepository
                 AND checkout > %s
                 AND status NOT IN (%s, %s, %s)';
         $params = [$roomId, $roomId, $checkout, $checkin, $excluded[0], $excluded[1], $excluded[2]];
-
         if ($excludeReservationId > 0) {
             $sql .= ' AND id <> %d';
             $params[] = $excludeReservationId;
         }
-
         $sql .= ' ORDER BY checkin ASC, checkout ASC, id ASC';
         $rows = $this->wpdb->get_results($this->wpdb->prepare($sql, ...$params), ARRAY_A);
-
         return \is_array($rows) ? $rows : [];
     }
-
     public function deleteReservation(int $reservationId, string $requiredStatus = ''): bool
     {
         if ($reservationId <= 0 || !$this->reservationsTableExists()) {
             return false;
         }
-
         $where = ['id' => $reservationId];
         $formats = ['%d'];
-
         if ($requiredStatus !== '') {
             $where['status'] = $requiredStatus;
             $formats[] = '%s';
         }
-
         $deleted = $this->wpdb->delete(
             $this->table('reservations'),
             $where,
             $formats
         );
-
         return $deleted !== false;
     }
-
     /**
      * @return array<int, array<string, mixed>>
      */
@@ -1704,7 +1593,6 @@ final class ReservationRepository extends AbstractRepository
         if ($startDate === '' || $endExclusive === '' || !$this->reservationsTableExists()) {
             return [];
         }
-
         $roomIds = \array_values(
             \array_filter(
                 \array_map('intval', $roomIds),
@@ -1713,15 +1601,12 @@ final class ReservationRepository extends AbstractRepository
                 }
             )
         );
-
         $params = [$endExclusive, $startDate];
         $roomFilterSql = '';
-
         if (!empty($roomIds)) {
             $roomFilterSql = ' AND r.room_id IN (' . \implode(', ', \array_fill(0, \count($roomIds), '%d')) . ')';
             $params = \array_merge($params, $roomIds);
         }
-
         $sql = $this->wpdb->prepare(
             'SELECT
                 r.id,
@@ -1750,10 +1635,8 @@ final class ReservationRepository extends AbstractRepository
             ...$params
         );
         $rows = $this->wpdb->get_results($sql, ARRAY_A);
-
         return \is_array($rows) ? $rows : [];
     }
-
     /**
      * @param array<int, int> $roomIds
      * @return array<int, array<string, mixed>>
@@ -1761,11 +1644,9 @@ final class ReservationRepository extends AbstractRepository
     public function getAccommodationReservationSummaryMap(array $roomIds, string $today): array
     {
         $roomIds = $this->normalizeIds($roomIds);
-
         if (empty($roomIds) || $today === '' || !$this->reservationsTableExists()) {
             return [];
         }
-
         $activeStatuses = ['pending', 'pending_payment', 'confirmed', 'completed'];
         $stayStatuses = ['confirmed', 'completed'];
         $rows = $this->wpdb->get_results(
@@ -1788,22 +1669,17 @@ final class ReservationRepository extends AbstractRepository
             ARRAY_A
         );
         $summary = [];
-
         if (!\is_array($rows)) {
             return $summary;
         }
-
         foreach ($rows as $row) {
             if (!\is_array($row)) {
                 continue;
             }
-
             $roomId = isset($row['accommodation_id']) ? (int) $row['accommodation_id'] : 0;
-
             if ($roomId <= 0) {
                 continue;
             }
-
             $summary[$roomId] = [
                 'reservation_count' => isset($row['reservation_count']) ? (int) $row['reservation_count'] : 0,
                 'future_reservations' => isset($row['future_reservations']) ? (int) $row['future_reservations'] : 0,
@@ -1811,10 +1687,8 @@ final class ReservationRepository extends AbstractRepository
                 'next_checkin' => isset($row['next_checkin']) ? (string) $row['next_checkin'] : '',
             ];
         }
-
         return $summary;
     }
-
     /**
      * @param array<int, int> $inventoryRoomIds
      * @return array<int, array<string, mixed>>
@@ -1822,11 +1696,9 @@ final class ReservationRepository extends AbstractRepository
     public function getInventoryRoomReservationSummaryMap(array $inventoryRoomIds, string $today): array
     {
         $inventoryRoomIds = $this->normalizeIds($inventoryRoomIds);
-
         if (empty($inventoryRoomIds) || $today === '' || !$this->reservationsTableExists()) {
             return [];
         }
-
         $activeStatuses = ['pending', 'pending_payment', 'confirmed', 'completed'];
         $stayStatuses = ['confirmed', 'completed'];
         $rows = $this->wpdb->get_results(
@@ -1849,22 +1721,17 @@ final class ReservationRepository extends AbstractRepository
             ARRAY_A
         );
         $summary = [];
-
         if (!\is_array($rows)) {
             return $summary;
         }
-
         foreach ($rows as $row) {
             if (!\is_array($row)) {
                 continue;
             }
-
             $roomId = isset($row['assigned_room_id']) ? (int) $row['assigned_room_id'] : 0;
-
             if ($roomId <= 0) {
                 continue;
             }
-
             $summary[$roomId] = [
                 'reservation_count' => isset($row['reservation_count']) ? (int) $row['reservation_count'] : 0,
                 'future_reservations' => isset($row['future_reservations']) ? (int) $row['future_reservations'] : 0,
@@ -1872,16 +1739,13 @@ final class ReservationRepository extends AbstractRepository
                 'next_checkin' => isset($row['next_checkin']) ? (string) $row['next_checkin'] : '',
             ];
         }
-
         return $summary;
     }
-
     public function countReservationsForAccommodationType(int $roomId): int
     {
         if ($roomId <= 0 || !$this->reservationsTableExists()) {
             return 0;
         }
-
         return (int) $this->wpdb->get_var(
             $this->wpdb->prepare(
                 'SELECT COUNT(*)
@@ -1892,13 +1756,11 @@ final class ReservationRepository extends AbstractRepository
             )
         );
     }
-
     public function countReservationsForInventoryRoom(int $inventoryRoomId): int
     {
         if ($inventoryRoomId <= 0 || !$this->reservationsTableExists()) {
             return 0;
         }
-
         return (int) $this->wpdb->get_var(
             $this->wpdb->prepare(
                 'SELECT COUNT(*)
@@ -1908,7 +1770,6 @@ final class ReservationRepository extends AbstractRepository
             )
         );
     }
-
     /**
      * @return array{bookings_today: int, upcoming_checkins: int, upcoming_checkouts: int, total_bookings_this_month: int}
      */
@@ -1920,11 +1781,9 @@ final class ReservationRepository extends AbstractRepository
             'upcoming_checkouts' => 0,
             'total_bookings_this_month' => 0,
         ];
-
         if (!$this->reservationsTableExists()) {
             return $metrics;
         }
-
         $excluded = ['cancelled', 'blocked', 'expired', 'payment_failed', 'pending_payment'];
         $metrics['bookings_today'] = (int) $this->wpdb->get_var(
             $this->wpdb->prepare(
@@ -1984,10 +1843,8 @@ final class ReservationRepository extends AbstractRepository
                 $excluded[4]
             )
         );
-
         return $metrics;
     }
-
     /**
      * @return array<int, array<string, mixed>>
      */
@@ -1996,7 +1853,6 @@ final class ReservationRepository extends AbstractRepository
         if ($today === '' || !$this->reservationsTableExists()) {
             return [];
         }
-
         $limit = \max(1, \min(50, $limit));
         $excluded = ['cancelled', 'blocked', 'expired', 'payment_failed', 'pending_payment'];
         $sql = $this->wpdb->prepare(
@@ -2024,10 +1880,8 @@ final class ReservationRepository extends AbstractRepository
             $limit
         );
         $rows = $this->wpdb->get_results($sql, ARRAY_A);
-
         return \is_array($rows) ? $rows : [];
     }
-
     /**
      * @param array<int, int> $reservationIds
      * @return array<int, array<string, mixed>>
@@ -2035,11 +1889,9 @@ final class ReservationRepository extends AbstractRepository
     public function getReservationsByIds(array $reservationIds): array
     {
         $reservationIds = $this->normalizeIds($reservationIds);
-
         if (empty($reservationIds)) {
             return [];
         }
-
         $sql = $this->wpdb->prepare(
             'SELECT id, booking_id, room_id, room_type_id, assigned_room_id, rate_plan_id, guest_id, checkin, checkout, guests, status, total_price, coupon_id, coupon_code, coupon_discount_total, payment_status, created_at
             FROM ' . $this->table('reservations') . '
@@ -2048,26 +1900,21 @@ final class ReservationRepository extends AbstractRepository
             ...$reservationIds
         );
         $rows = $this->wpdb->get_results($sql, ARRAY_A);
-
         return \is_array($rows) ? $rows : [];
     }
-
     public function updateReservationStatus(int $reservationId, string $status, string $paymentStatus = ''): bool
     {
         if ($reservationId <= 0) {
             return false;
         }
-
         $data = [
             'status' => $status,
         ];
         $formats = ['%s'];
-
         if ($paymentStatus !== '') {
             $data['payment_status'] = $paymentStatus;
             $formats[] = '%s';
         }
-
         $updated = $this->wpdb->update(
             $this->table('reservations'),
             $data,
@@ -2075,16 +1922,13 @@ final class ReservationRepository extends AbstractRepository
             $formats,
             ['%d']
         );
-
         return \is_int($updated);
     }
-
     public function updateReservationNotes(int $reservationId, string $notes): bool
     {
         if ($reservationId <= 0) {
             return false;
         }
-
         $updated = $this->wpdb->update(
             $this->table('reservations'),
             ['notes' => $notes],
@@ -2092,16 +1936,13 @@ final class ReservationRepository extends AbstractRepository
             ['%s'],
             ['%d']
         );
-
         return \is_int($updated);
     }
-
     public function updateReservationCouponData(int $reservationId, int $couponId, string $couponCode, float $couponDiscountTotal): bool
     {
         if ($reservationId <= 0) {
             return false;
         }
-
         $updated = $this->wpdb->update(
             $this->table('reservations'),
             [
@@ -2113,16 +1954,13 @@ final class ReservationRepository extends AbstractRepository
             ['%d', '%s', '%f'],
             ['%d']
         );
-
         return \is_int($updated);
     }
-
     public function assignInventoryRoomToReservation(int $reservationId, int $roomTypeId, int $assignedRoomId): bool
     {
         if ($reservationId <= 0 || $assignedRoomId <= 0) {
             return false;
         }
-
         $updated = $this->wpdb->update(
             $this->table('reservations'),
             [
@@ -2133,10 +1971,8 @@ final class ReservationRepository extends AbstractRepository
             ['%d', '%d'],
             ['%d']
         );
-
         return \is_int($updated);
     }
-
     /**
      * @return array<string, mixed>|null
      */
@@ -2145,7 +1981,6 @@ final class ReservationRepository extends AbstractRepository
         if ($reservationId <= 0) {
             return null;
         }
-
         $sql = $this->wpdb->prepare(
             'SELECT
                 r.id,
@@ -2180,10 +2015,8 @@ final class ReservationRepository extends AbstractRepository
             $reservationId
         );
         $row = $this->wpdb->get_row($sql, ARRAY_A);
-
         return \is_array($row) ? $row : null;
     }
-
     /**
      * @param array<int, int> $reservationIds
      * @return array<int, array<string, mixed>>
@@ -2191,20 +2024,16 @@ final class ReservationRepository extends AbstractRepository
     public function getConfirmationRowsByIds(array $reservationIds): array
     {
         $reservationIds = $this->normalizeIds($reservationIds);
-
         if (empty($reservationIds)) {
             return [];
         }
-
         $sql = $this->wpdb->prepare(
             $this->getConfirmationRowsQuery('r.id IN (' . $this->buildIntegerPlaceholders($reservationIds) . ')'),
             ...$reservationIds
         );
         $rows = $this->wpdb->get_results($sql, ARRAY_A);
-
         return \is_array($rows) ? $rows : [];
     }
-
     /**
      * @return array<int, array<string, mixed>>
      */
@@ -2213,16 +2042,13 @@ final class ReservationRepository extends AbstractRepository
         if (\trim($bookingId) === '') {
             return [];
         }
-
         $sql = $this->wpdb->prepare(
             $this->getConfirmationRowsQuery('r.booking_id = %s'),
             $bookingId
         );
         $rows = $this->wpdb->get_results($sql, ARRAY_A);
-
         return \is_array($rows) ? $rows : [];
     }
-
     /**
      * @return array<int, int>
      */
@@ -2240,10 +2066,8 @@ final class ReservationRepository extends AbstractRepository
                 $cutoff
             )
         );
-
         return $this->normalizeIds(\is_array($rows) ? $rows : []);
     }
-
     /**
      * @param array<string, mixed> $filters
      * @return array<string, mixed>
@@ -2254,14 +2078,11 @@ final class ReservationRepository extends AbstractRepository
         $perPage = isset($filters['per_page']) ? (int) $filters['per_page'] : 20;
         $paged = isset($filters['paged']) ? (int) $filters['paged'] : 1;
         $checkinMonth = isset($filters['checkin_month']) ? \sanitize_text_field((string) $filters['checkin_month']) : '';
-
         if (!\preg_match('/^\d{4}-\d{2}$/', $checkinMonth)) {
             $checkinMonth = '';
         }
-
         $perPage = \max(1, \min(100, $perPage));
         $paged = \max(1, $paged);
-
         return [
             'paginate' => !isset($filters['paginate']) || (bool) $filters['paginate'],
             'limit' => $limit > 0 ? \min(200, $limit) : 0,
@@ -2284,7 +2105,6 @@ final class ReservationRepository extends AbstractRepository
             'created_after' => isset($filters['created_after']) ? \sanitize_text_field((string) $filters['created_after']) : '',
         ];
     }
-
     /**
      * @param array<string, mixed> $filters
      * @return array{sql: string, params: array<int, mixed>}
@@ -2294,26 +2114,21 @@ final class ReservationRepository extends AbstractRepository
         bool $hasRoomsTable,
         bool $hasGuestsTable,
         bool $hasPaymentsTable
-    ): array
-    {
+    ): array {
         $where = [];
         $params = [];
         $stayStatuses = \MustHotelBooking\Core\ReservationStatus::getConfirmedStatuses();
         $activeStatuses = $this->getOperationalReservationStatuses();
         $quickFilter = $filters['quick_filter'];
-
         if ($quickFilter === '' && $filters['date_scope'] !== '') {
             $quickFilter = $filters['date_scope'];
         }
-
         if ($quickFilter === '' && $filters['status_group'] === 'pending') {
             $quickFilter = 'pending';
         }
-
         if ($quickFilter === '' && $filters['payment_group'] === 'unpaid') {
             $quickFilter = 'unpaid';
         }
-
         if ($quickFilter === 'arrivals_today' && $filters['today'] !== '') {
             $where[] = 'r.checkin = %s AND r.status IN (%s, %s)';
             $params[] = $filters['today'];
@@ -2364,7 +2179,6 @@ final class ReservationRepository extends AbstractRepository
             $params[] = 'payment_failed';
             $params[] = 'failed';
         }
-
         if ($filters['status'] !== '') {
             $where[] = 'r.status = %s';
             $params[] = $filters['status'];
@@ -2374,7 +2188,6 @@ final class ReservationRepository extends AbstractRepository
             $params[] = $pendingStatuses[0];
             $params[] = $pendingStatuses[1];
         }
-
         if ($filters['payment_status'] !== '') {
             $where[] = 'r.payment_status = %s';
             $params[] = $filters['payment_status'];
@@ -2384,28 +2197,23 @@ final class ReservationRepository extends AbstractRepository
             $params[] = 'pending';
             $params[] = 'failed';
         }
-
         if ($filters['payment_method'] !== '' && $hasPaymentsTable) {
             $where[] = 'p.method = %s';
             $params[] = $filters['payment_method'];
         }
-
         if ($filters['room_id'] > 0) {
             $where[] = '(r.room_id = %d OR r.room_type_id = %d)';
             $params[] = $filters['room_id'];
             $params[] = $filters['room_id'];
         }
-
         if ($filters['checkin_from'] !== '') {
             $where[] = 'r.checkin >= %s';
             $params[] = $filters['checkin_from'];
         }
-
         if ($filters['checkin_to'] !== '') {
             $where[] = 'r.checkin <= %s';
             $params[] = $filters['checkin_to'];
         }
-
         if ($filters['checkin_month'] !== '') {
             $monthStart = $filters['checkin_month'] . '-01';
             $monthStartDate = new \DateTimeImmutable($monthStart);
@@ -2414,16 +2222,13 @@ final class ReservationRepository extends AbstractRepository
             $params[] = $monthStart;
             $params[] = $monthEnd;
         }
-
         if ($filters['created_after'] !== '') {
             $where[] = 'r.created_at >= %s';
             $params[] = $filters['created_after'];
         }
-
         if ($filters['search'] !== '') {
             $searchClauses = ['r.booking_id LIKE %s'];
             $searchParams = ['%' . $filters['search'] . '%'];
-
             if ($hasGuestsTable) {
                 $searchClauses[] = 'g.first_name LIKE %s';
                 $searchClauses[] = 'g.last_name LIKE %s';
@@ -2436,34 +2241,28 @@ final class ReservationRepository extends AbstractRepository
                 $searchParams[] = '%' . $filters['search'] . '%';
                 $searchParams[] = '%' . $filters['search'] . '%';
             }
-
             if ($hasRoomsTable) {
                 $searchClauses[] = 'rm.name LIKE %s';
                 $searchParams[] = '%' . $filters['search'] . '%';
             }
-
             if ($hasPaymentsTable) {
                 $searchClauses[] = 'p.transaction_id LIKE %s';
                 $searchParams[] = '%' . $filters['search'] . '%';
             }
-
             $where[] = '(' . \implode(' OR ', $searchClauses) . ')';
             $params = \array_merge($params, $searchParams);
         }
-
         if (empty($where)) {
             return [
                 'sql' => '',
                 'params' => [],
             ];
         }
-
         return [
             'sql' => ' WHERE ' . \implode(' AND ', $where),
             'params' => $params,
         ];
     }
-
     /**
      * @return array<int, string>
      */
@@ -2471,7 +2270,6 @@ final class ReservationRepository extends AbstractRepository
     {
         return ['pending', 'pending_payment', 'confirmed', 'completed'];
     }
-
     /**
      * @return array<int, string>
      */
@@ -2479,7 +2277,6 @@ final class ReservationRepository extends AbstractRepository
     {
         return ['pending', 'pending_payment'];
     }
-
     /**
      * @param array<string, mixed> $reservationData
      * @return array<int, string>
@@ -2489,24 +2286,19 @@ final class ReservationRepository extends AbstractRepository
         $integerFields = ['room_id', 'room_type_id', 'assigned_room_id', 'rate_plan_id', 'guest_id', 'guests', 'coupon_id'];
         $floatFields = ['total_price', 'coupon_discount_total'];
         $formats = [];
-
         foreach (\array_keys($reservationData) as $field) {
             if (\in_array($field, $integerFields, true)) {
                 $formats[] = '%d';
                 continue;
             }
-
             if (\in_array($field, $floatFields, true)) {
                 $formats[] = '%f';
                 continue;
             }
-
             $formats[] = '%s';
         }
-
         return $formats;
     }
-
     private function getConfirmationRowsQuery(string $whereSql): string
     {
         return 'SELECT
