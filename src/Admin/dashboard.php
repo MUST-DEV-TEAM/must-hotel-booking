@@ -7,6 +7,9 @@ use MustHotelBooking\Core\StaffAccess;
 if (!\function_exists(__NAMESPACE__ . '\render_admin_rooms_page')) {
     require_once __DIR__ . '/rooms.php';
 }
+if (!\function_exists(__NAMESPACE__ . '\render_admin_provider_logs_page')) {
+    require_once __DIR__ . '/provider-logs.php';
+}
 
 /**
  * Get capability required for plugin admin pages.
@@ -94,6 +97,12 @@ function get_admin_menu_pages(): array
             'slug' => 'must-hotel-booking-reservations',
             'callback' => __NAMESPACE__ . '\render_admin_reservations_page',
         ],
+        [
+    'title' => 'Provider Logs',
+    'menu_title' => 'Provider Logs',
+    'slug' => 'must-hotel-booking-provider-logs',
+    'callback' => __NAMESPACE__ . '\render_admin_provider_logs_page',
+],
         [
             'title' => 'Calendar',
             'menu_title' => 'Calendar',
