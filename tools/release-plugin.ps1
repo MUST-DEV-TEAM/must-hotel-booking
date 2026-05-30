@@ -140,10 +140,21 @@ git status --short
 Write-Host ""
 $confirm = Read-Host "Type RELEASE to commit, push, tag, and publish GitHub release"
 
-if ($confirm -ne "RELEASE") {
-    Fail "Release cancelled."
-}
+$normalizedConfirm = [string]$confirm
+$normalizedConfirm = $normalizedConfirm.Trim().ToUpperInvariant()
 
+$acceptedConfirmations = @(
+    "RELEASE",
+    "RELESE",
+    "REESE",
+    "RELASE",
+    "YES",
+    "Y"
+)
+
+if ($acceptedConfirmations -notcontains $normalizedConfirm) {
+    Fail "Release cancelled. Accepted confirmations: RELEASE, RELESE, REESE, YES, Y."
+}
 $releaseNotesFile = New-TemporaryFile
 
 $releaseNotes = @()

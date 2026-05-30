@@ -53,6 +53,9 @@ final class ClockApiClient
             'subscription_id_set' => ClockConfig::subscriptionId() !== '',
             'account_id_set' => ClockConfig::accountId() !== '',
         ];
+        if (isset($options['body'])) {
+    $requestSummary['body'] = $this->redact($options['body']);
+}
         $logId = $this->logs->create([
             'provider' => ProviderManager::CLOCK_MODE,
             'operation' => $operation,

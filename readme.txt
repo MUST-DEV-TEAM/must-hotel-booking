@@ -4,7 +4,7 @@ Tags: hotel, booking, reservation, accommodation
 Requires at least: 5.0
 Tested up to: 6.0
 Requires PHP: 7.4
-Stable tag: 0.4.20
+Stable tag: 0.4.21
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -31,6 +31,12 @@ Main features include:
 5. When updating, upload the new release ZIP or use the configured updater, then review **Diagnostics & Maintenance** after the update completes.
 
 == Changelog ==
+
+= 0.4.21 =
+* Fixed Clock reservation creation to use the quoted Clock rate ID
+* Fixed Clock guest search parameter
+* Hid raw Clock booking errors from public checkout while keeping the real provider error in Provider Logs
+* Added sanitized request body logging for Clock API requests
 
 = 0.4.20 =
 * Added Provider Logs admin page for Clock API debugging
