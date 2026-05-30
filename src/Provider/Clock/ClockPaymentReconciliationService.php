@@ -1,28 +1,20 @@
 <?php
-
 namespace MustHotelBooking\Provider\Clock;
-
 use MustHotelBooking\Provider\ProviderManager;
 use MustHotelBooking\Provider\Storage\ProviderRequestLogRepository;
 use MustHotelBooking\Provider\Storage\ProviderSyncJobRepository;
-
 final class ClockPaymentReconciliationService
 {
     /** @var ClockApiClient */
     private $client;
-
     /** @var ProviderSyncJobRepository */
     private $syncJobs;
-
     /** @var ProviderRequestLogRepository */
     private $requestLogs;
-
     /** @var ClockCatalogService */
     private $catalog;
-
     /** @var ClockQuoteProvider */
     private $quote;
-
     public function __construct(
         ?ClockApiClient $client = null,
         ?ProviderSyncJobRepository $syncJobs = null,
@@ -36,14 +28,12 @@ final class ClockPaymentReconciliationService
         $this->catalog = $catalog ?: new ClockCatalogService($this->client);
         $this->quote = $quote ?: new ClockQuoteProvider($this->client, $this->catalog);
     }
-
     /** @param array<int, int> $reservationIds */
     public function reconcilePaymentSucceeded(array $reservationIds, string $paymentMethod = 'stripe', string $transactionId = ''): void
     {
         if (!$this->directReservationUpdateSupported()) {
             return;
         }
-
         foreach ($this->clockReservationRows($reservationIds) as $row) {
             $this->reconcileRow($row, [
                 'operation' => 'payment_succeeded',
@@ -60,20 +50,16 @@ final class ClockPaymentReconciliationService
             ]);
         }
     }
-
     /** @param array<int, int> $reservationIds */
     public function reconcilePaymentFailed(array $reservationIds, string $reason = 'payment_failed', string $paymentMethod = 'stripe'): void
     {
         if (!$this->directReservationUpdateSupported()) {
             return;
         }
-
         $reason = \sanitize_key($reason);
-
         if (!\in_array($reason, ['payment_failed', 'expired', 'cancelled'], true)) {
             $reason = 'payment_failed';
         }
-
         foreach ($this->clockReservationRows($reservationIds) as $row) {
             $this->reconcileRow($row, [
                 'operation' => $reason,
@@ -90,7 +76,6 @@ final class ClockPaymentReconciliationService
             ]);
         }
     }
-
     /**
      * @return array{success: bool, queued: bool, message: string}
      */
@@ -99,10 +84,8 @@ final class ClockPaymentReconciliationService
         if (!$this->directReservationUpdateSupported()) {
             return $this->unsupportedActionResult();
         }
-
         $rows = $this->clockReservationRows([$reservationId]);
         $row = isset($rows[0]) && \is_array($rows[0]) ? $rows[0] : [];
-
         if (empty($row)) {
             return [
                 'success' => false,
@@ -110,9 +93,7 @@ final class ClockPaymentReconciliationService
                 'message' => \__('Reservation is not a Clock mirror reservation.', 'must-hotel-booking'),
             ];
         }
-
         $currentStatus = \sanitize_key((string) ($row['status'] ?? ''));
-
         if (\in_array($currentStatus, ['cancelled', 'blocked', 'completed'], true)) {
             return [
                 'success' => false,
@@ -120,17 +101,13 @@ final class ClockPaymentReconciliationService
                 'message' => \__('Reservation cannot be cancelled from its current state.', 'must-hotel-booking'),
             ];
         }
-
         $targetProviderPaymentStatus = (string) ($row['provider_payment_status'] ?? '');
-
         if ($targetProviderPaymentStatus === '') {
             $targetProviderPaymentStatus = (string) ($row['payment_status'] ?? '');
         }
-
         if ($targetProviderPaymentStatus === '') {
             $targetProviderPaymentStatus = 'unpaid';
         }
-
         return $this->reconcileRow($row, [
             'operation' => \sanitize_key($reason) !== '' ? \sanitize_key($reason) : 'admin_cancelled',
             'target_provider_status' => 'cancelled',
@@ -150,7 +127,6 @@ final class ClockPaymentReconciliationService
             'missing_endpoint_message' => \__('Clock reservation cancel endpoint is not configured; provider cancellation was queued for later reconciliation.', 'must-hotel-booking'),
         ]);
     }
-
     /**
      * @return array{success: bool, queued: bool, message: string}
      */
@@ -159,10 +135,8 @@ final class ClockPaymentReconciliationService
         if (!$this->directReservationUpdateSupported()) {
             return $this->unsupportedActionResult();
         }
-
         $rows = $this->clockReservationRows([$reservationId]);
         $row = isset($rows[0]) && \is_array($rows[0]) ? $rows[0] : [];
-
         if (empty($row)) {
             return [
                 'success' => false,
@@ -170,10 +144,8 @@ final class ClockPaymentReconciliationService
                 'message' => \__('Reservation is not a Clock mirror reservation.', 'must-hotel-booking'),
             ];
         }
-
         $status = \sanitize_key((string) ($row['status'] ?? ''));
         $checkedInAt = \trim((string) ($row['checked_in_at'] ?? ''));
-
         if (!\in_array($status, ['confirmed', 'pending', 'pending_payment'], true)) {
             return [
                 'success' => false,
@@ -181,7 +153,6 @@ final class ClockPaymentReconciliationService
                 'message' => \__('Reservation cannot be checked in from its current state.', 'must-hotel-booking'),
             ];
         }
-
         if ($checkedInAt !== '' && $checkedInAt !== '0000-00-00 00:00:00') {
             return [
                 'success' => true,
@@ -189,7 +160,6 @@ final class ClockPaymentReconciliationService
                 'message' => \__('Reservation is already checked in.', 'must-hotel-booking'),
             ];
         }
-
         return $this->reconcileRow($row, $this->operationalAction(
             'checkin',
             'checked_in',
@@ -199,7 +169,6 @@ final class ClockPaymentReconciliationService
             $this->operationalPaymentStatus($row)
         ));
     }
-
     /**
      * @return array{success: bool, queued: bool, message: string}
      */
@@ -208,10 +177,8 @@ final class ClockPaymentReconciliationService
         if (!$this->directReservationUpdateSupported()) {
             return $this->unsupportedActionResult();
         }
-
         $rows = $this->clockReservationRows([$reservationId]);
         $row = isset($rows[0]) && \is_array($rows[0]) ? $rows[0] : [];
-
         if (empty($row)) {
             return [
                 'success' => false,
@@ -219,11 +186,9 @@ final class ClockPaymentReconciliationService
                 'message' => \__('Reservation is not a Clock mirror reservation.', 'must-hotel-booking'),
             ];
         }
-
         $status = \sanitize_key((string) ($row['status'] ?? ''));
         $checkedInAt = \trim((string) ($row['checked_in_at'] ?? ''));
         $checkedOutAt = \trim((string) ($row['checked_out_at'] ?? ''));
-
         if ($status !== 'confirmed') {
             return [
                 'success' => false,
@@ -231,7 +196,6 @@ final class ClockPaymentReconciliationService
                 'message' => \__('Reservation cannot be checked out from its current state.', 'must-hotel-booking'),
             ];
         }
-
         if ($checkedInAt === '' || $checkedInAt === '0000-00-00 00:00:00') {
             return [
                 'success' => false,
@@ -239,7 +203,6 @@ final class ClockPaymentReconciliationService
                 'message' => \__('Reservation must be checked in before check-out.', 'must-hotel-booking'),
             ];
         }
-
         if ($checkedOutAt !== '' && $checkedOutAt !== '0000-00-00 00:00:00') {
             return [
                 'success' => true,
@@ -247,7 +210,6 @@ final class ClockPaymentReconciliationService
                 'message' => \__('Reservation is already checked out.', 'must-hotel-booking'),
             ];
         }
-
         return $this->reconcileRow($row, $this->operationalAction(
             'checkout',
             'checked_out',
@@ -257,7 +219,6 @@ final class ClockPaymentReconciliationService
             $this->operationalPaymentStatus($row)
         ));
     }
-
     /**
      * @return array{success: bool, queued: bool, message: string}
      */
@@ -266,9 +227,7 @@ final class ClockPaymentReconciliationService
         if (!$this->directReservationUpdateSupported()) {
             return $this->unsupportedActionResult();
         }
-
         $row = \MustHotelBooking\Engine\get_reservation_repository()->getReservation($reservationId);
-
         if (!\is_array($row) || (string) ($row['provider'] ?? '') !== ProviderManager::CLOCK_MODE) {
             return [
                 'success' => false,
@@ -276,7 +235,6 @@ final class ClockPaymentReconciliationService
                 'message' => \__('Reservation is not a Clock mirror reservation.', 'must-hotel-booking'),
             ];
         }
-
         if ($targetRoomId <= 0) {
             return [
                 'success' => false,
@@ -284,10 +242,8 @@ final class ClockPaymentReconciliationService
                 'message' => \__('Clock room assignment requires a mapped target room.', 'must-hotel-booking'),
             ];
         }
-
         $status = \sanitize_key((string) ($row['status'] ?? ''));
         $checkedOutAt = \trim((string) ($row['checked_out_at'] ?? ''));
-
         if (\in_array($status, ['cancelled', 'completed', 'blocked'], true) || ($checkedOutAt !== '' && $checkedOutAt !== '0000-00-00 00:00:00')) {
             return [
                 'success' => false,
@@ -295,11 +251,9 @@ final class ClockPaymentReconciliationService
                 'message' => \__('Reservation cannot be assigned or moved from its current state.', 'must-hotel-booking'),
             ];
         }
-
         $roomTypeId = isset($row['room_type_id']) ? (int) $row['room_type_id'] : (int) ($row['room_id'] ?? 0);
         $inventoryRepository = \MustHotelBooking\Engine\get_inventory_repository();
         $targetRoom = $inventoryRepository->getInventoryRoomById($targetRoomId);
-
         if (!\is_array($targetRoom)) {
             return [
                 'success' => false,
@@ -307,9 +261,7 @@ final class ClockPaymentReconciliationService
                 'message' => \__('Target room was not found.', 'must-hotel-booking'),
             ];
         }
-
         $targetRoomTypeId = isset($targetRoom['room_type_id']) ? (int) $targetRoom['room_type_id'] : 0;
-
         if ($roomTypeId > 0 && $targetRoomTypeId > 0 && $targetRoomTypeId !== $roomTypeId) {
             return [
                 'success' => false,
@@ -317,9 +269,7 @@ final class ClockPaymentReconciliationService
                 'message' => \__('Target room does not match the reservation accommodation.', 'must-hotel-booking'),
             ];
         }
-
         $mapping = $this->catalog->findPhysicalRoomMapping($targetRoomId);
-
         if (!$this->hasExternalId($mapping)) {
             return [
                 'success' => false,
@@ -327,7 +277,6 @@ final class ClockPaymentReconciliationService
                 'message' => \__('Clock physical room mapping is missing for the selected room.', 'must-hotel-booking'),
             ];
         }
-
         if (!$this->isRoomAvailableForReservation($row, $targetRoomId, $roomTypeId)) {
             return [
                 'success' => false,
@@ -335,7 +284,6 @@ final class ClockPaymentReconciliationService
                 'message' => \__('Target room is not available for this reservation window.', 'must-hotel-booking'),
             ];
         }
-
         return $this->reconcileRow($row, $this->roomAssignmentAction(
             $row,
             $targetRoom,
@@ -343,7 +291,6 @@ final class ClockPaymentReconciliationService
             $source
         ));
     }
-
     /**
      * @return array{success: bool, queued: bool, message: string}
      */
@@ -352,9 +299,7 @@ final class ClockPaymentReconciliationService
         if (!$this->directReservationUpdateSupported()) {
             return $this->unsupportedActionResult();
         }
-
         $row = \MustHotelBooking\Engine\get_reservation_repository()->getReservation($reservationId);
-
         if (!\is_array($row) || (string) ($row['provider'] ?? '') !== ProviderManager::CLOCK_MODE) {
             return [
                 'success' => false,
@@ -362,10 +307,8 @@ final class ClockPaymentReconciliationService
                 'message' => \__('Reservation is not a Clock mirror reservation.', 'must-hotel-booking'),
             ];
         }
-
         $checkin = \sanitize_text_field($checkin);
         $checkout = \sanitize_text_field($checkout);
-
         if (
             !\MustHotelBooking\Engine\AvailabilityEngine::isValidBookingDate($checkin)
             || !\MustHotelBooking\Engine\AvailabilityEngine::isValidBookingDate($checkout)
@@ -377,11 +320,9 @@ final class ClockPaymentReconciliationService
                 'message' => \__('Enter valid stay dates.', 'must-hotel-booking'),
             ];
         }
-
         $status = \sanitize_key((string) ($row['status'] ?? ''));
         $checkedInAt = \trim((string) ($row['checked_in_at'] ?? ''));
         $checkedOutAt = \trim((string) ($row['checked_out_at'] ?? ''));
-
         if (\in_array($status, ['cancelled', 'completed', 'blocked', 'expired', 'payment_failed'], true) || ($checkedOutAt !== '' && $checkedOutAt !== '0000-00-00 00:00:00')) {
             return [
                 'success' => false,
@@ -389,7 +330,6 @@ final class ClockPaymentReconciliationService
                 'message' => \__('Reservation cannot be edited from its current state.', 'must-hotel-booking'),
             ];
         }
-
         if (
             $checkedInAt !== ''
             && $checkedInAt !== '0000-00-00 00:00:00'
@@ -401,7 +341,6 @@ final class ClockPaymentReconciliationService
                 'message' => \__('Check-in date cannot be changed after the guest has already checked in.', 'must-hotel-booking'),
             ];
         }
-
         if ($checkin === (string) ($row['checkin'] ?? '') && $checkout === (string) ($row['checkout'] ?? '')) {
             return [
                 'success' => true,
@@ -409,9 +348,7 @@ final class ClockPaymentReconciliationService
                 'message' => \__('Stay dates are already up to date.', 'must-hotel-booking'),
             ];
         }
-
         $roomTypeId = isset($row['room_type_id']) ? (int) $row['room_type_id'] : (int) ($row['room_id'] ?? 0);
-
         if ($roomTypeId <= 0) {
             return [
                 'success' => false,
@@ -419,7 +356,6 @@ final class ClockPaymentReconciliationService
                 'message' => \__('Reservation is missing its accommodation context.', 'must-hotel-booking'),
             ];
         }
-
         if (!\MustHotelBooking\Engine\AvailabilityEngine::checkBookingRestrictions($roomTypeId, $checkin, $checkout)) {
             return [
                 'success' => false,
@@ -427,9 +363,7 @@ final class ClockPaymentReconciliationService
                 'message' => \__('The selected stay dates are blocked by current booking rules for this accommodation.', 'must-hotel-booking'),
             ];
         }
-
         $availabilityError = $this->stayAvailabilityError($row, $roomTypeId, $checkin, $checkout);
-
         if ($availabilityError !== '') {
             return [
                 'success' => false,
@@ -437,7 +371,6 @@ final class ClockPaymentReconciliationService
                 'message' => $availabilityError,
             ];
         }
-
         return $this->reconcileRow($row, $this->stayUpdateAction(
             $row,
             $checkin,
@@ -445,7 +378,6 @@ final class ClockPaymentReconciliationService
             $source
         ));
     }
-
     /**
      * @param array<string, mixed> $guestData
      * @return array{success: bool, queued: bool, message: string}
@@ -455,9 +387,7 @@ final class ClockPaymentReconciliationService
         if (!$this->directReservationUpdateSupported()) {
             return $this->unsupportedActionResult();
         }
-
         $row = \MustHotelBooking\Engine\get_reservation_repository()->getAdminReservationDetails($reservationId);
-
         if (!\is_array($row) || (string) ($row['provider'] ?? '') !== ProviderManager::CLOCK_MODE) {
             return [
                 'success' => false,
@@ -465,9 +395,7 @@ final class ClockPaymentReconciliationService
                 'message' => \__('Reservation is not a Clock mirror reservation.', 'must-hotel-booking'),
             ];
         }
-
         $status = \sanitize_key((string) ($row['status'] ?? ''));
-
         if (\in_array($status, ['cancelled', 'completed', 'blocked', 'expired', 'payment_failed'], true)) {
             return [
                 'success' => false,
@@ -475,9 +403,7 @@ final class ClockPaymentReconciliationService
                 'message' => \__('Reservation guest details cannot be edited from its current state.', 'must-hotel-booking'),
             ];
         }
-
         $guest = $this->sanitizeGuestUpdate($guestData);
-
         if ((string) ($guest['email'] ?? '') !== '' && !\is_email((string) $guest['email'])) {
             return [
                 'success' => false,
@@ -485,7 +411,6 @@ final class ClockPaymentReconciliationService
                 'message' => \__('Please enter a valid guest email address.', 'must-hotel-booking'),
             ];
         }
-
         if ($this->guestDetailsMatch($row, $guest)) {
             return [
                 'success' => true,
@@ -493,10 +418,8 @@ final class ClockPaymentReconciliationService
                 'message' => \__('Guest details are already up to date.', 'must-hotel-booking'),
             ];
         }
-
         return $this->reconcileRow($row, $this->guestUpdateAction($row, $guest, $source));
     }
-
     /**
      * @param array<string, mixed> $job
      * @return array{success: bool, retry: bool, message: string}
@@ -510,17 +433,13 @@ final class ClockPaymentReconciliationService
                 'message' => \__('Direct Clock API reservation sync/update adapters are not implemented yet.', 'must-hotel-booking'),
             ];
         }
-
         $operation = isset($job['operation']) ? \sanitize_key((string) $job['operation']) : '';
         $reservationId = isset($job['target_local_id']) ? (int) $job['target_local_id'] : 0;
         $payload = $this->decodePayload($job['payload'] ?? null);
-
         if ($operation === 'reservation_pricing_refresh') {
             return $this->executePricingRefreshJob($job, $payload);
         }
-
         $action = $this->actionForSyncJob($operation, $payload);
-
         if (empty($action)) {
             return [
                 'success' => false,
@@ -528,7 +447,6 @@ final class ClockPaymentReconciliationService
                 'message' => \__('Unsupported Clock sync job operation.', 'must-hotel-booking'),
             ];
         }
-
         if ($reservationId <= 0) {
             return [
                 'success' => false,
@@ -536,10 +454,8 @@ final class ClockPaymentReconciliationService
                 'message' => \__('Clock sync job is missing a local reservation ID.', 'must-hotel-booking'),
             ];
         }
-
         $rows = \MustHotelBooking\Engine\get_reservation_repository()->getProviderReservationRowsByIds([$reservationId]);
         $row = isset($rows[0]) && \is_array($rows[0]) ? $rows[0] : [];
-
         if (empty($row) || (string) ($row['provider'] ?? '') !== ProviderManager::CLOCK_MODE) {
             return [
                 'success' => false,
@@ -547,9 +463,7 @@ final class ClockPaymentReconciliationService
                 'message' => \__('Clock sync job target reservation is not a Clock mirror reservation.', 'must-hotel-booking'),
             ];
         }
-
         $externalId = $this->externalId($row);
-
         if ($externalId === '') {
             return [
                 'success' => false,
@@ -557,14 +471,12 @@ final class ClockPaymentReconciliationService
                 'message' => \__('Clock sync job target reservation has no provider identifier.', 'must-hotel-booking'),
             ];
         }
-
         $targetProviderStatus = (string) ($action['target_provider_status'] ?? '');
         $targetProviderPaymentStatus = (string) ($action['target_provider_payment_status'] ?? '');
         $idempotencyContext = (string) ($action['idempotency_context'] ?? '');
         $idempotencyKey = isset($payload['idempotency_key']) && \is_scalar($payload['idempotency_key'])
             ? \sanitize_text_field((string) $payload['idempotency_key'])
             : $this->idempotencyKey($reservationId, $externalId, $targetProviderStatus, $targetProviderPaymentStatus, $idempotencyContext);
-
         if ($this->isSupersededSyncJob($row, $action, $idempotencyKey)) {
             return [
                 'success' => true,
@@ -572,7 +484,6 @@ final class ClockPaymentReconciliationService
                 'message' => \__('Clock sync job was superseded by a newer provider operation request.', 'must-hotel-booking'),
             ];
         }
-
         if ($this->isAlreadyReconciled($row, $action, $idempotencyKey)) {
             return [
                 'success' => true,
@@ -580,69 +491,61 @@ final class ClockPaymentReconciliationService
                 'message' => \__('Clock sync job was already reconciled.', 'must-hotel-booking'),
             ];
         }
-
         $path = (string) ($action['endpoint_path'] ?? '');
         $payload = $this->ensurePayload($payload, $row, $action, $idempotencyKey);
-
         if ($path === '') {
             $message = \__('Clock reconciliation endpoint is not configured.', 'must-hotel-booking');
             $this->recordSkippedLog($row, $action, $idempotencyKey);
             $this->updateMetadata($reservationId, $row, $action, $idempotencyKey, false, 'pending_retry', $message);
-
             return [
                 'success' => false,
                 'retry' => true,
                 'message' => $message,
             ];
         }
-
-        $resolvedPath = $this->applyPathTokens($path, $row, $action);
-
+        $endpoint = $this->endpointMethodAndPath($path);
+        $resolvedPath = $this->applyPathTokens($endpoint['path'], $row, $action);
         if ($resolvedPath === '') {
             $message = \__('Clock reconciliation endpoint path contains an unresolved token; the reservation may be missing a required provider identifier.', 'must-hotel-booking');
             $this->updateMetadata($reservationId, $row, $action, $idempotencyKey, false, 'pending_retry', $message);
-
             return [
                 'success' => false,
                 'retry' => false,
                 'message' => $message,
             ];
         }
-
+        $responseOptions = [
+            'idempotency_key' => $idempotencyKey,
+            'reservation_id' => $reservationId,
+            'external_id' => $externalId,
+        ];
+        if (!\in_array($endpoint['method'], ['GET', 'DELETE'], true)) {
+            $responseOptions['body'] = $payload;
+        }
         $response = $this->client->request(
-            'POST',
+            $endpoint['method'],
             $resolvedPath,
-            [
-                'body' => $payload,
-                'idempotency_key' => $idempotencyKey,
-                'reservation_id' => $reservationId,
-                'external_id' => $externalId,
-            ],
+            $responseOptions,
             (string) ($action['request_operation'] ?? 'clock.reservation_status')
         );
-
         if (!$response->isSuccess()) {
             $message = $response->getErrorMessage() !== '' ? $response->getErrorMessage() : \__('Clock reconciliation request failed.', 'must-hotel-booking');
             $this->updateMetadata($reservationId, $row, $action, $idempotencyKey, false, 'pending_retry', $message);
-
             return [
                 'success' => false,
                 'retry' => true,
                 'message' => $message,
             ];
         }
-
         $providerState = $this->providerState($response->getData());
         $this->updateMetadata($reservationId, $row, $action, $idempotencyKey, true, 'synced', '', $providerState);
         $pricingResult = $this->refreshPricingAfterStayUpdate($reservationId, $row, $action, $idempotencyKey, true);
-
         return [
             'success' => true,
             'retry' => false,
             'message' => !empty($pricingResult['pricing_pending']) ? (string) ($pricingResult['message'] ?? '') : '',
         ];
     }
-
     /**
      * @param array<string, mixed> $row
      * @param array<string, mixed> $action
@@ -652,7 +555,6 @@ final class ClockPaymentReconciliationService
     {
         $reservationId = isset($row['id']) ? (int) $row['id'] : 0;
         $externalId = $this->externalId($row);
-
         if ($reservationId <= 0 || $externalId === '') {
             return [
                 'success' => false,
@@ -660,7 +562,6 @@ final class ClockPaymentReconciliationService
                 'message' => \__('Clock reservation is missing a local or provider identifier.', 'must-hotel-booking'),
             ];
         }
-
         $targetProviderStatus = (string) ($action['target_provider_status'] ?? '');
         $targetProviderPaymentStatus = (string) ($action['target_provider_payment_status'] ?? '');
         $idempotencyKey = $this->idempotencyKey(
@@ -670,7 +571,6 @@ final class ClockPaymentReconciliationService
             $targetProviderPaymentStatus,
             (string) ($action['idempotency_context'] ?? '')
         );
-
         if ($this->isAlreadyReconciled($row, $action, $idempotencyKey)) {
             return [
                 'success' => true,
@@ -678,66 +578,58 @@ final class ClockPaymentReconciliationService
                 'message' => \__('Clock reservation was already reconciled.', 'must-hotel-booking'),
             ];
         }
-
         $path = (string) ($action['endpoint_path'] ?? '');
         $payload = $this->payload($row, $action, $idempotencyKey);
-
         if ($path === '') {
             $this->recordSkippedLog($row, $action, $idempotencyKey);
             $this->updateMetadata($reservationId, $row, $action, $idempotencyKey, false, (string) $action['missing_endpoint_status'], (string) $action['missing_endpoint_message']);
-
             if (!empty($action['missing_endpoint_retry'])) {
                 $this->enqueueRetry($row, $action, $payload, (string) $action['missing_endpoint_message']);
             }
-
             return [
                 'success' => false,
                 'queued' => !empty($action['missing_endpoint_retry']),
                 'message' => (string) $action['missing_endpoint_message'],
             ];
         }
-
-        $resolvedPath = $this->applyPathTokens($path, $row, $action);
-
+        $endpoint = $this->endpointMethodAndPath($path);
+        $resolvedPath = $this->applyPathTokens($endpoint['path'], $row, $action);
         if ($resolvedPath === '') {
             $message = \__('Clock reconciliation endpoint path contains an unresolved token; the reservation may be missing a required provider identifier.', 'must-hotel-booking');
             $this->updateMetadata($reservationId, $row, $action, $idempotencyKey, false, 'pending_retry', $message);
-
             return [
                 'success' => false,
                 'queued' => false,
                 'message' => $message,
             ];
         }
-
+        $responseOptions = [
+            'idempotency_key' => $idempotencyKey,
+            'reservation_id' => $reservationId,
+            'external_id' => $externalId,
+        ];
+        if (!\in_array($endpoint['method'], ['GET', 'DELETE'], true)) {
+            $responseOptions['body'] = $payload;
+        }
         $response = $this->client->request(
-            'POST',
+            $endpoint['method'],
             $resolvedPath,
-            [
-                'body' => $payload,
-                'idempotency_key' => $idempotencyKey,
-                'reservation_id' => $reservationId,
-                'external_id' => $externalId,
-            ],
+            $responseOptions,
             (string) ($action['request_operation'] ?? 'clock.reservation_status')
         );
-
         if (!$response->isSuccess()) {
             $message = $response->getErrorMessage() !== '' ? $response->getErrorMessage() : \__('Clock reconciliation request failed.', 'must-hotel-booking');
             $this->updateMetadata($reservationId, $row, $action, $idempotencyKey, false, 'pending_retry', $message);
             $this->enqueueRetry($row, $action, $payload, $message);
-
             return [
                 'success' => false,
                 'queued' => true,
                 'message' => $message,
             ];
         }
-
         $providerState = $this->providerState($response->getData());
         $this->updateMetadata($reservationId, $row, $action, $idempotencyKey, true, 'synced', '', $providerState);
         $pricingResult = $this->refreshPricingAfterStayUpdate($reservationId, $row, $action, $idempotencyKey, true);
-
         return [
             'success' => true,
             'queued' => !empty($pricingResult['queued']),
@@ -745,7 +637,6 @@ final class ClockPaymentReconciliationService
             'pricing_pending' => !empty($pricingResult['pricing_pending']),
         ];
     }
-
     /**
      * @param array<string, mixed> $job
      * @param array<string, mixed> $payload
@@ -754,7 +645,6 @@ final class ClockPaymentReconciliationService
     private function executePricingRefreshJob(array $job, array $payload): array
     {
         $reservationId = isset($job['target_local_id']) ? (int) $job['target_local_id'] : 0;
-
         if ($reservationId <= 0) {
             return [
                 'success' => false,
@@ -762,9 +652,7 @@ final class ClockPaymentReconciliationService
                 'message' => \__('Clock pricing refresh job is missing a local reservation ID.', 'must-hotel-booking'),
             ];
         }
-
         $row = \MustHotelBooking\Engine\get_reservation_repository()->getReservation($reservationId);
-
         if (!\is_array($row) || (string) ($row['provider'] ?? '') !== ProviderManager::CLOCK_MODE) {
             return [
                 'success' => false,
@@ -772,10 +660,8 @@ final class ClockPaymentReconciliationService
                 'message' => \__('Clock pricing refresh job target is not a Clock mirror reservation.', 'must-hotel-booking'),
             ];
         }
-
         $checkin = $this->payloadString($payload, 'local_target_checkin', (string) ($row['checkin'] ?? ''));
         $checkout = $this->payloadString($payload, 'local_target_checkout', (string) ($row['checkout'] ?? ''));
-
         if ($checkin !== (string) ($row['checkin'] ?? '') || $checkout !== (string) ($row['checkout'] ?? '')) {
             return [
                 'success' => true,
@@ -783,17 +669,14 @@ final class ClockPaymentReconciliationService
                 'message' => \__('Clock pricing refresh job was superseded by newer mirror dates.', 'must-hotel-booking'),
             ];
         }
-
         $idempotencyKey = $this->payloadString($payload, 'idempotency_key', $this->pricingIdempotencyKey($row, $checkin, $checkout));
         $result = $this->refreshPricingForRow($row, $checkin, $checkout, $idempotencyKey, false);
-
         return [
             'success' => !empty($result['success']),
             'retry' => empty($result['success']),
             'message' => (string) ($result['message'] ?? ''),
         ];
     }
-
     /**
      * @param array<string, mixed> $row
      * @param array<string, mixed> $action
@@ -809,20 +692,15 @@ final class ClockPaymentReconciliationService
                 'pricing_pending' => false,
             ];
         }
-
         $latestRow = \MustHotelBooking\Engine\get_reservation_repository()->getReservation($reservationId);
-
         if (!\is_array($latestRow)) {
             $latestRow = $row;
         }
-
         $checkin = (string) ($action['target_local_checkin'] ?? (string) ($latestRow['checkin'] ?? ''));
         $checkout = (string) ($action['target_local_checkout'] ?? (string) ($latestRow['checkout'] ?? ''));
         $pricingIdempotencyKey = $this->pricingIdempotencyKey($latestRow, $checkin, $checkout, $parentIdempotencyKey);
-
         return $this->refreshPricingForRow($latestRow, $checkin, $checkout, $pricingIdempotencyKey, $enqueueOnFailure);
     }
-
     /**
      * @param array<string, mixed> $row
      * @return array{success: bool, queued: bool, message: string, pricing_pending: bool}
@@ -830,7 +708,6 @@ final class ClockPaymentReconciliationService
     private function refreshPricingForRow(array $row, string $checkin, string $checkout, string $idempotencyKey, bool $enqueueOnFailure): array
     {
         $reservationId = isset($row['id']) ? (int) $row['id'] : 0;
-
         if ($reservationId <= 0 || $checkin === '' || $checkout === '') {
             return [
                 'success' => false,
@@ -839,7 +716,6 @@ final class ClockPaymentReconciliationService
                 'pricing_pending' => true,
             ];
         }
-
         if ($this->isPricingAlreadyReconciled($row, $checkin, $checkout, $idempotencyKey)) {
             return [
                 'success' => true,
@@ -848,14 +724,11 @@ final class ClockPaymentReconciliationService
                 'pricing_pending' => false,
             ];
         }
-
         $pricing = $this->fetchPricingQuote($row, $checkin, $checkout);
-
         if (empty($pricing['success'])) {
             $message = (string) ($pricing['message'] ?? \__('Clock pricing refresh failed.', 'must-hotel-booking'));
             $this->updatePricingMetadata($reservationId, $row, $checkin, $checkout, [], $idempotencyKey, false, 'pending_retry', $message);
             $queued = $enqueueOnFailure && $this->enqueuePricingRetry($row, $checkin, $checkout, $idempotencyKey, $message) > 0;
-
             return [
                 'success' => false,
                 'queued' => $queued,
@@ -865,9 +738,7 @@ final class ClockPaymentReconciliationService
                 'pricing_pending' => true,
             ];
         }
-
         $this->updatePricingMetadata($reservationId, $row, $checkin, $checkout, $pricing, $idempotencyKey, true, 'synced', '');
-
         return [
             'success' => true,
             'queued' => false,
@@ -875,7 +746,6 @@ final class ClockPaymentReconciliationService
             'pricing_pending' => false,
         ];
     }
-
     /**
      * @param array<string, mixed> $row
      * @return array<string, mixed>
@@ -886,35 +756,28 @@ final class ClockPaymentReconciliationService
         $guests = isset($row['guests']) ? \max(1, (int) $row['guests']) : 1;
         $ratePlanId = isset($row['rate_plan_id']) ? (int) $row['rate_plan_id'] : 0;
         $couponCode = isset($row['coupon_code']) ? (string) $row['coupon_code'] : '';
-
         if ($roomId <= 0) {
             return [
                 'success' => false,
                 'message' => \__('Clock pricing refresh is missing the local accommodation.', 'must-hotel-booking'),
             ];
         }
-
         if (ClockConfig::quotePath() === '') {
             return [
                 'success' => false,
                 'message' => \__('Clock quote endpoint is not configured; pricing refresh was queued for later reconciliation.', 'must-hotel-booking'),
             ];
         }
-
         $pricing = $this->quote->calculateTotal($roomId, $checkin, $checkout, $guests, $couponCode, $ratePlanId);
-
         if (empty($pricing['success']) || !isset($pricing['total_price'])) {
             return [
                 'success' => false,
                 'message' => (string) ($pricing['message'] ?? \__('Clock quote response did not include usable pricing.', 'must-hotel-booking')),
             ];
         }
-
         $pricing['pricing_source'] = 'clock_quote';
-
         return $pricing;
     }
-
     /**
      * @param array<string, mixed> $row
      * @param array<string, mixed> $pricing
@@ -929,7 +792,6 @@ final class ClockPaymentReconciliationService
         $providerPaymentStatus = $success
             ? (string) ($pricing['provider_payment_status'] ?? (string) ($row['provider_payment_status'] ?? ''))
             : (string) ($row['provider_payment_status'] ?? '');
-
         $metadata['last_provider_pricing_refresh'] = [
             'idempotency_key' => $idempotencyKey,
             'success' => $success,
@@ -949,11 +811,9 @@ final class ClockPaymentReconciliationService
             'synced_at' => $this->now(),
         ];
         $metadata['pricing_reconciliation_required'] = !$success;
-
         if ($success && isset($pricing['provider_pricing']) && \is_array($pricing['provider_pricing'])) {
             $metadata['last_provider_pricing_refresh']['provider_pricing'] = $pricing['provider_pricing'];
         }
-
         $metadataUpdates = [
             'provider_payment_status' => $providerPaymentStatus,
             'provider_sync_status' => $syncStatus,
@@ -961,35 +821,27 @@ final class ClockPaymentReconciliationService
             'provider_sync_error' => $syncError,
             'provider_metadata' => $metadata,
         ];
-
         \MustHotelBooking\Engine\get_reservation_repository()->updateProviderMetadata($reservationId, $metadataUpdates);
-
         if (!$success) {
             return;
         }
-
         $updates = [
             'total_price' => $totalPrice,
         ];
-
         if (isset($pricing['discount_total'])) {
             $updates['coupon_discount_total'] = \max(0.0, \round((float) $pricing['discount_total'], 2));
         }
-
         if (isset($pricing['applied_coupon']) && \is_scalar($pricing['applied_coupon']) && \trim((string) $pricing['applied_coupon']) !== '') {
             $updates['coupon_code'] = \sanitize_text_field((string) $pricing['applied_coupon']);
         }
-
         \MustHotelBooking\Engine\get_reservation_repository()->updateReservation($reservationId, $updates);
     }
-
     /**
      * @param array<string, mixed> $row
      */
     private function enqueuePricingRetry(array $row, string $checkin, string $checkout, string $idempotencyKey, string $error): int
     {
         $targetExternalId = $this->externalId($row) . '#pricing-' . $checkin . '-' . $checkout;
-
         return $this->syncJobs->enqueueOnce([
             'provider' => ProviderManager::CLOCK_MODE,
             'operation' => 'reservation_pricing_refresh',
@@ -1012,7 +864,6 @@ final class ClockPaymentReconciliationService
             ],
         ]);
     }
-
     /**
      * @param array<int, int> $reservationIds
      * @return array<int, array<string, mixed>>
@@ -1021,18 +872,14 @@ final class ClockPaymentReconciliationService
     {
         $rows = \MustHotelBooking\Engine\get_reservation_repository()->getProviderReservationRowsByIds($reservationIds);
         $clockRows = [];
-
         foreach ($rows as $row) {
             if (!\is_array($row) || (string) ($row['provider'] ?? '') !== ProviderManager::CLOCK_MODE) {
                 continue;
             }
-
             $clockRows[] = $row;
         }
-
         return $clockRows;
     }
-
     /**
      * @param array<string, mixed> $row
      * @param array<string, mixed> $action
@@ -1075,7 +922,6 @@ final class ClockPaymentReconciliationService
             'required_flag' => (string) ($action['required_flag'] ?? 'payment_reconciliation_required'),
             'source' => (string) ($action['source'] ?? 'must_hotel_booking_public_payment'),
         ];
-
         if (!empty($targetGuest)) {
             $payload['local_current_guest_id'] = isset($row['guest_id']) ? (int) $row['guest_id'] : 0;
             $payload['local_current_guest'] = [
@@ -1092,10 +938,8 @@ final class ClockPaymentReconciliationService
             $payload['guest_phone'] = (string) ($targetGuest['phone'] ?? '');
             $payload['guest_country'] = (string) ($targetGuest['country'] ?? '');
         }
-
         return $payload;
     }
-
     /**
      * @param array<string, mixed> $row
      * @param array<string, mixed> $action
@@ -1104,20 +948,16 @@ final class ClockPaymentReconciliationService
     private function enqueueRetry(array $row, array $action, array $payload, string $error): void
     {
         $targetExternalId = $this->externalId($row);
-
         if ((string) ($action['retry_operation'] ?? '') === 'reservation_room_assignment') {
             $targetExternalId .= '#room-' . (string) ((int) ($action['target_local_assigned_room_id'] ?? 0));
         }
-
         if ((string) ($action['retry_operation'] ?? '') === 'reservation_stay_update') {
             $targetExternalId .= '#stay-' . (string) ($action['target_local_checkin'] ?? '') . '-' . (string) ($action['target_local_checkout'] ?? '');
         }
-
         if ((string) ($action['retry_operation'] ?? '') === 'reservation_guest_update') {
             $guest = isset($action['target_guest']) && \is_array($action['target_guest']) ? $action['target_guest'] : [];
             $targetExternalId .= '#guest-' . $this->guestHash($guest);
         }
-
         $this->syncJobs->enqueueOnce([
             'provider' => ProviderManager::CLOCK_MODE,
             'operation' => (string) ($action['retry_operation'] ?? 'reservation_status'),
@@ -1132,7 +972,6 @@ final class ClockPaymentReconciliationService
             'payload' => $payload,
         ]);
     }
-
     /**
      * @param array<string, mixed> $payload
      * @return array<string, mixed>
@@ -1158,10 +997,8 @@ final class ClockPaymentReconciliationService
                 'source' => $this->payloadString($payload, 'source', 'must_hotel_booking_public_payment'),
             ];
         }
-
         if ($operation === 'reservation_cancel') {
             $reason = isset($payload['reason']) ? \sanitize_key((string) $payload['reason']) : 'cancelled';
-
             return [
                 'operation' => $reason,
                 'target_provider_status' => $this->payloadString($payload, 'reservation_status', $reason === 'expired' ? 'expired' : 'cancelled'),
@@ -1180,10 +1017,8 @@ final class ClockPaymentReconciliationService
                 'source' => $this->payloadString($payload, 'source', 'must_hotel_booking_public_payment'),
             ];
         }
-
         if ($operation === 'reservation_checkin' || $operation === 'reservation_checkout') {
             $isCheckout = $operation === 'reservation_checkout';
-
             return [
                 'operation' => $isCheckout ? 'checkout' : 'checkin',
                 'target_provider_status' => $this->payloadString($payload, 'reservation_status', $isCheckout ? 'checked_out' : 'checked_in'),
@@ -1202,12 +1037,10 @@ final class ClockPaymentReconciliationService
                 'source' => $this->payloadString($payload, 'source', 'must_hotel_booking_admin'),
             ];
         }
-
         if ($operation === 'reservation_room_assignment') {
             $providerRoomId = $this->payloadString($payload, 'provider_room_id', '');
             $providerRoomCode = $this->payloadString($payload, 'provider_room_code', '');
             $localRoomId = $this->payloadInt($payload, 'local_target_assigned_room_id', 0);
-
             return [
                 'operation' => 'room_assignment',
                 'target_provider_status' => $this->payloadString($payload, 'reservation_status', ''),
@@ -1232,11 +1065,9 @@ final class ClockPaymentReconciliationService
                 'idempotency_context' => 'room:' . ($providerRoomId !== '' ? $providerRoomId : (string) $localRoomId) . ':' . $providerRoomCode,
             ];
         }
-
         if ($operation === 'reservation_stay_update') {
             $checkin = $this->payloadString($payload, 'local_target_checkin', '');
             $checkout = $this->payloadString($payload, 'local_target_checkout', '');
-
             return [
                 'operation' => 'stay_update',
                 'target_provider_status' => $this->payloadString($payload, 'reservation_status', ''),
@@ -1258,7 +1089,6 @@ final class ClockPaymentReconciliationService
                 'idempotency_context' => 'stay:' . $checkin . ':' . $checkout,
             ];
         }
-
         if ($operation === 'reservation_guest_update') {
             $guest = $this->sanitizeGuestUpdate([
                 'first_name' => $this->payloadString($payload, 'guest_first_name', ''),
@@ -1267,7 +1097,6 @@ final class ClockPaymentReconciliationService
                 'phone' => $this->payloadString($payload, 'guest_phone', ''),
                 'country' => $this->payloadString($payload, 'guest_country', ''),
             ]);
-
             return [
                 'operation' => 'guest_update',
                 'target_provider_status' => $this->payloadString($payload, 'reservation_status', ''),
@@ -1288,10 +1117,8 @@ final class ClockPaymentReconciliationService
                 'idempotency_context' => 'guest:' . $this->guestHash($guest),
             ];
         }
-
         return [];
     }
-
     /**
      * @param array<string, mixed> $payload
      * @param array<string, mixed> $row
@@ -1301,18 +1128,14 @@ final class ClockPaymentReconciliationService
     private function ensurePayload(array $payload, array $row, array $action, string $idempotencyKey): array
     {
         $fallback = $this->payload($row, $action, $idempotencyKey);
-
         foreach ($fallback as $key => $value) {
             if (!isset($payload[$key]) || $payload[$key] === '') {
                 $payload[$key] = $value;
             }
         }
-
         $payload['idempotency_key'] = $idempotencyKey;
-
         return $payload;
     }
-
     /**
      * @param array<string, mixed> $row
      * @param array<string, mixed> $action
@@ -1339,15 +1162,12 @@ final class ClockPaymentReconciliationService
         $targetGuest = isset($action['target_guest']) && \is_array($action['target_guest'])
             ? $this->sanitizeGuestUpdate($action['target_guest'])
             : [];
-
         if ($metadataKey === '') {
             $metadataKey = 'last_payment_reconciliation';
         }
-
         if ($requiredFlag === '') {
             $requiredFlag = 'payment_reconciliation_required';
         }
-
         $metadata[$metadataKey] = [
             'idempotency_key' => $idempotencyKey,
             'operation' => (string) ($action['operation'] ?? ''),
@@ -1372,7 +1192,6 @@ final class ClockPaymentReconciliationService
         ];
         $metadata[$requiredFlag] = !$success && $syncStatus !== 'local_only';
         $applyTargetState = $success || $syncStatus === 'local_only';
-
         $reservationRepository = \MustHotelBooking\Engine\get_reservation_repository();
         $reservationRepository->updateProviderMetadata($reservationId, [
             'provider_status' => $applyTargetState
@@ -1394,7 +1213,6 @@ final class ClockPaymentReconciliationService
             'provider_sync_error' => $syncError,
             'provider_metadata' => $metadata,
         ]);
-
         if ($success && $targetLocalStatus !== '') {
             $reservationRepository->updateReservationStatus(
                 $reservationId,
@@ -1402,44 +1220,34 @@ final class ClockPaymentReconciliationService
                 $targetLocalPaymentStatus !== '' ? $targetLocalPaymentStatus : (string) ($row['payment_status'] ?? '')
             );
         }
-
         if ($success) {
             $updates = [];
-
             if ($targetCheckedInAt !== '') {
                 $updates['checked_in_at'] = $targetCheckedInAt === 'now' ? $this->now() : $targetCheckedInAt;
             }
-
             if ($targetCheckedOutAt !== '') {
                 $updates['checked_out_at'] = $targetCheckedOutAt === 'now' ? $this->now() : $targetCheckedOutAt;
             }
-
             if ($targetCheckin !== '') {
                 $updates['checkin'] = $targetCheckin;
             }
-
             if ($targetCheckout !== '') {
                 $updates['checkout'] = $targetCheckout;
             }
-
             if ($targetAssignedRoomId > 0) {
                 $updates['assigned_room_id'] = $targetAssignedRoomId;
             }
-
             if ($targetRoomTypeId > 0) {
                 $updates['room_type_id'] = $targetRoomTypeId;
             }
-
             if (!empty($updates)) {
                 $reservationRepository->updateReservation($reservationId, $updates);
             }
-
             if (!empty($targetGuest)) {
                 $this->applyLocalGuestUpdate($reservationId, $row, $targetGuest);
             }
         }
     }
-
     /**
      * @param array<string, mixed> $row
      * @param array<string, mixed> $action
@@ -1460,7 +1268,6 @@ final class ClockPaymentReconciliationService
                 'reason' => 'endpoint_missing',
             ],
         ]);
-
         if ($logId > 0) {
             $this->requestLogs->complete($logId, [
                 'success' => 0,
@@ -1472,7 +1279,6 @@ final class ClockPaymentReconciliationService
             ]);
         }
     }
-
     /**
      * @param array<string, mixed> $row
      */
@@ -1482,21 +1288,17 @@ final class ClockPaymentReconciliationService
         $metadataKey = \sanitize_key((string) ($action['metadata_key'] ?? 'last_payment_reconciliation'));
         $targetProviderStatus = (string) ($action['target_provider_status'] ?? '');
         $targetProviderPaymentStatus = (string) ($action['target_provider_payment_status'] ?? '');
-
         if ($metadataKey === '') {
             $metadataKey = 'last_payment_reconciliation';
         }
-
         $last = isset($metadata[$metadataKey]) && \is_array($metadata[$metadataKey])
             ? $metadata[$metadataKey]
             : [];
-
         return (string) ($last['idempotency_key'] ?? '') === $idempotencyKey
             && \in_array((string) ($row['provider_sync_status'] ?? ''), ['synced', 'local_only'], true)
             && ($targetProviderStatus === '' || (string) ($row['provider_status'] ?? '') === $targetProviderStatus)
             && ($targetProviderPaymentStatus === '' || (string) ($row['provider_payment_status'] ?? '') === $targetProviderPaymentStatus);
     }
-
     /**
      * @param array<string, mixed> $row
      */
@@ -1506,14 +1308,12 @@ final class ClockPaymentReconciliationService
         $last = isset($metadata['last_provider_pricing_refresh']) && \is_array($metadata['last_provider_pricing_refresh'])
             ? $metadata['last_provider_pricing_refresh']
             : [];
-
         return !empty($last['success'])
             && (string) ($last['idempotency_key'] ?? '') === $idempotencyKey
             && (string) ($last['checkin'] ?? '') === $checkin
             && (string) ($last['checkout'] ?? '') === $checkout
             && empty($metadata['pricing_reconciliation_required']);
     }
-
     /**
      * @param array<string, mixed> $row
      * @param array<string, mixed> $action
@@ -1523,10 +1323,8 @@ final class ClockPaymentReconciliationService
         if (!\in_array((string) ($action['retry_operation'] ?? ''), ['reservation_room_assignment', 'reservation_stay_update', 'reservation_guest_update'], true)) {
             return false;
         }
-
         $metadata = $this->decodeMetadata($row['provider_metadata'] ?? null);
         $metadataKey = \sanitize_key((string) ($action['metadata_key'] ?? ''));
-
         if ($metadataKey === '') {
             $retryOperation = (string) ($action['retry_operation'] ?? '');
             if ($retryOperation === 'reservation_stay_update') {
@@ -1537,15 +1335,12 @@ final class ClockPaymentReconciliationService
                 $metadataKey = 'last_provider_room_assignment';
             }
         }
-
         $last = isset($metadata[$metadataKey]) && \is_array($metadata[$metadataKey])
             ? $metadata[$metadataKey]
             : [];
         $latestIdempotencyKey = (string) ($last['idempotency_key'] ?? '');
-
         return $latestIdempotencyKey !== '' && $latestIdempotencyKey !== $idempotencyKey;
     }
-
     /**
      * @param mixed $payload
      * @return array<string, mixed>
@@ -1555,40 +1350,30 @@ final class ClockPaymentReconciliationService
         if (\is_array($payload)) {
             return $payload;
         }
-
         if (!\is_string($payload) || \trim($payload) === '') {
             return [];
         }
-
         $decoded = \json_decode($payload, true);
-
         return \is_array($decoded) ? $decoded : [];
     }
-
     /** @param mixed $metadata */
     private function decodeMetadata($metadata): array
     {
         if (\is_array($metadata)) {
             return $metadata;
         }
-
         if (!\is_string($metadata) || \trim($metadata) === '') {
             return [];
         }
-
         $decoded = \json_decode($metadata, true);
-
         return \is_array($decoded) ? $decoded : [];
     }
-
     /** @param array<string, mixed> $row */
     private function externalId(array $row): string
     {
         $reservationId = (string) ($row['provider_reservation_id'] ?? '');
-
         return $reservationId !== '' ? $reservationId : (string) ($row['provider_booking_id'] ?? '');
     }
-
     /** @param array<string, mixed> $row @param array<string, mixed> $action */
     private function applyPathTokens(string $path, array $row, array $action = []): string
     {
@@ -1600,26 +1385,21 @@ final class ClockPaymentReconciliationService
             '{checkin}' => \rawurlencode((string) ($action['target_local_checkin'] ?? '')),
             '{checkout}' => \rawurlencode((string) ($action['target_local_checkout'] ?? '')),
         ]);
-
         return \preg_match('/\{[a-z_]+\}/i', $resolved) === 1 ? '' : $resolved;
     }
-
     /** @param mixed $data @return array<string, mixed> */
     private function providerState($data): array
     {
         if (!\is_array($data)) {
             return [];
         }
-
         foreach (['reservation', 'booking', 'data', 'result'] as $key) {
             if (isset($data[$key]) && \is_array($data[$key])) {
                 return $data[$key];
             }
         }
-
         return $data;
     }
-
     /** @param array<string, mixed> $source @param array<int, string> $keys */
     private function firstString(array $source, array $keys, string $fallback = ''): string
     {
@@ -1628,32 +1408,25 @@ final class ClockPaymentReconciliationService
                 return \sanitize_text_field((string) $source[$key]);
             }
         }
-
         return $fallback;
     }
-
     /** @param array<string, mixed> $payload */
     private function payloadString(array $payload, string $key, string $fallback): string
     {
         if (!isset($payload[$key]) || !\is_scalar($payload[$key])) {
             return $fallback;
         }
-
         $value = \sanitize_text_field((string) $payload[$key]);
-
         return $value !== '' ? $value : $fallback;
     }
-
     /** @param array<string, mixed> $payload */
     private function payloadInt(array $payload, string $key, int $fallback): int
     {
         if (!isset($payload[$key]) || !\is_scalar($payload[$key])) {
             return $fallback;
         }
-
         return \max(0, (int) $payload[$key]);
     }
-
     /**
      * @return array<string, mixed>
      */
@@ -1661,7 +1434,6 @@ final class ClockPaymentReconciliationService
     {
         $operation = \sanitize_key($operation);
         $isCheckout = $operation === 'checkout';
-
         return [
             'operation' => $isCheckout ? 'checkout' : 'checkin',
             'target_provider_status' => $providerStatus,
@@ -1683,19 +1455,15 @@ final class ClockPaymentReconciliationService
             'missing_endpoint_message' => \__('Clock reservation status update endpoint is not configured; provider operation was queued for later reconciliation.', 'must-hotel-booking'),
         ];
     }
-
     /** @param array<string, mixed> $row */
     private function operationalPaymentStatus(array $row): string
     {
         $providerPaymentStatus = (string) ($row['provider_payment_status'] ?? '');
-
         if ($providerPaymentStatus !== '') {
             return $providerPaymentStatus;
         }
-
         return (string) ($row['payment_status'] ?? '');
     }
-
     /**
      * @param array<string, mixed> $row
      * @param array<string, mixed> $targetRoom
@@ -1708,7 +1476,6 @@ final class ClockPaymentReconciliationService
         $targetRoomTypeId = isset($targetRoom['room_type_id']) ? (int) $targetRoom['room_type_id'] : 0;
         $providerRoomId = (string) ($mapping['external_id'] ?? '');
         $providerRoomCode = (string) ($mapping['external_code'] ?? '');
-
         return [
             'operation' => 'room_assignment',
             'target_provider_status' => (string) ($row['provider_status'] ?? ''),
@@ -1736,7 +1503,6 @@ final class ClockPaymentReconciliationService
             'missing_endpoint_message' => \__('Clock reservation room update endpoint is not configured; provider room assignment was queued for later reconciliation.', 'must-hotel-booking'),
         ];
     }
-
     /**
      * @param array<string, mixed> $row
      * @return array<string, mixed>
@@ -1767,7 +1533,6 @@ final class ClockPaymentReconciliationService
             'missing_endpoint_message' => \__('Clock reservation stay update endpoint is not configured; provider stay-date edit was queued for later reconciliation.', 'must-hotel-booking'),
         ];
     }
-
     /**
      * @param array<string, mixed> $row
      * @param array<string, string> $guest
@@ -1798,7 +1563,6 @@ final class ClockPaymentReconciliationService
             'missing_endpoint_message' => \__('Clock reservation guest update endpoint is not configured; provider guest edit was queued for later reconciliation.', 'must-hotel-booking'),
         ];
     }
-
     /**
      * @param array<string, mixed> $guestData
      * @return array<string, string>
@@ -1813,7 +1577,6 @@ final class ClockPaymentReconciliationService
             'country' => \sanitize_text_field((string) ($guestData['country'] ?? '')),
         ];
     }
-
     /**
      * @param array<string, mixed> $row
      * @param array<string, string> $guest
@@ -1826,7 +1589,6 @@ final class ClockPaymentReconciliationService
             && \trim((string) ($row['phone'] ?? '')) === (string) ($guest['phone'] ?? '')
             && \trim((string) ($row['country'] ?? '')) === (string) ($guest['country'] ?? '');
     }
-
     /**
      * @param array<string, mixed> $row
      * @param array<string, string> $guest
@@ -1835,12 +1597,10 @@ final class ClockPaymentReconciliationService
     {
         if (!isset($row['guest_id'])) {
             $currentRow = \MustHotelBooking\Engine\get_reservation_repository()->getReservation($reservationId);
-
             if (\is_array($currentRow)) {
                 $row = \array_merge($row, $currentRow);
             }
         }
-
         $guestId = \MustHotelBooking\Engine\get_guest_repository()->saveAdminGuestProfile(
             isset($row['guest_id']) ? (int) $row['guest_id'] : 0,
             (string) ($guest['first_name'] ?? ''),
@@ -1849,42 +1609,34 @@ final class ClockPaymentReconciliationService
             (string) ($guest['phone'] ?? ''),
             (string) ($guest['country'] ?? '')
         );
-
         if ($guestId > 0 && $guestId !== (int) ($row['guest_id'] ?? 0)) {
             \MustHotelBooking\Engine\get_reservation_repository()->updateReservation($reservationId, ['guest_id' => $guestId]);
         }
     }
-
     /** @param array<string, mixed> $guest */
     private function guestHash(array $guest): string
     {
         $normalized = $this->sanitizeGuestUpdate($guest);
         $encoded = \function_exists('wp_json_encode') ? \wp_json_encode($normalized) : \json_encode($normalized);
-
         return \substr(\sha1(\is_string($encoded) ? $encoded : ''), 0, 16);
     }
-
     /** @param array<string, mixed> $reservation */
     private function stayAvailabilityError(array $reservation, int $roomTypeId, string $checkin, string $checkout): string
     {
         $reservationId = isset($reservation['id']) ? (int) $reservation['id'] : 0;
         $nonBlockingStatuses = \MustHotelBooking\Core\ReservationStatus::getInventoryNonBlockingStatuses();
         $reservationRepository = \MustHotelBooking\Engine\get_reservation_repository();
-
         if (!\MustHotelBooking\Engine\InventoryEngine::hasInventoryForRoomType($roomTypeId)) {
             return $reservationRepository->hasReservationOverlapExcludingId($reservationId, $roomTypeId, $checkin, $checkout, $nonBlockingStatuses)
                 ? \__('The selected stay dates are not available for this accommodation.', 'must-hotel-booking')
                 : '';
         }
-
         $assignedRoomId = isset($reservation['assigned_room_id']) ? (int) $reservation['assigned_room_id'] : 0;
-
         if ($assignedRoomId > 0) {
             return $reservationRepository->hasAssignedRoomOverlapExcludingId($reservationId, $assignedRoomId, $checkin, $checkout, $nonBlockingStatuses)
                 ? \__('The assigned physical room is not available for the selected stay dates. Move the reservation to an available mapped room before editing the stay.', 'must-hotel-booking')
                 : '';
         }
-
         $inventoryRepository = \MustHotelBooking\Engine\get_inventory_repository();
         $availableRooms = $inventoryRepository->getAvailableRooms(
             $roomTypeId,
@@ -1899,56 +1651,45 @@ final class ClockPaymentReconciliationService
             $checkout,
             $nonBlockingStatuses
         );
-
         if (
             $this->reservationDatesOverlap((string) ($reservation['checkin'] ?? ''), (string) ($reservation['checkout'] ?? ''), $checkin, $checkout)
             && \MustHotelBooking\Core\ReservationStatus::blocksInventory((string) ($reservation['status'] ?? ''))
         ) {
             $unassignedOverlapCount = \max(0, $unassignedOverlapCount - 1);
         }
-
         return \count($availableRooms) > $unassignedOverlapCount
             ? ''
             : \__('The selected stay dates are not available for this accommodation.', 'must-hotel-booking');
     }
-
     private function reservationDatesOverlap(string $firstCheckin, string $firstCheckout, string $secondCheckin, string $secondCheckout): bool
     {
         if ($firstCheckin === '' || $firstCheckout === '' || $secondCheckin === '' || $secondCheckout === '') {
             return false;
         }
-
         return $firstCheckin < $secondCheckout && $firstCheckout > $secondCheckin;
     }
-
     /** @param array<string, mixed> $reservation */
     private function isRoomAvailableForReservation(array $reservation, int $targetRoomId, int $roomTypeId): bool
     {
         if ($targetRoomId <= 0) {
             return false;
         }
-
         $currentAssignedRoomId = isset($reservation['assigned_room_id']) ? (int) $reservation['assigned_room_id'] : 0;
-
         if ($targetRoomId === $currentAssignedRoomId) {
             return true;
         }
-
         if ($roomTypeId <= 0) {
             return false;
         }
-
         $today = \current_time('Y-m-d');
         $effectiveCheckin = isset($reservation['checkin']) && (string) $reservation['checkin'] > $today
             ? (string) $reservation['checkin']
             : $today;
         $effectiveCheckout = isset($reservation['checkout']) ? (string) $reservation['checkout'] : '';
-
         if ($effectiveCheckout === '' || $effectiveCheckout <= $effectiveCheckin) {
             $timestamp = \strtotime($effectiveCheckin . ' +1 day');
             $effectiveCheckout = $timestamp !== false ? \wp_date('Y-m-d', $timestamp) : $effectiveCheckin;
         }
-
         $availableRooms = \MustHotelBooking\Engine\get_inventory_repository()->getAvailableRooms(
             $roomTypeId,
             $effectiveCheckin,
@@ -1956,49 +1697,56 @@ final class ClockPaymentReconciliationService
             ['cancelled', 'expired', 'payment_failed'],
             \current_time('mysql')
         );
-
         foreach ($availableRooms as $availableRoom) {
             if (\is_array($availableRoom) && isset($availableRoom['id']) && (int) $availableRoom['id'] === $targetRoomId) {
                 return true;
             }
         }
-
         return false;
     }
-
     /** @param array<string, mixed>|null $mapping */
     private function hasExternalId(?array $mapping): bool
     {
         return \is_array($mapping) && (string) ($mapping['external_id'] ?? '') !== '';
     }
-
     /** @param array<string, mixed> $room */
     private function roomLabel(array $room): string
     {
         $roomNumber = \trim((string) ($room['room_number'] ?? ''));
-
         if ($roomNumber !== '') {
             return $roomNumber;
         }
-
         $title = \trim((string) ($room['title'] ?? ''));
-
         return $title !== '' ? $title : (string) ((int) ($room['id'] ?? 0));
     }
-
     private function idempotencyKey(int $reservationId, string $externalId, string $providerStatus, string $providerPaymentStatus, string $context = ''): string
     {
         return 'mhb-clock-reconcile-' . \substr(\hash('sha256', $reservationId . '|' . $externalId . '|' . $providerStatus . '|' . $providerPaymentStatus . '|' . $context), 0, 48);
     }
-
-private function directReservationUpdateSupported(): bool
-{
-    return ClockConfig::reservationStatusUpdatePath() !== ''
-        || ClockConfig::reservationCancelPath() !== ''
-        || ClockConfig::reservationRoomUpdatePath() !== ''
-        || ClockConfig::reservationStayUpdatePath() !== ''
-        || ClockConfig::reservationGuestUpdatePath() !== '';
-}
+    /**
+     * @return array{method: string, path: string}
+     */
+    private function endpointMethodAndPath(string $path): array
+    {
+        $path = \trim($path);
+        $method = 'POST';
+        if (\preg_match('/^\/?\s*(GET|POST|PUT|PATCH|DELETE)\s+(.+)$/i', $path, $matches)) {
+            $method = \strtoupper((string) $matches[1]);
+            $path = \trim((string) $matches[2]);
+        }
+        return [
+            'method' => $method,
+            'path' => $path,
+        ];
+    }
+    private function directReservationUpdateSupported(): bool
+    {
+        return ClockConfig::reservationStatusUpdatePath() !== ''
+            || ClockConfig::reservationCancelPath() !== ''
+            || ClockConfig::reservationRoomUpdatePath() !== ''
+            || ClockConfig::reservationStayUpdatePath() !== ''
+            || ClockConfig::reservationGuestUpdatePath() !== '';
+    }
     /**
      * @return array{success: bool, queued: bool, message: string}
      */
@@ -2010,16 +1758,13 @@ private function directReservationUpdateSupported(): bool
             'message' => \__('Clock reservation update/cancellation endpoint paths are not configured yet.', 'must-hotel-booking'),
         ];
     }
-
     /** @param array<string, mixed> $row */
     private function pricingIdempotencyKey(array $row, string $checkin, string $checkout, string $parentIdempotencyKey = ''): string
     {
         $reservationId = isset($row['id']) ? (int) $row['id'] : 0;
         $externalId = $this->externalId($row);
-
         return 'mhb-clock-pricing-' . \substr(\hash('sha256', $reservationId . '|' . $externalId . '|' . $checkin . '|' . $checkout . '|' . $parentIdempotencyKey), 0, 48);
     }
-
     private function now(): string
     {
         return \function_exists('current_time') ? \current_time('mysql') : \gmdate('Y-m-d H:i:s');
