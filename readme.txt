@@ -4,7 +4,7 @@ Tags: hotel, booking, reservation, accommodation
 Requires at least: 5.0
 Tested up to: 6.0
 Requires PHP: 7.4
-Stable tag: 0.4.24
+Stable tag: 0.4.25
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -31,6 +31,9 @@ Main features include:
 5. When updating, upload the new release ZIP or use the configured updater, then review **Diagnostics & Maintenance** after the update completes.
 
 == Changelog ==
+
+= 0.4.25 =
+* Wrapped Clock reservation cancellation requests in the expected booking payload and used the Clock canceled status value for provider-side cancellation
 
 = 0.4.24 =
 * Added HTTP method support for configurable Clock reservation mutation endpoints

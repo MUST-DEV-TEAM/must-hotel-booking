@@ -520,7 +520,7 @@ final class ClockPaymentReconciliationService
             'external_id' => $externalId,
         ];
         if (!\in_array($endpoint['method'], ['GET', 'DELETE'], true)) {
-            $responseOptions['body'] = $payload;
+            $responseOptions['body'] = $this->providerRequestBody($payload, $action);
         }
         $response = $this->client->request(
             $endpoint['method'],
@@ -609,7 +609,7 @@ final class ClockPaymentReconciliationService
             'external_id' => $externalId,
         ];
         if (!\in_array($endpoint['method'], ['GET', 'DELETE'], true)) {
-            $responseOptions['body'] = $payload;
+            $responseOptions['body'] = $this->providerRequestBody($payload, $action);
         }
         $response = $this->client->request(
             $endpoint['method'],
@@ -881,10 +881,22 @@ final class ClockPaymentReconciliationService
         return $clockRows;
     }
     /**
-     * @param array<string, mixed> $row
+     * @param array<string, mixed> $payload
      * @param array<string, mixed> $action
      * @return array<string, mixed>
      */
+    private function providerRequestBody(array $payload, array $action): array
+    {
+        $requestOperation = (string) ($action['request_operation'] ?? '');
+        if ($requestOperation === 'clock.reservation_cancel') {
+            return [
+                'booking' => [
+                    'status' => 'canceled',
+                ],
+            ];
+        }
+        return $payload;
+    }
     private function payload(array $row, array $action, string $idempotencyKey): array
     {
         $targetGuest = isset($action['target_guest']) && \is_array($action['target_guest'])
