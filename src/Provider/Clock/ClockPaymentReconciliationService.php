@@ -1991,11 +1991,14 @@ final class ClockPaymentReconciliationService
         return 'mhb-clock-reconcile-' . \substr(\hash('sha256', $reservationId . '|' . $externalId . '|' . $providerStatus . '|' . $providerPaymentStatus . '|' . $context), 0, 48);
     }
 
-    private function directReservationUpdateSupported(): bool
-    {
-        return false;
-    }
-
+private function directReservationUpdateSupported(): bool
+{
+    return ClockConfig::reservationStatusUpdatePath() !== ''
+        || ClockConfig::reservationCancelPath() !== ''
+        || ClockConfig::reservationRoomUpdatePath() !== ''
+        || ClockConfig::reservationStayUpdatePath() !== ''
+        || ClockConfig::reservationGuestUpdatePath() !== '';
+}
     /**
      * @return array{success: bool, queued: bool, message: string}
      */
@@ -2004,7 +2007,7 @@ final class ClockPaymentReconciliationService
         return [
             'success' => false,
             'queued' => false,
-            'message' => \__('Direct Clock API reservation update/cancellation adapters are not implemented yet.', 'must-hotel-booking'),
+            'message' => \__('Clock reservation update/cancellation endpoint paths are not configured yet.', 'must-hotel-booking'),
         ];
     }
 

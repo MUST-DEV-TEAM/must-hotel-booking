@@ -1066,10 +1066,10 @@ final class SettingsPage
         $currentUserId = (int) \get_current_user_id();
 
         if ($subAction === 'create') {
-            $username  = isset($source['new_staff_username']) ? \sanitize_user((string) \wp_unslash($source['new_staff_username'])) : '';
-            $email     = isset($source['new_staff_email']) ? \sanitize_email((string) \wp_unslash($source['new_staff_email'])) : '';
-            $password  = isset($source['new_staff_password']) ? (string) \wp_unslash($source['new_staff_password']) : '';
-            $roleSlug  = isset($source['new_staff_role']) ? \sanitize_key((string) \wp_unslash($source['new_staff_role'])) : '';
+            $username = isset($source['new_staff_username']) ? \sanitize_user((string) \wp_unslash($source['new_staff_username'])) : '';
+            $email = isset($source['new_staff_email']) ? \sanitize_email((string) \wp_unslash($source['new_staff_email'])) : '';
+            $password = isset($source['new_staff_password']) ? (string) \wp_unslash($source['new_staff_password']) : '';
+            $roleSlug = isset($source['new_staff_role']) ? \sanitize_key((string) \wp_unslash($source['new_staff_role'])) : '';
 
             $validRoles = StaffAccess::getPortalRoleSlugs();
 
@@ -1117,17 +1117,17 @@ final class SettingsPage
                 $transientKey = 'mhb_staff_created_creds_' . \get_current_user_id();
                 \set_transient($transientKey, [
                     'username' => $username,
-                    'email'    => $email,
-                    'role'     => $roleSlug,
+                    'email' => $email,
+                    'role' => $roleSlug,
                     'password' => $password,
                 ], 120);
             }
 
             return [
-                'tab'    => $tab,
+                'tab' => $tab,
                 'notice' => 'staff_user_created',
                 'errors' => [],
-                'forms'  => [],
+                'forms' => [],
             ];
         }
 
@@ -1501,8 +1501,8 @@ final class SettingsPage
         return [
             'dangerous_reset' => DangerousResetService::getFormState(
                 isset($overrides['dangerous_reset']) && \is_array($overrides['dangerous_reset'])
-                    ? $overrides['dangerous_reset']
-                    : []
+                ? $overrides['dangerous_reset']
+                : []
             ),
         ];
     }
@@ -2321,7 +2321,7 @@ final class SettingsPage
 
             if (\is_array($creds) && isset($creds['username'], $creds['password'])) {
                 $roleLabels = StaffAccess::getRoleLabels();
-                $roleLabel  = $roleLabels[$creds['role'] ?? ''] ?? (string) ($creds['role'] ?? '');
+                $roleLabel = $roleLabels[$creds['role'] ?? ''] ?? (string) ($creds['role'] ?? '');
 
                 echo '<div class="notice notice-success">';
                 echo '<p><strong>' . \esc_html__('Staff user created successfully.', 'must-hotel-booking') . '</strong></p>';
@@ -2847,7 +2847,8 @@ final class SettingsPage
         self::renderSectionIntro(\__('Brand basics', 'must-hotel-booking'), \__('Reusable logo assets and the site environment summary that help staff understand where this installation is running.', 'must-hotel-booking'));
         self::renderField(['label' => __('Hotel logo', 'must-hotel-booking'), 'name' => 'hotel_logo_url', 'type' => 'media', 'value' => $form['hotel_logo_url'] ?? '']);
         self::renderField(['label' => __('Portal logo', 'must-hotel-booking'), 'name' => 'portal_logo_url', 'type' => 'media', 'value' => $form['portal_logo_url'] ?? '']);
-        self::renderField(['label' => __('Site environment', 'must-hotel-booking'), 'name' => 'site_environment', 'type' => 'select', 'value' => $form['site_environment'] ?? PaymentEngine::getActiveSiteEnvironment(), 'options' => \array_map(static function (array $meta): string { return (string) ($meta['label'] ?? ''); }, PaymentEngine::getStripeEnvironmentCatalog())]);
+        self::renderField(['label' => __('Site environment', 'must-hotel-booking'), 'name' => 'site_environment', 'type' => 'select', 'value' => $form['site_environment'] ?? PaymentEngine::getActiveSiteEnvironment(), 'options' => \array_map(static function (array $meta): string {
+            return (string) ($meta['label'] ?? ''); }, PaymentEngine::getStripeEnvironmentCatalog())]);
         echo '</div>';
         self::renderPanelEnd();
         self::renderFormEnd(\__('Save General Settings', 'must-hotel-booking'));
@@ -3130,7 +3131,7 @@ final class SettingsPage
             $currentUserId = (int) \get_current_user_id();
 
             foreach ($staffUsers as $staffUser) {
-                $userId   = (int) $staffUser->ID;
+                $userId = (int) $staffUser->ID;
                 $disabled = StaffAccess::isStaffUserDisabled($staffUser);
                 $userRole = '';
 
@@ -3155,7 +3156,7 @@ final class SettingsPage
 
                 // Activate / Deactivate
                 $toggleAction = $disabled ? 'activate' : 'deactivate';
-                $toggleLabel  = $disabled ? \__('Activate', 'must-hotel-booking') : \__('Deactivate', 'must-hotel-booking');
+                $toggleLabel = $disabled ? \__('Activate', 'must-hotel-booking') : \__('Deactivate', 'must-hotel-booking');
 
                 if ($isSelf && !$disabled) {
                     echo '<span style="color:#999;">' . \esc_html__('(current user)', 'must-hotel-booking') . '</span> ';
@@ -3450,18 +3451,51 @@ final class SettingsPage
 
             echo '<details class="must-settings-advanced"><summary>' . \esc_html__('Advanced Clock endpoint paths', 'must-hotel-booking') . '</summary>';
             echo '<p class="description">' . \esc_html__('Leave these on defaults unless Clock support gives you a different endpoint. They are shown for diagnostics, not normal setup.', 'must-hotel-booking') . '</p>';
-            echo '<div class="must-settings-grid must-settings-grid--3">';
-            self::renderField(['label' => __('Connection test path', 'must-hotel-booking'), 'name' => 'clock_connection_path', 'value' => $form['clock_connection_path'] ?? '/room_types']);
-            self::renderField(['label' => __('Room types path', 'must-hotel-booking'), 'name' => 'clock_room_types_path', 'value' => $form['clock_room_types_path'] ?? '/room_types']);
-            self::renderField(['label' => __('Physical rooms path', 'must-hotel-booking'), 'name' => 'clock_rooms_path', 'value' => $form['clock_rooms_path'] ?? '/rooms']);
-            self::renderField(['label' => __('Rates path', 'must-hotel-booking'), 'name' => 'clock_rates_path', 'value' => $form['clock_rates_path'] ?? '/rates']);
-            self::renderField(['label' => __('Rates availability path', 'must-hotel-booking'), 'name' => 'clock_rates_availability_path', 'value' => $form['clock_rates_availability_path'] ?? '/rates_availability']);
-            self::renderField(['label' => __('Products path', 'must-hotel-booking'), 'name' => 'clock_products_path', 'value' => $form['clock_products_path'] ?? '/products']);
-            self::renderField(['label' => __('Reservation create path', 'must-hotel-booking'), 'name' => 'clock_reservation_create_path', 'value' => $form['clock_reservation_create_path'] ?? '/bookings/']);
-            self::renderField(['label' => __('Reservation fetch path', 'must-hotel-booking'), 'name' => 'clock_reservation_fetch_path', 'value' => $form['clock_reservation_fetch_path'] ?? '/bookings/{booking_id}']);
-            self::renderField(['label' => __('Rate plans path', 'must-hotel-booking'), 'name' => 'clock_rate_plans_path', 'value' => $form['clock_rate_plans_path'] ?? '']);
-            echo '</div>';
-            echo '</details>';
+            echo '<p class="description">' . \esc_html__('Supported path tokens: {booking_id}, {reservation_id}, {provider_booking_id}, {provider_reservation_id}, {provider_room_id}, {provider_room_code}, {checkin}, {checkout}.', 'must-hotel-booking') . '</p>';
+echo '<div class="must-settings-grid must-settings-grid--3">';
+self::renderField(['label' => __('Connection test path', 'must-hotel-booking'), 'name' => 'clock_connection_path', 'value' => $form['clock_connection_path'] ?? '/room_types']);
+self::renderField(['label' => __('Room types path', 'must-hotel-booking'), 'name' => 'clock_room_types_path', 'value' => $form['clock_room_types_path'] ?? '/room_types']);
+self::renderField(['label' => __('Physical rooms path', 'must-hotel-booking'), 'name' => 'clock_rooms_path', 'value' => $form['clock_rooms_path'] ?? '/rooms']);
+self::renderField(['label' => __('Rates path', 'must-hotel-booking'), 'name' => 'clock_rates_path', 'value' => $form['clock_rates_path'] ?? '/rates']);
+self::renderField(['label' => __('Rates availability path', 'must-hotel-booking'), 'name' => 'clock_rates_availability_path', 'value' => $form['clock_rates_availability_path'] ?? '/rates_availability']);
+self::renderField(['label' => __('Products path', 'must-hotel-booking'), 'name' => 'clock_products_path', 'value' => $form['clock_products_path'] ?? '/products']);
+
+self::renderField(['label' => __('Reservation create path', 'must-hotel-booking'), 'name' => 'clock_reservation_create_path', 'value' => $form['clock_reservation_create_path'] ?? '/bookings/']);
+self::renderField(['label' => __('Reservation fetch path', 'must-hotel-booking'), 'name' => 'clock_reservation_fetch_path', 'value' => $form['clock_reservation_fetch_path'] ?? '/bookings/{booking_id}']);
+self::renderField(['label' => __('Reservation cancel path', 'must-hotel-booking'), 'name' => 'clock_reservation_cancel_path', 'value' => $form['clock_reservation_cancel_path'] ?? '', 'description' => __('Provider-side cancellation endpoint. Supports {booking_id} and {reservation_id}. Leave blank until tested in Clock sandbox.', 'must-hotel-booking')]);
+self::renderField(['label' => __('Reservation status update path', 'must-hotel-booking'), 'name' => 'clock_reservation_status_update_path', 'value' => $form['clock_reservation_status_update_path'] ?? '', 'description' => __('Optional Clock status/check-in/check-out endpoint. Supports {booking_id} and {reservation_id}.', 'must-hotel-booking')]);
+self::renderField(['label' => __('Reservation room update path', 'must-hotel-booking'), 'name' => 'clock_reservation_room_update_path', 'value' => $form['clock_reservation_room_update_path'] ?? '', 'description' => __('Optional Clock room-assignment endpoint. Supports {booking_id}, {reservation_id}, {provider_room_id}, and {provider_room_code}.', 'must-hotel-booking')]);
+self::renderField(['label' => __('Reservation stay update path', 'must-hotel-booking'), 'name' => 'clock_reservation_stay_update_path', 'value' => $form['clock_reservation_stay_update_path'] ?? '', 'description' => __('Optional Clock stay-date update endpoint. Supports {booking_id}, {reservation_id}, {checkin}, and {checkout}.', 'must-hotel-booking')]);
+self::renderField(['label' => __('Reservation guest update path', 'must-hotel-booking'), 'name' => 'clock_reservation_guest_update_path', 'value' => $form['clock_reservation_guest_update_path'] ?? '', 'description' => __('Optional Clock guest/contact update endpoint. Supports {booking_id} and {reservation_id}.', 'must-hotel-booking')]);
+
+self::renderField(['label' => __('Rate plans path', 'must-hotel-booking'), 'name' => 'clock_rate_plans_path', 'value' => $form['clock_rate_plans_path'] ?? '']);
+echo '</div>';
+
+$mutationPaths = [
+    'cancel' => (string) ($form['clock_reservation_cancel_path'] ?? ''),
+    'status' => (string) ($form['clock_reservation_status_update_path'] ?? ''),
+    'room' => (string) ($form['clock_reservation_room_update_path'] ?? ''),
+    'stay' => (string) ($form['clock_reservation_stay_update_path'] ?? ''),
+    'guest' => (string) ($form['clock_reservation_guest_update_path'] ?? ''),
+];
+
+$missingMutationPaths = \array_keys(\array_filter(
+    $mutationPaths,
+    static function (string $path): bool {
+        return \trim($path) === '';
+    }
+));
+
+if (!empty($missingMutationPaths)) {
+    echo '<p class="description notice notice-warning inline" style="padding:8px 12px;">';
+    echo \esc_html__(
+        'Some Clock mutation endpoint paths are empty. Booking creation can still work, but cancellation, status updates, room assignment, stay changes, or guest updates may not sync back to Clock until the correct paths are configured.',
+        'must-hotel-booking'
+    );
+    echo '</p>';
+}
+
+echo '</details>';
         } else {
             echo '<p class="description">' . \esc_html__('Plugin backend mode uses the local accommodation, rate, availability, checkout, payment, and reservation settings already configured in the other tabs.', 'must-hotel-booking') . '</p>';
         }
@@ -3561,11 +3595,6 @@ final class SettingsPage
             'clock_wbe_room_type_rates_path' => (string) ($form['clock_wbe_room_type_rates_path'] ?? '/rates'),
             'clock_availability_path' => (string) ($form['clock_availability_path'] ?? ''),
             'clock_quote_path' => (string) ($form['clock_quote_path'] ?? ''),
-            'clock_reservation_status_update_path' => (string) ($form['clock_reservation_status_update_path'] ?? ''),
-            'clock_reservation_cancel_path' => (string) ($form['clock_reservation_cancel_path'] ?? ''),
-            'clock_reservation_room_update_path' => (string) ($form['clock_reservation_room_update_path'] ?? ''),
-            'clock_reservation_stay_update_path' => (string) ($form['clock_reservation_stay_update_path'] ?? ''),
-            'clock_reservation_guest_update_path' => (string) ($form['clock_reservation_guest_update_path'] ?? ''),
         ];
 
         if ($setupChoice !== 'clock_wbe_inline') {
@@ -4698,8 +4727,8 @@ final class SettingsPage
         self::renderPanelEnd();
         self::renderDangerZoneSection(
             isset($form['dangerous_reset']) && \is_array($form['dangerous_reset'])
-                ? $form['dangerous_reset']
-                : DangerousResetService::getFormState()
+            ? $form['dangerous_reset']
+            : DangerousResetService::getFormState()
         );
     }
 
