@@ -5,7 +5,6 @@ namespace MustHotelBooking\Core;
 use MustHotelBooking\Admin\SettingsDiagnostics;
 use MustHotelBooking\Provider\Clock\ClockConfig;
 use MustHotelBooking\Provider\ProviderManager;
-use MustHotelBooking\Portal\PortalRouter;
 
 final class SupportDiagnosticsEndpoint
 {
@@ -16,6 +15,7 @@ final class SupportDiagnosticsEndpoint
     public static function registerHooks(): void
     {
         \add_action('rest_api_init', [self::class, 'registerRestRoutes']);
+        \add_action('init', [self::class, 'maybeHandlePlainHealthRequest'], 1);
         \add_action('admin_post_must_support_diagnostics_settings', [self::class, 'handleSettingsPost']);
     }
 
@@ -32,8 +32,49 @@ final class SupportDiagnosticsEndpoint
         );
     }
 
+    public static function maybeHandlePlainHealthRequest(): void
+    {
+        if (empty($_GET['must_support_health'])) {
+            return;
+        }
+
+        self::sendNoCacheHeaders();
+
+        $settings = self::getSettings();
+
+        if (empty($settings['enabled'])) {
+            self::sendJsonResponse(
+                [
+                    'success' => false,
+                    'message' => 'Not found.',
+                ],
+                404
+            );
+        }
+
+        $providedToken = isset($_GET['token']) && !\is_array($_GET['token'])
+            ? (string) \wp_unslash($_GET['token'])
+            : '';
+
+        $storedToken = (string) ($settings['token'] ?? '');
+
+        if ($storedToken === '' || $providedToken === '' || !\hash_equals($storedToken, $providedToken)) {
+            self::sendJsonResponse(
+                [
+                    'success' => false,
+                    'message' => 'Not found.',
+                ],
+                404
+            );
+        }
+
+        self::sendJsonResponse(self::buildReport($settings), 200);
+    }
+
     public static function handleHealthRequest(\WP_REST_Request $request)
     {
+        self::sendNoCacheHeaders();
+
         $settings = self::getSettings();
 
         if (empty($settings['enabled'])) {
@@ -47,7 +88,16 @@ final class SupportDiagnosticsEndpoint
             return self::notFoundResponse();
         }
 
-        return \rest_ensure_response(self::buildReport($settings));
+        $response = \rest_ensure_response(self::buildReport($settings));
+
+        if ($response instanceof \WP_REST_Response) {
+            $response->header('Cache-Control', 'no-store, no-cache, must-revalidate, max-age=0');
+            $response->header('Pragma', 'no-cache');
+            $response->header('Expires', '0');
+            $response->header('X-Robots-Tag', 'noindex, nofollow, noarchive');
+        }
+
+        return $response;
     }
 
     public static function handleSettingsPost(): void
@@ -59,6 +109,7 @@ final class SupportDiagnosticsEndpoint
         \check_admin_referer('must_support_diagnostics_settings', 'must_support_diagnostics_nonce');
 
         $settings = self::getSettings();
+
         $action = isset($_POST['support_diagnostics_action']) && !\is_array($_POST['support_diagnostics_action'])
             ? \sanitize_key((string) \wp_unslash($_POST['support_diagnostics_action']))
             : 'save';
@@ -104,10 +155,12 @@ final class SupportDiagnosticsEndpoint
         $enabled = !empty($settings['enabled']);
         $token = (string) ($settings['token'] ?? '');
         $endpointUrl = $token !== '' ? self::getEndpointUrl($token) : '';
+        $plainEndpointUrl = $token !== '' ? self::getPlainEndpointUrl($token) : '';
         $logLimit = self::normalizeLogLimit((int) ($settings['log_limit'] ?? 25));
 
         echo '<section class="postbox must-dashboard-panel must-settings-panel">';
         echo '<div class="must-dashboard-panel-inner">';
+
         echo '<div class="must-dashboard-panel-heading">';
         echo '<div>';
         echo '<h2>' . \esc_html__('MUST Support Diagnostics Endpoint', 'must-hotel-booking') . '</h2>';
@@ -155,9 +208,15 @@ final class SupportDiagnosticsEndpoint
 
         if ($endpointUrl !== '') {
             echo '<div class="must-settings-field">';
-            echo '<label for="must-support-diagnostics-url">' . \esc_html__('Support endpoint URL', 'must-hotel-booking') . '</label>';
+            echo '<label for="must-support-diagnostics-url">' . \esc_html__('REST support endpoint URL', 'must-hotel-booking') . '</label>';
             echo '<input id="must-support-diagnostics-url" type="text" readonly value="' . \esc_attr($endpointUrl) . '" onclick="this.select();" />';
-            echo '<p class="description">' . \esc_html__('Send this URL only to trusted support. Disable or regenerate the token when finished.', 'must-hotel-booking') . '</p>';
+            echo '<p class="description">' . \esc_html__('Primary REST endpoint. Send this URL only to trusted support.', 'must-hotel-booking') . '</p>';
+            echo '</div>';
+
+            echo '<div class="must-settings-field">';
+            echo '<label for="must-support-diagnostics-plain-url">' . \esc_html__('Plain support endpoint URL', 'must-hotel-booking') . '</label>';
+            echo '<input id="must-support-diagnostics-plain-url" type="text" readonly value="' . \esc_attr($plainEndpointUrl) . '" onclick="this.select();" />';
+            echo '<p class="description">' . \esc_html__('Fallback URL that avoids wp-json routing and adds a refresh parameter to reduce caching issues.', 'must-hotel-booking') . '</p>';
             echo '</div>';
         } else {
             echo '<p class="description">' . \esc_html__('Enable the endpoint to generate a support URL.', 'must-hotel-booking') . '</p>';
@@ -200,12 +259,16 @@ final class SupportDiagnosticsEndpoint
                 'log_limit' => self::normalizeLogLimit((int) ($settings['log_limit'] ?? 25)),
             ],
             'environment' => self::getEnvironmentSummary(),
+            'critical_findings' => self::getCriticalFindings($diagnostics),
             'provider' => [
                 'configured_mode' => ProviderManager::configuredKey(),
                 'active_mode' => ProviderManager::activeKey(),
                 'clock_summary' => $clockSummary,
             ],
             'diagnostics' => self::pickDiagnostics($diagnostics),
+            'cron_statuses' => self::getPluginCronStatuses(),
+            'refund_summary' => self::getRefundSummary(),
+            'clock_request_summary' => self::getClockRequestSummary($diagnostics),
         ];
 
         if (!empty($settings['include_logs'])) {
@@ -256,6 +319,152 @@ final class SupportDiagnosticsEndpoint
                 'critical_issues' => (int) ($diagnostics['critical_issues'] ?? 0),
                 'warnings' => (int) ($diagnostics['warnings'] ?? 0),
             ],
+        ];
+    }
+
+    /**
+     * @param array<string, mixed> $diagnostics
+     * @return array<int, string>
+     */
+    private static function getCriticalFindings(array $diagnostics): array
+    {
+        $findings = [];
+
+        $cron = isset($diagnostics['cron']) && \is_array($diagnostics['cron']) ? $diagnostics['cron'] : [];
+        if ((string) ($cron['health'] ?? '') !== 'ok') {
+            $message = (string) ($cron['message'] ?? '');
+            $findings[] = $message !== '' ? $message : 'A required plugin cron job is not healthy.';
+        }
+
+        $provider = isset($diagnostics['provider']) && \is_array($diagnostics['provider']) ? $diagnostics['provider'] : [];
+
+        if (isset($provider['request_logs']) && \is_array($provider['request_logs'])) {
+            $outbound = isset($provider['request_logs']['outbound_summary']) && \is_array($provider['request_logs']['outbound_summary'])
+                ? $provider['request_logs']['outbound_summary']
+                : [];
+
+            $lastError = (string) ($outbound['last_error'] ?? '');
+            if ($lastError !== '') {
+                $findings[] = $lastError;
+            }
+        }
+
+        $refundSummary = self::getRefundSummary();
+        if ((int) ($refundSummary['manual_review'] ?? 0) > 0) {
+            $findings[] = \sprintf(
+                '%d refund(s) require manual Clock review.',
+                (int) $refundSummary['manual_review']
+            );
+        }
+
+        if (empty($findings)) {
+            $findings[] = 'No critical support findings detected by this report.';
+        }
+
+        return \array_values(\array_unique($findings));
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private static function getPluginCronStatuses(): array
+    {
+        $crons = \_get_cron_array();
+
+        if (!\is_array($crons)) {
+            $crons = [];
+        }
+
+        $pluginHooks = [];
+
+        foreach ($crons as $timestamp => $hooks) {
+            if (!\is_array($hooks)) {
+                continue;
+            }
+
+            foreach ($hooks as $hook => $events) {
+                if (!\is_string($hook)) {
+                    continue;
+                }
+
+                if (\strpos($hook, 'must_') === false && \strpos($hook, 'mhb_') === false && \strpos($hook, 'hotel_booking') === false) {
+                    continue;
+                }
+
+                if (!isset($pluginHooks[$hook])) {
+                    $pluginHooks[$hook] = [
+                        'hook' => $hook,
+                        'next_run_timestamp' => (int) $timestamp,
+                        'next_run' => \wp_date('Y-m-d H:i:s', (int) $timestamp),
+                    ];
+                }
+            }
+        }
+
+        \ksort($pluginHooks);
+
+        return [
+            'total_plugin_crons' => \count($pluginHooks),
+            'items' => \array_values($pluginHooks),
+        ];
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private static function getRefundSummary(): array
+    {
+        global $wpdb;
+
+        $table = $wpdb->prefix . 'must_refunds';
+
+        if (!self::tableExists($table)) {
+            return [
+                'table_exists' => false,
+                'total' => 0,
+                'succeeded' => 0,
+                'failed' => 0,
+                'manual_review' => 0,
+                'latest_error' => '',
+            ];
+        }
+
+        $total = (int) $wpdb->get_var("SELECT COUNT(*) FROM `{$table}`");
+        $succeeded = (int) $wpdb->get_var("SELECT COUNT(*) FROM `{$table}` WHERE status = 'succeeded'");
+        $failed = (int) $wpdb->get_var("SELECT COUNT(*) FROM `{$table}` WHERE status IN ('failed', 'error')");
+        $manualReview = (int) $wpdb->get_var("SELECT COUNT(*) FROM `{$table}` WHERE clock_sync_status = 'manual_review'");
+
+        $latestError = (string) $wpdb->get_var(
+            "SELECT error_message FROM `{$table}` WHERE error_message <> '' ORDER BY id DESC LIMIT 1"
+        );
+
+        return [
+            'table_exists' => true,
+            'total' => $total,
+            'succeeded' => $succeeded,
+            'failed' => $failed,
+            'manual_review' => $manualReview,
+            'latest_error' => $latestError,
+        ];
+    }
+
+    /**
+     * @param array<string, mixed> $diagnostics
+     * @return array<string, mixed>
+     */
+    private static function getClockRequestSummary(array $diagnostics): array
+    {
+        $provider = isset($diagnostics['provider']) && \is_array($diagnostics['provider']) ? $diagnostics['provider'] : [];
+        $requestLogs = isset($provider['request_logs']) && \is_array($provider['request_logs']) ? $provider['request_logs'] : [];
+        $outbound = isset($requestLogs['outbound_summary']) && \is_array($requestLogs['outbound_summary']) ? $requestLogs['outbound_summary'] : [];
+
+        return [
+            'total' => (int) ($outbound['total'] ?? 0),
+            'successful' => (int) ($outbound['successful'] ?? 0),
+            'failed' => (int) ($outbound['failed'] ?? 0),
+            'last_error' => (string) ($outbound['last_error'] ?? ''),
+            'last_error_operation' => (string) ($outbound['last_error_operation'] ?? ''),
+            'last_error_http_status' => (int) ($outbound['last_error_http_status'] ?? 0),
         ];
     }
 
@@ -414,6 +623,15 @@ final class SupportDiagnosticsEndpoint
             'payload',
             'context_json',
             'metadata',
+            'email',
+            'guest_email',
+            'customer_email',
+            'sender_email',
+            'booking_recipient',
+            'phone',
+            'guest_phone',
+            'customer_phone',
+            'mobile',
         ];
 
         if (\in_array($key, $blockedExact, true)) {
@@ -421,21 +639,16 @@ final class SupportDiagnosticsEndpoint
         }
 
         $blockedContains = [
-            'secret',
-            'password',
             'access_token',
             'refresh_token',
             'bearer',
             'authorization',
             'cookie',
-            'nonce',
             'raw_',
             'payload',
             'request_body',
             'response_body',
             'card',
-            'email',
-            'phone',
         ];
 
         foreach ($blockedContains as $needle) {
@@ -452,6 +665,10 @@ final class SupportDiagnosticsEndpoint
             return true;
         }
 
+        if (\strpos($key, 'secret') !== false && \substr($key, -4) !== '_set') {
+            return true;
+        }
+
         return false;
     }
 
@@ -460,7 +677,8 @@ final class SupportDiagnosticsEndpoint
         $value = \sanitize_text_field($value);
 
         $value = (string) \preg_replace('/[A-Z0-9._%+\-]+@[A-Z0-9.\-]+\.[A-Z]{2,}/i', '[email-redacted]', $value);
-        $value = (string) \preg_replace('/\+?\d[\d\s().\-]{7,}\d/', '[phone-redacted]', $value);
+        $value = (string) \preg_replace('/\b(phone|tel|mobile|whatsapp)\s*[:=]\s*\+?\d[\d\s().\-]{7,}\d\b/i', '$1: [phone-redacted]', $value);
+        $value = (string) \preg_replace('/(?<![\d:])\+\d[\d\s().\-]{7,}\d(?![\d:])/', '[phone-redacted]', $value);
         $value = (string) \preg_replace('/(sk_live_|sk_test_|whsec_|pk_live_|pk_test_)[A-Za-z0-9_]+/', '[key-redacted]', $value);
 
         return $value;
@@ -543,8 +761,56 @@ final class SupportDiagnosticsEndpoint
     private static function getEndpointUrl(string $token): string
     {
         return \add_query_arg(
-            ['token' => $token],
+            [
+                'token' => $token,
+                'refresh' => \time(),
+            ],
             \rest_url(self::REST_NAMESPACE . self::REST_ROUTE)
         );
+    }
+
+    private static function getPlainEndpointUrl(string $token): string
+    {
+        return \add_query_arg(
+            [
+                'must_support_health' => '1',
+                'token' => $token,
+                'refresh' => \time(),
+            ],
+            \home_url('/')
+        );
+    }
+
+    private static function sendNoCacheHeaders(): void
+    {
+        if (\headers_sent()) {
+            return;
+        }
+
+        \nocache_headers();
+        \header('Cache-Control: no-store, no-cache, must-revalidate, max-age=0');
+        \header('Pragma: no-cache');
+        \header('Expires: 0');
+        \header('X-Robots-Tag: noindex, nofollow, noarchive');
+    }
+
+    /**
+     * @param array<string, mixed> $payload
+     */
+    private static function sendJsonResponse(array $payload, int $statusCode = 200): void
+    {
+        self::sendNoCacheHeaders();
+
+        \status_header($statusCode);
+
+        if (!\headers_sent()) {
+            \header('Content-Type: application/json; charset=' . \get_option('blog_charset'));
+        }
+
+        $json = \wp_json_encode($payload, \JSON_PRETTY_PRINT | \JSON_UNESCAPED_SLASHES);
+
+        echo $json !== false ? $json : '{"success":false,"message":"Unable to encode diagnostics report."}';
+
+        exit;
     }
 }
