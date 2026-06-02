@@ -177,7 +177,7 @@ final class ClockRoomSelection
         $roomTypeId = isset($roomType['id']) ? (int) $roomType['id'] : 0;
         $roomNumber = \trim((string) ($physicalRoom['room_number'] ?? ''));
         $title = \trim((string) ($physicalRoom['title'] ?? ''));
-        $name = $roomNumber !== '' ? $roomNumber : $title;
+        $name = $title !== '' ? $title : $roomNumber;
 
         if ($name === '') {
             $name = \sprintf(
@@ -185,8 +185,16 @@ final class ClockRoomSelection
                 \__('Room %d', 'must-hotel-booking'),
                 $physicalRoomId
             );
-        } elseif ($title !== '' && $title !== $name) {
-            $name .= ' - ' . $title;
+        }
+
+        $description = \trim((string) ($physicalRoom['description'] ?? ''));
+
+        if ($description === '') {
+            $description = \trim((string) ($physicalRoom['admin_notes'] ?? ''));
+        }
+
+        if ($description === '') {
+            $description = (string) ($roomType['description'] ?? '');
         }
 
         return [
@@ -199,7 +207,7 @@ final class ClockRoomSelection
             'slug' => (string) ($roomType['slug'] ?? ''),
             'details_slug' => (string) ($roomType['slug'] ?? ''),
             'category' => (string) ($roomType['category'] ?? ''),
-            'description' => (string) ($roomType['description'] ?? ''),
+            'description' => $description,
             'max_guests' => isset($physicalRoom['capacity_override']) && (int) $physicalRoom['capacity_override'] > 0
                 ? (int) $physicalRoom['capacity_override']
                 : (int) ($roomType['max_guests'] ?? 1),

@@ -4,7 +4,7 @@ Tags: hotel, booking, reservation, accommodation
 Requires at least: 5.0
 Tested up to: 6.0
 Requires PHP: 7.4
-Stable tag: 0.4.27
+Stable tag: 0.4.28
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -31,6 +31,11 @@ Main features include:
 5. When updating, upload the new release ZIP or use the configured updater, then review **Diagnostics & Maintenance** after the update completes.
 
 == Changelog ==
+
+= 0.4.28 =
+* Added Stripe refund tracking with admin and portal refund controls plus Clock folio refund sync support
+* Added Clock endpoint defaults and increased mobile top padding on non-home pages
+* Fixed Clock physical room list and detail displays to show physical room names, descriptions, features, nightly price, and similar rooms
 
 = 0.4.27 =
 * Fixed Clock automatic sync scheduler PHP file formatting so the namespace declaration loads correctly in production

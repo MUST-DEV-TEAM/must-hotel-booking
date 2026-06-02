@@ -154,6 +154,7 @@ class Rooms_List_Widget extends \Elementor\Widget_Base
             $room_name = isset($room['name']) ? (string) $room['name'] : '';
             $room_slug = isset($room['details_slug']) ? (string) $room['details_slug'] : (isset($room['slug']) ? (string) $room['slug'] : '');
             $room_description = isset($room['description']) ? (string) $room['description'] : '';
+            $physical_room_id = isset($room['physical_room_id']) ? (int) $room['physical_room_id'] : 0;
             $gallery_urls = $gallery_room_id > 0 ? get_room_gallery_urls_for_widget($gallery_room_id, 4) : [];
             $primary_image = $gallery_room_id > 0 ? get_room_main_image_url_for_widget($gallery_room_id) : '';
             $thumbnail_urls = $gallery_urls;
@@ -187,14 +188,19 @@ class Rooms_List_Widget extends \Elementor\Widget_Base
             $details_url = '';
 
             if ($rooms_page_url !== '' && $room_slug !== '') {
+                $details_args = ['room' => $room_slug];
+
+                if ($physical_room_id > 0) {
+                    $details_args['inventory_room_id'] = $physical_room_id;
+                }
+
                 $details_url = \add_query_arg(
-                    ['room' => $room_slug],
+                    $details_args,
                     $rooms_page_url
                 );
             }
 
             $book_args = ['room_id' => $booking_room_id];
-            $physical_room_id = isset($room['physical_room_id']) ? (int) $room['physical_room_id'] : 0;
 
             if ($physical_room_id > 0) {
                 $book_args = [

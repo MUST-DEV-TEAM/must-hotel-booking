@@ -141,8 +141,9 @@
 .must-hotel-booking-single-room .must-hotel-booking-single-room-meta {
     margin: 0;
     display: flex;
-    flex-direction: column;
-    gap: 7px;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 10px 18px;
 }
 
 .must-hotel-booking-single-room .must-hotel-booking-single-room-meta p {
@@ -161,6 +162,20 @@
     height: 15px;
     object-fit: contain;
     filter: brightness(0) saturate(100%) invert(83%) sepia(14%) saturate(324%) hue-rotate(165deg) brightness(88%) contrast(90%);
+}
+
+.must-hotel-booking-single-room .must-hotel-booking-single-room-description {
+    margin: 0;
+    max-width: 620px;
+    font-size: 17px;
+    line-height: 1.35;
+    font-weight: 500;
+    color: #1e1e1e;
+}
+
+.must-hotel-booking-single-room .must-hotel-booking-single-room-price {
+    padding-left: 18px;
+    border-left: 1px solid rgba(20, 20, 20, 0.28);
 }
 
 .must-hotel-booking-single-room .must-hotel-booking-single-room-section {

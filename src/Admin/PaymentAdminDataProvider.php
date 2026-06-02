@@ -11,12 +11,14 @@ use MustHotelBooking\Provider\ProviderReservationView;
 final class PaymentAdminDataProvider
 {
     private \MustHotelBooking\Database\PaymentRepository $paymentRepository;
+    private \MustHotelBooking\Database\RefundRepository $refundRepository;
     private \MustHotelBooking\Database\ReservationRepository $reservationRepository;
     private \MustHotelBooking\Database\ActivityRepository $activityRepository;
 
     public function __construct()
     {
         $this->paymentRepository = \MustHotelBooking\Engine\get_payment_repository();
+        $this->refundRepository = \MustHotelBooking\Engine\get_refund_repository();
         $this->reservationRepository = \MustHotelBooking\Engine\get_reservation_repository();
         $this->activityRepository = \MustHotelBooking\Engine\get_activity_repository();
     }
@@ -302,6 +304,7 @@ final class PaymentAdminDataProvider
         }
 
         $paymentRows = $this->paymentRepository->getPaymentsForReservation($reservationId);
+        $refundRows = $this->refundRepository->getRefundsForReservation($reservationId);
         $state = PaymentStatusService::buildReservationPaymentState($reservation, $paymentRows);
         $providerContext = ProviderReservationView::metadata($reservation);
         $providerPayment = ProviderReservationView::paymentContext($reservation, $state);
@@ -319,6 +322,14 @@ final class PaymentAdminDataProvider
 
             if (!empty($providerPayment['reconciliation_required'])) {
                 $state['warnings'][] = \__('Provider payment reconciliation is pending or failed.', 'must-hotel-booking');
+            }
+        }
+
+        foreach ($refundRows as $refundRow) {
+            $clockSyncStatus = \sanitize_key((string) ($refundRow['clock_sync_status'] ?? ''));
+            if (\in_array($clockSyncStatus, ['failed', 'manual_review', 'retrying'], true)) {
+                $state['warnings'][] = \__('Refund succeeded in Stripe but failed to sync to Clock. Retry sync or mark for manual review.', 'must-hotel-booking');
+                break;
             }
         }
 
@@ -351,6 +362,7 @@ final class PaymentAdminDataProvider
                 ? (string) $reservation['room_name']
                 : \__('Unassigned', 'must-hotel-booking'),
             'payments' => $paymentRows,
+            'refunds' => $refundRows,
             'timeline' => $timeline,
             'provider' => $providerContext,
             'provider_payment' => $providerPayment,

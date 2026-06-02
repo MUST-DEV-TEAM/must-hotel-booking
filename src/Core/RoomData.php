@@ -178,63 +178,110 @@ final class RoomData
         $rooms = [];
 
         foreach ($rows as $row) {
-            if (!\is_array($row)) {
-                continue;
+            $displayRoom = \is_array($row) ? self::buildPhysicalRoomDisplayRow($row, $roomType) : null;
+
+            if (\is_array($displayRoom)) {
+                $rooms[] = $displayRoom;
             }
-
-            $isActive = !isset($row['is_active']) || (int) $row['is_active'] === 1;
-            $isBookable = !isset($row['is_bookable']) || (int) $row['is_bookable'] === 1;
-
-            if (!$isActive || !$isBookable) {
-                continue;
-            }
-
-            $roomNumber = \trim((string) ($row['room_number'] ?? ''));
-            $title = \trim((string) ($row['title'] ?? ''));
-            $name = $roomNumber !== '' ? $roomNumber : $title;
-
-            if ($name === '') {
-                $name = \sprintf(
-                    /* translators: %d is an inventory room ID. */
-                    \__('Room %d', 'must-hotel-booking'),
-                    (int) ($row['id'] ?? 0)
-                );
-            } elseif ($title !== '' && $title !== $name) {
-                $name .= ' - ' . $title;
-            }
-
-            $physicalRoomId = isset($row['id']) ? (int) $row['id'] : 0;
-
-            if ($physicalRoomId <= 0) {
-                continue;
-            }
-
-            $rooms[] = [
-                'id' => $physicalRoomId,
-                'booking_room_id' => $physicalRoomId,
-                'gallery_room_id' => $roomTypeId,
-                'room_type_id' => $roomTypeId,
-                'physical_room_id' => $physicalRoomId,
-                'name' => $name,
-                'slug' => (string) ($roomType['slug'] ?? ''),
-                'details_slug' => (string) ($roomType['slug'] ?? ''),
-                'category' => (string) ($roomType['category'] ?? ''),
-                'description' => \sprintf(
-                    /* translators: %s is the room type name. */
-                    \__('Individual room under %s.', 'must-hotel-booking'),
-                    (string) ($roomType['name'] ?? \__('this room type', 'must-hotel-booking'))
-                ),
-                'max_guests' => isset($row['capacity_override']) && (int) $row['capacity_override'] > 0
-                    ? (int) $row['capacity_override']
-                    : (int) ($roomType['max_guests'] ?? 1),
-                'base_price' => (float) ($roomType['base_price'] ?? 0.0),
-                'room_size' => (string) ($roomType['room_size'] ?? ''),
-                'beds' => (string) ($roomType['beds'] ?? ''),
-                'is_clock_physical_room' => true,
-            ];
         }
 
         return $rooms;
+    }
+
+    /**
+     * @return array<string, mixed>|null
+     */
+    public static function getPhysicalRoomDisplayById(int $physicalRoomId): ?array
+    {
+        if ($physicalRoomId <= 0) {
+            return null;
+        }
+
+        $inventory = \MustHotelBooking\Engine\get_inventory_repository();
+
+        if (!$inventory->inventoryRoomsTableExists()) {
+            return null;
+        }
+
+        $physicalRoom = $inventory->getInventoryRoomById($physicalRoomId);
+
+        if (!\is_array($physicalRoom)) {
+            return null;
+        }
+
+        $roomTypeId = isset($physicalRoom['room_type_id']) ? (int) $physicalRoom['room_type_id'] : 0;
+        $roomType = $roomTypeId > 0 ? self::getRoom($roomTypeId) : null;
+
+        if (!\is_array($roomType)) {
+            return null;
+        }
+
+        return self::buildPhysicalRoomDisplayRow($physicalRoom, $roomType);
+    }
+
+    /**
+     * @param array<string, mixed> $physicalRoom
+     * @param array<string, mixed> $roomType
+     * @return array<string, mixed>|null
+     */
+    private static function buildPhysicalRoomDisplayRow(array $physicalRoom, array $roomType): ?array
+    {
+        $isActive = !isset($physicalRoom['is_active']) || (int) $physicalRoom['is_active'] === 1;
+        $isBookable = !isset($physicalRoom['is_bookable']) || (int) $physicalRoom['is_bookable'] === 1;
+
+        if (!$isActive || !$isBookable) {
+            return null;
+        }
+
+        $physicalRoomId = isset($physicalRoom['id']) ? (int) $physicalRoom['id'] : 0;
+        $roomTypeId = isset($roomType['id']) ? (int) $roomType['id'] : 0;
+
+        if ($physicalRoomId <= 0 || $roomTypeId <= 0) {
+            return null;
+        }
+
+        $roomNumber = \trim((string) ($physicalRoom['room_number'] ?? ''));
+        $title = \trim((string) ($physicalRoom['title'] ?? ''));
+        $name = $title !== '' ? $title : $roomNumber;
+
+        if ($name === '') {
+            $name = \sprintf(
+                /* translators: %d is an inventory room ID. */
+                \__('Room %d', 'must-hotel-booking'),
+                $physicalRoomId
+            );
+        }
+
+        $description = \trim((string) ($physicalRoom['description'] ?? ''));
+
+        if ($description === '') {
+            $description = \trim((string) ($physicalRoom['admin_notes'] ?? ''));
+        }
+
+        if ($description === '') {
+            $description = (string) ($roomType['description'] ?? '');
+        }
+
+        return [
+            'id' => $physicalRoomId,
+            'booking_room_id' => $physicalRoomId,
+            'gallery_room_id' => $roomTypeId,
+            'room_type_id' => $roomTypeId,
+            'physical_room_id' => $physicalRoomId,
+            'room_number' => $roomNumber,
+            'name' => $name,
+            'slug' => (string) ($roomType['slug'] ?? ''),
+            'details_slug' => (string) ($roomType['slug'] ?? ''),
+            'category' => (string) ($roomType['category'] ?? ''),
+            'description' => $description,
+            'max_guests' => isset($physicalRoom['capacity_override']) && (int) $physicalRoom['capacity_override'] > 0
+                ? (int) $physicalRoom['capacity_override']
+                : (int) ($roomType['max_guests'] ?? 1),
+            'base_price' => (float) ($roomType['base_price'] ?? 0.0),
+            'room_size' => (string) ($roomType['room_size'] ?? ''),
+            'beds' => (string) ($roomType['beds'] ?? ''),
+            'is_clock_physical_room' => true,
+        ];
     }
 
     public static function getRoomMainImageId(int $roomId): int

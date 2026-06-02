@@ -27,7 +27,10 @@ $wbeWarningMarkup = \MustHotelBooking\Frontend\ClockWbeFrontend::getFrontendConf
         <?php else : ?>
             <?php
             $room_title = isset($view['room_title']) ? (string) $view['room_title'] : '';
+            $description = isset($view['description']) ? (string) $view['description'] : '';
             $max_guests = isset($view['max_guests']) ? (int) $view['max_guests'] : 1;
+            $base_price = isset($view['base_price']) ? (float) $view['base_price'] : 0.0;
+            $currency = isset($view['currency']) ? (string) $view['currency'] : 'USD';
             $room_size = isset($view['room_size']) ? (string) $view['room_size'] : '';
             $room_rules = isset($view['room_rules']) ? (string) $view['room_rules'] : '';
             $amenities_intro = isset($view['amenities_intro']) ? (string) $view['amenities_intro'] : '';
@@ -100,6 +103,12 @@ $wbeWarningMarkup = \MustHotelBooking\Frontend\ClockWbeFrontend::getFrontendConf
                         <?php echo $wbeWarningMarkup; // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped ?>
                     <?php endif; ?>
 
+                    <?php if ($description !== '') : ?>
+                        <p class="must-hotel-booking-single-room-description">
+                            <?php echo \wp_kses_post(\nl2br(\esc_html($description))); ?>
+                        </p>
+                    <?php endif; ?>
+
                     <div class="must-hotel-booking-single-room-meta">
                         <p>
                             <?php if ($people_icon_url !== '') : ?>
@@ -117,6 +126,21 @@ $wbeWarningMarkup = \MustHotelBooking\Frontend\ClockWbeFrontend::getFrontendConf
                                 ?>
                             </span>
                         </p>
+                        <?php if ($base_price > 0) : ?>
+                            <p class="must-hotel-booking-single-room-price">
+                                <span>
+                                    <?php
+                                    echo \esc_html(
+                                        \sprintf(
+                                            /* translators: %s is a formatted nightly price. */
+                                            __('%s per night', 'must-hotel-booking'),
+                                            \must_hotel_booking\format_frontend_money($base_price, $currency)
+                                        )
+                                    );
+                                    ?>
+                                </span>
+                            </p>
+                        <?php endif; ?>
                         <?php if ($room_size !== '') : ?>
                             <p>
                                 <?php if ($surface_icon_url !== '') : ?>
@@ -231,13 +255,10 @@ $wbeWarningMarkup = \MustHotelBooking\Frontend\ClockWbeFrontend::getFrontendConf
             </div>
 
             <?php if (!empty($related_rooms)) : ?>
-                <section class="must-hotel-booking-related-rooms-section" aria-label="<?php echo \esc_attr__('Related Rooms', 'must-hotel-booking'); ?>">
+                <section class="must-hotel-booking-related-rooms-section" aria-label="<?php echo \esc_attr__('Similar rooms', 'must-hotel-booking'); ?>">
                     <div class="must-hotel-booking-related-rooms-inner">
                         <p class="must-hotel-booking-related-rooms-kicker">
-                            <?php
-                            $kicker_label = $category_label !== '' ? $category_label : \__('Rooms', 'must-hotel-booking');
-                            echo \esc_html('/ ' . $kicker_label);
-                            ?>
+                            <?php echo \esc_html('/ ' . \__('Similar rooms', 'must-hotel-booking')); ?>
                         </p>
 
                         <div class="must-hotel-booking-related-rooms-grid">

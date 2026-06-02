@@ -159,11 +159,23 @@ function get_requested_single_room_id(): int
 }
 
 /**
+ * Resolve requested physical inventory room id from query.
+ */
+function get_requested_single_physical_room_id(): int
+{
+    if (isset($_GET['inventory_room_id'])) {
+        return \absint(\wp_unslash($_GET['inventory_room_id']));
+    }
+
+    return isset($_GET['physical_room_id']) ? \absint(\wp_unslash($_GET['physical_room_id'])) : 0;
+}
+
+/**
  * Determine whether current request is for a single room details page.
  */
 function is_single_room_request(): bool
 {
-    return get_requested_single_room_slug() !== '' || get_requested_single_room_id() > 0;
+    return get_requested_single_room_slug() !== '' || get_requested_single_room_id() > 0 || get_requested_single_physical_room_id() > 0;
 }
 
 /**
@@ -183,8 +195,17 @@ function get_room_record_by_slug(string $room_slug): ?array
  */
 function get_single_room_record_from_request(): ?array
 {
+    $physical_room_id = get_requested_single_physical_room_id();
     $room_slug = get_requested_single_room_slug();
     $room_id = get_requested_single_room_id();
+
+    if ($physical_room_id > 0) {
+        $physical_room = RoomData::getPhysicalRoomDisplayById($physical_room_id);
+
+        if (\is_array($physical_room)) {
+            return $physical_room;
+        }
+    }
 
     if ($room_slug !== '') {
         return get_room_record_by_slug($room_slug);
@@ -200,7 +221,7 @@ function get_single_room_record_from_request(): ?array
 /**
  * Build single room details URL.
  */
-function get_single_room_url(string $slug): string
+function get_single_room_url(string $slug, int $physical_room_id = 0): string
 {
     $slug = \sanitize_title($slug);
     $roomsPageUrl = get_preferred_single_room_host_page_url();
@@ -209,7 +230,13 @@ function get_single_room_url(string $slug): string
         return '';
     }
 
-    return \add_query_arg(['room' => $slug], $roomsPageUrl);
+    $args = ['room' => $slug];
+
+    if ($physical_room_id > 0) {
+        $args['inventory_room_id'] = $physical_room_id;
+    }
+
+    return \add_query_arg($args, $roomsPageUrl);
 }
 
 /**
@@ -292,6 +319,142 @@ function get_single_room_related_rooms(int $current_room_id, string $category, i
 }
 
 /**
+ * Build a room card row for the similar rooms section.
+ *
+ * @param array<string, mixed> $row
+ * @return array<string, mixed>|null
+ */
+function build_single_room_similar_room_card(array $row): ?array
+{
+    $room_id = isset($row['id']) ? (int) $row['id'] : 0;
+    $physical_room_id = isset($row['physical_room_id']) ? (int) $row['physical_room_id'] : 0;
+    $gallery_room_id = isset($row['gallery_room_id']) ? (int) $row['gallery_room_id'] : $room_id;
+    $booking_room_id = isset($row['booking_room_id']) ? (int) $row['booking_room_id'] : $room_id;
+    $room_slug = isset($row['details_slug']) ? (string) $row['details_slug'] : (isset($row['slug']) ? (string) $row['slug'] : '');
+
+    if ($room_id <= 0 || $gallery_room_id <= 0 || $room_slug === '') {
+        return null;
+    }
+
+    $main_image_url = RoomData::getRoomMainImageUrl($gallery_room_id, 'large');
+    $gallery_urls = RoomData::getRoomGalleryImageUrls($gallery_room_id, 10, 'large');
+    $images = [];
+
+    if ($main_image_url !== '') {
+        $images[] = $main_image_url;
+    }
+
+    foreach ($gallery_urls as $gallery_url) {
+        $gallery_url = (string) $gallery_url;
+
+        if ($gallery_url !== '') {
+            $images[] = $gallery_url;
+        }
+    }
+
+    $images = \array_values(\array_unique($images));
+    $booking_args = ['room_id' => $booking_room_id];
+
+    if ($physical_room_id > 0) {
+        $booking_args = [
+            'room_id' => $gallery_room_id,
+            'inventory_room_id' => $physical_room_id,
+        ];
+    }
+
+    return [
+        'id' => $room_id,
+        'name' => isset($row['name']) ? (string) $row['name'] : '',
+        'slug' => $room_slug,
+        'description' => isset($row['description']) ? (string) $row['description'] : '',
+        'max_guests' => isset($row['max_guests']) ? (int) $row['max_guests'] : 1,
+        'room_size' => isset($row['room_size']) ? (string) $row['room_size'] : '',
+        'permalink' => get_single_room_url($room_slug, $physical_room_id),
+        'booking_url' => \add_query_arg($booking_args, ManagedPages::getBookingPageUrl()),
+        'images' => $images,
+        'cover_image' => !empty($images) ? (string) $images[0] : '',
+    ];
+}
+
+/**
+ * Get similar rooms, preferring random physical rooms from the same room type.
+ *
+ * @return array<int, array<string, mixed>>
+ */
+function get_single_room_similar_rooms(int $current_physical_room_id, int $room_type_id, string $category, int $current_room_id, int $limit = 3): array
+{
+    $limit = \max(1, \min(6, $limit));
+    $similar_rooms = [];
+    $seen_ids = [];
+
+    if ($room_type_id > 0) {
+        $inventory = \MustHotelBooking\Engine\get_inventory_repository();
+
+        if ($inventory->inventoryRoomsTableExists()) {
+            $same_type_rows = $inventory->getRoomsByType($room_type_id);
+            \shuffle($same_type_rows);
+
+            foreach ($same_type_rows as $same_type_row) {
+                if (!\is_array($same_type_row)) {
+                    continue;
+                }
+
+                $physical_room_id = isset($same_type_row['id']) ? (int) $same_type_row['id'] : 0;
+
+                if ($physical_room_id <= 0 || $physical_room_id === $current_physical_room_id || isset($seen_ids[$physical_room_id])) {
+                    continue;
+                }
+
+                $display_row = RoomData::getPhysicalRoomDisplayById($physical_room_id);
+                $card = \is_array($display_row) ? build_single_room_similar_room_card($display_row) : null;
+
+                if (\is_array($card)) {
+                    $seen_ids[$physical_room_id] = true;
+                    $similar_rooms[] = $card;
+                }
+
+                if (\count($similar_rooms) >= $limit) {
+                    return $similar_rooms;
+                }
+            }
+        }
+    }
+
+    $all_rooms = RoomData::getRoomsForDisplay('all', 200);
+    \shuffle($all_rooms);
+
+    foreach ($all_rooms as $candidate_row) {
+        if (!\is_array($candidate_row)) {
+            continue;
+        }
+
+        $physical_room_id = isset($candidate_row['physical_room_id']) ? (int) $candidate_row['physical_room_id'] : 0;
+        $candidate_id = $physical_room_id > 0 ? $physical_room_id : (int) ($candidate_row['id'] ?? 0);
+
+        if ($candidate_id <= 0 || $candidate_id === $current_physical_room_id || isset($seen_ids[$candidate_id])) {
+            continue;
+        }
+
+        $card = build_single_room_similar_room_card($candidate_row);
+
+        if (\is_array($card)) {
+            $seen_ids[$candidate_id] = true;
+            $similar_rooms[] = $card;
+        }
+
+        if (\count($similar_rooms) >= $limit) {
+            return $similar_rooms;
+        }
+    }
+
+    if (empty($similar_rooms) && $current_physical_room_id <= 0 && $current_room_id > 0 && $category !== '') {
+        return get_single_room_related_rooms($current_room_id, $category, $limit);
+    }
+
+    return $similar_rooms;
+}
+
+/**
  * Build single room page view data.
  *
  * @return array<string, mixed>
@@ -312,35 +475,48 @@ function get_single_room_page_view_data(): array
     }
 
     $room_id = (int) $room['id'];
+    $gallery_room_id = isset($room['gallery_room_id']) ? (int) $room['gallery_room_id'] : $room_id;
+    $room_type_id = isset($room['room_type_id']) ? (int) $room['room_type_id'] : $gallery_room_id;
+    $physical_room_id = isset($room['physical_room_id']) ? (int) $room['physical_room_id'] : 0;
     $room_slug = isset($room['slug']) ? (string) $room['slug'] : '';
     $room_category = isset($room['category']) ? (string) $room['category'] : '';
-    $main_image_url = RoomData::getRoomMainImageUrl($room_id, 'large');
-    $gallery_urls = RoomData::getRoomGalleryImageUrls($room_id, 12, 'large');
+    $main_image_url = RoomData::getRoomMainImageUrl($gallery_room_id, 'large');
+    $gallery_urls = RoomData::getRoomGalleryImageUrls($gallery_room_id, 12, 'large');
 
     if ($main_image_url === '' && !empty($gallery_urls)) {
         $main_image_url = (string) $gallery_urls[0];
         $gallery_urls = \array_slice($gallery_urls, 1);
     }
 
-    $booking_url = \add_query_arg(
-        ['room_id' => $room_id],
-        ManagedPages::getBookingPageUrl()
-    );
-    $related_rooms = get_single_room_related_rooms($room_id, $room_category, 3);
+    $booking_args = ['room_id' => $gallery_room_id];
+
+    if ($physical_room_id > 0) {
+        $booking_args['inventory_room_id'] = $physical_room_id;
+    }
+
+    $booking_url = \add_query_arg($booking_args, ManagedPages::getBookingPageUrl());
+    $related_rooms = get_single_room_similar_rooms($physical_room_id, $room_type_id, $room_category, $gallery_room_id, 3);
 
     return [
         'success' => true,
         'message' => '',
         'room' => $room,
         'room_id' => $room_id,
+        'gallery_room_id' => $gallery_room_id,
+        'room_type_id' => $room_type_id,
+        'physical_room_id' => $physical_room_id,
         'room_slug' => $room_slug,
         'room_title' => isset($room['name']) ? (string) $room['name'] : '',
         'description' => isset($room['description']) ? (string) $room['description'] : '',
         'max_guests' => isset($room['max_guests']) ? (int) $room['max_guests'] : 1,
+        'base_price' => isset($room['base_price']) ? (float) $room['base_price'] : 0.0,
+        'currency' => \class_exists(\MustHotelBooking\Core\MustBookingConfig::class)
+            ? \MustHotelBooking\Core\MustBookingConfig::get_currency()
+            : 'USD',
         'room_size' => isset($room['room_size']) ? (string) $room['room_size'] : '',
-        'room_rules' => RoomData::getRoomRulesText($room_id),
-        'amenities_intro' => RoomData::getRoomAmenitiesIntroText($room_id),
-        'amenities' => RoomData::getRoomAmenityDisplayItems($room_id),
+        'room_rules' => RoomData::getRoomRulesText($gallery_room_id),
+        'amenities_intro' => RoomData::getRoomAmenitiesIntroText($gallery_room_id),
+        'amenities' => RoomData::getRoomAmenityDisplayItems($gallery_room_id),
         'main_image_url' => $main_image_url,
         'gallery_urls' => $gallery_urls,
         'related_rooms' => $related_rooms,
@@ -377,7 +553,7 @@ function get_single_room_page_view_data(): array
                 'icon_url' => MUST_HOTEL_BOOKING_URL . 'assets/img/parking.svg',
             ],
         ],
-        'permalink' => get_single_room_url($room_slug),
+        'permalink' => get_single_room_url($room_slug, $physical_room_id),
     ];
 }
 

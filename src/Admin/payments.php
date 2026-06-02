@@ -121,6 +121,8 @@ function render_payments_admin_notice_from_query(): void
         'payment_marked_pending' => ['success', \__('Reservation payment moved to pending.', 'must-hotel-booking')],
         'payment_marked_pay_at_hotel' => ['success', \__('Reservation updated to pay at hotel.', 'must-hotel-booking')],
         'payment_marked_failed' => ['success', \__('Reservation payment marked failed.', 'must-hotel-booking')],
+        'payment_refunded' => ['success', \__('Refund issued successfully.', 'must-hotel-booking')],
+        'refund_manual_done' => ['success', \__('Refund marked as manually reconciled in Clock.', 'must-hotel-booking')],
         'reservation_guest_email_resent' => ['success', \__('Guest confirmation email resent.', 'must-hotel-booking')],
         'reservation_admin_email_resent' => ['success', \__('Admin notification email resent.', 'must-hotel-booking')],
         'provider_backed_read_only' => ['error', \__('Provider-backed reservations are read-only in local payment actions until provider-aware payment operations are implemented.', 'must-hotel-booking')],
@@ -877,6 +879,33 @@ function render_payment_detail(?array $detail): void
         echo '<p>' . \esc_html__('No payment warnings are currently attached to this reservation. The ledger, reservation state, and gateway reference appear aligned from the stored data available on this page.', 'must-hotel-booking') . '</p>';
         echo '</div>';
     }
+    $reservationId = (int) ($reservation['id'] ?? 0);
+    $amountPaid = (float) ($state['amount_paid'] ?? 0.0);
+    $paymentMethod = \sanitize_key((string) ($state['method'] ?? ''));
+    $transactionId = (string) ($state['transaction_id'] ?? '');
+    if ($reservationId > 0 && $amountPaid > 0.0 && $paymentMethod === 'stripe' && $transactionId !== '') {
+        echo '<div class="must-payments-context-card">';
+        echo '<span class="must-dashboard-eyebrow">' . \esc_html__('Stripe Refund', 'must-hotel-booking') . '</span>';
+        echo '<form method="post" action="' . \esc_url(get_admin_payments_page_url(['action' => 'view', 'reservation_id' => $reservationId])) . '" class="must-payments-filter-form">';
+        \wp_nonce_field('must_payment_issue_refund_' . $reservationId, 'must_payments_nonce');
+        echo '<input type="hidden" name="must_payments_action" value="issue_refund" />';
+        echo '<input type="hidden" name="reservation_id" value="' . \esc_attr((string) $reservationId) . '" />';
+        echo '<label><span>' . \esc_html__('Amount', 'must-hotel-booking') . '</span><input type="number" min="0.01" max="' . \esc_attr(\number_format($amountPaid, 2, '.', '')) . '" step="0.01" name="amount" value="' . \esc_attr(\number_format($amountPaid, 2, '.', '')) . '" /></label>';
+        echo '<label><span>' . \esc_html__('Action', 'must-hotel-booking') . '</span><select name="refund_type">';
+        foreach ([
+            'refund_only' => __('Refund only', 'must-hotel-booking'),
+            'full_refund_cancel' => __('Refund and cancel', 'must-hotel-booking'),
+            'partial_refund' => __('Partial refund', 'must-hotel-booking'),
+            'partial_refund_cancel' => __('Partial refund and cancel', 'must-hotel-booking'),
+        ] as $value => $label) {
+            echo '<option value="' . \esc_attr((string) $value) . '">' . \esc_html((string) $label) . '</option>';
+        }
+        echo '</select></label>';
+        echo '<label><span>' . \esc_html__('Reason', 'must-hotel-booking') . '</span><input type="text" name="reason" /></label>';
+        echo '<button type="submit" class="button button-secondary">' . \esc_html__('Issue Refund', 'must-hotel-booking') . '</button>';
+        echo '</form>';
+        echo '</div>';
+    }
     echo '</div>';
     echo '</div>';
 
@@ -918,6 +947,46 @@ function render_payment_detail(?array $detail): void
         echo '</div>';
     }
     echo '</div>';
+
+    if (!empty($detail['refunds'])) {
+        echo '<div class="must-payments-subsection">';
+        echo '<div class="must-payments-subsection-heading"><h3>' . \esc_html__('Refund Records', 'must-hotel-booking') . '</h3><p>' . \esc_html__('Stripe refunds and Clock folio sync state for this reservation.', 'must-hotel-booking') . '</p></div>';
+        echo '<div class="must-payments-table-wrap">';
+        echo '<table class="widefat striped must-payments-data-table must-payments-detail-table"><thead><tr>';
+        echo '<th>' . \esc_html__('Amount', 'must-hotel-booking') . '</th>';
+        echo '<th>' . \esc_html__('Stripe Refund', 'must-hotel-booking') . '</th>';
+        echo '<th>' . \esc_html__('Refund Status', 'must-hotel-booking') . '</th>';
+        echo '<th>' . \esc_html__('Clock Sync', 'must-hotel-booking') . '</th>';
+        echo '<th>' . \esc_html__('Reason', 'must-hotel-booking') . '</th>';
+        echo '<th>' . \esc_html__('Action', 'must-hotel-booking') . '</th>';
+        echo '</tr></thead><tbody>';
+        foreach ((array) ($detail['refunds'] ?? []) as $refundRow) {
+            if (!\is_array($refundRow)) {
+                continue;
+            }
+            echo '<tr>';
+            echo '<td><div class="must-payments-money">' . \esc_html(\number_format_i18n((float) ($refundRow['amount'] ?? 0.0), 2) . ' ' . (string) ($refundRow['currency'] ?? MustBookingConfig::get_currency())) . '</div></td>';
+            echo '<td>' . \esc_html((string) ($refundRow['stripe_refund_id'] ?? '')) . '</td>';
+            echo '<td>' . render_payments_status_badge((string) ($refundRow['status'] ?? ''), (string) ($refundRow['status'] ?? '')) . '</td>';
+            echo '<td>' . render_payments_status_badge((string) ($refundRow['clock_sync_status'] ?? ''), (string) ($refundRow['clock_sync_status'] ?? '')) . '</td>';
+            echo '<td>' . \esc_html((string) ($refundRow['failed_reason'] ?? '') !== '' ? (string) ($refundRow['failed_reason'] ?? '') : (string) ($refundRow['reason'] ?? '')) . '</td>';
+            echo '<td>';
+            if (\in_array(\sanitize_key((string) ($refundRow['clock_sync_status'] ?? '')), ['failed', 'manual_review'], true)) {
+                echo '<form method="post" action="' . \esc_url(get_admin_payments_page_url(['action' => 'view', 'reservation_id' => (int) ($refundRow['reservation_id'] ?? 0)])) . '">';
+                \wp_nonce_field('must_payment_refund_manual_done_' . (int) ($refundRow['id'] ?? 0), 'must_payments_nonce');
+                echo '<input type="hidden" name="must_payments_action" value="mark_refund_manual_done" />';
+                echo '<input type="hidden" name="reservation_id" value="' . \esc_attr((string) ((int) ($refundRow['reservation_id'] ?? 0))) . '" />';
+                echo '<input type="hidden" name="refund_id" value="' . \esc_attr((string) ((int) ($refundRow['id'] ?? 0))) . '" />';
+                echo '<button type="submit" class="button button-small">' . \esc_html__('Mark manual done', 'must-hotel-booking') . '</button>';
+                echo '</form>';
+            }
+            echo '</td>';
+            echo '</tr>';
+        }
+        echo '</tbody></table>';
+        echo '</div>';
+        echo '</div>';
+    }
 
     echo '<div class="must-payments-subsection">';
     echo '<div class="must-payments-subsection-heading"><h3>' . \esc_html__('Activity Timeline', 'must-hotel-booking') . '</h3><p>' . \esc_html__('Payment-related activity, gateway follow-up, and reservation events captured for this booking.', 'must-hotel-booking') . '</p></div>';

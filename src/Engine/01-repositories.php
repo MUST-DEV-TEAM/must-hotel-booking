@@ -10,6 +10,7 @@ use MustHotelBooking\Database\GuestRepository;
 use MustHotelBooking\Database\HousekeepingRepository;
 use MustHotelBooking\Database\InventoryRepository;
 use MustHotelBooking\Database\PaymentRepository;
+use MustHotelBooking\Database\RefundRepository;
 use MustHotelBooking\Database\ReportRepository;
 use MustHotelBooking\Database\RatePlanRepository;
 use MustHotelBooking\Database\ReservationRepository;
@@ -132,6 +133,17 @@ function get_payment_repository(): PaymentRepository
 
     if (!$repository instanceof PaymentRepository) {
         $repository = new PaymentRepository();
+    }
+
+    return $repository;
+}
+
+function get_refund_repository(): RefundRepository
+{
+    static $repository = null;
+
+    if (!$repository instanceof RefundRepository) {
+        $repository = new RefundRepository();
     }
 
     return $repository;

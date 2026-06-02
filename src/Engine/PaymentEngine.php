@@ -659,7 +659,7 @@ final class PaymentEngine
      * @param array<string, scalar> $body
      * @return array<string, mixed>
      */
-    public static function performStripeApiRequest(string $method, string $path, array $body = []): array
+    public static function performStripeApiRequest(string $method, string $path, array $body = [], array $options = []): array
     {
         $secretKey = self::getStripeSecretKey();
 
@@ -680,6 +680,10 @@ final class PaymentEngine
                 'Authorization' => 'Bearer ' . $secretKey,
             ],
         ];
+
+        if (!empty($options['idempotency_key'])) {
+            $args['headers']['Idempotency-Key'] = \sanitize_text_field((string) $options['idempotency_key']);
+        }
 
         if (!empty($body)) {
             $args['body'] = $body;
@@ -1395,6 +1399,13 @@ final class PaymentEngine
 
         $type = isset($event['type']) ? (string) $event['type'] : '';
         $object = isset($event['data']['object']) && \is_array($event['data']['object']) ? $event['data']['object'] : [];
+
+        if (\in_array($type, ['refund.created', 'refund.updated', 'charge.refunded'], true)) {
+            (new PaymentRefundService())->handleStripeWebhookEvent($event);
+
+            return new \WP_REST_Response(['success' => true], 200);
+        }
+
         $reservationIds = self::getReservationIdsFromStripeSession($object);
 
         if (empty($reservationIds)) {

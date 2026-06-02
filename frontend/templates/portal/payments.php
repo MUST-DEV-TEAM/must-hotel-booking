@@ -110,6 +110,7 @@ if (\is_array($detail)) {
     $providerPayment = isset($detail['provider_payment']) && \is_array($detail['provider_payment']) ? $detail['provider_payment'] : [];
     $isProviderBacked = !empty($providerContext['is_provider_backed']);
     $payments = isset($detail['payments']) && \is_array($detail['payments']) ? $detail['payments'] : [];
+    $refunds = isset($detail['refunds']) && \is_array($detail['refunds']) ? $detail['refunds'] : [];
     $timeline = isset($detail['timeline']) && \is_array($detail['timeline']) ? $detail['timeline'] : [];
     $warnings = isset($state['warnings']) && \is_array($state['warnings']) ? $state['warnings'] : [];
     $reservationStatus = \sanitize_key((string) ($reservation['status'] ?? ''));
@@ -145,7 +146,6 @@ if (\is_array($detail)) {
         $canPostPayment = false;
         $canPostPartialPayment = false;
         $canMarkPaid = false;
-        $canRefund = false;
         $canReconcile = false;
         $canRenderReceipt = false;
         $canRenderInvoice = false;
@@ -191,7 +191,7 @@ if (\is_array($detail)) {
     }
 
     if ($isProviderBacked) {
-        echo '<div class="must-portal-feed-item"><div><strong>' . \esc_html__('Provider-backed payment actions are read-only here.', 'must-hotel-booking') . '</strong><span>' . \esc_html__('Use provider-aware reservation actions or provider diagnostics instead of changing this payment state locally.', 'must-hotel-booking') . '</span></div>';
+        echo '<div class="must-portal-feed-item"><div><strong>' . \esc_html__('Provider-backed local payment edits are read-only here.', 'must-hotel-booking') . '</strong><span>' . \esc_html__('Stripe refunds use provider-aware Clock sync; other local payment-state edits remain disabled.', 'must-hotel-booking') . '</span></div>';
         PortalRenderer::renderBadge('warning', \__('Read-only', 'must-hotel-booking'));
         echo '</div>';
         if (!empty($providerPayment)) {
@@ -238,6 +238,17 @@ if (\is_array($detail)) {
         echo '<input type="hidden" name="must_portal_action" value="payment_refund" />';
         echo '<input type="hidden" name="reservation_id" value="' . \esc_attr((string) $reservationId) . '" />';
         echo '<label><span>' . \esc_html__('Refund amount', 'must-hotel-booking') . '</span><input type="number" min="0.01" max="' . \esc_attr(\number_format($amountPaid, 2, '.', '')) . '" step="0.01" name="amount" value="' . \esc_attr($refundAmountValue) . '" /></label>';
+        echo '<label><span>' . \esc_html__('Refund action', 'must-hotel-booking') . '</span><select name="refund_type">';
+        foreach ([
+            'refund_only' => __('Refund only', 'must-hotel-booking'),
+            'full_refund_cancel' => __('Refund and cancel', 'must-hotel-booking'),
+            'partial_refund' => __('Partial refund', 'must-hotel-booking'),
+            'partial_refund_cancel' => __('Partial refund and cancel', 'must-hotel-booking'),
+        ] as $value => $label) {
+            echo '<option value="' . \esc_attr((string) $value) . '"' . \selected((string) ($refundForm['refund_type'] ?? 'refund_only'), (string) $value, false) . '>' . \esc_html((string) $label) . '</option>';
+        }
+        echo '</select></label>';
+        echo '<label class="must-portal-form-full"><span>' . \esc_html__('Reason', 'must-hotel-booking') . '</span><input type="text" name="reason" value="' . \esc_attr((string) ($refundForm['reason'] ?? '')) . '" /></label>';
         echo '<div class="must-portal-form-full must-portal-inline-actions"><button type="submit" class="must-portal-secondary-button">' . \esc_html__('Issue refund', 'must-hotel-booking') . '</button></div>';
         echo '</form>';
     } elseif ($canRefund && $amountPaid > 0.0 && $paymentMethodKey === 'pay_at_hotel') {
@@ -319,7 +330,29 @@ if (\is_array($detail)) {
         echo '</tbody></table></div>';
     }
 
-    echo '</article><article class="must-portal-panel"><div class="must-portal-panel-header"><div><h2>' . \esc_html__('Payment timeline', 'must-hotel-booking') . '</h2><p>' . \esc_html__('Recent payment events and follow-up captured for this reservation.', 'must-hotel-booking') . '</p></div></div>';
+    echo '</article>';
+
+    if (!empty($refunds)) {
+        echo '<article class="must-portal-panel"><div class="must-portal-panel-header"><div><h2>' . \esc_html__('Refund records', 'must-hotel-booking') . '</h2><p>' . \esc_html__('Stripe refund IDs and Clock folio sync state.', 'must-hotel-booking') . '</p></div></div>';
+        echo '<div class="must-portal-table-wrap"><table class="must-portal-table"><thead><tr><th>' . \esc_html__('Amount', 'must-hotel-booking') . '</th><th>' . \esc_html__('Stripe', 'must-hotel-booking') . '</th><th>' . \esc_html__('Status', 'must-hotel-booking') . '</th><th>' . \esc_html__('Clock', 'must-hotel-booking') . '</th></tr></thead><tbody>';
+        foreach ($refunds as $refundRow) {
+            if (!\is_array($refundRow)) {
+                continue;
+            }
+            echo '<tr>';
+            echo '<td>' . \esc_html(\number_format_i18n((float) ($refundRow['amount'] ?? 0.0), 2) . ' ' . (string) ($refundRow['currency'] ?? $currency)) . '</td>';
+            echo '<td>' . \esc_html((string) ($refundRow['stripe_refund_id'] ?? '')) . '</td>';
+            echo '<td>';
+            PortalRenderer::renderBadge((string) ($refundRow['status'] ?? 'info'), (string) ($refundRow['status'] ?? ''));
+            echo '</td><td>';
+            PortalRenderer::renderBadge((string) ($refundRow['clock_sync_status'] ?? 'info'), (string) ($refundRow['clock_sync_status'] ?? ''));
+            echo '</td></tr>';
+        }
+        echo '</tbody></table></div>';
+        echo '</article>';
+    }
+
+    echo '<article class="must-portal-panel"><div class="must-portal-panel-header"><div><h2>' . \esc_html__('Payment timeline', 'must-hotel-booking') . '</h2><p>' . \esc_html__('Recent payment events and follow-up captured for this reservation.', 'must-hotel-booking') . '</p></div></div>';
 
     if (empty($timeline)) {
         PortalRenderer::renderEmptyState(\__('No payment activity has been logged for this reservation yet.', 'must-hotel-booking'));

@@ -5640,6 +5640,14 @@ div.must-confirmation-picker:nth-child(1) > div:nth-child(3) > div:nth-child(1) 
     }
 }
 
+@media (max-width: 767px) {
+    body:not(.home) .site-main .page-content > .elementor > .e-con.e-parent:first-child,
+    body:not(.home) .site-main .page-content > .elementor > .elementor-element.e-con:first-child {
+        --padding-top: 100px !important;
+        padding-top: 100px !important;
+    }
+}
+
 @media (min-width: 1200px) {
     .must-hotel-booking-page-accommodation .must-hotel-booking-container,
     .must-hotel-booking-page-checkout .must-hotel-booking-container {

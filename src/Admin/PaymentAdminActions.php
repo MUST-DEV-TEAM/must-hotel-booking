@@ -7,6 +7,7 @@ use MustHotelBooking\Core\PaymentMethodRegistry;
 use MustHotelBooking\Engine\BookingStatusEngine;
 use MustHotelBooking\Engine\EmailEngine;
 use MustHotelBooking\Engine\PaymentEngine;
+use MustHotelBooking\Engine\PaymentRefundService;
 use MustHotelBooking\Engine\PaymentStatusService;
 use MustHotelBooking\Provider\ProviderReservationView;
 
@@ -87,6 +88,55 @@ final class PaymentAdminActions
         }
 
         $action = isset($_POST['must_payments_action']) ? \sanitize_key((string) \wp_unslash($_POST['must_payments_action'])) : '';
+
+        if ($action === 'issue_refund') {
+            $reservationId = isset($_POST['reservation_id']) ? \absint(\wp_unslash($_POST['reservation_id'])) : 0;
+            $nonce = isset($_POST['must_payments_nonce']) ? (string) \wp_unslash($_POST['must_payments_nonce']) : '';
+
+            if ($reservationId <= 0 || !\wp_verify_nonce($nonce, 'must_payment_issue_refund_' . $reservationId)) {
+                $this->redirectToPaymentsPage($query->buildUrlArgs([
+                    'notice' => 'invalid_nonce',
+                    'action' => 'view',
+                    'reservation_id' => $reservationId,
+                ]));
+            }
+
+            $amount = isset($_POST['amount']) && !\is_array($_POST['amount']) ? (float) \wp_unslash($_POST['amount']) : 0.0;
+            $refundType = isset($_POST['refund_type']) && !\is_array($_POST['refund_type']) ? \sanitize_key((string) \wp_unslash($_POST['refund_type'])) : 'refund_only';
+            $result = $this->refundRecordedPayment($reservationId, $amount, [
+                'reason' => isset($_POST['reason']) && !\is_array($_POST['reason']) ? \sanitize_text_field((string) \wp_unslash($_POST['reason'])) : '',
+                'refund_type' => $refundType,
+                'cancel_reservation' => \in_array($refundType, ['full_refund_cancel', 'partial_refund_cancel'], true),
+                'source' => 'wp_admin',
+            ]);
+
+            $this->redirectToPaymentsPage($query->buildUrlArgs([
+                'notice' => !empty($result['success']) ? 'payment_refunded' : 'action_failed',
+                'action' => 'view',
+                'reservation_id' => $reservationId,
+            ]));
+        }
+
+        if ($action === 'mark_refund_manual_done') {
+            $reservationId = isset($_POST['reservation_id']) ? \absint(\wp_unslash($_POST['reservation_id'])) : 0;
+            $refundId = isset($_POST['refund_id']) ? \absint(\wp_unslash($_POST['refund_id'])) : 0;
+            $nonce = isset($_POST['must_payments_nonce']) ? (string) \wp_unslash($_POST['must_payments_nonce']) : '';
+
+            if ($reservationId <= 0 || $refundId <= 0 || !\wp_verify_nonce($nonce, 'must_payment_refund_manual_done_' . $refundId)) {
+                $this->redirectToPaymentsPage($query->buildUrlArgs([
+                    'notice' => 'invalid_nonce',
+                    'action' => 'view',
+                    'reservation_id' => $reservationId,
+                ]));
+            }
+
+            $result = (new PaymentRefundService())->markClockSyncHandledManually($refundId);
+            $this->redirectToPaymentsPage($query->buildUrlArgs([
+                'notice' => !empty($result['success']) ? 'refund_manual_done' : 'action_failed',
+                'action' => 'view',
+                'reservation_id' => $reservationId,
+            ]));
+        }
 
         if ($action !== 'save_payment_settings') {
             return $this->blankState();
@@ -226,7 +276,7 @@ final class PaymentAdminActions
     /**
      * @return array<string, mixed>
      */
-    public function refundRecordedPayment(int $reservationId, float $amount): array
+    public function refundRecordedPayment(int $reservationId, float $amount, array $options = []): array
     {
         $reservation = $this->reservationRepository->getReservation($reservationId);
 
@@ -234,13 +284,6 @@ final class PaymentAdminActions
             return [
                 'success' => false,
                 'message' => \__('Reservation not found.', 'must-hotel-booking'),
-            ];
-        }
-
-        if (ProviderReservationView::isProviderBacked($reservation)) {
-            return [
-                'success' => false,
-                'message' => \__('Provider-backed reservations are read-only in local payment actions until provider-aware payment operations are implemented.', 'must-hotel-booking'),
             ];
         }
 
@@ -286,15 +329,10 @@ final class PaymentAdminActions
             ];
         }
 
-        $refundResult = PaymentEngine::refundPayment(
-            $method,
-            [$reservationId],
-            $amount,
-            [
-                'transaction_id' => $transactionId,
-                'currency' => MustBookingConfig::get_currency(),
-            ]
-        );
+        $refundResult = (new PaymentRefundService())->requestRefund($reservationId, $amount, $options + [
+            'currency' => MustBookingConfig::get_currency(),
+            'source' => 'admin',
+        ]);
 
         if (empty($refundResult['success'])) {
             return [
@@ -305,24 +343,11 @@ final class PaymentAdminActions
             ];
         }
 
-        $paymentId = $this->createLedgerPaymentRow($reservationId, $amount, $method, 'refunded', $transactionId);
-
-        $updatedAmountPaid = \max(0.0, $amountPaid - $amount);
-        $updatedAmountDue = \max(0.0, (float) ($state['total'] ?? 0.0) - $updatedAmountPaid);
-        $paymentStatus = $updatedAmountPaid <= 0.0 ? 'refunded' : ($updatedAmountDue > 0.0 ? 'partially_paid' : 'paid');
-        $currentStatus = \sanitize_key((string) ($reservation['status'] ?? 'confirmed'));
-
-        $this->reservationRepository->updateReservationStatus($reservationId, $currentStatus, $paymentStatus);
-
-        if ($paymentId > 0) {
-            $this->dispatchPaymentRecordedEvent($paymentId, $reservationId, $amount, $method, 'refunded', $transactionId);
-        }
-
         return [
             'success' => true,
             'notice' => 'payment_refunded',
-            'payment_id' => $paymentId,
-            'payment_status' => $paymentStatus,
+            'refund_id' => (int) ($refundResult['refund_id'] ?? 0),
+            'status' => (string) ($refundResult['status'] ?? ''),
         ];
     }
 

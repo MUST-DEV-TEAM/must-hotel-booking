@@ -3011,7 +3011,7 @@ final class SettingsPage
             self::renderField(['label' => __('Reservation room update path', 'must-hotel-booking'), 'name' => 'clock_reservation_room_update_path', 'value' => $form['clock_reservation_room_update_path'] ?? '', 'description' => __('Optional Clock room-assignment endpoint. Supports {booking_id}, {reservation_id}, {provider_room_id}, and {provider_room_code}.', 'must-hotel-booking')]);
             self::renderField(['label' => __('Reservation stay update path', 'must-hotel-booking'), 'name' => 'clock_reservation_stay_update_path', 'value' => $form['clock_reservation_stay_update_path'] ?? '', 'description' => __('Optional Clock stay-date update endpoint. Supports {booking_id}, {reservation_id}, {checkin}, and {checkout}.', 'must-hotel-booking')]);
             self::renderField(['label' => __('Reservation guest update path', 'must-hotel-booking'), 'name' => 'clock_reservation_guest_update_path', 'value' => $form['clock_reservation_guest_update_path'] ?? '', 'description' => __('Optional Clock guest/contact update endpoint. Supports {booking_id} and {reservation_id}.', 'must-hotel-booking')]);
-            self::renderField(['label' => __('Rate plans path', 'must-hotel-booking'), 'name' => 'clock_rate_plans_path', 'value' => $form['clock_rate_plans_path'] ?? '']);
+            self::renderField(['label' => __('Rate plans path', 'must-hotel-booking'), 'name' => 'clock_rate_plans_path', 'value' => ($form['clock_rate_plans_path'] ?? '') !== '' ? $form['clock_rate_plans_path'] : '/rate_plans']);
             echo '</div>';
             $mutationPaths = [
                 'cancel' => (string) ($form['clock_reservation_cancel_path'] ?? ''),

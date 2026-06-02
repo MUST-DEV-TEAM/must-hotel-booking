@@ -1028,8 +1028,13 @@ final class PortalController
         $nonce = isset($_POST['must_portal_payment_nonce']) ? (string) \wp_unslash($_POST['must_portal_payment_nonce']) : '';
         $rawAmount = isset($_POST['amount']) && !\is_array($_POST['amount']) ? (string) \wp_unslash($_POST['amount']) : '';
         $amount = (float) $rawAmount;
+        $reason = isset($_POST['reason']) && !\is_array($_POST['reason']) ? \sanitize_text_field((string) \wp_unslash($_POST['reason'])) : '';
+        $refundType = isset($_POST['refund_type']) && !\is_array($_POST['refund_type']) ? \sanitize_key((string) \wp_unslash($_POST['refund_type'])) : 'refund_only';
+        $cancelReservation = \in_array($refundType, ['full_refund_cancel', 'partial_refund_cancel'], true);
         $form = [
             'amount' => $amount > 0 ? \number_format($amount, 2, '.', '') : '',
+            'reason' => $reason,
+            'refund_type' => $refundType,
         ];
 
         if ($reservationId <= 0 || !\wp_verify_nonce($nonce, 'must_portal_payment_action_payment_refund_' . $reservationId)) {
@@ -1040,7 +1045,12 @@ final class PortalController
             return self::buildPaymentActionState($reservationId, ['refund' => $form], [\__('You do not have permission to issue refunds from the portal.', 'must-hotel-booking')]);
         }
 
-        $result = (new PaymentAdminActions())->refundRecordedPayment($reservationId, $amount);
+        $result = (new PaymentAdminActions())->refundRecordedPayment($reservationId, $amount, [
+            'reason' => $reason,
+            'refund_type' => $refundType,
+            'cancel_reservation' => $cancelReservation,
+            'source' => 'portal',
+        ]);
 
         if (empty($result['success'])) {
             return self::buildPaymentActionState(
