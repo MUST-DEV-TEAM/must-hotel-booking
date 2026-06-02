@@ -12,21 +12,15 @@ final class SupportDiagnosticsEndpoint
     private const REST_NAMESPACE = 'must-support/v1';
     private const REST_ROUTE = '/health';
 
-    private const STATIC_SUBDIR = 'must-support';
-    private const STATIC_FILENAME_PREFIX = 'health-';
-    private const STATIC_REFRESH_CRON_HOOK = 'must_support_diagnostics_refresh_static_report';
-    private const STATIC_REFRESH_CRON_SCHEDULE = 'must_support_every_five_minutes';
+    private const LEGACY_STATIC_SUBDIR = 'must-support';
+    private const LEGACY_STATIC_FILENAME_PREFIX = 'health-';
+    private const LEGACY_STATIC_REFRESH_CRON_HOOK = 'must_support_diagnostics_refresh_static_report';
 
     public static function registerHooks(): void
     {
-        \add_filter('cron_schedules', [self::class, 'addCronSchedules']);
-
         \add_action('rest_api_init', [self::class, 'registerRestRoutes']);
-        \add_action('init', [self::class, 'maybeHandlePlainHealthRequest'], 1);
-        \add_action('init', [self::class, 'maybeScheduleStaticRefreshCron'], 20);
-
-        \add_action(self::STATIC_REFRESH_CRON_HOOK, [self::class, 'refreshStaticReportFromCron']);
         \add_action('admin_post_must_support_diagnostics_settings', [self::class, 'handleSettingsPost']);
+        \add_action('init', [self::class, 'cleanupLegacyStaticArtifacts'], 20);
     }
 
     public static function registerRestRoutes(): void
@@ -40,45 +34,6 @@ final class SupportDiagnosticsEndpoint
                 'permission_callback' => '__return_true',
             ]
         );
-    }
-
-    public static function maybeHandlePlainHealthRequest(): void
-    {
-        if (empty($_GET['must_support_health'])) {
-            return;
-        }
-
-        self::sendNoCacheHeaders();
-
-        $settings = self::getSettings();
-
-        if (empty($settings['enabled'])) {
-            self::sendJsonResponse(
-                [
-                    'success' => false,
-                    'message' => 'Not found.',
-                ],
-                404
-            );
-        }
-
-        $providedToken = isset($_GET['token']) && !\is_array($_GET['token'])
-            ? (string) \wp_unslash($_GET['token'])
-            : '';
-
-        $storedToken = (string) ($settings['token'] ?? '');
-
-        if ($storedToken === '' || $providedToken === '' || !\hash_equals($storedToken, $providedToken)) {
-            self::sendJsonResponse(
-                [
-                    'success' => false,
-                    'message' => 'Not found.',
-                ],
-                404
-            );
-        }
-
-        self::sendJsonResponse(self::buildReport($settings), 200);
     }
 
     public static function handleHealthRequest(\WP_REST_Request $request)
@@ -143,26 +98,11 @@ final class SupportDiagnosticsEndpoint
         } elseif ($action === 'clear') {
             $settings['enabled'] = false;
             $settings['token'] = '';
-        } elseif ($action === 'refresh_static') {
-            $settings['enabled'] = true;
-
-            if ((string) ($settings['token'] ?? '') === '') {
-                $settings['token'] = self::generateToken();
-            }
         }
 
         $settings['updated_at'] = \current_time('mysql');
-        $settings = self::sanitizeSettings($settings);
 
-        \update_option(self::OPTION_NAME, $settings, false);
-
-        if (!empty($settings['enabled']) && (string) ($settings['token'] ?? '') !== '') {
-            self::writeStaticReportFile($settings);
-            self::maybeScheduleStaticRefreshCron();
-        } else {
-            self::deleteStaticReportFiles();
-            self::unscheduleStaticRefreshCron();
-        }
+        \update_option(self::OPTION_NAME, self::sanitizeSettings($settings), false);
 
         \wp_safe_redirect(
             \admin_url('admin.php?page=must-hotel-booking-settings&tab=maintenance&support_diagnostics_saved=1')
@@ -180,8 +120,6 @@ final class SupportDiagnosticsEndpoint
         $enabled = !empty($settings['enabled']);
         $token = (string) ($settings['token'] ?? '');
         $endpointUrl = $token !== '' ? self::getEndpointUrl($token) : '';
-        $plainEndpointUrl = $token !== '' ? self::getPlainEndpointUrl($token) : '';
-        $staticReportUrl = $token !== '' ? self::getStaticReportUrl($token) : '';
         $logLimit = self::normalizeLogLimit((int) ($settings['log_limit'] ?? 25));
 
         echo '<section class="postbox must-dashboard-panel must-settings-panel">';
@@ -189,8 +127,8 @@ final class SupportDiagnosticsEndpoint
 
         echo '<div class="must-dashboard-panel-heading">';
         echo '<div>';
-        echo '<h2>' . \esc_html__('MUST Support Diagnostics Endpoint', 'must-hotel-booking') . '</h2>';
-        echo '<p>' . \esc_html__('Enable a temporary, token-protected, read-only support report for debugging live Clock, Stripe, cron, portal, and plugin health without exposing secrets.', 'must-hotel-booking') . '</p>';
+        echo '<h2>' . \esc_html__('MUST Support Diagnostics', 'must-hotel-booking') . '</h2>';
+        echo '<p>' . \esc_html__('Enable a temporary, token-protected, read-only JSON support report for debugging live Clock, Stripe, cron, portal, payment, refund, and plugin health without exposing secrets.', 'must-hotel-booking') . '</p>';
         echo '</div>';
 
         echo '<span class="must-dashboard-status-badge ' . \esc_attr($enabled ? 'is-ok' : 'is-info') . '">';
@@ -211,7 +149,7 @@ final class SupportDiagnosticsEndpoint
 
         echo '<div class="must-settings-field">';
         echo '<label>' . \esc_html__('Endpoint status', 'must-hotel-booking') . '</label>';
-        echo '<p class="description">' . \esc_html($enabled ? __('The endpoint is currently available to anyone with the token.', 'must-hotel-booking') : __('The endpoint is disabled and returns not found.', 'must-hotel-booking')) . '</p>';
+        echo '<p class="description">' . \esc_html($enabled ? __('The diagnostics URL is currently available to anyone with the token.', 'must-hotel-booking') : __('The diagnostics URL is disabled and returns not found.', 'must-hotel-booking')) . '</p>';
         echo '</div>';
 
         echo '<div class="must-settings-field">';
@@ -221,7 +159,7 @@ final class SupportDiagnosticsEndpoint
             echo '<option value="' . \esc_attr((string) $limit) . '"' . \selected($logLimit, $limit, false) . '>' . \esc_html((string) $limit) . '</option>';
         }
         echo '</select>';
-        echo '<p class="description">' . \esc_html__('Maximum recent rows to include from safe operational tables.', 'must-hotel-booking') . '</p>';
+        echo '<p class="description">' . \esc_html__('Maximum recent safe rows to include from operational tables.', 'must-hotel-booking') . '</p>';
         echo '</div>';
 
         echo '<label class="must-settings-toggle">';
@@ -234,24 +172,12 @@ final class SupportDiagnosticsEndpoint
 
         if ($endpointUrl !== '') {
             echo '<div class="must-settings-field">';
-            echo '<label for="must-support-diagnostics-url">' . \esc_html__('REST support endpoint URL', 'must-hotel-booking') . '</label>';
+            echo '<label for="must-support-diagnostics-url">' . \esc_html__('Support diagnostics URL', 'must-hotel-booking') . '</label>';
             echo '<input id="must-support-diagnostics-url" type="text" readonly value="' . \esc_attr($endpointUrl) . '" onclick="this.select();" />';
-            echo '<p class="description">' . \esc_html__('Primary REST endpoint. Send this URL only to trusted support.', 'must-hotel-booking') . '</p>';
-            echo '</div>';
-
-            echo '<div class="must-settings-field">';
-            echo '<label for="must-support-diagnostics-plain-url">' . \esc_html__('Plain support endpoint URL', 'must-hotel-booking') . '</label>';
-            echo '<input id="must-support-diagnostics-plain-url" type="text" readonly value="' . \esc_attr($plainEndpointUrl) . '" onclick="this.select();" />';
-            echo '<p class="description">' . \esc_html__('Fallback URL that avoids wp-json routing and adds a refresh parameter to reduce caching issues.', 'must-hotel-booking') . '</p>';
-            echo '</div>';
-
-            echo '<div class="must-settings-field">';
-            echo '<label for="must-support-diagnostics-static-url">' . \esc_html__('Static support report URL', 'must-hotel-booking') . '</label>';
-            echo '<input id="must-support-diagnostics-static-url" type="text" readonly value="' . \esc_attr($staticReportUrl) . '" onclick="this.select();" />';
-            echo '<p class="description">' . \esc_html__('Best fallback for external support access. This writes a sanitized JSON file in uploads and refreshes it while diagnostics are enabled.', 'must-hotel-booking') . '</p>';
+            echo '<p class="description">' . \esc_html__('Open this URL, copy the JSON, and send it to support. Disable or regenerate the token when finished.', 'must-hotel-booking') . '</p>';
             echo '</div>';
         } else {
-            echo '<p class="description">' . \esc_html__('Enable the endpoint to generate a support URL.', 'must-hotel-booking') . '</p>';
+            echo '<p class="description">' . \esc_html__('Enable diagnostics to generate a support URL.', 'must-hotel-booking') . '</p>';
         }
 
         echo '<div class="must-dashboard-action-strip">';
@@ -259,9 +185,8 @@ final class SupportDiagnosticsEndpoint
 
         if ($enabled) {
             echo '<button type="submit" name="support_diagnostics_action" value="save" class="button">' . \esc_html__('Save Settings', 'must-hotel-booking') . '</button>';
-            echo '<button type="submit" name="support_diagnostics_action" value="refresh_static" class="button">' . \esc_html__('Refresh Static Report', 'must-hotel-booking') . '</button>';
             echo '<button type="submit" name="support_diagnostics_action" value="regenerate" class="button">' . \esc_html__('Regenerate Token', 'must-hotel-booking') . '</button>';
-            echo '<button type="submit" name="support_diagnostics_action" value="disable" class="button button-secondary">' . \esc_html__('Disable Endpoint', 'must-hotel-booking') . '</button>';
+            echo '<button type="submit" name="support_diagnostics_action" value="disable" class="button button-secondary">' . \esc_html__('Disable Diagnostics', 'must-hotel-booking') . '</button>';
             echo '<button type="submit" name="support_diagnostics_action" value="clear" class="button button-link-delete">' . \esc_html__('Disable and Clear Token', 'must-hotel-booking') . '</button>';
         } else {
             echo '<button type="submit" name="support_diagnostics_action" value="enable" class="button button-primary">' . \esc_html__('Enable and Generate URL', 'must-hotel-booking') . '</button>';
@@ -383,6 +308,7 @@ final class SupportDiagnosticsEndpoint
         }
 
         $refundSummary = self::getRefundSummary();
+
         if ((int) ($refundSummary['manual_review'] ?? 0) > 0) {
             $findings[] = \sprintf(
                 '%d refund(s) require manual Clock review.',
@@ -463,13 +389,18 @@ final class SupportDiagnosticsEndpoint
         }
 
         $total = (int) $wpdb->get_var("SELECT COUNT(*) FROM `{$table}`");
-        $succeeded = (int) $wpdb->get_var("SELECT COUNT(*) FROM `{$table}` WHERE status = 'succeeded'");
-        $failed = (int) $wpdb->get_var("SELECT COUNT(*) FROM `{$table}` WHERE status IN ('failed', 'error')");
-        $manualReview = (int) $wpdb->get_var("SELECT COUNT(*) FROM `{$table}` WHERE clock_sync_status = 'manual_review'");
-
-        $latestError = (string) $wpdb->get_var(
-            "SELECT error_message FROM `{$table}` WHERE error_message <> '' ORDER BY id DESC LIMIT 1"
-        );
+        $succeeded = self::columnExists($table, 'status')
+            ? (int) $wpdb->get_var("SELECT COUNT(*) FROM `{$table}` WHERE status = 'succeeded'")
+            : 0;
+        $failed = self::columnExists($table, 'status')
+            ? (int) $wpdb->get_var("SELECT COUNT(*) FROM `{$table}` WHERE status IN ('failed', 'error')")
+            : 0;
+        $manualReview = self::columnExists($table, 'clock_sync_status')
+            ? (int) $wpdb->get_var("SELECT COUNT(*) FROM `{$table}` WHERE clock_sync_status = 'manual_review'")
+            : 0;
+        $latestError = self::columnExists($table, 'error_message')
+            ? (string) $wpdb->get_var("SELECT error_message FROM `{$table}` WHERE error_message <> '' ORDER BY id DESC LIMIT 1")
+            : '';
 
         return [
             'table_exists' => true,
@@ -524,7 +455,7 @@ final class SupportDiagnosticsEndpoint
     {
         global $wpdb;
 
-        if (!self::isSafeTableName($table) || !self::tableExists($table)) {
+        if (!self::isSafeTableName($table) || !self::tableExists($table) || !self::columnExists($table, 'id')) {
             return [];
         }
 
@@ -614,29 +545,71 @@ final class SupportDiagnosticsEndpoint
      */
     private static function sanitizeReport(array $report): array
     {
-        $clean = [];
+        $sanitized = self::sanitizeValue($report);
 
-        foreach ($report as $key => $value) {
-            $keyString = \is_string($key) ? $key : (string) $key;
+        return \is_array($sanitized) ? $sanitized : [];
+    }
 
-            if (self::isSensitiveKey($keyString)) {
-                continue;
-            }
-
-            if (\is_array($value)) {
-                $clean[$keyString] = self::sanitizeReport($value);
-                continue;
-            }
-
-            if (\is_bool($value) || \is_int($value) || \is_float($value) || $value === null) {
-                $clean[$keyString] = $value;
-                continue;
-            }
-
-            $clean[$keyString] = self::maskSensitiveText((string) $value);
+    /**
+     * @param mixed $value
+     * @return mixed
+     */
+    private static function sanitizeValue($value, string $key = '')
+    {
+        if ($key !== '' && self::isSensitiveKey($key)) {
+            return null;
         }
 
-        return $clean;
+        if (\is_array($value)) {
+            $isList = self::isListArray($value);
+            $clean = [];
+
+            foreach ($value as $childKey => $childValue) {
+                $childKeyString = \is_string($childKey) ? $childKey : (string) $childKey;
+
+                if (!$isList && self::isSensitiveKey($childKeyString)) {
+                    continue;
+                }
+
+                $childClean = self::sanitizeValue($childValue, $childKeyString);
+
+                if ($isList) {
+                    $clean[] = $childClean;
+                } else {
+                    $clean[$childKeyString] = $childClean;
+                }
+            }
+
+            return $clean;
+        }
+
+        if (\is_bool($value) || \is_int($value) || \is_float($value) || $value === null) {
+            return $value;
+        }
+
+        return self::maskSensitiveText((string) $value);
+    }
+
+    /**
+     * @param array<mixed> $array
+     */
+    private static function isListArray(array $array): bool
+    {
+        if (\function_exists('array_is_list')) {
+            return \array_is_list($array);
+        }
+
+        $i = 0;
+
+        foreach (\array_keys($array) as $key) {
+            if ($key !== $i) {
+                return false;
+            }
+
+            $i++;
+        }
+
+        return true;
     }
 
     private static function isSensitiveKey(string $key): bool
@@ -730,6 +703,19 @@ final class SupportDiagnosticsEndpoint
         return (string) $found === $table;
     }
 
+    private static function columnExists(string $table, string $column): bool
+    {
+        global $wpdb;
+
+        if (!self::isSafeTableName($table) || !\preg_match('/^[A-Za-z0-9_]+$/', $column)) {
+            return false;
+        }
+
+        $found = $wpdb->get_var($wpdb->prepare("SHOW COLUMNS FROM `{$table}` LIKE %s", $column));
+
+        return (string) $found === $column;
+    }
+
     private static function isSafeTableName(string $table): bool
     {
         return \preg_match('/^[A-Za-z0-9_]+$/', $table) === 1;
@@ -794,23 +780,8 @@ final class SupportDiagnosticsEndpoint
     private static function getEndpointUrl(string $token): string
     {
         return \add_query_arg(
-            [
-                'token' => $token,
-                'refresh' => \time(),
-            ],
+            ['token' => $token],
             \rest_url(self::REST_NAMESPACE . self::REST_ROUTE)
-        );
-    }
-
-    private static function getPlainEndpointUrl(string $token): string
-    {
-        return \add_query_arg(
-            [
-                'must_support_health' => '1',
-                'token' => $token,
-                'refresh' => \time(),
-            ],
-            \home_url('/')
         );
     }
 
@@ -827,211 +798,32 @@ final class SupportDiagnosticsEndpoint
         \header('X-Robots-Tag: noindex, nofollow, noarchive');
     }
 
-    /**
-     * @param array<string, mixed> $payload
-     */
-    private static function sendJsonResponse(array $payload, int $statusCode = 200): void
+    public static function cleanupLegacyStaticArtifacts(): void
     {
-        self::sendNoCacheHeaders();
-
-        \status_header($statusCode);
-
-        if (!\headers_sent()) {
-            \header('Content-Type: application/json; charset=' . \get_option('blog_charset'));
-        }
-
-        $json = \wp_json_encode($payload, \JSON_PRETTY_PRINT | \JSON_UNESCAPED_SLASHES);
-
-        echo $json !== false ? $json : '{"success":false,"message":"Unable to encode diagnostics report."}';
-
-        exit;
-    }
-
-    /**
-     * @param array<string, mixed> $schedules
-     * @return array<string, mixed>
-     */
-    public static function addCronSchedules(array $schedules): array
-    {
-        if (!isset($schedules[self::STATIC_REFRESH_CRON_SCHEDULE])) {
-            $schedules[self::STATIC_REFRESH_CRON_SCHEDULE] = [
-                'interval' => 5 * 60,
-                'display' => \__('Every 5 minutes for MUST support diagnostics', 'must-hotel-booking'),
-            ];
-        }
-
-        return $schedules;
-    }
-
-    public static function maybeScheduleStaticRefreshCron(): void
-    {
-        $settings = self::getSettings();
-
-        if (empty($settings['enabled']) || (string) ($settings['token'] ?? '') === '') {
-            self::unscheduleStaticRefreshCron();
+        if ((string) \get_option('must_hotel_booking_support_diagnostics_legacy_cleaned', '') === '1') {
             return;
         }
 
-        if (\wp_next_scheduled(self::STATIC_REFRESH_CRON_HOOK) === false) {
-            \wp_schedule_event(
-                \time() + 60,
-                self::STATIC_REFRESH_CRON_SCHEDULE,
-                self::STATIC_REFRESH_CRON_HOOK
-            );
-        }
-    }
-
-    public static function refreshStaticReportFromCron(): void
-    {
-        $settings = self::getSettings();
-
-        if (empty($settings['enabled']) || (string) ($settings['token'] ?? '') === '') {
-            self::deleteStaticReportFiles();
-            self::unscheduleStaticRefreshCron();
-            return;
+        while (($timestamp = \wp_next_scheduled(self::LEGACY_STATIC_REFRESH_CRON_HOOK)) !== false) {
+            \wp_unschedule_event((int) $timestamp, self::LEGACY_STATIC_REFRESH_CRON_HOOK);
         }
 
-        self::writeStaticReportFile($settings);
-    }
+        $uploads = \wp_upload_dir();
 
-    private static function unscheduleStaticRefreshCron(): void
-    {
-        while (($timestamp = \wp_next_scheduled(self::STATIC_REFRESH_CRON_HOOK)) !== false) {
-            \wp_unschedule_event((int) $timestamp, self::STATIC_REFRESH_CRON_HOOK);
-        }
-    }
+        if (empty($uploads['error']) && !empty($uploads['basedir'])) {
+            $dir = \trailingslashit((string) $uploads['basedir']) . self::LEGACY_STATIC_SUBDIR;
 
-    /**
-     * @param array<string, mixed> $settings
-     */
-    private static function writeStaticReportFile(array $settings): bool
-    {
-        $token = (string) ($settings['token'] ?? '');
+            if (\is_dir($dir)) {
+                $pattern = \trailingslashit($dir) . self::LEGACY_STATIC_FILENAME_PREFIX . '*.json';
 
-        if ($token === '' || empty($settings['enabled'])) {
-            return false;
-        }
-
-        $dir = self::getStaticReportDir();
-
-        if ($dir === '') {
-            return false;
-        }
-
-        if (!\wp_mkdir_p($dir)) {
-            return false;
-        }
-
-        self::writeStaticProtectionFiles($dir);
-        self::deleteStaticReportFiles();
-
-        $report = self::buildReport($settings);
-        $report['static_report'] = [
-            'generated_at' => \current_time('mysql'),
-            'refresh_mode' => 'admin_or_wp_cron',
-            'auto_refresh_minutes' => 5,
-        ];
-
-        $json = \wp_json_encode($report, \JSON_PRETTY_PRINT | \JSON_UNESCAPED_SLASHES);
-
-        if ($json === false) {
-            return false;
-        }
-
-        $path = self::getStaticReportPath($token);
-
-        if ($path === '') {
-            return false;
-        }
-
-        return \file_put_contents($path, $json, \LOCK_EX) !== false;
-    }
-
-    private static function deleteStaticReportFiles(): void
-    {
-        $dir = self::getStaticReportDir();
-
-        if ($dir === '' || !\is_dir($dir)) {
-            return;
-        }
-
-        $pattern = \trailingslashit($dir) . self::STATIC_FILENAME_PREFIX . '*.json';
-
-        foreach ((array) \glob($pattern) as $file) {
-            if (\is_string($file) && \is_file($file)) {
-                \unlink($file);
+                foreach ((array) \glob($pattern) as $file) {
+                    if (\is_string($file) && \is_file($file)) {
+                        \unlink($file);
+                    }
+                }
             }
         }
-    }
 
-    private static function writeStaticProtectionFiles(string $dir): void
-    {
-        if ($dir === '' || !\is_dir($dir)) {
-            return;
-        }
-
-        $indexPath = \trailingslashit($dir) . 'index.html';
-
-        if (!\file_exists($indexPath)) {
-            \file_put_contents($indexPath, '');
-        }
-
-        $htaccessPath = \trailingslashit($dir) . '.htaccess';
-
-        if (!\file_exists($htaccessPath)) {
-            \file_put_contents(
-                $htaccessPath,
-                "Options -Indexes\n<IfModule mod_headers.c>\nHeader set X-Robots-Tag \"noindex, nofollow, noarchive\"\nHeader set Cache-Control \"no-store, no-cache, must-revalidate, max-age=0\"\nHeader set Pragma \"no-cache\"\nHeader set Expires \"0\"\n</IfModule>\n"
-            );
-        }
-    }
-
-    private static function getStaticReportDir(): string
-    {
-        $uploads = \wp_upload_dir();
-
-        if (!empty($uploads['error']) || empty($uploads['basedir'])) {
-            return '';
-        }
-
-        return \trailingslashit((string) $uploads['basedir']) . self::STATIC_SUBDIR;
-    }
-
-    private static function getStaticReportBaseUrl(): string
-    {
-        $uploads = \wp_upload_dir();
-
-        if (!empty($uploads['error']) || empty($uploads['baseurl'])) {
-            return '';
-        }
-
-        return \trailingslashit((string) $uploads['baseurl']) . self::STATIC_SUBDIR;
-    }
-
-    private static function getStaticReportFilename(string $token): string
-    {
-        return self::STATIC_FILENAME_PREFIX . \hash('sha256', $token) . '.json';
-    }
-
-    private static function getStaticReportPath(string $token): string
-    {
-        $dir = self::getStaticReportDir();
-
-        if ($dir === '') {
-            return '';
-        }
-
-        return \trailingslashit($dir) . self::getStaticReportFilename($token);
-    }
-
-    private static function getStaticReportUrl(string $token): string
-    {
-        $baseUrl = self::getStaticReportBaseUrl();
-
-        if ($baseUrl === '') {
-            return '';
-        }
-
-        return \trailingslashit($baseUrl) . self::getStaticReportFilename($token);
+        \update_option('must_hotel_booking_support_diagnostics_legacy_cleaned', '1', false);
     }
 }
