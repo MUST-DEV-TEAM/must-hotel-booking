@@ -4,7 +4,7 @@ Tags: hotel, booking, reservation, accommodation
 Requires at least: 5.0
 Tested up to: 6.0
 Requires PHP: 7.4
-Stable tag: 0.4.41
+Stable tag: 0.4.42
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -31,6 +31,9 @@ Main features include:
 5. When updating, upload the new release ZIP or use the configured updater, then review **Diagnostics & Maintenance** after the update completes.
 
 == Changelog ==
+
+= 0.4.42 =
+* Added future refund readiness diagnostics to show whether the latest paid Clock booking has a Clock folio ID available for automatic refund sync.
 
 = 0.4.41 =
 * Improved refund diagnostics so Clock manual-review refunds now expose the stored failure reason, including missing Clock folio IDs or Clock refund sync API errors, instead of showing an empty latest_error value.

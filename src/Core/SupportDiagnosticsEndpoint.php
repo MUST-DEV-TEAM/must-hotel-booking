@@ -184,6 +184,7 @@ final class SupportDiagnosticsEndpoint
             'diagnostics' => self::pickDiagnostics($diagnostics),
             'cron_statuses' => self::getPluginCronStatuses(),
             'refund_summary' => self::getRefundSummary(),
+            'future_refund_readiness' => self::getFutureRefundReadiness(),
             'clock_request_summary' => $clockRequestSummary,
             'phase1_trial_summary' => $phase1TrialSummary,
         ];
@@ -666,6 +667,191 @@ final class SupportDiagnosticsEndpoint
             || \strpos($message, 'local payment status was recorded only in the mirror reservation') !== false
             || \strpos($message, 'payment status remains local-only') !== false;
     }
+
+
+
+/**
+ * @return array<string, mixed>
+ */
+private static function getFutureRefundReadiness(): array
+{
+    global $wpdb;
+
+    $paymentsTable = $wpdb->prefix . 'must_payments';
+    $reservationsTable = $wpdb->prefix . 'must_reservations';
+
+    if (
+        !self::tableExists($paymentsTable)
+        || !self::tableExists($reservationsTable)
+        || !self::columnExists($paymentsTable, 'id')
+        || !self::columnExists($paymentsTable, 'reservation_id')
+        || !self::columnExists($paymentsTable, 'status')
+        || !self::columnExists($reservationsTable, 'id')
+    ) {
+        return [
+            'checked' => false,
+            'status' => 'not_available',
+            'message' => 'Required payment or reservation tables/columns are missing.',
+            'latest_paid_reservation_id' => 0,
+            'latest_booking_reference' => '',
+            'clock_folio_id_present' => false,
+            'clock_folio_id_source' => '',
+        ];
+    }
+
+    $bookingReferenceSelect = self::columnExists($reservationsTable, 'booking_id') ? 'r.booking_id' : "''";
+    $providerSelect = self::columnExists($reservationsTable, 'provider') ? 'r.provider' : "''";
+    $providerMetadataSelect = self::columnExists($reservationsTable, 'provider_metadata') ? 'r.provider_metadata' : "''";
+
+    $row = $wpdb->get_row(
+        "SELECT
+            r.id AS reservation_id,
+            {$bookingReferenceSelect} AS booking_reference,
+            {$providerSelect} AS provider,
+            {$providerMetadataSelect} AS provider_metadata
+        FROM `{$paymentsTable}` p
+        INNER JOIN `{$reservationsTable}` r ON r.id = p.reservation_id
+        WHERE p.status = 'paid'
+        ORDER BY p.id DESC
+        LIMIT 1",
+        ARRAY_A
+    );
+
+    if (!\is_array($row)) {
+        return [
+            'checked' => true,
+            'status' => 'no_paid_booking_found',
+            'message' => 'No paid booking was found to check future refund readiness.',
+            'latest_paid_reservation_id' => 0,
+            'latest_booking_reference' => '',
+            'clock_folio_id_present' => false,
+            'clock_folio_id_source' => '',
+        ];
+    }
+
+    $reservationId = (int) ($row['reservation_id'] ?? 0);
+    $bookingReference = (string) ($row['booking_reference'] ?? '');
+    $provider = (string) ($row['provider'] ?? '');
+    $metadata = self::decodeJsonObject((string) ($row['provider_metadata'] ?? ''));
+
+    $folio = self::findClockFolioIdInMetadata($metadata);
+
+    $isClockBooking = $provider === ProviderManager::CLOCK_MODE;
+    $ready = $isClockBooking && (string) ($folio['value'] ?? '') !== '';
+
+    return [
+        'checked' => true,
+        'status' => $ready ? 'ready' : 'needs_folio_recovery',
+        'message' => $ready
+            ? 'Latest paid Clock booking has a Clock folio ID available for future automatic refund sync.'
+            : 'Latest paid Clock booking does not show a Clock folio ID in provider metadata; future refunds may still require manual Clock review.',
+        'latest_paid_reservation_id' => $reservationId,
+        'latest_booking_reference' => $bookingReference,
+        'provider' => $provider,
+        'clock_folio_id_present' => $ready,
+        'clock_folio_id_source' => (string) ($folio['source'] ?? ''),
+        'clock_folio_id_value_masked' => (string) ($folio['value'] ?? '') !== '' ? '[present]' : '',
+    ];
+}
+
+/**
+ * @return array<string, mixed>
+ */
+private static function decodeJsonObject(string $json): array
+{
+    $decoded = \json_decode($json, true);
+
+    return \is_array($decoded) ? $decoded : [];
+}
+
+/**
+ * @param array<string, mixed> $metadata
+ * @return array{value:string,source:string}
+ */
+private static function findClockFolioIdInMetadata(array $metadata): array
+{
+    foreach (['clock_folio_id', 'folio_id', 'default_folio_id'] as $key) {
+        if (isset($metadata[$key]) && \trim((string) $metadata[$key]) !== '') {
+            return [
+                'value' => \sanitize_text_field((string) $metadata[$key]),
+                'source' => $key,
+            ];
+        }
+    }
+
+    $providerResponse = isset($metadata['provider_response']) && \is_array($metadata['provider_response'])
+        ? $metadata['provider_response']
+        : [];
+
+    foreach (['clock_folio_id', 'folio_id', 'default_folio_id'] as $key) {
+        if (isset($providerResponse[$key]) && \trim((string) $providerResponse[$key]) !== '') {
+            return [
+                'value' => \sanitize_text_field((string) $providerResponse[$key]),
+                'source' => 'provider_response.' . $key,
+            ];
+        }
+    }
+
+    foreach (['folios', 'folio', 'accounts'] as $containerKey) {
+        if (!isset($providerResponse[$containerKey])) {
+            continue;
+        }
+
+        $container = $providerResponse[$containerKey];
+
+        if (\is_array($container)) {
+            $found = self::findFirstIdInNestedArray($container, $containerKey);
+
+            if ((string) ($found['value'] ?? '') !== '') {
+                return [
+                    'value' => (string) $found['value'],
+                    'source' => (string) $found['source'],
+                ];
+            }
+        }
+    }
+
+    return [
+        'value' => '',
+        'source' => '',
+    ];
+}
+
+/**
+ * @param array<mixed> $source
+ * @return array{value:string,source:string}
+ */
+private static function findFirstIdInNestedArray(array $source, string $path): array
+{
+    foreach ($source as $key => $value) {
+        $currentPath = $path . '.' . (string) $key;
+
+        if (\is_array($value)) {
+            $nested = self::findFirstIdInNestedArray($value, $currentPath);
+
+            if ((string) ($nested['value'] ?? '') !== '') {
+                return $nested;
+            }
+
+            continue;
+        }
+
+        if (\in_array((string) $key, ['id', 'folio_id', 'default_folio_id', 'clock_folio_id'], true) && \trim((string) $value) !== '') {
+            return [
+                'value' => \sanitize_text_field((string) $value),
+                'source' => $currentPath,
+            ];
+        }
+    }
+
+    return [
+        'value' => '',
+        'source' => '',
+    ];
+}
+
+
+
     /**
      * @return array<string, mixed>
      */
