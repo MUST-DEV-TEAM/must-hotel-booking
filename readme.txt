@@ -4,7 +4,7 @@ Tags: hotel, booking, reservation, accommodation
 Requires at least: 5.0
 Tested up to: 6.0
 Requires PHP: 7.4
-Stable tag: 0.4.53
+Stable tag: 0.4.55
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -31,6 +31,12 @@ Main features include:
 5. When updating, upload the new release ZIP or use the configured updater, then review **Diagnostics & Maintenance** after the update completes.
 
 == Changelog ==
+
+= 0.4.55 =
+* expand the diagnositc
+
+= 0.4.54 =
+* Added production readiness diagnostics for Stripe, Clock, inventory, email, cron, and security checks to identify launch blockers, warnings, and manual operations before going live.
 
 = 0.4.53 =
 * css change
@@ -367,3 +373,4 @@ Main features include:
 
 = 0.3.18 =
 * Maintenance release and plugin structure cleanup for WordPress conventions.
+

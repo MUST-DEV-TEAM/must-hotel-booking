@@ -1,6 +1,7 @@
 <?php
 namespace MustHotelBooking\Core;
 use MustHotelBooking\Admin\SettingsDiagnostics;
+use MustHotelBooking\Engine\PaymentEngine;
 use MustHotelBooking\Provider\Clock\ClockApiClient;
 use MustHotelBooking\Provider\Clock\ClockConfig;
 use MustHotelBooking\Provider\ProviderManager;
@@ -190,6 +191,7 @@ final class SupportDiagnosticsEndpoint
             'clock_folio_payment_accounting_notice' => self::getClockFolioPaymentAccountingNotice($clockRequestSummary),
             'clock_request_summary' => $clockRequestSummary,
             'phase1_trial_summary' => $phase1TrialSummary,
+            'production_readiness' => self::getProductionReadiness($diagnostics, $clockSummary, $clockRequestSummary, $phase1TrialSummary),
         ];
         if (!empty($settings['include_logs'])) {
             $report['recent_logs'] = self::getRecentSafeLogs(self::normalizeLogLimit((int) ($settings['log_limit'] ?? 25)));
@@ -290,9 +292,414 @@ final class SupportDiagnosticsEndpoint
             $findings[] = 'No critical support findings detected by this report.';
         }
         return \array_values(\array_unique($findings));
-    }    /**
-         * @return array<string, mixed>
-         */
+    }
+    /**
+     * @param array<string, mixed> $diagnostics
+     * @param array<string, mixed> $clockSummary
+     * @param array<string, mixed> $clockRequestSummary
+     * @param array<string, mixed> $phase1TrialSummary
+     * @return array<string, mixed>
+     */
+    private static function getProductionReadiness(array $diagnostics, array $clockSummary, array $clockRequestSummary, array $phase1TrialSummary): array
+    {
+        $settings = MustBookingConfig::get_all_settings();
+        $checks = [
+            'stripe' => self::getStripeReadiness($diagnostics),
+            'clock' => self::getClockReadiness($diagnostics, $clockSummary, $clockRequestSummary),
+            'inventory' => self::getInventoryReadiness($diagnostics),
+            'email' => self::getEmailReadiness($diagnostics),
+            'cron' => self::getCronReadinessForProduction($diagnostics),
+            'security' => self::getSecurityReadiness(\is_array($settings) ? $settings : [], $diagnostics),
+        ];
+        if (!empty($phase1TrialSummary['clock_folio_payment_ready']) && isset($checks['clock']['clock_folio_payment_mode'])) {
+            $checks['clock']['clock_folio_payment_mode'] = 'automatic';
+        }
+        return self::buildProductionReadinessStatus($checks) + ['checks' => $checks];
+    }
+    /**
+     * @param array<string, mixed> $diagnostics
+     * @return array<string, mixed>
+     */
+    private static function getStripeReadiness(array $diagnostics): array
+    {
+        $payments = isset($diagnostics['payments']) && \is_array($diagnostics['payments']) ? $diagnostics['payments'] : [];
+        $stripeEnabled = !empty($payments['stripe_enabled']);
+        $environment = PaymentEngine::getActiveSiteEnvironment();
+        $credentials = PaymentEngine::getStripeEnvironmentCredentials($environment);
+        $publishableKeyPresent = (string) ($credentials['publishable_key'] ?? '') !== '';
+        $secretKeyPresent = (string) ($credentials['secret_key'] ?? '') !== '';
+        $webhookSecretPresent = PaymentEngine::getStripeWebhookSecret() !== '';
+        $mode = $environment === 'production' ? 'live' : ($environment !== '' ? 'test' : 'unknown');
+        $latestPayment = self::getLatestStripePaymentSummary();
+        $lastWebhookSeenAt = self::getLatestActivityAt(['stripe_webhook_received', 'stripe_webhook_processed', 'stripe_webhook_failed']);
+        $lastStripeError = self::getLatestStripeError();
+        $blockers = [];
+        $warnings = [];
+        if ($stripeEnabled && !$publishableKeyPresent) {
+            $blockers[] = 'Stripe is enabled but the active publishable key is missing.';
+        }
+        if ($stripeEnabled && !$secretKeyPresent) {
+            $blockers[] = 'Stripe is enabled but the active secret key is missing.';
+        }
+        if ($stripeEnabled && !$webhookSecretPresent) {
+            $blockers[] = 'Stripe is enabled but the webhook signing secret is missing.';
+        }
+        if ($stripeEnabled && (string) ($latestPayment['paid_at'] ?? '') === '' && $lastWebhookSeenAt === '') {
+            $warnings[] = 'Stripe is enabled but no successful payment or webhook activity is recorded in local diagnostics.';
+        }
+        if ($stripeEnabled && $mode === 'test') {
+            $warnings[] = 'Stripe test mode is active.';
+        }
+        return [
+            'stripe_enabled' => $stripeEnabled,
+            'stripe_mode' => $mode,
+            'publishable_key_present' => $publishableKeyPresent,
+            'secret_key_present' => $secretKeyPresent,
+            'webhook_secret_present' => $webhookSecretPresent,
+            'last_successful_payment_at' => (string) ($latestPayment['paid_at'] ?? ''),
+            'last_webhook_seen_at' => $lastWebhookSeenAt,
+            'last_stripe_error' => $lastStripeError,
+            'blockers' => $blockers,
+            'warnings' => $warnings,
+            'manual_operations' => [],
+            'check_status' => !empty($blockers) ? 'blocked' : (!empty($warnings) ? 'warning' : 'ready'),
+        ];
+    }
+    /**
+     * @param array<string, mixed> $diagnostics
+     * @param array<string, mixed> $clockSummary
+     * @param array<string, mixed> $clockRequestSummary
+     * @return array<string, mixed>
+     */
+    private static function getClockReadiness(array $diagnostics, array $clockSummary, array $clockRequestSummary): array
+    {
+        $provider = isset($diagnostics['provider']) && \is_array($diagnostics['provider']) ? $diagnostics['provider'] : [];
+        $clockDiagnostics = isset($provider['clock']) && \is_array($provider['clock']) ? $provider['clock'] : [];
+        $clock = \array_merge($clockDiagnostics, $clockSummary);
+        $configuredMode = (string) ($provider['configured_mode'] ?? ProviderManager::configuredKey());
+        $activeMode = (string) ($provider['active_booking_provider'] ?? ProviderManager::activeKey());
+        $clockEnabled = !empty($clock['clock_enabled']) || $configuredMode === ProviderManager::CLOCK_MODE || $activeMode === ProviderManager::CLOCK_MODE;
+        $clockActive = $configuredMode === ProviderManager::CLOCK_MODE || $activeMode === ProviderManager::CLOCK_MODE;
+        $baseConfigured = !empty($clock['clock_base_api_configured']) || !empty($clock['clock_base_api_url_configured']);
+        $pmsConfigured = !empty($clock['clock_pms_api_configured']) || !empty($clock['clock_pms_api_url_configured']) || !empty($clock['clock_direct_api_configured']);
+        $credentialsPresent = !empty($clock['clock_api_user_set']) && !empty($clock['clock_api_key_set']);
+        $lastSuccessCreate = self::getLatestProviderRequestAt('clock.reservation_create', true);
+        $lastSuccessCancel = self::getLatestProviderRequestAt('clock.reservation_cancel', true);
+        $lastError = (string) ($clockRequestSummary['last_error'] ?? '');
+        $lastOperation = (string) ($clockRequestSummary['last_error_operation'] ?? '');
+        $missingPermissions = [];
+        if (self::isKnownClockFolioPermissionMessage($lastError)) {
+            $missingPermissions[] = 'pms_api_booking_folios_default';
+        }
+        $manualOperations = [];
+        if (\in_array('pms_api_booking_folios_default', $missingPermissions, true)) {
+            $manualOperations[] = 'Staff must manually add website Stripe payments into Clock folio until Clock enables pms_api_booking_folios_default and folio credit item API rights.';
+        }
+        $blockers = [];
+        $warnings = [];
+        if ($clockActive && !$baseConfigured) {
+            $blockers[] = 'Clock mode is active but Base API configuration is missing.';
+        }
+        if ($clockActive && !$pmsConfigured) {
+            $blockers[] = 'Clock mode is active but PMS API configuration is missing.';
+        }
+        if ($clockActive && !$credentialsPresent) {
+            $blockers[] = 'Clock mode is active but API credentials are missing.';
+        }
+        $isBookingCreateError = \strpos($lastOperation, 'reservation_create') !== false || \strpos($lastOperation, 'booking_create') !== false;
+        if ($clockActive && $lastError !== '' && !self::isKnownClockFolioPermissionMessage($lastError) && !self::isKnownLocalOnlyPaymentStatusMessage($lastError)) {
+            if ($isBookingCreateError) {
+                $blockers[] = $lastOperation !== '' ? $lastOperation . ': ' . $lastError : $lastError;
+            } else {
+                $warnings[] = $lastOperation !== '' ? $lastOperation . ': ' . $lastError : $lastError;
+            }
+        }
+        if (!empty($missingPermissions)) {
+            $warnings[] = 'Clock API user is missing pms_api_booking_folios_default; automatic folio payment posting remains manual.';
+        }
+        return [
+            'clock_enabled' => $clockEnabled,
+            'base_api_configured' => $baseConfigured,
+            'pms_api_configured' => $pmsConfigured,
+            'api_credentials_present' => $credentialsPresent,
+            'configured_mode' => $configuredMode,
+            'active_mode' => $activeMode,
+            'last_successful_booking_create' => $lastSuccessCreate,
+            'last_successful_cancel' => $lastSuccessCancel,
+            'last_failed_clock_operation' => $lastError !== '' ? ['operation' => $lastOperation, 'message' => $lastError] : [],
+            'clock_folio_payment_mode' => empty($missingPermissions) ? 'automatic' : 'manual',
+            'missing_permissions' => $missingPermissions,
+            'blockers' => $blockers,
+            'warnings' => $warnings,
+            'manual_operations' => $manualOperations,
+            'check_status' => !empty($blockers) ? 'blocked' : (!empty($warnings) || !empty($manualOperations) ? 'warning' : 'ready'),
+        ];
+    }
+    /**
+     * @param array<string, mixed> $diagnostics
+     * @return array<string, mixed>
+     */
+    private static function getInventoryReadiness(array $diagnostics): array
+    {
+        global $wpdb;
+        $roomsTable = $wpdb->prefix . 'must_rooms';
+        $inventoryTable = $wpdb->prefix . 'mhb_rooms';
+        $rateTable = $wpdb->prefix . 'mhb_room_type_rate_plans';
+        $mappingTable = $wpdb->prefix . 'mhb_provider_mappings';
+        $clockActive = ProviderManager::configuredKey() === ProviderManager::CLOCK_MODE || ProviderManager::activeKey() === ProviderManager::CLOCK_MODE;
+        $items = [];
+        $blockers = [];
+        $warnings = [];
+        $limitations = [];
+        $mappingLimited = false;
+        if (!self::tableExists($roomsTable) || !self::columnExists($roomsTable, 'id') || !self::columnExists($roomsTable, 'name')) {
+            return [
+                'total_active_sellable_rooms_or_room_types' => 0,
+                'items_checked' => [],
+                'items_missing_clock_mapping' => [],
+                'items_missing_inventory' => [],
+                'items_missing_price' => [],
+                'items_missing_rate' => [],
+                'mapping_check_limited' => true,
+                'limitations' => ['Sellable room table or required columns are missing.'],
+                'blockers' => ['Sellable room inventory cannot be checked because the room table is unavailable.'],
+                'warnings' => [],
+                'manual_operations' => [],
+                'check_status' => 'blocked',
+            ];
+        }
+        $where = [];
+        if (self::columnExists($roomsTable, 'is_active')) {
+            $where[] = 'is_active = 1';
+        }
+        if (self::columnExists($roomsTable, 'is_bookable')) {
+            $where[] = 'is_bookable = 1';
+        }
+        if (self::columnExists($roomsTable, 'is_online_bookable')) {
+            $where[] = 'is_online_bookable = 1';
+        }
+        $priceSelect = self::columnExists($roomsTable, 'base_price') ? 'base_price' : '0 AS base_price';
+        $rows = $wpdb->get_results('SELECT id, name, ' . $priceSelect . ' FROM `' . $roomsTable . '`' . (!empty($where) ? ' WHERE ' . \implode(' AND ', $where) : '') . ' ORDER BY id ASC LIMIT 200', ARRAY_A);
+        if (!\is_array($rows)) {
+            $rows = [];
+        }
+        $inventoryCheckAvailable = self::tableExists($inventoryTable) && self::columnExists($inventoryTable, 'room_type_id');
+        $rateCheckAvailable = self::tableExists($rateTable) && self::columnExists($rateTable, 'room_type_id');
+        $mappingCheckAvailable = self::tableExists($mappingTable) && self::columnExists($mappingTable, 'local_id') && self::columnExists($mappingTable, 'external_id');
+        if (!$inventoryCheckAvailable) {
+            $limitations[] = 'Inventory unit table cannot be checked reliably.';
+        }
+        if (!$rateCheckAvailable) {
+            $limitations[] = 'Rate assignment table cannot be checked reliably.';
+        }
+        if (!$mappingCheckAvailable) {
+            $mappingLimited = true;
+            $limitations[] = 'Clock mapping table cannot be checked reliably.';
+        }
+        $missingMapping = [];
+        $missingInventory = [];
+        $missingPrice = [];
+        $missingRate = [];
+        foreach ($rows as $row) {
+            if (!\is_array($row)) {
+                continue;
+            }
+            $id = (int) ($row['id'] ?? 0);
+            if ($id <= 0) {
+                continue;
+            }
+            $title = (string) ($row['name'] ?? '');
+            $price = (float) ($row['base_price'] ?? 0);
+            $inventoryUnits = $inventoryCheckAvailable ? (int) $wpdb->get_var($wpdb->prepare('SELECT COUNT(*) FROM `' . $inventoryTable . '` WHERE room_type_id = %d', $id)) : 0;
+            $rateCount = $rateCheckAvailable ? (int) $wpdb->get_var($wpdb->prepare('SELECT COUNT(*) FROM `' . $rateTable . '` WHERE room_type_id = %d', $id)) : 0;
+            $clockMappings = $mappingCheckAvailable ? (int) $wpdb->get_var($wpdb->prepare('SELECT COUNT(*) FROM `' . $mappingTable . '` WHERE provider = %s AND entity_type = %s AND local_id = %d AND external_id <> %s', ProviderManager::CLOCK_MODE, 'accommodation', $id, '')) : 0;
+            $itemWarnings = [];
+            if ($inventoryCheckAvailable && $inventoryUnits <= 0) {
+                $missingInventory[] = $id;
+                $itemWarnings[] = 'No inventory units are configured.';
+                $blockers[] = 'Active sellable accommodation has no inventory units: ' . $title;
+            }
+            if ($price <= 0) {
+                $missingPrice[] = $id;
+                $itemWarnings[] = 'Base price is missing or zero.';
+                $blockers[] = 'Active sellable accommodation has no price: ' . $title;
+            }
+            if ($rateCheckAvailable && $rateCount <= 0) {
+                $missingRate[] = $id;
+                $itemWarnings[] = 'No rate plan assignment is configured.';
+                $blockers[] = 'Active sellable accommodation has no rate assignment: ' . $title;
+            }
+            if ($clockActive && $mappingCheckAvailable && $clockMappings <= 0) {
+                $missingMapping[] = $id;
+                $itemWarnings[] = 'No Clock accommodation mapping is configured.';
+                $blockers[] = 'Clock mode is active and accommodation has no Clock mapping: ' . $title;
+            }
+            $items[] = [
+                'id' => $id,
+                'title' => $title,
+                'has_clock_mapping' => $mappingCheckAvailable ? $clockMappings > 0 : false,
+                'has_inventory_units' => $inventoryCheckAvailable ? $inventoryUnits > 0 : false,
+                'has_price' => $price > 0,
+                'has_rate_mapping' => $rateCheckAvailable ? $rateCount > 0 : false,
+                'can_book' => empty($itemWarnings),
+                'warnings' => $itemWarnings,
+            ];
+        }
+        if ($mappingLimited || !$inventoryCheckAvailable || !$rateCheckAvailable) {
+            $warnings[] = 'Inventory, rate, or Clock mapping checks are limited by unavailable tables or columns.';
+        }
+        return [
+            'total_active_sellable_rooms_or_room_types' => \count($items),
+            'items_checked' => $items,
+            'items_missing_clock_mapping' => $missingMapping,
+            'items_missing_inventory' => $missingInventory,
+            'items_missing_price' => $missingPrice,
+            'items_missing_rate' => $missingRate,
+            'mapping_check_limited' => $mappingLimited,
+            'limitations' => $limitations,
+            'blockers' => \array_values(\array_unique($blockers)),
+            'warnings' => $warnings,
+            'manual_operations' => [],
+            'check_status' => !empty($blockers) ? 'blocked' : (!empty($warnings) ? 'warning' : 'ready'),
+        ];
+    }
+    /**
+     * @param array<string, mixed> $diagnostics
+     * @return array<string, mixed>
+     */
+    private static function getEmailReadiness(array $diagnostics): array
+    {
+        $emails = isset($diagnostics['emails']) && \is_array($diagnostics['emails']) ? $diagnostics['emails'] : [];
+        $lastSent = self::getLatestActivityAt(['email_sent']);
+        $lastFailed = self::getLatestActivityMessage(['email_failed']);
+        $warnings = [];
+        $blockers = [];
+        $configured = !empty($emails['is_configured']);
+        if (!$configured) {
+            $warnings[] = 'Email settings cannot be fully determined or are incomplete.';
+        }
+        if ($lastSent === '' && $lastFailed === '') {
+            $warnings[] = 'No recent email success or failure data is recorded.';
+        }
+        if ((int) ($emails['recent_failures'] ?? 0) > 0 && $configured) {
+            $blockers[] = 'Recent confirmation email failures are recorded.';
+        }
+        return [
+            'wp_mail_available' => \function_exists('wp_mail'),
+            'guest_email_enabled' => $configured,
+            'admin_email_enabled' => $configured,
+            'last_guest_email_sent' => $lastSent,
+            'last_admin_email_sent' => $lastSent,
+            'last_email_error' => (string) ($lastFailed['message'] ?? ''),
+            'blockers' => $blockers,
+            'warnings' => $warnings,
+            'manual_operations' => [],
+            'check_status' => !empty($blockers) ? 'blocked' : (!empty($warnings) ? 'warning' : 'ready'),
+        ];
+    }
+    /**
+     * @param array<string, mixed> $diagnostics
+     * @return array<string, mixed>
+     */
+    private static function getCronReadinessForProduction(array $diagnostics): array
+    {
+        unset($diagnostics);
+        $required = [
+            'must_hotel_booking_cleanup_expired_locks',
+            'must_hotel_booking_process_provider_sync_jobs',
+            'must_hotel_booking_clock_auto_reservation_sync',
+        ];
+        $scheduled = [];
+        foreach (self::getPluginCronStatuses()['items'] as $item) {
+            if (\is_array($item) && isset($item['hook'])) {
+                $scheduled[] = (string) $item['hook'];
+            }
+        }
+        $missing = \array_values(\array_diff($required, $scheduled));
+        return [
+            'required_jobs' => $required,
+            'scheduled_jobs' => \array_values(\array_unique($scheduled)),
+            'missing_jobs' => $missing,
+            'blockers' => \array_map(static function (string $hook): string {
+                return 'Required WP-Cron job is not scheduled: ' . $hook;
+            }, $missing),
+            'warnings' => [],
+            'manual_operations' => [],
+            'check_status' => !empty($missing) ? 'blocked' : 'ready',
+        ];
+    }
+    /**
+     * @param array<string, mixed> $settings
+     * @param array<string, mixed> $diagnostics
+     * @return array<string, mixed>
+     */
+    private static function getSecurityReadiness(array $settings, array $diagnostics): array
+    {
+        unset($diagnostics);
+        $supportSettings = self::getSettings();
+        $stripeMode = PaymentEngine::getActiveSiteEnvironment() === 'production' ? 'live' : 'test';
+        $warnings = [];
+        if (\defined('WP_DEBUG') && WP_DEBUG) {
+            $warnings[] = 'WP_DEBUG is enabled.';
+        }
+        if (!empty($supportSettings['enabled'])) {
+            $warnings[] = 'Support diagnostics endpoint is enabled.';
+        }
+        if (!empty($supportSettings['include_logs'])) {
+            $warnings[] = 'Support diagnostics includes sanitized logs.';
+        }
+        if ((string) ($supportSettings['token'] ?? '') !== '') {
+            $warnings[] = 'Diagnostics token should be regenerated or disabled after testing.';
+        }
+        if ($stripeMode === 'test') {
+            $warnings[] = 'Stripe test mode is active.';
+        }
+        return [
+            'wp_debug_enabled' => \defined('WP_DEBUG') && WP_DEBUG,
+            'support_diagnostics_enabled' => !empty($supportSettings['enabled']),
+            'support_diagnostics_include_logs' => !empty($supportSettings['include_logs']),
+            'support_diagnostics_token_present' => (string) ($supportSettings['token'] ?? '') !== '',
+            'stripe_test_mode_active' => $stripeMode === 'test',
+            'settings_loaded' => !empty($settings),
+            'blockers' => [],
+            'warnings' => $warnings,
+            'manual_operations' => [],
+            'check_status' => !empty($warnings) ? 'warning' : 'ready',
+        ];
+    }
+    /**
+     * @param array<string, array<string, mixed>> $checks
+     * @return array<string, mixed>
+     */
+    private static function buildProductionReadinessStatus(array $checks): array
+    {
+        $blockers = [];
+        $warnings = [];
+        $manualOperations = [];
+        foreach ($checks as $checkName => $check) {
+            foreach ((array) ($check['blockers'] ?? []) as $message) {
+                $blockers[] = $checkName . ': ' . (string) $message;
+            }
+            foreach ((array) ($check['warnings'] ?? []) as $message) {
+                $warnings[] = $checkName . ': ' . (string) $message;
+            }
+            foreach ((array) ($check['manual_operations'] ?? []) as $message) {
+                $manualOperations[] = $checkName . ': ' . (string) $message;
+            }
+        }
+        $blockers = \array_values(\array_unique($blockers));
+        $warnings = \array_values(\array_unique($warnings));
+        $manualOperations = \array_values(\array_unique($manualOperations));
+        return [
+            'overall_status' => !empty($blockers) ? 'blocked' : (!empty($warnings) || !empty($manualOperations) ? 'warning' : 'ready'),
+            'launch_blockers' => $blockers,
+            'warnings' => $warnings,
+            'manual_operations' => $manualOperations,
+        ];
+    }
+    /**
+     * @return array<string, mixed>
+     */
     private static function getPluginCronStatuses(): array
     {
         $crons = \_get_cron_array();
@@ -900,6 +1307,108 @@ final class SupportDiagnosticsEndpoint
             'folio_id_present' => $folioPresent,
             'folio_id_source' => (string) ($folio['source'] ?? ''),
         ];
+    }
+    /**
+     * @return array<string, string>
+     */
+    private static function getLatestStripePaymentSummary(): array
+    {
+        global $wpdb;
+        $table = $wpdb->prefix . 'must_payments';
+        if (!self::tableExists($table) || !self::columnExists($table, 'method') || !self::columnExists($table, 'status')) {
+            return [];
+        }
+        $paidAtColumn = self::columnExists($table, 'paid_at') ? 'paid_at' : 'created_at';
+        $createdColumn = self::columnExists($table, 'created_at') ? 'created_at' : $paidAtColumn;
+        $row = $wpdb->get_row(
+            $wpdb->prepare(
+                'SELECT `' . $paidAtColumn . '` AS paid_at, `' . $createdColumn . '` AS created_at
+                FROM `' . $table . '`
+                WHERE method = %s AND status = %s
+                ORDER BY COALESCE(`' . $paidAtColumn . '`, `' . $createdColumn . '`) DESC, id DESC
+                LIMIT 1',
+                'stripe',
+                'paid'
+            ),
+            ARRAY_A
+        );
+        return \is_array($row)
+            ? [
+                'paid_at' => \sanitize_text_field((string) ($row['paid_at'] ?? '')),
+                'created_at' => \sanitize_text_field((string) ($row['created_at'] ?? '')),
+            ]
+            : [];
+    }
+    private static function getLatestStripeError(): string
+    {
+        $activity = self::getLatestActivityMessage(['stripe_webhook_failed', 'payment_failed']);
+        if ((string) ($activity['message'] ?? '') !== '') {
+            return (string) $activity['message'];
+        }
+        global $wpdb;
+        $table = $wpdb->prefix . 'mhb_provider_request_logs';
+        if (!self::tableExists($table) || !self::columnExists($table, 'operation') || !self::columnExists($table, 'success') || !self::columnExists($table, 'error_message')) {
+            return '';
+        }
+        $message = $wpdb->get_var(
+            "SELECT error_message FROM `{$table}` WHERE operation LIKE 'stripe.%' AND success = 0 AND error_message <> '' ORDER BY created_at DESC, id DESC LIMIT 1"
+        );
+        return \is_string($message) ? self::maskSensitiveText($message) : '';
+    }
+    /**
+     * @param array<int, string> $eventTypes
+     */
+    private static function getLatestActivityAt(array $eventTypes): string
+    {
+        $row = self::getLatestActivityMessage($eventTypes);
+        return (string) ($row['created_at'] ?? '');
+    }
+    /**
+     * @param array<int, string> $eventTypes
+     * @return array<string, string>
+     */
+    private static function getLatestActivityMessage(array $eventTypes): array
+    {
+        global $wpdb;
+        $table = $wpdb->prefix . 'must_activity_log';
+        if (empty($eventTypes) || !self::tableExists($table) || !self::columnExists($table, 'event_type')) {
+            return [];
+        }
+        $eventTypes = \array_values(\array_filter(\array_map('sanitize_key', $eventTypes)));
+        if (empty($eventTypes)) {
+            return [];
+        }
+        $placeholders = \implode(',', \array_fill(0, \count($eventTypes), '%s'));
+        $row = $wpdb->get_row(
+            $wpdb->prepare(
+                'SELECT created_at, message FROM `' . $table . '` WHERE event_type IN (' . $placeholders . ') ORDER BY created_at DESC, id DESC LIMIT 1',
+                ...$eventTypes
+            ),
+            ARRAY_A
+        );
+        return \is_array($row)
+            ? [
+                'created_at' => \sanitize_text_field((string) ($row['created_at'] ?? '')),
+                'message' => self::maskSensitiveText((string) ($row['message'] ?? '')),
+            ]
+            : [];
+    }
+    private static function getLatestProviderRequestAt(string $operation, bool $success): string
+    {
+        global $wpdb;
+        $table = $wpdb->prefix . 'mhb_provider_request_logs';
+        if (!self::tableExists($table) || !self::columnExists($table, 'operation') || !self::columnExists($table, 'success')) {
+            return '';
+        }
+        $createdAt = $wpdb->get_var(
+            $wpdb->prepare(
+                'SELECT created_at FROM `' . $table . '` WHERE provider = %s AND operation = %s AND success = %d ORDER BY created_at DESC, id DESC LIMIT 1',
+                ProviderManager::CLOCK_MODE,
+                $operation,
+                $success ? 1 : 0
+            )
+        );
+        return \is_string($createdAt) ? \sanitize_text_field($createdAt) : '';
     }
     /**
      * @return array<string, mixed>
