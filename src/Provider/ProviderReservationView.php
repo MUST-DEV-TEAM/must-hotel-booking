@@ -55,13 +55,25 @@ final class ProviderReservationView
         $folioPaymentCurrency = self::cleanText((string) ($folioPayment['currency'] ?? ''));
         $folioPaymentSubType = self::cleanText((string) ($folioPayment['payment_sub_type'] ?? ''));
         $folioPaymentSyncedAt = self::formatDateTime((string) ($folioPayment['synced_at'] ?? ''));
+        $directProviderSyncStatus = self::normalizeProviderKey((string) ($reservation['provider_sync_status'] ?? ''));
+        $directProviderSyncError = self::cleanText((string) ($reservation['provider_sync_error'] ?? ''));
+
         $folioPaymentNeedsManualAccounting =
             $provider === ProviderManager::CLOCK_MODE
-            && !empty($folioPayment)
-            && empty($folioPayment['success'])
             && (
-                $folioPaymentStatus === 'manual_review'
-                || \strpos(\strtolower($folioPaymentError), 'pms_api_booking_folios_default') !== false
+                (
+                    !empty($folioPayment)
+                    && empty($folioPayment['success'])
+                    && (
+                        $folioPaymentStatus === 'manual_review'
+                        || \strpos(\strtolower($folioPaymentError), 'pms_api_booking_folios_default') !== false
+                    )
+                )
+                || (
+                    $directProviderSyncStatus === 'manual_review'
+                    && \strpos(\strtolower($directProviderSyncError), 'pms_api_booking_folios_default') !== false
+                )
+                || \strpos(\strtolower($directProviderSyncError), 'pms_api_booking_folios_default') !== false
             );
         $last = isset($metadata['last_payment_reconciliation']) && \is_array($metadata['last_payment_reconciliation'])
             ? $metadata['last_payment_reconciliation']
@@ -92,7 +104,7 @@ final class ProviderReservationView
                 'success' => !empty($folioPayment['success']),
                 'status' => $folioPaymentStatus,
                 'status_label' => self::formatStatusLabel($folioPaymentStatus),
-                'error' => $folioPaymentError,
+                'error' => $folioPaymentError !== '' ? $folioPaymentError : $directProviderSyncError,
                 'stripe_reference' => $folioPaymentReference,
                 'amount' => $folioPaymentAmount,
                 'currency' => $folioPaymentCurrency,
