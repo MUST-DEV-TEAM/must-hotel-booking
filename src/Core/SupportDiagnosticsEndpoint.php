@@ -186,6 +186,7 @@ final class SupportDiagnosticsEndpoint
             'cron_statuses' => self::getPluginCronStatuses(),
             'refund_summary' => self::getRefundSummary(),
             'future_refund_readiness' => self::getFutureRefundReadiness(),
+            'refund_manual_accounting_notice' => self::getRefundManualAccountingNotice(),
             'clock_request_summary' => $clockRequestSummary,
             'phase1_trial_summary' => $phase1TrialSummary,
         ];
@@ -265,18 +266,21 @@ final class SupportDiagnosticsEndpoint
             }
         }
         $refundSummary = self::getRefundSummary();
-        if ((int) ($refundSummary['manual_review'] ?? 0) > 0) {
-            $manualReviewReason = (string) ($refundSummary['latest_manual_review_reason'] ?? '');
-            $findings[] = $manualReviewReason !== ''
+        $manualReviewCount = (int) ($refundSummary['manual_review'] ?? 0);
+        $failedRefundCount = (int) ($refundSummary['failed'] ?? 0);
+        $latestManualReviewReason = (string) ($refundSummary['latest_manual_review_reason'] ?? '');
+        $isKnownClockFolioManualAccounting =
+            $manualReviewCount > 0
+            && $failedRefundCount === 0
+            && \stripos($latestManualReviewReason, 'no Clock folio ID') !== false;
+        if ($manualReviewCount > 0 && !$isKnownClockFolioManualAccounting) {
+            $findings[] = $latestManualReviewReason !== ''
                 ? \sprintf(
                     '%d refund(s) require manual Clock review. Latest reason: %s',
-                    (int) $refundSummary['manual_review'],
-                    $manualReviewReason
+                    $manualReviewCount,
+                    $latestManualReviewReason
                 )
-                : \sprintf(
-                    '%d refund(s) require manual Clock review.',
-                    (int) $refundSummary['manual_review']
-                );
+                : \sprintf('%d refund(s) require manual Clock review.', $manualReviewCount);
         }
         if (empty($findings)) {
             $findings[] = 'No critical support findings detected by this report.';
@@ -317,6 +321,29 @@ final class SupportDiagnosticsEndpoint
         return [
             'total_plugin_crons' => \count($pluginHooks),
             'items' => \array_values($pluginHooks),
+        ];
+    }
+    /**
+     * @return array<string, mixed>
+     */
+    private static function getRefundManualAccountingNotice(): array
+    {
+        $refundSummary = self::getRefundSummary();
+        $manualReviewCount = (int) ($refundSummary['manual_review'] ?? 0);
+        $failedRefundCount = (int) ($refundSummary['failed'] ?? 0);
+        $latestReason = (string) ($refundSummary['latest_manual_review_reason'] ?? '');
+        $isKnownClockFolioManualAccounting =
+            $manualReviewCount > 0
+            && $failedRefundCount === 0
+            && \stripos($latestReason, 'no Clock folio ID') !== false;
+        return [
+            'enabled' => $isKnownClockFolioManualAccounting,
+            'status' => $isKnownClockFolioManualAccounting ? 'manual_clock_accounting_required' : 'not_applicable',
+            'manual_review_count' => $manualReviewCount,
+            'failed_refund_count' => $failedRefundCount,
+            'message' => $isKnownClockFolioManualAccounting
+                ? 'Stripe refunds succeeded, but Clock did not expose a folio ID. Clock PMS folio/accounting must be handled manually, then marked manual done in the plugin.'
+                : '',
         ];
     }
     /**
