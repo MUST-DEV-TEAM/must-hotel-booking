@@ -1,7 +1,5 @@
 <?php
-
 namespace MustHotelBooking\Provider;
-
 final class ProviderReservationView
 {
     /**
@@ -15,7 +13,6 @@ final class ProviderReservationView
         $providerStatus = self::cleanText((string) ($reservation['provider_status'] ?? ''));
         $providerPaymentStatus = self::cleanText((string) ($reservation['provider_payment_status'] ?? ''));
         $providerSyncStatus = self::normalizeProviderKey((string) ($reservation['provider_sync_status'] ?? ''));
-
         return [
             'provider' => $provider,
             'provider_label' => self::providerLabel($provider),
@@ -36,7 +33,6 @@ final class ProviderReservationView
             'read_only_message' => self::readOnlyMessage($provider),
         ];
     }
-
     /**
      * @param array<string, mixed> $reservation
      * @param array<string, mixed> $paymentState
@@ -48,6 +44,25 @@ final class ProviderReservationView
         $providerStatus = self::cleanText((string) ($reservation['provider_payment_status'] ?? ''));
         $providerStatusKey = self::normalizeProviderKey($providerStatus);
         $metadata = self::decodeMetadata($reservation['provider_metadata'] ?? null);
+        $provider = self::normalizeProviderKey((string) ($reservation['provider'] ?? ''));
+        $folioPayment = isset($metadata['clock_folio_payment_sync']) && \is_array($metadata['clock_folio_payment_sync'])
+            ? $metadata['clock_folio_payment_sync']
+            : [];
+        $folioPaymentStatus = self::normalizeProviderKey((string) ($folioPayment['sync_status'] ?? ''));
+        $folioPaymentError = self::cleanText((string) ($folioPayment['sync_error'] ?? ''));
+        $folioPaymentReference = self::cleanText((string) ($folioPayment['stripe_reference'] ?? ''));
+        $folioPaymentAmount = self::cleanText((string) ($folioPayment['amount'] ?? ''));
+        $folioPaymentCurrency = self::cleanText((string) ($folioPayment['currency'] ?? ''));
+        $folioPaymentSubType = self::cleanText((string) ($folioPayment['payment_sub_type'] ?? ''));
+        $folioPaymentSyncedAt = self::formatDateTime((string) ($folioPayment['synced_at'] ?? ''));
+        $folioPaymentNeedsManualAccounting =
+            $provider === ProviderManager::CLOCK_MODE
+            && !empty($folioPayment)
+            && empty($folioPayment['success'])
+            && (
+                $folioPaymentStatus === 'manual_review'
+                || \strpos(\strtolower($folioPaymentError), 'pms_api_booking_folios_default') !== false
+            );
         $last = isset($metadata['last_payment_reconciliation']) && \is_array($metadata['last_payment_reconciliation'])
             ? $metadata['last_payment_reconciliation']
             : [];
@@ -58,7 +73,6 @@ final class ProviderReservationView
         $differs = $localStatus !== ''
             && $providerStatusKey !== ''
             && !self::paymentStatusesEquivalent($localStatus, $providerStatusKey);
-
         return [
             'local_status' => $localStatus,
             'local_status_label' => self::formatStatusLabel($localStatus),
@@ -72,103 +86,94 @@ final class ProviderReservationView
             'synced_at' => $syncedAt,
             'last_reconciliation_success' => !empty($last['success']),
             'last_target_provider_payment_status' => self::cleanText((string) ($last['target_provider_payment_status'] ?? '')),
-            'needs_attention' => $differs || $required || $syncError !== '' || \in_array($syncStatus, ['pending_retry', 'failed', 'exhausted'], true),
+            'needs_attention' => $differs || $required || $syncError !== '' || $folioPaymentNeedsManualAccounting || \in_array($syncStatus, ['pending_retry', 'failed', 'exhausted'], true),
+            'folio_payment_accounting' => [
+                'enabled' => $folioPaymentNeedsManualAccounting,
+                'success' => !empty($folioPayment['success']),
+                'status' => $folioPaymentStatus,
+                'status_label' => self::formatStatusLabel($folioPaymentStatus),
+                'error' => $folioPaymentError,
+                'stripe_reference' => $folioPaymentReference,
+                'amount' => $folioPaymentAmount,
+                'currency' => $folioPaymentCurrency,
+                'payment_sub_type' => $folioPaymentSubType !== '' ? $folioPaymentSubType : 'Stripe',
+                'synced_at' => $folioPaymentSyncedAt,
+                'message' => $folioPaymentNeedsManualAccounting
+                    ? \__('Website Stripe payment succeeded, but Clock folio payment posting is blocked by missing API permission. Staff must manually add this payment in Clock PMS.', 'must-hotel-booking')
+                    : '',
+            ],
         ];
     }
-
     /** @param array<string, mixed> $reservation */
     public static function isProviderBacked(array $reservation): bool
     {
         $provider = self::normalizeProviderKey((string) ($reservation['provider'] ?? ''));
-
         return $provider !== '' && $provider !== ProviderManager::LOCAL_MODE;
     }
-
     public static function providerLabel(string $provider): string
     {
         $provider = self::normalizeProviderKey($provider);
-
         if ($provider === '') {
             return \__('Local', 'must-hotel-booking');
         }
-
         if ($provider === ProviderManager::LOCAL_MODE) {
             return \__('Local', 'must-hotel-booking');
         }
-
         if ($provider === ProviderManager::CLOCK_MODE) {
             return \__('Clock', 'must-hotel-booking');
         }
-
         return \ucwords(\str_replace(['_', '-'], ' ', $provider));
     }
-
     public static function formatStatusLabel(string $status): string
     {
         $status = self::cleanText($status);
-
         if ($status === '') {
             return \__('Not reported', 'must-hotel-booking');
         }
-
         $normalized = \sanitize_key($status);
-
         if ($normalized !== '') {
             return \ucwords(\str_replace(['_', '-'], ' ', $normalized));
         }
-
         return $status;
     }
-
     public static function readOnlyMessage(string $provider): string
     {
         $providerLabel = self::providerLabel($provider);
-
         return \sprintf(
             /* translators: %s: provider label. */
             \__('This reservation is mirrored from %s. Local-only admin and staff mutations are read-only unless a provider-aware action is explicitly available.', 'must-hotel-booking'),
             $providerLabel
         );
     }
-
     private static function normalizeProviderKey(string $provider): string
     {
         return \sanitize_key($provider);
     }
-
     private static function cleanText(string $value): string
     {
         return \sanitize_text_field($value);
     }
-
     /** @param mixed $metadata */
     private static function decodeMetadata($metadata): array
     {
         if (\is_array($metadata)) {
             return $metadata;
         }
-
         if (!\is_string($metadata) || \trim($metadata) === '') {
             return [];
         }
-
         $decoded = \json_decode($metadata, true);
-
         return \is_array($decoded) ? $decoded : [];
     }
-
     private static function paymentStatusesEquivalent(string $localStatus, string $providerStatus): bool
     {
         $localStatus = self::normalizePaymentStatus($localStatus);
         $providerStatus = self::normalizePaymentStatus($providerStatus);
-
         return $localStatus !== '' && $localStatus === $providerStatus;
     }
-
     private static function normalizePaymentStatus(string $status): string
     {
         $status = self::normalizeProviderKey($status);
-
         $aliases = [
             'not_paid' => 'unpaid',
             'notpaid' => 'unpaid',
@@ -187,24 +192,18 @@ final class ProviderReservationView
             'canceled' => 'cancelled',
             'voided' => 'cancelled',
         ];
-
         return isset($aliases[$status]) ? $aliases[$status] : $status;
     }
-
     private static function formatDateTime(string $value): string
     {
         $value = \trim($value);
-
         if ($value === '' || $value === '0000-00-00 00:00:00') {
             return '';
         }
-
         $timestamp = \strtotime($value);
-
         if ($timestamp === false) {
             return $value;
         }
-
         return \mysql2date(\get_option('date_format') . ' ' . \get_option('time_format'), $value);
     }
 }
