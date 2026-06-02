@@ -2045,3 +2045,233 @@ body.must-portal-login-page {
         padding: 10px 16px;
     }
 }
+
+
+/* ============================================================
+   Reservation Immediate Actions polish
+   ============================================================ */
+
+body.must-portal-page .must-portal-panel--actions {
+    position: relative;
+    overflow: hidden;
+    border-color: rgba(15, 23, 42, 0.06);
+    background:
+        radial-gradient(circle at top right, rgba(15, 118, 110, 0.07), transparent 34%),
+        linear-gradient(180deg, #ffffff 0%, #fbfcfd 100%);
+}
+
+body.must-portal-page .must-portal-panel--actions .must-portal-panel-header {
+    margin-bottom: 18px;
+    padding-bottom: 16px;
+    border-bottom: 1px solid rgba(15, 23, 42, 0.07);
+}
+
+body.must-portal-page .must-portal-panel--actions .must-portal-panel-header h2 {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+body.must-portal-page .must-portal-panel--actions .must-portal-panel-header h2::before {
+    content: "";
+    width: 9px;
+    height: 9px;
+    border-radius: 999px;
+    background: #0f766e;
+    box-shadow: 0 0 0 5px rgba(15, 118, 110, 0.12);
+}
+
+body.must-portal-page .must-portal-reservation-action-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 12px;
+    align-items: stretch;
+}
+
+body.must-portal-page .must-portal-reservation-action-grid > .must-portal-muted {
+    grid-column: 1 / -1;
+    margin: 0;
+    padding: 12px 14px;
+    border: 1px solid rgba(15, 23, 42, 0.07);
+    border-radius: 14px;
+    background: rgba(246, 247, 249, 0.82);
+    font-size: 13px;
+    line-height: 1.55;
+}
+
+body.must-portal-page .must-portal-reservation-action-form {
+    margin: 0;
+    min-width: 0;
+}
+
+body.must-portal-page .must-portal-reservation-action-button {
+    position: relative;
+    justify-content: flex-start;
+    gap: 11px;
+    min-height: 48px;
+    padding: 12px 14px;
+    border: 1px solid rgba(15, 23, 42, 0.08);
+    border-radius: 14px;
+    background: #ffffff;
+    color: #16212b;
+    box-shadow: none;
+    font-size: 13px;
+    line-height: 1.25;
+    text-align: left;
+    overflow: hidden;
+}
+
+body.must-portal-page .must-portal-reservation-action-button::after {
+    content: "";
+    position: absolute;
+    inset: auto 12px 8px 42px;
+    height: 2px;
+    border-radius: 999px;
+    background: currentColor;
+    opacity: 0;
+    transform: scaleX(0);
+    transform-origin: left center;
+    transition: opacity 0.2s ease, transform 0.2s ease;
+}
+
+body.must-portal-page .must-portal-reservation-action-button:hover,
+body.must-portal-page .must-portal-reservation-action-button:focus,
+body.must-portal-page .must-portal-reservation-action-button:focus-visible {
+    border-color: rgba(15, 23, 42, 0.16);
+    background: #f8fafc;
+    box-shadow: 0 12px 24px rgba(15, 23, 42, 0.07);
+    transform: translateY(-1px);
+    outline: none;
+}
+
+body.must-portal-page .must-portal-reservation-action-button:hover::after,
+body.must-portal-page .must-portal-reservation-action-button:focus-visible::after {
+    opacity: 0.22;
+    transform: scaleX(1);
+}
+
+body.must-portal-page .must-portal-reservation-action-button .dashicons {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    flex: 0 0 26px;
+    width: 26px;
+    height: 26px;
+    border-radius: 10px;
+    background: rgba(15, 23, 42, 0.06);
+    color: #60707d;
+    font-size: 15px;
+    line-height: 1;
+}
+
+body.must-portal-page .must-portal-reservation-action-button.is-primary {
+    border-color: #0f766e;
+    background: linear-gradient(180deg, #0f766e 0%, #0b5f5a 100%);
+    color: #ffffff;
+    box-shadow: 0 14px 28px rgba(15, 118, 110, 0.20);
+}
+
+body.must-portal-page .must-portal-reservation-action-button.is-primary .dashicons {
+    background: rgba(255, 255, 255, 0.16);
+    color: #ffffff;
+}
+
+body.must-portal-page .must-portal-reservation-action-button.is-danger {
+    border-color: rgba(183, 65, 44, 0.24);
+    background: #fff6f4;
+    color: #b7412c;
+}
+
+body.must-portal-page .must-portal-reservation-action-button.is-danger .dashicons {
+    background: rgba(183, 65, 44, 0.10);
+    color: #b7412c;
+}
+
+body.must-portal-page .must-portal-reservation-action-button.is-link {
+    border-style: dashed;
+    background: #f8fafc;
+}
+
+body.must-portal-page .must-portal-action-callout {
+    grid-column: 1 / -1;
+    padding: 14px;
+    border: 1px solid rgba(160, 103, 0, 0.20);
+    border-radius: 16px;
+    background:
+        linear-gradient(180deg, rgba(255, 244, 219, 0.78) 0%, rgba(255, 251, 242, 0.96) 100%);
+}
+
+body.must-portal-page .must-portal-action-callout .must-portal-feed-item {
+    padding: 0;
+    border: 0;
+    border-radius: 0;
+    background: transparent;
+    box-shadow: none;
+    transform: none;
+}
+
+body.must-portal-page .must-portal-action-callout .must-portal-feed-item:hover {
+    border-color: transparent;
+    box-shadow: none;
+    transform: none;
+}
+
+body.must-portal-page .must-portal-action-callout .must-portal-feed-meta strong {
+    font-size: 14px;
+}
+
+body.must-portal-page .must-portal-action-callout .must-portal-feed-meta span {
+    max-width: 68ch;
+    font-size: 13px;
+    line-height: 1.55;
+}
+
+body.must-portal-page .must-portal-action-callout .must-portal-feed-actions {
+    align-items: center;
+}
+
+body.must-portal-page .must-portal-action-callout .must-portal-reservation-action-form {
+    width: auto;
+}
+
+body.must-portal-page .must-portal-action-callout .must-portal-reservation-action-button {
+    min-height: 44px;
+    width: auto;
+    min-width: 260px;
+    white-space: nowrap;
+}
+
+@media (max-width: 1100px) {
+    body.must-portal-page .must-portal-reservation-action-grid {
+        grid-template-columns: 1fr;
+    }
+
+    body.must-portal-page .must-portal-action-callout .must-portal-feed-actions {
+        flex-direction: column;
+        align-items: flex-start;
+    }
+
+    body.must-portal-page .must-portal-action-callout .must-portal-reservation-action-form,
+    body.must-portal-page .must-portal-action-callout .must-portal-reservation-action-button {
+        width: 100%;
+        min-width: 0;
+    }
+}
+
+@media (max-width: 640px) {
+    body.must-portal-page .must-portal-panel--actions {
+        padding: 18px;
+    }
+
+    body.must-portal-page .must-portal-reservation-action-button {
+        min-height: 46px;
+        padding: 11px 12px;
+        font-size: 12px;
+    }
+
+    body.must-portal-page .must-portal-reservation-action-button .dashicons {
+        width: 24px;
+        height: 24px;
+        flex-basis: 24px;
+    }
+}
