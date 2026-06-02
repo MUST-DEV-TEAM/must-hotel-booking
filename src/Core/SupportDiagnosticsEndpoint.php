@@ -12,10 +12,20 @@ final class SupportDiagnosticsEndpoint
     private const REST_NAMESPACE = 'must-support/v1';
     private const REST_ROUTE = '/health';
 
+    private const STATIC_SUBDIR = 'must-support';
+    private const STATIC_FILENAME_PREFIX = 'health-';
+    private const STATIC_REFRESH_CRON_HOOK = 'must_support_diagnostics_refresh_static_report';
+    private const STATIC_REFRESH_CRON_SCHEDULE = 'must_support_every_five_minutes';
+
     public static function registerHooks(): void
     {
+        \add_filter('cron_schedules', [self::class, 'addCronSchedules']);
+
         \add_action('rest_api_init', [self::class, 'registerRestRoutes']);
         \add_action('init', [self::class, 'maybeHandlePlainHealthRequest'], 1);
+        \add_action('init', [self::class, 'maybeScheduleStaticRefreshCron'], 20);
+
+        \add_action(self::STATIC_REFRESH_CRON_HOOK, [self::class, 'refreshStaticReportFromCron']);
         \add_action('admin_post_must_support_diagnostics_settings', [self::class, 'handleSettingsPost']);
     }
 
@@ -133,11 +143,26 @@ final class SupportDiagnosticsEndpoint
         } elseif ($action === 'clear') {
             $settings['enabled'] = false;
             $settings['token'] = '';
+        } elseif ($action === 'refresh_static') {
+            $settings['enabled'] = true;
+
+            if ((string) ($settings['token'] ?? '') === '') {
+                $settings['token'] = self::generateToken();
+            }
         }
 
         $settings['updated_at'] = \current_time('mysql');
+        $settings = self::sanitizeSettings($settings);
 
-        \update_option(self::OPTION_NAME, self::sanitizeSettings($settings), false);
+        \update_option(self::OPTION_NAME, $settings, false);
+
+        if (!empty($settings['enabled']) && (string) ($settings['token'] ?? '') !== '') {
+            self::writeStaticReportFile($settings);
+            self::maybeScheduleStaticRefreshCron();
+        } else {
+            self::deleteStaticReportFiles();
+            self::unscheduleStaticRefreshCron();
+        }
 
         \wp_safe_redirect(
             \admin_url('admin.php?page=must-hotel-booking-settings&tab=maintenance&support_diagnostics_saved=1')
@@ -156,6 +181,7 @@ final class SupportDiagnosticsEndpoint
         $token = (string) ($settings['token'] ?? '');
         $endpointUrl = $token !== '' ? self::getEndpointUrl($token) : '';
         $plainEndpointUrl = $token !== '' ? self::getPlainEndpointUrl($token) : '';
+        $staticReportUrl = $token !== '' ? self::getStaticReportUrl($token) : '';
         $logLimit = self::normalizeLogLimit((int) ($settings['log_limit'] ?? 25));
 
         echo '<section class="postbox must-dashboard-panel must-settings-panel">';
@@ -218,6 +244,12 @@ final class SupportDiagnosticsEndpoint
             echo '<input id="must-support-diagnostics-plain-url" type="text" readonly value="' . \esc_attr($plainEndpointUrl) . '" onclick="this.select();" />';
             echo '<p class="description">' . \esc_html__('Fallback URL that avoids wp-json routing and adds a refresh parameter to reduce caching issues.', 'must-hotel-booking') . '</p>';
             echo '</div>';
+
+            echo '<div class="must-settings-field">';
+            echo '<label for="must-support-diagnostics-static-url">' . \esc_html__('Static support report URL', 'must-hotel-booking') . '</label>';
+            echo '<input id="must-support-diagnostics-static-url" type="text" readonly value="' . \esc_attr($staticReportUrl) . '" onclick="this.select();" />';
+            echo '<p class="description">' . \esc_html__('Best fallback for external support access. This writes a sanitized JSON file in uploads and refreshes it while diagnostics are enabled.', 'must-hotel-booking') . '</p>';
+            echo '</div>';
         } else {
             echo '<p class="description">' . \esc_html__('Enable the endpoint to generate a support URL.', 'must-hotel-booking') . '</p>';
         }
@@ -227,6 +259,7 @@ final class SupportDiagnosticsEndpoint
 
         if ($enabled) {
             echo '<button type="submit" name="support_diagnostics_action" value="save" class="button">' . \esc_html__('Save Settings', 'must-hotel-booking') . '</button>';
+            echo '<button type="submit" name="support_diagnostics_action" value="refresh_static" class="button">' . \esc_html__('Refresh Static Report', 'must-hotel-booking') . '</button>';
             echo '<button type="submit" name="support_diagnostics_action" value="regenerate" class="button">' . \esc_html__('Regenerate Token', 'must-hotel-booking') . '</button>';
             echo '<button type="submit" name="support_diagnostics_action" value="disable" class="button button-secondary">' . \esc_html__('Disable Endpoint', 'must-hotel-booking') . '</button>';
             echo '<button type="submit" name="support_diagnostics_action" value="clear" class="button button-link-delete">' . \esc_html__('Disable and Clear Token', 'must-hotel-booking') . '</button>';
@@ -812,5 +845,193 @@ final class SupportDiagnosticsEndpoint
         echo $json !== false ? $json : '{"success":false,"message":"Unable to encode diagnostics report."}';
 
         exit;
+    }
+
+    /**
+     * @param array<string, mixed> $schedules
+     * @return array<string, mixed>
+     */
+    public static function addCronSchedules(array $schedules): array
+    {
+        if (!isset($schedules[self::STATIC_REFRESH_CRON_SCHEDULE])) {
+            $schedules[self::STATIC_REFRESH_CRON_SCHEDULE] = [
+                'interval' => 5 * 60,
+                'display' => \__('Every 5 minutes for MUST support diagnostics', 'must-hotel-booking'),
+            ];
+        }
+
+        return $schedules;
+    }
+
+    public static function maybeScheduleStaticRefreshCron(): void
+    {
+        $settings = self::getSettings();
+
+        if (empty($settings['enabled']) || (string) ($settings['token'] ?? '') === '') {
+            self::unscheduleStaticRefreshCron();
+            return;
+        }
+
+        if (\wp_next_scheduled(self::STATIC_REFRESH_CRON_HOOK) === false) {
+            \wp_schedule_event(
+                \time() + 60,
+                self::STATIC_REFRESH_CRON_SCHEDULE,
+                self::STATIC_REFRESH_CRON_HOOK
+            );
+        }
+    }
+
+    public static function refreshStaticReportFromCron(): void
+    {
+        $settings = self::getSettings();
+
+        if (empty($settings['enabled']) || (string) ($settings['token'] ?? '') === '') {
+            self::deleteStaticReportFiles();
+            self::unscheduleStaticRefreshCron();
+            return;
+        }
+
+        self::writeStaticReportFile($settings);
+    }
+
+    private static function unscheduleStaticRefreshCron(): void
+    {
+        while (($timestamp = \wp_next_scheduled(self::STATIC_REFRESH_CRON_HOOK)) !== false) {
+            \wp_unschedule_event((int) $timestamp, self::STATIC_REFRESH_CRON_HOOK);
+        }
+    }
+
+    /**
+     * @param array<string, mixed> $settings
+     */
+    private static function writeStaticReportFile(array $settings): bool
+    {
+        $token = (string) ($settings['token'] ?? '');
+
+        if ($token === '' || empty($settings['enabled'])) {
+            return false;
+        }
+
+        $dir = self::getStaticReportDir();
+
+        if ($dir === '') {
+            return false;
+        }
+
+        if (!\wp_mkdir_p($dir)) {
+            return false;
+        }
+
+        self::writeStaticProtectionFiles($dir);
+        self::deleteStaticReportFiles();
+
+        $report = self::buildReport($settings);
+        $report['static_report'] = [
+            'generated_at' => \current_time('mysql'),
+            'refresh_mode' => 'admin_or_wp_cron',
+            'auto_refresh_minutes' => 5,
+        ];
+
+        $json = \wp_json_encode($report, \JSON_PRETTY_PRINT | \JSON_UNESCAPED_SLASHES);
+
+        if ($json === false) {
+            return false;
+        }
+
+        $path = self::getStaticReportPath($token);
+
+        if ($path === '') {
+            return false;
+        }
+
+        return \file_put_contents($path, $json, \LOCK_EX) !== false;
+    }
+
+    private static function deleteStaticReportFiles(): void
+    {
+        $dir = self::getStaticReportDir();
+
+        if ($dir === '' || !\is_dir($dir)) {
+            return;
+        }
+
+        $pattern = \trailingslashit($dir) . self::STATIC_FILENAME_PREFIX . '*.json';
+
+        foreach ((array) \glob($pattern) as $file) {
+            if (\is_string($file) && \is_file($file)) {
+                \unlink($file);
+            }
+        }
+    }
+
+    private static function writeStaticProtectionFiles(string $dir): void
+    {
+        if ($dir === '' || !\is_dir($dir)) {
+            return;
+        }
+
+        $indexPath = \trailingslashit($dir) . 'index.html';
+
+        if (!\file_exists($indexPath)) {
+            \file_put_contents($indexPath, '');
+        }
+
+        $htaccessPath = \trailingslashit($dir) . '.htaccess';
+
+        if (!\file_exists($htaccessPath)) {
+            \file_put_contents(
+                $htaccessPath,
+                "Options -Indexes\n<IfModule mod_headers.c>\nHeader set X-Robots-Tag \"noindex, nofollow, noarchive\"\nHeader set Cache-Control \"no-store, no-cache, must-revalidate, max-age=0\"\nHeader set Pragma \"no-cache\"\nHeader set Expires \"0\"\n</IfModule>\n"
+            );
+        }
+    }
+
+    private static function getStaticReportDir(): string
+    {
+        $uploads = \wp_upload_dir();
+
+        if (!empty($uploads['error']) || empty($uploads['basedir'])) {
+            return '';
+        }
+
+        return \trailingslashit((string) $uploads['basedir']) . self::STATIC_SUBDIR;
+    }
+
+    private static function getStaticReportBaseUrl(): string
+    {
+        $uploads = \wp_upload_dir();
+
+        if (!empty($uploads['error']) || empty($uploads['baseurl'])) {
+            return '';
+        }
+
+        return \trailingslashit((string) $uploads['baseurl']) . self::STATIC_SUBDIR;
+    }
+
+    private static function getStaticReportFilename(string $token): string
+    {
+        return self::STATIC_FILENAME_PREFIX . \hash('sha256', $token) . '.json';
+    }
+
+    private static function getStaticReportPath(string $token): string
+    {
+        $dir = self::getStaticReportDir();
+
+        if ($dir === '') {
+            return '';
+        }
+
+        return \trailingslashit($dir) . self::getStaticReportFilename($token);
+    }
+
+    private static function getStaticReportUrl(string $token): string
+    {
+        $baseUrl = self::getStaticReportBaseUrl();
+
+        if ($baseUrl === '') {
+            return '';
+        }
+
+        return \trailingslashit($baseUrl) . self::getStaticReportFilename($token);
     }
 }
