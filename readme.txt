@@ -4,7 +4,7 @@ Tags: hotel, booking, reservation, accommodation
 Requires at least: 5.0
 Tested up to: 6.0
 Requires PHP: 7.4
-Stable tag: 0.4.46
+Stable tag: 0.4.47
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -31,6 +31,9 @@ Main features include:
 5. When updating, upload the new release ZIP or use the configured updater, then review **Diagnostics & Maintenance** after the update completes.
 
 == Changelog ==
+
+= 0.4.47 =
+* Changed diagnostics so missing Clock API right pms_api_booking_folios_default is treated as a known manual Clock folio payment/accounting state while waiting for Clock permissions.
 
 = 0.4.46 =
 * Added Clock folio payment posting for successful website Stripe payments. The plugin now fetches the default Clock folio for the booking, saves the folio ID locally, and posts a positive Clock credit item with the Stripe PaymentIntent reference.

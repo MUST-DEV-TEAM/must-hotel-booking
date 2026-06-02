@@ -187,6 +187,7 @@ final class SupportDiagnosticsEndpoint
             'refund_summary' => self::getRefundSummary(),
             'future_refund_readiness' => self::getFutureRefundReadiness(),
             'refund_manual_accounting_notice' => self::getRefundManualAccountingNotice(),
+            'clock_folio_payment_accounting_notice' => self::getClockFolioPaymentAccountingNotice($clockRequestSummary),
             'clock_request_summary' => $clockRequestSummary,
             'phase1_trial_summary' => $phase1TrialSummary,
         ];
@@ -261,7 +262,10 @@ final class SupportDiagnosticsEndpoint
                 && self::isKnownLocalOnlyPaymentStatusMessage($lastError)
                 && (string) ($phase1TrialSummary['clock_payment_sync_mode'] ?? '') === 'local_only'
                 && empty($phase1TrialSummary['new_clock_payment_update_failure_detected']);
-            if ($lastError !== '' && !$isKnownLocalOnlyPaymentNotice) {
+            $isKnownClockFolioPaymentManualAccounting =
+                $lastOperation === 'clock.default_booking_folio_fetch'
+                && self::isKnownClockFolioPermissionMessage($lastError);
+            if ($lastError !== '' && !$isKnownLocalOnlyPaymentNotice && !$isKnownClockFolioPaymentManualAccounting) {
                 $findings[] = $lastError;
             }
         }
@@ -286,10 +290,9 @@ final class SupportDiagnosticsEndpoint
             $findings[] = 'No critical support findings detected by this report.';
         }
         return \array_values(\array_unique($findings));
-    }
-    /**
-     * @return array<string, mixed>
-     */
+    }    /**
+         * @return array<string, mixed>
+         */
     private static function getPluginCronStatuses(): array
     {
         $crons = \_get_cron_array();
@@ -343,6 +346,28 @@ final class SupportDiagnosticsEndpoint
             'failed_refund_count' => $failedRefundCount,
             'message' => $isKnownClockFolioManualAccounting
                 ? 'Stripe refunds succeeded, but Clock did not expose a folio ID. Clock PMS folio/accounting must be handled manually, then marked manual done in the plugin.'
+                : '',
+        ];
+    }
+    /**
+     * @param array<string, mixed> $clockRequestSummary
+     * @return array<string, mixed>
+     */
+    private static function getClockFolioPaymentAccountingNotice(array $clockRequestSummary): array
+    {
+        $lastOperation = (string) ($clockRequestSummary['last_error_operation'] ?? '');
+        $lastError = (string) ($clockRequestSummary['last_error'] ?? '');
+        $lastHttpStatus = (int) ($clockRequestSummary['last_error_http_status'] ?? 0);
+        $isKnownManualAccounting =
+            $lastOperation === 'clock.default_booking_folio_fetch'
+            && self::isKnownClockFolioPermissionMessage($lastError);
+        return [
+            'enabled' => $isKnownManualAccounting,
+            'status' => $isKnownManualAccounting ? 'manual_clock_folio_payment_required' : 'not_applicable',
+            'last_error_operation' => $lastOperation,
+            'last_error_http_status' => $lastHttpStatus,
+            'message' => $isKnownManualAccounting
+                ? 'Clock blocked automatic folio payment posting because the API user is missing pms_api_booking_folios_default. Staff must manually post the website Stripe payment in Clock until Clock enables this API right.'
                 : '',
         ];
     }
@@ -688,6 +713,15 @@ final class SupportDiagnosticsEndpoint
             || \strpos($message, 'clock payment status sync endpoint is not configured') !== false
             || \strpos($message, 'local payment status was recorded only in the mirror reservation') !== false
             || \strpos($message, 'payment status remains local-only') !== false;
+    }
+    private static function isKnownClockFolioPermissionMessage(string $message): bool
+    {
+        $message = \strtolower($message);
+        return \strpos($message, 'pms_api_booking_folios_default') !== false
+            || (
+                \strpos($message, 'booking_folios_default') !== false
+                && \strpos($message, 'right') !== false
+            );
     }
     /**
      * @return array<string, mixed>
