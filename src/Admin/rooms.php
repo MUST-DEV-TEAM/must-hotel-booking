@@ -1673,6 +1673,18 @@ function render_accommodation_unit_form(array $form, array $typeOptions, array $
 {
     $isEditing = isset($form['unit_id']) && (int) $form['unit_id'] > 0;
     $closeHref = $closeUrl !== '' ? $closeUrl : get_admin_rooms_page_url(['tab' => 'units']);
+    $unitFeaturedImageId = isset($form['featured_image_id']) ? (int) $form['featured_image_id'] : 0;
+    $unitGalleryIds = parse_room_gallery_ids((string) ($form['gallery_image_ids_input'] ?? $form['gallery_image_ids'] ?? ''));
+    $unitSelectedAmenities = isset($form['amenity_keys']) && \is_array($form['amenity_keys']) ? \array_map('strval', $form['amenity_keys']) : [];
+    $unitSelectedAmenityMap = \array_fill_keys($unitSelectedAmenities, true);
+    $availableAmenities = get_available_room_amenities();
+    $unitSelectedAmenityLabels = [];
+
+    foreach ($unitSelectedAmenities as $amenityKey) {
+        if (isset($availableAmenities[$amenityKey])) {
+            $unitSelectedAmenityLabels[] = (string) ($availableAmenities[$amenityKey]['label'] ?? $amenityKey);
+        }
+    }
 
     echo '<section class="must-accommodation-panel must-accommodation-editor-card">';
     echo '<div class="must-accommodation-panel-head">';
@@ -1722,17 +1734,17 @@ function render_accommodation_unit_form(array $form, array $typeOptions, array $
     echo '<label><span>' . \esc_html__('Capacity Override', 'must-hotel-booking') . '</span><input type="number" min="0" name="capacity_override" value="' . \esc_attr((string) ((int) ($form['capacity_override'] ?? 0))) . '" /><small>' . \esc_html__('Leave 0 to inherit the linked room listing capacity.', 'must-hotel-booking') . '</small></label>';
     echo '<label><span>' . \esc_html__('Sort Order', 'must-hotel-booking') . '</span><input type="number" name="sort_order" value="' . \esc_attr((string) ((int) ($form['sort_order'] ?? 0))) . '" step="1" /></label>';
     echo '</div>';
+    echo '<div class="must-accommodation-behavior-summary" data-booking-behavior-summary>';
+    echo '<span class="must-accommodation-behavior-summary-label">' . \esc_html__('Current behavior', 'must-hotel-booking') . '</span>';
+    echo '<div class="must-accommodation-behavior-summary-pills" data-booking-behavior-pills></div>';
+    echo '</div>';
     echo '<div class="must-accommodation-toggle-grid">';
-    echo '<label class="must-accommodation-toggle"><input type="checkbox" name="is_active" value="1"' . \checked(!empty($form['is_active']), true, false) . ' /><span><strong>' . \esc_html__('Active', 'must-hotel-booking') . '</strong><small>' . \esc_html__('Inactive units stay in history but should stop receiving new assignments.', 'must-hotel-booking') . '</small></span></label>';
-    echo '<label class="must-accommodation-toggle"><input type="checkbox" name="is_bookable" value="1"' . \checked(!empty($form['is_bookable']), true, false) . ' /><span><strong>' . \esc_html__('Bookable', 'must-hotel-booking') . '</strong><small>' . \esc_html__('Controls whether this exact unit can be selected for new operational bookings.', 'must-hotel-booking') . '</small></span></label>';
-    echo '<label class="must-accommodation-toggle"><input type="checkbox" name="is_calendar_visible" value="1"' . \checked(!empty($form['is_calendar_visible']), true, false) . ' /><span><strong>' . \esc_html__('Visible in calendar', 'must-hotel-booking') . '</strong><small>' . \esc_html__('Hide back-of-house or non-assignable units from the board when needed.', 'must-hotel-booking') . '</small></span></label>';
+    echo '<label class="must-accommodation-toggle" data-toggle-card><input type="checkbox" name="is_active" value="1" data-toggle-label-on="' . \esc_attr__('Active', 'must-hotel-booking') . '" data-toggle-label-off="' . \esc_attr__('Inactive', 'must-hotel-booking') . '"' . \checked(!empty($form['is_active']), true, false) . ' /><span><strong>' . \esc_html__('Active', 'must-hotel-booking') . '</strong><small>' . \esc_html__('Inactive units stay in history but should stop receiving new assignments.', 'must-hotel-booking') . '</small></span></label>';
+    echo '<label class="must-accommodation-toggle" data-toggle-card><input type="checkbox" name="is_bookable" value="1" data-toggle-label-on="' . \esc_attr__('Bookable', 'must-hotel-booking') . '" data-toggle-label-off="' . \esc_attr__('Blocked', 'must-hotel-booking') . '"' . \checked(!empty($form['is_bookable']), true, false) . ' /><span><strong>' . \esc_html__('Bookable', 'must-hotel-booking') . '</strong><small>' . \esc_html__('Controls whether this exact unit can be selected for new operational bookings.', 'must-hotel-booking') . '</small></span></label>';
+    echo '<label class="must-accommodation-toggle" data-toggle-card><input type="checkbox" name="is_calendar_visible" value="1" data-toggle-label-on="' . \esc_attr__('Calendar visible', 'must-hotel-booking') . '" data-toggle-label-off="' . \esc_attr__('Calendar hidden', 'must-hotel-booking') . '"' . \checked(!empty($form['is_calendar_visible']), true, false) . ' /><span><strong>' . \esc_html__('Visible in calendar', 'must-hotel-booking') . '</strong><small>' . \esc_html__('Hide back-of-house or non-assignable units from the board when needed.', 'must-hotel-booking') . '</small></span></label>';
+    echo '<label class="must-accommodation-toggle" data-toggle-card><input type="checkbox" name="public_visible" value="1" data-toggle-label-on="' . \esc_attr__('Public', 'must-hotel-booking') . '" data-toggle-label-off="' . \esc_attr__('Private', 'must-hotel-booking') . '"' . \checked(!empty($form['public_visible']), true, false) . ' /><span><strong>' . \esc_html__('Publicly visible', 'must-hotel-booking') . '</strong><small>' . \esc_html__('In Clock mode, this still requires a Clock physical-room mapping before it can be sold online.', 'must-hotel-booking') . '</small></span></label>';
     echo '</div>';
     echo '</section>';
-
-    $unitFeaturedImageId = isset($form['featured_image_id']) ? (int) $form['featured_image_id'] : 0;
-    $unitGalleryIds = parse_room_gallery_ids((string) ($form['gallery_image_ids_input'] ?? $form['gallery_image_ids'] ?? ''));
-    $unitSelectedAmenities = isset($form['amenity_keys']) && \is_array($form['amenity_keys']) ? \array_map('strval', $form['amenity_keys']) : [];
-    $availableAmenities = get_available_room_amenities();
 
     echo '<section class="must-accommodation-form-section">';
     echo '<div class="must-accommodation-section-head"><h3>' . \esc_html__('Public Unit Details', 'must-hotel-booking') . '</h3><p>' . \esc_html__('Guest-facing metadata for this exact physical room. Empty fields fall back to the linked room listing.', 'must-hotel-booking') . '</p></div>';
@@ -1745,24 +1757,80 @@ function render_accommodation_unit_form(array $form, array $typeOptions, array $
     echo '<label><span>' . \esc_html__('Public Max Guests Override', 'must-hotel-booking') . '</span><input type="number" min="0" name="max_guests_override" value="' . \esc_attr((string) ((int) ($form['max_guests_override'] ?? 0))) . '" /><small>' . \esc_html__('Leave 0 to inherit the operational capacity.', 'must-hotel-booking') . '</small></label>';
     echo '</div>';
     echo '<label><span>' . \esc_html__('Public Description', 'must-hotel-booking') . '</span><textarea name="public_description" rows="5">' . \esc_textarea((string) ($form['public_description'] ?? '')) . '</textarea></label>';
+    echo '<label><span>' . \esc_html__('Room Rules', 'must-hotel-booking') . '</span><textarea name="public_room_rules" rows="4">' . \esc_textarea((string) ($form['public_room_rules'] ?? '')) . '</textarea><small>' . \esc_html__('Leave blank to inherit the linked room listing rules.', 'must-hotel-booking') . '</small></label>';
+    echo '<label><span>' . \esc_html__('Amenities Intro', 'must-hotel-booking') . '</span><textarea name="public_amenities_intro" rows="3">' . \esc_textarea((string) ($form['public_amenities_intro'] ?? '')) . '</textarea><small>' . \esc_html__('Leave blank to inherit the linked room listing amenities intro.', 'must-hotel-booking') . '</small></label>';
+    echo '</section>';
+
+    $unitMediaSummary = \sprintf(
+        __('%1$d amenities selected / %2$d gallery items', 'must-hotel-booking'),
+        \count($unitSelectedAmenities),
+        \count($unitGalleryIds)
+    );
+    echo '<details class="must-accommodation-disclosure">';
+    echo '<summary><div><strong>' . \esc_html__('Media & Amenities', 'must-hotel-booking') . '</strong><small>' . \esc_html($unitMediaSummary) . '</small></div></summary>';
+    echo '<div class="must-accommodation-disclosure-body">';
     echo '<div class="must-accommodation-field-grid is-two-col">';
-    echo '<div><label><span>' . \esc_html__('Featured Image ID', 'must-hotel-booking') . '</span><input type="number" min="0" name="featured_image_id" class="must-room-main-image-id" value="' . \esc_attr((string) $unitFeaturedImageId) . '" /></label>';
-    render_room_main_image_preview($unitFeaturedImageId);
-    echo '<button type="button" class="button must-room-main-image-select">' . \esc_html__('Select Image', 'must-hotel-booking') . '</button></div>';
-    echo '<div><label><span>' . \esc_html__('Gallery Image IDs', 'must-hotel-booking') . '</span><input type="text" name="gallery_image_ids" class="must-room-gallery-ids" value="' . \esc_attr((string) ($form['gallery_image_ids_input'] ?? $form['gallery_image_ids'] ?? '')) . '" /></label>';
-    render_room_gallery_preview($unitGalleryIds);
-    echo '<button type="button" class="button must-room-gallery-select">' . \esc_html__('Select Gallery', 'must-hotel-booking') . '</button></div>';
+    echo '<div class="must-room-main-image-field">';
+    echo '<span class="must-accommodation-field-label">' . \esc_html__('Main Image', 'must-hotel-booking') . '</span>';
+    echo '<input type="hidden" name="featured_image_id" class="must-room-main-image-id" value="' . \esc_attr((string) $unitFeaturedImageId) . '" />';
+    echo '<div class="must-accommodation-media-actions">';
+    echo '<button type="button" class="button button-secondary must-room-upload-main-image">' . \esc_html__('Choose Main Image', 'must-hotel-booking') . '</button>';
+    echo '<button type="button" class="button button-link-delete must-room-clear-main-image">' . \esc_html__('Clear', 'must-hotel-booking') . '</button>';
     echo '</div>';
-    echo '<div class="must-accommodation-amenity-grid">';
-    foreach ($availableAmenities as $amenityKey => $amenity) {
-        $isSelected = \in_array((string) $amenityKey, $unitSelectedAmenities, true);
-        echo '<label><input type="checkbox" name="amenities[]" value="' . \esc_attr((string) $amenityKey) . '"' . \checked($isSelected, true, false) . ' /> ' . \esc_html((string) ($amenity['label'] ?? $amenityKey)) . '</label>';
+    echo '<div class="must-accommodation-preview-card"><span class="must-accommodation-preview-label">' . \esc_html__('Main Image Preview', 'must-hotel-booking') . '</span>';
+    render_room_main_image_preview($unitFeaturedImageId);
+    echo '</div>';
+    echo '</div>';
+
+    echo '<div class="must-room-gallery-field">';
+    echo '<span class="must-accommodation-field-label">' . \esc_html__('Gallery Images', 'must-hotel-booking') . '</span>';
+    echo '<input type="hidden" name="gallery_image_ids" class="must-room-gallery-ids" value="' . \esc_attr((string) ($form['gallery_image_ids_input'] ?? $form['gallery_image_ids'] ?? '')) . '" />';
+    echo '<div class="must-accommodation-media-actions">';
+    echo '<button type="button" class="button button-secondary must-room-upload-images">' . \esc_html__('Choose Gallery Images', 'must-hotel-booking') . '</button>';
+    echo '<button type="button" class="button button-link-delete must-room-clear-images">' . \esc_html__('Clear', 'must-hotel-booking') . '</button>';
+    echo '</div>';
+    echo '<div class="must-accommodation-preview-card"><span class="must-accommodation-preview-label">' . \esc_html__('Gallery Preview', 'must-hotel-booking') . '</span>';
+    render_room_gallery_preview($unitGalleryIds);
+    echo '</div>';
+    echo '</div>';
+
+    echo '<div class="must-accommodation-field-span-2">';
+    echo '<div class="must-accommodation-inline-picker">';
+    echo '<div class="must-accommodation-inline-picker-copy"><span class="must-accommodation-field-label">' . \esc_html__('Amenities', 'must-hotel-booking') . '</span><small>' . \esc_html(\sprintf(_n('%d amenity selected', '%d amenities selected', \count($unitSelectedAmenities), 'must-hotel-booking'), \count($unitSelectedAmenities))) . '</small></div>';
+    echo '<button type="button" class="button button-secondary must-open-submodal" data-modal-target="unit-amenities-modal">' . \esc_html__('Edit Amenities', 'must-hotel-booking') . '</button>';
+    echo '</div>';
+    echo '<div class="must-accommodation-selected-tags"' . (empty($unitSelectedAmenityLabels) ? ' data-empty-text="' . \esc_attr__('No amenities selected yet.', 'must-hotel-booking') . '"' : '') . '>';
+    foreach ($unitSelectedAmenityLabels as $unitSelectedAmenityLabel) {
+        echo '<span class="must-accommodation-selected-tag">' . \esc_html($unitSelectedAmenityLabel) . '</span>';
     }
     echo '</div>';
-    echo '<div class="must-accommodation-toggle-grid">';
-    echo '<label class="must-accommodation-toggle"><input type="checkbox" name="public_visible" value="1"' . \checked(!empty($form['public_visible']), true, false) . ' /><span><strong>' . \esc_html__('Publicly visible', 'must-hotel-booking') . '</strong><small>' . \esc_html__('In Clock mode, this still requires a Clock physical-room mapping before it can be sold online.', 'must-hotel-booking') . '</small></span></label>';
+    echo '<div class="must-accommodation-submodal" id="unit-amenities-modal" hidden>';
+    echo '<div class="must-accommodation-submodal-backdrop" data-close-submodal></div>';
+    echo '<div class="must-accommodation-submodal-dialog" role="dialog" aria-modal="true" aria-labelledby="unit-amenities-modal-title">';
+    echo '<div class="must-accommodation-submodal-head"><div><h3 id="unit-amenities-modal-title">' . \esc_html__('Amenities', 'must-hotel-booking') . '</h3><p>' . \esc_html__('Choose the guest-facing features that should appear for this exact unit.', 'must-hotel-booking') . '</p></div><button type="button" class="must-accommodation-submodal-close" aria-label="' . \esc_attr__('Close amenities panel', 'must-hotel-booking') . '" data-close-submodal>&times;</button></div>';
+    echo '<div class="must-accommodation-submodal-toolbar"><input type="search" class="must-accommodation-amenity-search" placeholder="' . \esc_attr__('Search amenities', 'must-hotel-booking') . '" data-amenity-search="unit-amenities-modal" /><div class="must-accommodation-submodal-actions"><button type="button" class="button button-secondary must-amenity-bulk-action" data-amenity-bulk="select-all">' . \esc_html__('Select All', 'must-hotel-booking') . '</button><button type="button" class="button button-link must-amenity-bulk-action" data-amenity-bulk="clear">' . \esc_html__('Clear', 'must-hotel-booking') . '</button></div></div>';
+    echo '<div class="must-room-amenities-selector" data-amenity-list>';
+    foreach ($availableAmenities as $amenityKey => $amenityMeta) {
+        $iconFile = isset($amenityMeta['icon']) ? (string) $amenityMeta['icon'] : '';
+        $iconUrl = $iconFile !== '' ? MUST_HOTEL_BOOKING_URL . 'assets/img/' . $iconFile : '';
+        $isSelected = isset($unitSelectedAmenityMap[(string) $amenityKey]);
+        $amenityLabel = (string) ($amenityMeta['label'] ?? $amenityKey);
+        echo '<label class="must-room-amenity-option' . ($isSelected ? ' is-selected' : '') . '" data-amenity-label="' . \esc_attr(\strtolower($amenityLabel)) . '">';
+        if ($iconUrl !== '') {
+            echo '<span class="must-room-amenity-icon-wrap"><img class="must-room-amenity-icon" src="' . \esc_url($iconUrl) . '" alt="" /></span>';
+        }
+        echo '<span class="must-room-amenity-label">' . \esc_html($amenityLabel) . '</span>';
+        echo '<input type="checkbox" name="amenities[]" value="' . \esc_attr((string) $amenityKey) . '"' . \checked($isSelected, true, false) . ' />';
+        echo '</label>';
+    }
     echo '</div>';
-    echo '</section>';
+    echo '<div class="must-accommodation-submodal-foot"><button type="button" class="button button-primary must-close-submodal-action" data-close-submodal>' . \esc_html__('Done', 'must-hotel-booking') . '</button></div>';
+    echo '</div>';
+    echo '</div>';
+    echo '</div>';
+    echo '</div>';
+    echo '</div>';
+    echo '</details>';
 
     $unitHasNotes = (string) ($form['admin_notes'] ?? '') !== '';
     echo '<details class="must-accommodation-disclosure">';

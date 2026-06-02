@@ -248,6 +248,40 @@ function get_single_room_inquiry_url(array $room): string
 }
 
 /**
+ * @param array<int, string> $keys
+ * @return array<int, array<string, string>>
+ */
+function build_single_room_amenity_display_items(array $keys): array
+{
+    $available = RoomCatalog::getAvailableAmenities();
+    $items = [];
+
+    foreach ($keys as $key) {
+        $normalized = RoomCatalog::normalizeAmenityKey((string) $key);
+
+        if ($normalized === '' || !isset($available[$normalized])) {
+            continue;
+        }
+
+        $amenity = $available[$normalized];
+        $label = isset($amenity['label']) ? (string) $amenity['label'] : '';
+        $icon_file = isset($amenity['icon']) ? (string) $amenity['icon'] : '';
+
+        if ($label === '' || $icon_file === '') {
+            continue;
+        }
+
+        $items[$normalized] = [
+            'key' => $normalized,
+            'label' => $label,
+            'icon' => MUST_HOTEL_BOOKING_URL . 'assets/img/' . $icon_file,
+        ];
+    }
+
+    return \array_values($items);
+}
+
+/**
  * Get related rooms from same category.
  *
  * @return array<int, array<string, mixed>>
@@ -496,7 +530,12 @@ function get_single_room_page_view_data(): array
 
     $booking_url = \add_query_arg($booking_args, ManagedPages::getBookingPageUrl());
     $related_rooms = get_single_room_similar_rooms($physical_room_id, $room_type_id, $room_category, $gallery_room_id, 3);
-    $amenities = RoomData::getRoomAmenityDisplayItems($gallery_room_id);
+    $unit_amenity_keys = isset($room['amenity_keys']) && \is_array($room['amenity_keys'])
+        ? \array_values(\array_filter(\array_map('strval', $room['amenity_keys'])))
+        : [];
+    $amenities = !empty($unit_amenity_keys)
+        ? build_single_room_amenity_display_items($unit_amenity_keys)
+        : RoomData::getRoomAmenityDisplayItems($physical_room_id > 0 && $room_type_id > 0 ? $room_type_id : $gallery_room_id);
 
     return [
         'success' => true,
@@ -515,8 +554,12 @@ function get_single_room_page_view_data(): array
             ? \MustHotelBooking\Core\MustBookingConfig::get_currency()
             : 'USD',
         'room_size' => isset($room['room_size']) ? (string) $room['room_size'] : '',
-        'room_rules' => RoomData::getRoomRulesText($gallery_room_id),
-        'amenities_intro' => RoomData::getRoomAmenitiesIntroText($gallery_room_id),
+        'room_rules' => isset($room['room_rules']) && (string) $room['room_rules'] !== ''
+            ? (string) $room['room_rules']
+            : RoomData::getRoomRulesText($gallery_room_id),
+        'amenities_intro' => isset($room['amenities_intro']) && (string) $room['amenities_intro'] !== ''
+            ? (string) $room['amenities_intro']
+            : RoomData::getRoomAmenitiesIntroText($gallery_room_id),
         'amenities' => $amenities,
         'main_image_url' => $main_image_url,
         'gallery_urls' => $gallery_urls,

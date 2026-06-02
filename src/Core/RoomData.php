@@ -432,6 +432,8 @@ final class RoomData
         $featuredImageId = isset($physicalRoom['featured_image_id']) ? (int) $physicalRoom['featured_image_id'] : 0;
         $galleryImageIds = self::parseIdList((string) ($physicalRoom['gallery_image_ids'] ?? ''));
         $amenities = self::parseAmenityList((string) ($physicalRoom['amenities'] ?? ''));
+        $roomRules = \trim((string) ($physicalRoom['public_room_rules'] ?? ''));
+        $amenitiesIntro = \trim((string) ($physicalRoom['public_amenities_intro'] ?? ''));
         $roomSize = \trim((string) ($physicalRoom['room_size'] ?? ''));
         $bedSetup = \trim((string) ($physicalRoom['bed_setup'] ?? ''));
         $maxGuestsOverride = isset($physicalRoom['max_guests_override']) ? (int) $physicalRoom['max_guests_override'] : 0;
@@ -462,6 +464,8 @@ final class RoomData
             'main_image_id' => $featuredImageId,
             'gallery_image_ids' => $galleryImageIds,
             'amenity_keys' => $amenities,
+            'room_rules' => $roomRules !== '' ? $roomRules : self::getRoomRulesText($roomTypeId),
+            'amenities_intro' => $amenitiesIntro !== '' ? $amenitiesIntro : self::getRoomAmenitiesIntroText($roomTypeId),
             'is_clock_physical_room' => true,
         ];
     }

@@ -4,7 +4,7 @@ Tags: hotel, booking, reservation, accommodation
 Requires at least: 5.0
 Tested up to: 6.0
 Requires PHP: 7.4
-Stable tag: 0.4.56
+Stable tag: 0.4.57
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -31,6 +31,9 @@ Main features include:
 5. When updating, upload the new release ZIP or use the configured updater, then review **Diagnostics & Maintenance** after the update completes.
 
 == Changelog ==
+
+= 0.4.57 =
+* minor fix with the editing of rooms
 
 = 0.4.56 =
 * Added Clock-mode guaranteed individual room booking with public room-unit metadata, frontend unit cards, exact physical-room availability checks, Clock-derived pricing, and safe checkout blocking when the selected room cannot be confirmed in Clock.

@@ -238,6 +238,8 @@ function install_tables(): void
         section VARCHAR(100) NOT NULL DEFAULT '',
         public_title VARCHAR(191) NOT NULL DEFAULT '',
         public_description LONGTEXT NULL,
+        public_room_rules LONGTEXT NULL,
+        public_amenities_intro LONGTEXT NULL,
         featured_image_id BIGINT(20) UNSIGNED NOT NULL DEFAULT 0,
         gallery_image_ids LONGTEXT NULL,
         amenities LONGTEXT NULL,

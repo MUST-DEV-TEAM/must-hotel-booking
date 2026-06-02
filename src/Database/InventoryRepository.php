@@ -81,6 +81,8 @@ final class InventoryRepository extends AbstractRepository
         $optional = [
             'public_title',
             'public_description',
+            'public_room_rules',
+            'public_amenities_intro',
             'featured_image_id',
             'gallery_image_ids',
             'amenities',
@@ -136,6 +138,8 @@ final class InventoryRepository extends AbstractRepository
         return $row + [
             'public_title' => '',
             'public_description' => '',
+            'public_room_rules' => '',
+            'public_amenities_intro' => '',
             'featured_image_id' => 0,
             'gallery_image_ids' => '',
             'amenities' => '',
@@ -173,6 +177,8 @@ final class InventoryRepository extends AbstractRepository
         $optional = [
             'public_title' => ['%s', (string) ($data['public_title'] ?? '')],
             'public_description' => ['%s', (string) ($data['public_description'] ?? '')],
+            'public_room_rules' => ['%s', (string) ($data['public_room_rules'] ?? '')],
+            'public_amenities_intro' => ['%s', (string) ($data['public_amenities_intro'] ?? '')],
             'featured_image_id' => ['%d', (int) ($data['featured_image_id'] ?? 0)],
             'gallery_image_ids' => ['%s', (string) ($data['gallery_image_ids'] ?? '')],
             'amenities' => ['%s', (string) ($data['amenities'] ?? '')],

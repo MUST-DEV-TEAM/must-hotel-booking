@@ -5,6 +5,40 @@ namespace MustHotelBooking\Core;
 final class RoomViewBuilder
 {
     /**
+     * @param array<int, string> $keys
+     * @return array<int, array<string, string>>
+     */
+    private static function buildAmenityDisplayItems(array $keys): array
+    {
+        $available = RoomCatalog::getAvailableAmenities();
+        $items = [];
+
+        foreach ($keys as $key) {
+            $normalized = RoomCatalog::normalizeAmenityKey((string) $key);
+
+            if ($normalized === '' || !isset($available[$normalized])) {
+                continue;
+            }
+
+            $amenity = $available[$normalized];
+            $label = isset($amenity['label']) ? (string) $amenity['label'] : '';
+            $iconFile = isset($amenity['icon']) ? (string) $amenity['icon'] : '';
+
+            if ($label === '' || $iconFile === '') {
+                continue;
+            }
+
+            $items[$normalized] = [
+                'key' => $normalized,
+                'label' => $label,
+                'icon' => MUST_HOTEL_BOOKING_URL . 'assets/img/' . $iconFile,
+            ];
+        }
+
+        return \array_values($items);
+    }
+
+    /**
      * @param array<string, mixed> $room
      * @return array<string, mixed>|null
      */
@@ -73,7 +107,15 @@ final class RoomViewBuilder
                 : $roomsPageUrl;
         }
 
-        $amenities = RoomData::getRoomAmenityDisplayItems($galleryRoomId);
+        $unitAmenityKeys = isset($room['amenity_keys']) && \is_array($room['amenity_keys'])
+            ? \array_values(\array_filter(\array_map('strval', $room['amenity_keys'])))
+            : [];
+        $amenities = !empty($unitAmenityKeys)
+            ? self::buildAmenityDisplayItems($unitAmenityKeys)
+            : RoomData::getRoomAmenityDisplayItems(!empty($room['physical_room_id']) && !empty($room['room_type_id']) ? (int) $room['room_type_id'] : $galleryRoomId);
+        $roomRules = isset($room['room_rules']) && (string) $room['room_rules'] !== ''
+            ? (string) $room['room_rules']
+            : RoomData::getRoomRulesText($galleryRoomId);
 
         return [
             'id' => $roomId,
@@ -115,7 +157,8 @@ final class RoomViewBuilder
             'primary_image_url' => $primaryImageUrl,
             'gallery_images' => \array_slice($galleryImages, 0, 3),
             'lightbox_images' => $lightboxImages,
-            'room_rules' => RoomData::getRoomRulesText($galleryRoomId),
+            'room_rules' => $roomRules,
+            'amenities_intro' => isset($room['amenities_intro']) ? (string) $room['amenities_intro'] : '',
             'amenities' => $amenities,
             'people_icon_url' => MUST_HOTEL_BOOKING_URL . 'assets/img/PeopleFill.svg',
             'surface_icon_url' => MUST_HOTEL_BOOKING_URL . 'assets/img/Surface.svg',

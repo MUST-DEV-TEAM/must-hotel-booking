@@ -761,6 +761,8 @@ final class AccommodationAdminActions
         $section = isset($source['section']) ? \sanitize_text_field((string) \wp_unslash($source['section'])) : '';
         $publicTitle = isset($source['public_title']) ? \sanitize_text_field((string) \wp_unslash($source['public_title'])) : '';
         $publicDescription = isset($source['public_description']) ? \sanitize_textarea_field((string) \wp_unslash($source['public_description'])) : '';
+        $publicRoomRules = isset($source['public_room_rules']) ? \sanitize_textarea_field((string) \wp_unslash($source['public_room_rules'])) : '';
+        $publicAmenitiesIntro = isset($source['public_amenities_intro']) ? \sanitize_textarea_field((string) \wp_unslash($source['public_amenities_intro'])) : '';
         $featuredImageInput = isset($source['featured_image_id']) ? (string) \wp_unslash($source['featured_image_id']) : '';
         $galleryInput = isset($source['gallery_image_ids']) ? (string) \wp_unslash($source['gallery_image_ids']) : '';
         $amenities = isset($source['amenities']) ? parse_room_amenity_keys($source['amenities']) : [];
@@ -818,6 +820,8 @@ final class AccommodationAdminActions
             'section' => $section,
             'public_title' => $publicTitle,
             'public_description' => $publicDescription,
+            'public_room_rules' => $publicRoomRules,
+            'public_amenities_intro' => $publicAmenitiesIntro,
             'featured_image_id' => parse_room_main_image_id($featuredImageInput),
             'featured_image_id_input' => $featuredImageInput,
             'gallery_image_ids' => \implode(',', parse_room_gallery_ids($galleryInput)),
