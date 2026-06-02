@@ -4,7 +4,7 @@ Tags: hotel, booking, reservation, accommodation
 Requires at least: 5.0
 Tested up to: 6.0
 Requires PHP: 7.4
-Stable tag: 0.4.49
+Stable tag: 0.4.50
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -31,6 +31,9 @@ Main features include:
 5. When updating, upload the new release ZIP or use the configured updater, then review **Diagnostics & Maintenance** after the update completes.
 
 == Changelog ==
+
+= 0.4.50 =
+* Expanded staff portal manual Clock folio payment notices to show for paid Clock-backed Stripe bookings even when folio sync metadata was not saved, using payment rows as fallback for amount and Stripe reference.
 
 = 0.4.49 =
 * Expanded staff portal manual Clock folio payment notices to detect missing Clock folio API permission from provider sync errors, not only provider metadata.

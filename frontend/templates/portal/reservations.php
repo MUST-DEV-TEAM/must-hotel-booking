@@ -160,7 +160,28 @@ if (\is_array($detail)) {
     $guestsCount = isset($stay['guests']) ? (int) $stay['guests'] : 0;
     $amountDue = isset($pricing['amount_due']) ? (float) $pricing['amount_due'] : 0.0;
     $storedTotal = isset($pricing['stored_total']) ? (float) $pricing['stored_total'] : 0.0;
-    $amountPaid = isset($pricing['amount_paid']) ? (float) $pricing['amount_paid'] : 0.0;
+    if ($requiresManualClockFolioPayment) {
+        if ($manualClockFolioPaymentAmount === '' && $amountPaid > 0.0) {
+            $manualClockFolioPaymentAmount = \number_format_i18n($amountPaid, 2);
+        }
+
+        if ($manualClockFolioPaymentReference === '') {
+            foreach ($payments as $paymentRow) {
+                if (!\is_array($paymentRow)) {
+                    continue;
+                }
+
+                $paymentMethod = \strtolower((string) ($paymentRow['method'] ?? ''));
+                $paymentStatus = \strtolower((string) ($paymentRow['status_key'] ?? (string) ($paymentRow['status'] ?? '')));
+                $transactionId = \trim((string) ($paymentRow['transaction_id'] ?? ''));
+
+                if ($transactionId !== '' && $paymentStatus === 'paid' && \strpos($paymentMethod, 'stripe') !== false) {
+                    $manualClockFolioPaymentReference = $transactionId;
+                    break;
+                }
+            }
+        }
+    }
     $stayForm = isset($detailForms['stay']) && \is_array($detailForms['stay']) ? $detailForms['stay'] : [];
     $stayFormCheckin = isset($stayForm['checkin']) ? (string) $stayForm['checkin'] : (string) ($stay['checkin'] ?? '');
     $stayFormCheckout = isset($stayForm['checkout']) ? (string) $stayForm['checkout'] : (string) ($stay['checkout'] ?? '');

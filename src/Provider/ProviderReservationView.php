@@ -40,7 +40,7 @@ final class ProviderReservationView
      */
     public static function paymentContext(array $reservation, array $paymentState = []): array
     {
-        $localStatus = self::normalizeProviderKey((string) ($paymentState['derived_status'] ?? (string) ($reservation['payment_status'] ?? '')));
+        $localPaymentMethod = self::normalizeProviderKey((string) ($paymentState['method'] ?? (string) ($reservation['payment_method'] ?? '')));
         $providerStatus = self::cleanText((string) ($reservation['provider_payment_status'] ?? ''));
         $providerStatusKey = self::normalizeProviderKey($providerStatus);
         $metadata = self::decodeMetadata($reservation['provider_metadata'] ?? null);
@@ -58,12 +58,16 @@ final class ProviderReservationView
         $directProviderSyncStatus = self::normalizeProviderKey((string) ($reservation['provider_sync_status'] ?? ''));
         $directProviderSyncError = self::cleanText((string) ($reservation['provider_sync_error'] ?? ''));
 
+        $directProviderSyncStatus = self::normalizeProviderKey((string) ($reservation['provider_sync_status'] ?? ''));
+        $directProviderSyncError = self::cleanText((string) ($reservation['provider_sync_error'] ?? ''));
+        $folioPaymentAlreadySynced = !empty($folioPayment['success']);
+
         $folioPaymentNeedsManualAccounting =
             $provider === ProviderManager::CLOCK_MODE
+            && !$folioPaymentAlreadySynced
             && (
                 (
                     !empty($folioPayment)
-                    && empty($folioPayment['success'])
                     && (
                         $folioPaymentStatus === 'manual_review'
                         || \strpos(\strtolower($folioPaymentError), 'pms_api_booking_folios_default') !== false
@@ -74,6 +78,13 @@ final class ProviderReservationView
                     && \strpos(\strtolower($directProviderSyncError), 'pms_api_booking_folios_default') !== false
                 )
                 || \strpos(\strtolower($directProviderSyncError), 'pms_api_booking_folios_default') !== false
+                || (
+                    $localStatus === 'paid'
+                    && (
+                        \strpos($localPaymentMethod, 'stripe') !== false
+                        || $localPaymentMethod === ''
+                    )
+                )
             );
         $last = isset($metadata['last_payment_reconciliation']) && \is_array($metadata['last_payment_reconciliation'])
             ? $metadata['last_payment_reconciliation']
