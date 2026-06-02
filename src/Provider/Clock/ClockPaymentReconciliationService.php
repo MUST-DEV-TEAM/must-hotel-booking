@@ -31,9 +31,6 @@ final class ClockPaymentReconciliationService
     /** @param array<int, int> $reservationIds */
     public function reconcilePaymentSucceeded(array $reservationIds, string $paymentMethod = 'stripe', string $transactionId = ''): void
     {
-        if (!$this->directReservationUpdateSupported()) {
-            return;
-        }
         foreach ($this->clockReservationRows($reservationIds) as $row) {
             $this->reconcileRow($row, [
                 'operation' => 'payment_succeeded',
@@ -44,9 +41,12 @@ final class ClockPaymentReconciliationService
                 'endpoint_path' => ClockConfig::reservationStatusUpdatePath(),
                 'request_operation' => 'clock.reservation_payment_update',
                 'retry_operation' => 'reservation_payment_update',
+                'metadata_key' => 'last_payment_reconciliation',
+                'required_flag' => 'payment_reconciliation_required',
+                'source' => 'must_hotel_booking_public_payment',
                 'missing_endpoint_retry' => false,
                 'missing_endpoint_status' => 'local_only',
-                'missing_endpoint_message' => \__('Clock reservation status update endpoint is not configured; local payment status was recorded only in the mirror reservation.', 'must-hotel-booking'),
+                'missing_endpoint_message' => \__('Clock payment status sync endpoint is not configured; Stripe payment was recorded locally and the Clock mirror was marked local-only.', 'must-hotel-booking'),
             ]);
         }
     }
@@ -494,13 +494,48 @@ final class ClockPaymentReconciliationService
         $path = (string) ($action['endpoint_path'] ?? '');
         $payload = $this->ensurePayload($payload, $row, $action, $idempotencyKey);
         if ($path === '') {
-            $message = \__('Clock reconciliation endpoint is not configured.', 'must-hotel-booking');
+            $missingEndpointStatus = isset($action['missing_endpoint_status'])
+                ? (string) $action['missing_endpoint_status']
+                : 'pending_retry';
+
+            $missingEndpointMessage = isset($action['missing_endpoint_message'])
+                ? (string) $action['missing_endpoint_message']
+                : \__('Clock reconciliation endpoint is not configured.', 'must-hotel-booking');
+
+            if ($missingEndpointStatus === 'local_only') {
+                $this->updateMetadata(
+                    $reservationId,
+                    $row,
+                    $action,
+                    $idempotencyKey,
+                    false,
+                    'local_only',
+                    $missingEndpointMessage
+                );
+
+                return [
+                    'success' => true,
+                    'retry' => false,
+                    'message' => $missingEndpointMessage,
+                ];
+            }
+
             $this->recordSkippedLog($row, $action, $idempotencyKey);
-            $this->updateMetadata($reservationId, $row, $action, $idempotencyKey, false, 'pending_retry', $message);
+
+            $this->updateMetadata(
+                $reservationId,
+                $row,
+                $action,
+                $idempotencyKey,
+                false,
+                $missingEndpointStatus,
+                $missingEndpointMessage
+            );
+
             return [
                 'success' => false,
                 'retry' => true,
-                'message' => $message,
+                'message' => $missingEndpointMessage,
             ];
         }
         $endpoint = $this->endpointMethodAndPath($path);
@@ -581,15 +616,52 @@ final class ClockPaymentReconciliationService
         $path = (string) ($action['endpoint_path'] ?? '');
         $payload = $this->payload($row, $action, $idempotencyKey);
         if ($path === '') {
-            $this->recordSkippedLog($row, $action, $idempotencyKey);
-            $this->updateMetadata($reservationId, $row, $action, $idempotencyKey, false, (string) $action['missing_endpoint_status'], (string) $action['missing_endpoint_message']);
-            if (!empty($action['missing_endpoint_retry'])) {
-                $this->enqueueRetry($row, $action, $payload, (string) $action['missing_endpoint_message']);
+            $missingEndpointStatus = isset($action['missing_endpoint_status'])
+                ? (string) $action['missing_endpoint_status']
+                : 'pending_retry';
+
+            $missingEndpointMessage = isset($action['missing_endpoint_message'])
+                ? (string) $action['missing_endpoint_message']
+                : \__('Clock reconciliation endpoint is not configured.', 'must-hotel-booking');
+
+            if ($missingEndpointStatus === 'local_only') {
+                $this->updateMetadata(
+                    $reservationId,
+                    $row,
+                    $action,
+                    $idempotencyKey,
+                    false,
+                    'local_only',
+                    $missingEndpointMessage
+                );
+
+                return [
+                    'success' => true,
+                    'queued' => false,
+                    'message' => $missingEndpointMessage,
+                ];
             }
+
+            $this->recordSkippedLog($row, $action, $idempotencyKey);
+
+            $this->updateMetadata(
+                $reservationId,
+                $row,
+                $action,
+                $idempotencyKey,
+                false,
+                $missingEndpointStatus,
+                $missingEndpointMessage
+            );
+
+            if (!empty($action['missing_endpoint_retry'])) {
+                $this->enqueueRetry($row, $action, $payload, $missingEndpointMessage);
+            }
+
             return [
                 'success' => false,
                 'queued' => !empty($action['missing_endpoint_retry']),
-                'message' => (string) $action['missing_endpoint_message'],
+                'message' => $missingEndpointMessage,
             ];
         }
         $endpoint = $this->endpointMethodAndPath($path);
@@ -1007,6 +1079,9 @@ final class ClockPaymentReconciliationService
                 'metadata_key' => $this->payloadString($payload, 'metadata_key', 'last_payment_reconciliation'),
                 'required_flag' => $this->payloadString($payload, 'required_flag', 'payment_reconciliation_required'),
                 'source' => $this->payloadString($payload, 'source', 'must_hotel_booking_public_payment'),
+                'missing_endpoint_retry' => false,
+                'missing_endpoint_status' => 'local_only',
+                'missing_endpoint_message' => \__('Clock payment status sync endpoint is not configured; payment status remains local-only.', 'must-hotel-booking'),
             ];
         }
         if ($operation === 'reservation_cancel') {

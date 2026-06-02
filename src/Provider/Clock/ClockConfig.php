@@ -444,6 +444,11 @@ final class ClockConfig
             'clock_reservation_create_path' => $publicBookingPaths['reservation_create'],
             'clock_reconciliation_paths_configured' => $configuredReconciliationPaths,
             'clock_reservation_status_update_path' => $reconciliationPaths['reservation_status_update'],
+            'clock_payment_status_sync_supported' => $reconciliationPaths['reservation_status_update'] !== '',
+            'clock_payment_status_sync_mode' => $reconciliationPaths['reservation_status_update'] !== '' ? 'provider_update' : 'local_only',
+            'clock_payment_status_sync_last_notice' => $reconciliationPaths['reservation_status_update'] !== ''
+                ? ''
+                : \__('Clock payment status sync endpoint is not configured; Stripe/local payment status is kept in the local mirror only.', 'must-hotel-booking'),
             'clock_reservation_cancel_path' => $reconciliationPaths['reservation_cancel'],
             'clock_reservation_room_update_path' => $reconciliationPaths['reservation_room_update'],
             'clock_reservation_stay_update_path' => $reconciliationPaths['reservation_stay_update'],

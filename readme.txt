@@ -4,7 +4,7 @@ Tags: hotel, booking, reservation, accommodation
 Requires at least: 5.0
 Tested up to: 6.0
 Requires PHP: 7.4
-Stable tag: 0.4.38
+Stable tag: 0.4.39
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -31,6 +31,9 @@ Main features include:
 5. When updating, upload the new release ZIP or use the configured updater, then review **Diagnostics & Maintenance** after the update completes.
 
 == Changelog ==
+
+= 0.4.39 =
+* This release fixes Phase 1A/1B operational issues found by the support diagnostics report. It self-heals missing plugin cron schedules, especially expired lock cleanup, and changes Clock payment reconciliation so missing Clock payment/status update endpoints are treated as intentional local-only sync instead of false provider failures.
 
 = 0.4.38 =
 * rmeove phaso0 maybe

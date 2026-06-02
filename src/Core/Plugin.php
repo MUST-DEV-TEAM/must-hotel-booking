@@ -10,12 +10,17 @@ final class Plugin
         (new \MustHotelBooking\Database\DefaultInventoryUnitSyncService())->maybeRunBackfill();
         \MustHotelBooking\Core\ManagedPages::install();
         \MustHotelBooking\Core\StaffAccess::syncRoleCapabilities();
+
         \MustHotelBooking\Engine\LockEngine::scheduleCleanupCron();
+
         \MustHotelBooking\Provider\Sync\ProviderSyncJobRunner::registerHooks();
         \MustHotelBooking\Provider\Sync\ProviderSyncJobRunner::scheduleCron();
+
         \MustHotelBooking\Portal\PortalBootstrap::registerRewriteRules();
+
         \MustHotelBooking\Provider\Clock\ClockReservationAutoSyncScheduler::registerHooks();
         \MustHotelBooking\Provider\Clock\ClockReservationAutoSyncScheduler::scheduleCron();
+
         \flush_rewrite_rules();
     }
 
@@ -37,6 +42,10 @@ final class Plugin
         }
 
         \MustHotelBooking\Database\install_tables();
+
+        \MustHotelBooking\Engine\LockEngine::scheduleCleanupCron();
+        \MustHotelBooking\Provider\Sync\ProviderSyncJobRunner::scheduleCron();
+        \MustHotelBooking\Provider\Clock\ClockReservationAutoSyncScheduler::scheduleCron();
     }
 
     public static function initPlugin(): void
@@ -49,11 +58,16 @@ final class Plugin
         \MustHotelBooking\Core\PluginSupportWidget::registerHooks();
         \MustHotelBooking\Core\SupportDiagnosticsEndpoint::registerHooks();
         \MustHotelBooking\Core\ActivityLogger::registerHooks();
+
         \MustHotelBooking\Engine\LockEngine::registerHooks();
+        \MustHotelBooking\Engine\LockEngine::scheduleCleanupCron();
+
         \MustHotelBooking\Provider\Sync\ProviderSyncJobRunner::registerHooks();
         \MustHotelBooking\Provider\Sync\ProviderSyncJobRunner::scheduleCron();
+
         \MustHotelBooking\Provider\Clock\ClockReservationAutoSyncScheduler::registerHooks();
         \MustHotelBooking\Provider\Clock\ClockReservationAutoSyncScheduler::scheduleCron();
+
         \MustHotelBooking\Engine\PaymentEngine::registerHooks();
         \MustHotelBooking\Provider\Clock\ClockInboundSyncController::registerHooks();
         \MustHotelBooking\Engine\AvailabilityAjaxController::registerHooks();
