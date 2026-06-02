@@ -40,6 +40,7 @@ final class ProviderReservationView
      */
     public static function paymentContext(array $reservation, array $paymentState = []): array
     {
+        $localStatus = self::normalizeProviderKey((string) ($paymentState['derived_status'] ?? (string) ($reservation['payment_status'] ?? '')));
         $localPaymentMethod = self::normalizeProviderKey((string) ($paymentState['method'] ?? (string) ($reservation['payment_method'] ?? '')));
         $providerStatus = self::cleanText((string) ($reservation['provider_payment_status'] ?? ''));
         $providerStatusKey = self::normalizeProviderKey($providerStatus);
@@ -55,9 +56,6 @@ final class ProviderReservationView
         $folioPaymentCurrency = self::cleanText((string) ($folioPayment['currency'] ?? ''));
         $folioPaymentSubType = self::cleanText((string) ($folioPayment['payment_sub_type'] ?? ''));
         $folioPaymentSyncedAt = self::formatDateTime((string) ($folioPayment['synced_at'] ?? ''));
-        $directProviderSyncStatus = self::normalizeProviderKey((string) ($reservation['provider_sync_status'] ?? ''));
-        $directProviderSyncError = self::cleanText((string) ($reservation['provider_sync_error'] ?? ''));
-
         $directProviderSyncStatus = self::normalizeProviderKey((string) ($reservation['provider_sync_status'] ?? ''));
         $directProviderSyncError = self::cleanText((string) ($reservation['provider_sync_error'] ?? ''));
         $folioPaymentAlreadySynced = !empty($folioPayment['success']);

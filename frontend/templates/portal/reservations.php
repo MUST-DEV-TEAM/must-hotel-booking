@@ -159,8 +159,10 @@ if (\is_array($detail)) {
     $nights = isset($stay['nights']) ? (int) $stay['nights'] : 0;
     $guestsCount = isset($stay['guests']) ? (int) $stay['guests'] : 0;
     $amountDue = isset($pricing['amount_due']) ? (float) $pricing['amount_due'] : 0.0;
-    $storedTotal = isset($pricing['stored_total']) ? (float) $pricing['stored_total'] : 0.0;
-    if ($requiresManualClockFolioPayment) {
+$storedTotal = isset($pricing['stored_total']) ? (float) $pricing['stored_total'] : 0.0;
+$amountPaid = isset($pricing['amount_paid']) ? (float) $pricing['amount_paid'] : 0.0;
+
+if ($requiresManualClockFolioPayment) {
         if ($manualClockFolioPaymentAmount === '' && $amountPaid > 0.0) {
             $manualClockFolioPaymentAmount = \number_format_i18n($amountPaid, 2);
         }
