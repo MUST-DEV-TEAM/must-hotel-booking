@@ -375,14 +375,14 @@ final class PortalController
 
         /** @var array<string, mixed> $rawPost */
         $rawPost = \is_array($_POST) ? $_POST : [];
-        $form    = \MustHotelBooking\Admin\sanitize_admin_quick_booking_form_values($rawPost);
-        $errors  = isset($form['errors']) && \is_array($form['errors']) ? $form['errors'] : [];
+        $form = \MustHotelBooking\Admin\sanitize_admin_quick_booking_form_values($rawPost);
+        $errors = isset($form['errors']) && \is_array($form['errors']) ? $form['errors'] : [];
 
         if (!empty($errors)) {
             return [
                 'module_key' => 'front_desk',
-                'errors'     => $errors,
-                'form'       => $form,
+                'errors' => $errors,
+                'form' => $form,
             ];
         }
 
@@ -391,8 +391,8 @@ final class PortalController
         if ($reservationId <= 0) {
             return [
                 'module_key' => 'front_desk',
-                'errors'     => [\__('Unable to create the reservation from the submitted booking.', 'must-hotel-booking')],
-                'form'       => $form,
+                'errors' => [\__('Unable to create the reservation from the submitted booking.', 'must-hotel-booking')],
+                'form' => $form,
             ];
         }
 
@@ -401,7 +401,7 @@ final class PortalController
                 'reservations',
                 [
                     'reservation_id' => $reservationId,
-                    'portal_notice'  => 'quick_booking_created',
+                    'portal_notice' => 'quick_booking_created',
                 ]
             )
         );
@@ -540,8 +540,8 @@ final class PortalController
         self::redirectToPortalReservationDetail(
             $reservationId,
             $success
-                ? ($action === 'resend_guest_email' ? 'reservation_guest_email_resent' : 'reservation_admin_email_resent')
-                : 'portal_action_failed'
+            ? ($action === 'resend_guest_email' ? 'reservation_guest_email_resent' : 'reservation_admin_email_resent')
+            : 'portal_action_failed'
         );
     }
 
@@ -922,9 +922,9 @@ final class PortalController
      */
     private static function handleGuestMerge(): array
     {
-        $primaryId   = isset($_POST['guest_id']) ? \absint(\wp_unslash($_POST['guest_id'])) : 0;
+        $primaryId = isset($_POST['guest_id']) ? \absint(\wp_unslash($_POST['guest_id'])) : 0;
         $secondaryId = isset($_POST['merge_guest_id']) ? \absint(\wp_unslash($_POST['merge_guest_id'])) : 0;
-        $nonce       = isset($_POST['must_portal_guest_nonce']) ? (string) \wp_unslash($_POST['must_portal_guest_nonce']) : '';
+        $nonce = isset($_POST['must_portal_guest_nonce']) ? (string) \wp_unslash($_POST['must_portal_guest_nonce']) : '';
 
         if ($primaryId <= 0 || $secondaryId <= 0 || !\wp_verify_nonce($nonce, 'must_portal_guest_merge_' . $primaryId . '_' . $secondaryId)) {
             self::redirectToPortalGuestDetail($primaryId, 'invalid_nonce');
@@ -935,8 +935,8 @@ final class PortalController
         }
 
         $guestRepository = \MustHotelBooking\Engine\get_guest_repository();
-        $primary         = $guestRepository->getGuestById($primaryId);
-        $secondary       = $guestRepository->getGuestById($secondaryId);
+        $primary = $guestRepository->getGuestById($primaryId);
+        $secondary = $guestRepository->getGuestById($secondaryId);
 
         if (!\is_array($primary)) {
             self::redirectToPortalGuestDetail($primaryId, 'guest_not_found');
@@ -1019,50 +1019,133 @@ final class PortalController
         self::redirectToPortalPaymentDetail($reservationId, (string) ($result['notice'] ?? 'payment_posted'));
     }
 
-    /**
-     * @return array<string, mixed>
-     */
-    private static function handlePaymentRefund(): array
-    {
-        $reservationId = isset($_POST['reservation_id']) ? \absint(\wp_unslash($_POST['reservation_id'])) : 0;
-        $nonce = isset($_POST['must_portal_payment_nonce']) ? (string) \wp_unslash($_POST['must_portal_payment_nonce']) : '';
-        $rawAmount = isset($_POST['amount']) && !\is_array($_POST['amount']) ? (string) \wp_unslash($_POST['amount']) : '';
-        $amount = (float) $rawAmount;
-        $reason = isset($_POST['reason']) && !\is_array($_POST['reason']) ? \sanitize_text_field((string) \wp_unslash($_POST['reason'])) : '';
-        $refundType = isset($_POST['refund_type']) && !\is_array($_POST['refund_type']) ? \sanitize_key((string) \wp_unslash($_POST['refund_type'])) : 'refund_only';
-        $cancelReservation = \in_array($refundType, ['full_refund_cancel', 'partial_refund_cancel'], true);
-        $form = [
-            'amount' => $amount > 0 ? \number_format($amount, 2, '.', '') : '',
-            'reason' => $reason,
-            'refund_type' => $refundType,
-        ];
+/**
+ * @return array<string, mixed>
+ */
+private static function handlePaymentRefund(): array
+{
+    $reservationId = isset($_POST['reservation_id']) ? \absint(\wp_unslash($_POST['reservation_id'])) : 0;
+    $nonce = isset($_POST['must_portal_payment_nonce']) ? (string) \wp_unslash($_POST['must_portal_payment_nonce']) : '';
 
-        if ($reservationId <= 0 || !\wp_verify_nonce($nonce, 'must_portal_payment_action_payment_refund_' . $reservationId)) {
-            return self::buildPaymentActionState($reservationId, ['refund' => $form], [\__('Security check failed. Please try again.', 'must-hotel-booking')]);
-        }
+    $rawAmount = isset($_POST['amount']) && !\is_array($_POST['amount']) ? (string) \wp_unslash($_POST['amount']) : '';
+    $amount = (float) $rawAmount;
 
-        if (!\current_user_can(StaffAccess::CAP_PAYMENT_REFUND) && !\current_user_can('manage_options')) {
-            return self::buildPaymentActionState($reservationId, ['refund' => $form], [\__('You do not have permission to issue refunds from the portal.', 'must-hotel-booking')]);
-        }
+    $reason = isset($_POST['reason']) && !\is_array($_POST['reason'])
+        ? \sanitize_text_field((string) \wp_unslash($_POST['reason']))
+        : '';
 
-        $result = (new PaymentAdminActions())->refundRecordedPayment($reservationId, $amount, [
-            'reason' => $reason,
-            'refund_type' => $refundType,
-            'cancel_reservation' => $cancelReservation,
-            'source' => 'portal',
-        ]);
+    $refundType = isset($_POST['refund_type']) && !\is_array($_POST['refund_type'])
+        ? \sanitize_key((string) \wp_unslash($_POST['refund_type']))
+        : 'refund_only';
 
-        if (empty($result['success'])) {
+    $refundAmountMode = isset($_POST['refund_amount_mode']) && !\is_array($_POST['refund_amount_mode'])
+        ? \sanitize_key((string) \wp_unslash($_POST['refund_amount_mode']))
+        : 'fixed';
+
+    $refundPercent = isset($_POST['refund_percent']) && !\is_array($_POST['refund_percent'])
+        ? (float) \wp_unslash($_POST['refund_percent'])
+        : 0.0;
+
+    if (!\in_array($refundType, ['refund_only', 'full_refund_cancel', 'partial_refund', 'partial_refund_cancel'], true)) {
+        $refundType = 'refund_only';
+    }
+
+    if (!\in_array($refundAmountMode, ['fixed', 'percent'], true)) {
+        $refundAmountMode = 'fixed';
+    }
+
+    $cancelReservation = \in_array($refundType, ['full_refund_cancel', 'partial_refund_cancel'], true);
+    $isPartialRefund = \in_array($refundType, ['partial_refund', 'partial_refund_cancel'], true);
+
+    $form = [
+        'amount' => $amount > 0 ? \number_format($amount, 2, '.', '') : '',
+        'reason' => $reason,
+        'refund_type' => $refundType,
+        'refund_amount_mode' => $refundAmountMode,
+        'refund_percent' => $refundPercent > 0 ? (string) $refundPercent : '',
+    ];
+
+    if ($reservationId <= 0 || !\wp_verify_nonce($nonce, 'must_portal_payment_action_payment_refund_' . $reservationId)) {
+        return self::buildPaymentActionState(
+            $reservationId,
+            ['refund' => $form],
+            [\__('Security check failed. Please try again.', 'must-hotel-booking')]
+        );
+    }
+
+    if (!\current_user_can(StaffAccess::CAP_PAYMENT_REFUND) && !\current_user_can('manage_options')) {
+        return self::buildPaymentActionState(
+            $reservationId,
+            ['refund' => $form],
+            [\__('You do not have permission to issue refunds from the portal.', 'must-hotel-booking')]
+        );
+    }
+
+    $detail = (new PaymentAdminDataProvider())->getDetailDataForReservation($reservationId);
+    $state = \is_array($detail) && isset($detail['state']) && \is_array($detail['state']) ? $detail['state'] : [];
+    $amountPaid = (float) ($state['amount_paid'] ?? 0.0);
+
+    if (!$isPartialRefund && $amountPaid > 0.0) {
+        $amount = $amountPaid;
+    }
+
+    if ($isPartialRefund && $refundAmountMode === 'percent') {
+        $amount = \round($amountPaid * ($refundPercent / 100), 2);
+    }
+
+    $form['amount'] = $amount > 0 ? \number_format($amount, 2, '.', '') : '';
+
+    if ($isPartialRefund) {
+        if ($amountPaid <= 0.0) {
             return self::buildPaymentActionState(
                 $reservationId,
                 ['refund' => $form],
-                [isset($result['message']) ? (string) $result['message'] : \__('Unable to issue the refund.', 'must-hotel-booking')]
+                [\__('There is no recorded paid balance available to refund.', 'must-hotel-booking')]
             );
         }
 
-        self::redirectToPortalPaymentDetail($reservationId, (string) ($result['notice'] ?? 'payment_refunded'));
+        if ($amount <= 0.0) {
+            return self::buildPaymentActionState(
+                $reservationId,
+                ['refund' => $form],
+                [\__('Partial refund amount must be greater than zero.', 'must-hotel-booking')]
+            );
+        }
+
+        if ($amount >= $amountPaid) {
+            return self::buildPaymentActionState(
+                $reservationId,
+                ['refund' => $form],
+                [\__('Partial refund amount must be lower than the total paid amount. Use full refund instead.', 'must-hotel-booking')]
+            );
+        }
+
+        if ($refundAmountMode === 'percent' && ($refundPercent <= 0.0 || $refundPercent >= 100.0)) {
+            return self::buildPaymentActionState(
+                $reservationId,
+                ['refund' => $form],
+                [\__('Partial refund percentage must be greater than 0 and lower than 100.', 'must-hotel-booking')]
+            );
+        }
     }
 
+    $result = (new PaymentAdminActions())->refundRecordedPayment($reservationId, $amount, [
+        'reason' => $reason,
+        'refund_type' => $refundType,
+        'cancel_reservation' => $cancelReservation,
+        'source' => 'portal',
+    ]);
+
+    if (empty($result['success'])) {
+        return self::buildPaymentActionState(
+            $reservationId,
+            ['refund' => $form],
+            [isset($result['message']) ? (string) $result['message'] : \__('Unable to issue the refund.', 'must-hotel-booking')]
+        );
+    }
+
+    self::redirectToPortalPaymentDetail($reservationId, (string) ($result['notice'] ?? 'payment_refunded'));
+}
     /**
      * @return array<string, mixed>
      */
@@ -1475,14 +1558,14 @@ final class PortalController
     private static function getPortalQuickActionDescription(string $moduleKey): string
     {
         $descriptions = [
-            'reservations'      => \__('Review arrivals, departures, and booking status changes.', 'must-hotel-booking'),
-            'calendar'          => \__('Check room occupancy, availability, and date conflicts.', 'must-hotel-booking'),
-            'front_desk'        => \__('Create reservations, process check-ins and check-outs.', 'must-hotel-booking'),
-            'guests'            => \__('Search guest profiles, stay history, and contact details.', 'must-hotel-booking'),
-            'payments'          => \__('Follow unpaid balances, Stripe issues, and pay-at-hotel collections.', 'must-hotel-booking'),
-            'housekeeping'      => \__('View room readiness, cleaning status, and maintenance issues.', 'must-hotel-booking'),
-            'rooms_availability'=> \__('Inspect room inventory, blocks, rules, and operational statuses.', 'must-hotel-booking'),
-            'reports'           => \__('Open revenue and operational reporting views.', 'must-hotel-booking'),
+            'reservations' => \__('Review arrivals, departures, and booking status changes.', 'must-hotel-booking'),
+            'calendar' => \__('Check room occupancy, availability, and date conflicts.', 'must-hotel-booking'),
+            'front_desk' => \__('Create reservations, process check-ins and check-outs.', 'must-hotel-booking'),
+            'guests' => \__('Search guest profiles, stay history, and contact details.', 'must-hotel-booking'),
+            'payments' => \__('Follow unpaid balances, Stripe issues, and pay-at-hotel collections.', 'must-hotel-booking'),
+            'housekeeping' => \__('View room readiness, cleaning status, and maintenance issues.', 'must-hotel-booking'),
+            'rooms_availability' => \__('Inspect room inventory, blocks, rules, and operational statuses.', 'must-hotel-booking'),
+            'reports' => \__('Open revenue and operational reporting views.', 'must-hotel-booking'),
         ];
 
         return isset($descriptions[$moduleKey]) ? $descriptions[$moduleKey] : \__('Open this workspace module.', 'must-hotel-booking');
@@ -2172,11 +2255,11 @@ final class PortalController
         string $severity,
         string $message
     ): void {
-        $bookingId   = isset($reservation['booking_id']) ? \trim((string) $reservation['booking_id']) : '';
-        $reference   = $bookingId !== '' ? $bookingId : ('RES-' . $reservationId);
+        $bookingId = isset($reservation['booking_id']) ? \trim((string) $reservation['booking_id']) : '';
+        $reference = $bookingId !== '' ? $bookingId : ('RES-' . $reservationId);
         $actorUserId = \get_current_user_id();
-        $actorRole   = '';
-        $actorIp     = '';
+        $actorRole = '';
+        $actorIp = '';
 
         if ($actorUserId > 0) {
             $actorUser = \wp_get_current_user();
@@ -2191,20 +2274,20 @@ final class PortalController
 
         \MustHotelBooking\Engine\get_activity_repository()->createActivity(
             [
-                'event_type'    => $eventType,
-                'severity'      => $severity,
-                'entity_type'   => 'reservation',
-                'entity_id'     => $reservationId,
-                'reference'     => $reference,
-                'message'       => $message,
+                'event_type' => $eventType,
+                'severity' => $severity,
+                'entity_type' => 'reservation',
+                'entity_id' => $reservationId,
+                'reference' => $reference,
+                'message' => $message,
                 'actor_user_id' => $actorUserId,
-                'actor_role'    => $actorRole,
-                'actor_ip'      => $actorIp,
-                'context_json'  => \wp_json_encode(
+                'actor_role' => $actorRole,
+                'actor_ip' => $actorIp,
+                'context_json' => \wp_json_encode(
                     [
                         'reservation_id' => $reservationId,
-                        'booking_id'     => $bookingId,
-                        'actor_user_id'  => $actorUserId,
+                        'booking_id' => $bookingId,
+                        'actor_user_id' => $actorUserId,
                     ]
                 ),
             ]
@@ -2327,7 +2410,7 @@ final class PortalController
     private static function handleReservationCheckin(): void
     {
         $reservationId = isset($_POST['reservation_id']) ? \absint(\wp_unslash($_POST['reservation_id'])) : 0;
-        $nonce         = isset($_POST['must_portal_reservation_nonce']) ? (string) \wp_unslash($_POST['must_portal_reservation_nonce']) : '';
+        $nonce = isset($_POST['must_portal_reservation_nonce']) ? (string) \wp_unslash($_POST['must_portal_reservation_nonce']) : '';
 
         if ($reservationId <= 0 || !\wp_verify_nonce($nonce, 'must_portal_reservation_action_checkin_' . $reservationId)) {
             self::redirectToPortalReservationDetail($reservationId, 'invalid_nonce');
@@ -2338,7 +2421,7 @@ final class PortalController
         }
 
         $reservationRepository = \MustHotelBooking\Engine\get_reservation_repository();
-        $reservation           = $reservationRepository->getReservation($reservationId);
+        $reservation = $reservationRepository->getReservation($reservationId);
 
         if (!\is_array($reservation)) {
             self::redirectToPortalReservationDetail($reservationId, 'reservation_not_found');
@@ -2380,7 +2463,7 @@ final class PortalController
             self::redirectToPortalReservationDetail($reservationId, 'reservation_checkin_failed');
         }
 
-        $status      = \sanitize_key((string) ($reservation['status'] ?? ''));
+        $status = \sanitize_key((string) ($reservation['status'] ?? ''));
         $checkedInAt = \trim((string) ($reservation['checked_in_at'] ?? ''));
 
         // Only check in if the reservation is active and not already checked in.
@@ -2412,7 +2495,7 @@ final class PortalController
     private static function handleReservationCheckout(): void
     {
         $reservationId = isset($_POST['reservation_id']) ? \absint(\wp_unslash($_POST['reservation_id'])) : 0;
-        $nonce         = isset($_POST['must_portal_reservation_nonce']) ? (string) \wp_unslash($_POST['must_portal_reservation_nonce']) : '';
+        $nonce = isset($_POST['must_portal_reservation_nonce']) ? (string) \wp_unslash($_POST['must_portal_reservation_nonce']) : '';
 
         if ($reservationId <= 0 || !\wp_verify_nonce($nonce, 'must_portal_reservation_action_checkout_' . $reservationId)) {
             self::redirectToPortalReservationDetail($reservationId, 'invalid_nonce');
@@ -2423,7 +2506,7 @@ final class PortalController
         }
 
         $reservationRepository = \MustHotelBooking\Engine\get_reservation_repository();
-        $reservation           = $reservationRepository->getReservation($reservationId);
+        $reservation = $reservationRepository->getReservation($reservationId);
 
         if (!\is_array($reservation)) {
             self::redirectToPortalReservationDetail($reservationId, 'reservation_not_found');
@@ -2465,10 +2548,10 @@ final class PortalController
             self::redirectToPortalReservationDetail($reservationId, 'reservation_checkout_failed');
         }
 
-        $status        = \sanitize_key((string) ($reservation['status'] ?? ''));
+        $status = \sanitize_key((string) ($reservation['status'] ?? ''));
         $paymentStatus = \sanitize_key((string) ($reservation['payment_status'] ?? 'unpaid'));
-        $checkedInAt   = \trim((string) ($reservation['checked_in_at'] ?? ''));
-        $checkedOutAt  = \trim((string) ($reservation['checked_out_at'] ?? ''));
+        $checkedInAt = \trim((string) ($reservation['checked_in_at'] ?? ''));
+        $checkedOutAt = \trim((string) ($reservation['checked_out_at'] ?? ''));
 
         if ($status !== 'confirmed') {
             self::redirectToPortalReservationDetail($reservationId, 'reservation_wrong_status');
@@ -2503,7 +2586,7 @@ final class PortalController
     private static function handleReservationAssignRoom(): void
     {
         $reservationId = isset($_POST['reservation_id']) ? \absint(\wp_unslash($_POST['reservation_id'])) : 0;
-        $nonce         = isset($_POST['must_portal_reservation_nonce']) ? (string) \wp_unslash($_POST['must_portal_reservation_nonce']) : '';
+        $nonce = isset($_POST['must_portal_reservation_nonce']) ? (string) \wp_unslash($_POST['must_portal_reservation_nonce']) : '';
         $roomMoveRequest = self::isFrontDeskRoomMoveRequest();
 
         if ($reservationId <= 0 || !\wp_verify_nonce($nonce, 'must_portal_reservation_assign_room_' . $reservationId)) {
@@ -2511,7 +2594,7 @@ final class PortalController
         }
 
         $reservationRepository = \MustHotelBooking\Engine\get_reservation_repository();
-        $reservation           = $reservationRepository->getReservation($reservationId);
+        $reservation = $reservationRepository->getReservation($reservationId);
 
         if (!\is_array($reservation)) {
             self::redirectAfterReservationAssignRoom($reservationId, 'reservation_not_found');
@@ -2551,8 +2634,8 @@ final class PortalController
         }
 
         // 0 = unassign; any positive integer = assign to that inventory room.
-        $newRoomId            = isset($_POST['assigned_room_id']) ? \absint(\wp_unslash($_POST['assigned_room_id'])) : 0;
-        $roomTypeId           = isset($reservation['room_type_id']) ? (int) $reservation['room_type_id'] : (int) ($reservation['room_id'] ?? 0);
+        $newRoomId = isset($_POST['assigned_room_id']) ? \absint(\wp_unslash($_POST['assigned_room_id'])) : 0;
+        $roomTypeId = isset($reservation['room_type_id']) ? (int) $reservation['room_type_id'] : (int) ($reservation['room_id'] ?? 0);
         $currentAssignedRoomId = isset($reservation['assigned_room_id']) ? (int) $reservation['assigned_room_id'] : 0;
 
         if ($requiresMoveCapability && $newRoomId <= 0) {
@@ -2595,9 +2678,9 @@ final class PortalController
             self::redirectAfterReservationAssignRoom($reservationId, 'reservation_room_assignment_failed');
         }
 
-        $inventoryRepository  = \MustHotelBooking\Engine\get_inventory_repository();
-        $roomLabel            = \__('Unassigned', 'must-hotel-booking');
-        $updated              = false;
+        $inventoryRepository = \MustHotelBooking\Engine\get_inventory_repository();
+        $roomLabel = \__('Unassigned', 'must-hotel-booking');
+        $updated = false;
 
         if ($newRoomId > 0) {
             $inventoryRoom = $inventoryRepository->getInventoryRoomById($newRoomId);
@@ -3112,7 +3195,7 @@ final class PortalController
     private static function handleReservationAddNote(): void
     {
         $reservationId = isset($_POST['reservation_id']) ? \absint(\wp_unslash($_POST['reservation_id'])) : 0;
-        $nonce         = isset($_POST['must_portal_reservation_nonce']) ? (string) \wp_unslash($_POST['must_portal_reservation_nonce']) : '';
+        $nonce = isset($_POST['must_portal_reservation_nonce']) ? (string) \wp_unslash($_POST['must_portal_reservation_nonce']) : '';
 
         if ($reservationId <= 0 || !\wp_verify_nonce($nonce, 'must_portal_reservation_add_note_' . $reservationId)) {
             self::redirectToPortalReservationDetail($reservationId, 'invalid_nonce');
@@ -3130,18 +3213,18 @@ final class PortalController
         }
 
         $reservationRepository = \MustHotelBooking\Engine\get_reservation_repository();
-        $reservation           = $reservationRepository->getReservation($reservationId);
+        $reservation = $reservationRepository->getReservation($reservationId);
 
         if (!\is_array($reservation)) {
             self::redirectToPortalReservationDetail($reservationId, 'reservation_not_found');
         }
 
-        $currentUser  = \wp_get_current_user();
-        $authorName   = $currentUser instanceof \WP_User && $currentUser->display_name !== '' ? (string) $currentUser->display_name : \__('Staff', 'must-hotel-booking');
-        $timestamp    = \date_i18n('d M Y H:i', \current_time('timestamp'));
-        $noteEntry    = '[' . $timestamp . ' — ' . $authorName . '] ' . $note;
-        $existing     = \trim((string) ($reservation['notes'] ?? ''));
-        $noteEntry    = '[' . $timestamp . ' - ' . $authorName . '] ' . $note;
+        $currentUser = \wp_get_current_user();
+        $authorName = $currentUser instanceof \WP_User && $currentUser->display_name !== '' ? (string) $currentUser->display_name : \__('Staff', 'must-hotel-booking');
+        $timestamp = \date_i18n('d M Y H:i', \current_time('timestamp'));
+        $noteEntry = '[' . $timestamp . ' — ' . $authorName . '] ' . $note;
+        $existing = \trim((string) ($reservation['notes'] ?? ''));
+        $noteEntry = '[' . $timestamp . ' - ' . $authorName . '] ' . $note;
         $updatedNotes = $existing !== '' ? $existing . "\n\n" . $noteEntry : $noteEntry;
 
         $reservationRepository->updateReservation($reservationId, ['notes' => $updatedNotes]);
@@ -3178,7 +3261,7 @@ final class PortalController
     private static function handleReservationRequestCancel(): void
     {
         $reservationId = isset($_POST['reservation_id']) ? \absint(\wp_unslash($_POST['reservation_id'])) : 0;
-        $nonce         = isset($_POST['must_portal_reservation_nonce']) ? (string) \wp_unslash($_POST['must_portal_reservation_nonce']) : '';
+        $nonce = isset($_POST['must_portal_reservation_nonce']) ? (string) \wp_unslash($_POST['must_portal_reservation_nonce']) : '';
 
         if ($reservationId <= 0 || !\wp_verify_nonce($nonce, 'must_portal_reservation_request_cancel_' . $reservationId)) {
             self::redirectToPortalReservationDetail($reservationId, 'invalid_nonce');
@@ -3189,7 +3272,7 @@ final class PortalController
         }
 
         $reservationRepository = \MustHotelBooking\Engine\get_reservation_repository();
-        $reservation           = $reservationRepository->getReservation($reservationId);
+        $reservation = $reservationRepository->getReservation($reservationId);
 
         if (!\is_array($reservation)) {
             self::redirectToPortalReservationDetail($reservationId, 'reservation_not_found');
@@ -3208,7 +3291,7 @@ final class PortalController
         $reservationRepository->updateReservation(
             $reservationId,
             [
-                'cancellation_requested'    => 1,
+                'cancellation_requested' => 1,
                 'cancellation_requested_at' => \current_time('mysql'),
                 'cancellation_requested_by' => \get_current_user_id(),
             ]
@@ -3236,7 +3319,7 @@ final class PortalController
     private static function handleReservationRejectCancel(): void
     {
         $reservationId = isset($_POST['reservation_id']) ? \absint(\wp_unslash($_POST['reservation_id'])) : 0;
-        $nonce         = isset($_POST['must_portal_reservation_nonce']) ? (string) \wp_unslash($_POST['must_portal_reservation_nonce']) : '';
+        $nonce = isset($_POST['must_portal_reservation_nonce']) ? (string) \wp_unslash($_POST['must_portal_reservation_nonce']) : '';
 
         if ($reservationId <= 0 || !\wp_verify_nonce($nonce, 'must_portal_reservation_reject_cancel_' . $reservationId)) {
             self::redirectToPortalReservationDetail($reservationId, 'invalid_nonce');
@@ -3247,7 +3330,7 @@ final class PortalController
         }
 
         $reservationRepository = \MustHotelBooking\Engine\get_reservation_repository();
-        $reservation           = $reservationRepository->getReservation($reservationId);
+        $reservation = $reservationRepository->getReservation($reservationId);
 
         if (!\is_array($reservation)) {
             self::redirectToPortalReservationDetail($reservationId, 'reservation_not_found');
@@ -3277,7 +3360,7 @@ final class PortalController
     private static function handleReservationApproveCancel(): void
     {
         $reservationId = isset($_POST['reservation_id']) ? \absint(\wp_unslash($_POST['reservation_id'])) : 0;
-        $nonce         = isset($_POST['must_portal_reservation_nonce']) ? (string) \wp_unslash($_POST['must_portal_reservation_nonce']) : '';
+        $nonce = isset($_POST['must_portal_reservation_nonce']) ? (string) \wp_unslash($_POST['must_portal_reservation_nonce']) : '';
 
         if ($reservationId <= 0 || !\wp_verify_nonce($nonce, 'must_portal_reservation_approve_cancel_' . $reservationId)) {
             self::redirectToPortalReservationDetail($reservationId, 'invalid_nonce');
@@ -3288,7 +3371,7 @@ final class PortalController
         }
 
         $reservationRepository = \MustHotelBooking\Engine\get_reservation_repository();
-        $reservation           = $reservationRepository->getReservation($reservationId);
+        $reservation = $reservationRepository->getReservation($reservationId);
 
         if (!\is_array($reservation)) {
             self::redirectToPortalReservationDetail($reservationId, 'reservation_not_found');
@@ -3336,7 +3419,7 @@ final class PortalController
         \MustHotelBooking\Engine\get_reservation_repository()->updateReservation(
             $reservationId,
             [
-                'cancellation_requested'    => 0,
+                'cancellation_requested' => 0,
                 'cancellation_requested_at' => '',
                 'cancellation_requested_by' => 0,
             ]
@@ -4644,17 +4727,19 @@ final class PortalController
     private static function buildReportExportRows(string $activeTab, array $reportData, array $auditRows): array
     {
         if ($activeTab === 'audit-log') {
-            $rows = [[
-                'Timestamp',
-                'Severity',
-                'Event',
-                'Entity',
-                'Actor',
-                'Reference',
-                'Message',
-                'Provider',
-                'Action URL',
-            ]];
+            $rows = [
+                [
+                    'Timestamp',
+                    'Severity',
+                    'Event',
+                    'Entity',
+                    'Actor',
+                    'Reference',
+                    'Message',
+                    'Provider',
+                    'Action URL',
+                ]
+            ];
 
             foreach ($auditRows as $row) {
                 $rows[] = [
@@ -5890,12 +5975,12 @@ final class PortalController
                 ? (string) $boardRow['reservation_context_meta']
                 : (
                     (int) ($unitRow['future_reservations'] ?? 0) > 0 && (string) ($unitRow['next_checkin'] ?? '') !== ''
-                        ? \sprintf(
-                            /* translators: %s: next check-in date */
-                            \__('Next arrival %s', 'must-hotel-booking'),
-                            (string) $unitRow['next_checkin']
-                        )
-                        : \__('No assigned reservation context is attached to this unit right now.', 'must-hotel-booking')
+                    ? \sprintf(
+                        /* translators: %s: next check-in date */
+                        \__('Next arrival %s', 'must-hotel-booking'),
+                        (string) $unitRow['next_checkin']
+                    )
+                    : \__('No assigned reservation context is attached to this unit right now.', 'must-hotel-booking')
                 );
 
             $mergedRows[] = $unitRow + [
@@ -6002,9 +6087,9 @@ final class PortalController
             return;
         }
 
-        $entry     = $deprecated[$route];
+        $entry = $deprecated[$route];
         $moduleKey = (string) ($entry['module'] ?? '');
-        $args      = isset($entry['args']) && \is_array($entry['args']) ? $entry['args'] : [];
+        $args = isset($entry['args']) && \is_array($entry['args']) ? $entry['args'] : [];
         $targetUrl = PortalRouter::getModuleUrl($moduleKey, $args);
 
         if ($targetUrl === '') {

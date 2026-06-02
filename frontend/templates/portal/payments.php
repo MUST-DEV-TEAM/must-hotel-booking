@@ -75,23 +75,27 @@ if (empty($moduleData['rows'])) {
         $isProviderBacked = !empty($providerContext['is_provider_backed']);
 
         echo '<tr><td><strong>' . \esc_html((string) ($row['booking_id'] ?? '')) . '</strong><br /><span class="must-portal-muted">' . \esc_html((string) ($row['accommodation'] ?? '')) . '</span></td>';
+
         if ($isProviderBacked) {
             echo '<td>' . \esc_html((string) ($row['guest'] ?? '')) . '<br /><span class="must-portal-muted">' . \esc_html((string) ($providerContext['provider_label'] ?? __('Provider mirror', 'must-hotel-booking'))) . '</span></td>';
         } else {
             echo '<td>' . \esc_html((string) ($row['guest'] ?? '')) . '</td>';
         }
+
         echo '<td>' . \esc_html((string) ($row['payment_method'] ?? '')) . '</td><td>';
         PortalRenderer::renderBadge((string) ($row['payment_status_key'] ?? 'info'), (string) ($row['payment_status'] ?? ''));
+
         if ($isProviderBacked && !empty($providerPayment)) {
             echo '<br /><span class="must-portal-muted">' . \esc_html(\sprintf(
-                /* translators: %s: provider payment status. */
                 __('Provider: %s', 'must-hotel-booking'),
                 (string) ($providerPayment['provider_status_label'] ?? __('Not reported', 'must-hotel-booking'))
             )) . '</span>';
+
             if (!empty($providerPayment['differs'])) {
                 echo '<br /><span class="must-portal-muted">' . \esc_html__('Provider/local differ', 'must-hotel-booking') . '</span>';
             }
         }
+
         echo '</td><td>' . \esc_html((string) ($row['amount_due'] ?? '')) . '</td><td><a class="must-portal-inline-link" href="' . \esc_url($buildPaymentDetailUrl($reservationId)) . '">' . \esc_html__('View', 'must-hotel-booking') . '</a></td></tr>';
     }
 
@@ -113,23 +117,28 @@ if (\is_array($detail)) {
     $refunds = isset($detail['refunds']) && \is_array($detail['refunds']) ? $detail['refunds'] : [];
     $timeline = isset($detail['timeline']) && \is_array($detail['timeline']) ? $detail['timeline'] : [];
     $warnings = isset($state['warnings']) && \is_array($state['warnings']) ? $state['warnings'] : [];
+
     $reservationStatus = \sanitize_key((string) ($reservation['status'] ?? ''));
     $paymentStatusKey = \sanitize_key((string) ($state['derived_status'] ?? ''));
     $paymentMethodKey = \sanitize_key((string) ($state['method'] ?? ''));
     $paymentStatusLabel = (string) ($paymentStatusOptions[$paymentStatusKey] ?? ($state['derived_status'] ?? \__('Unknown', 'must-hotel-booking')));
     $reservationStatusLabel = (string) ($reservationStatusOptions[$reservationStatus] ?? ($reservation['status'] ?? \__('Unknown', 'must-hotel-booking')));
     $paymentMethodLabel = isset($paymentMethodCatalog[$paymentMethodKey]['label']) ? (string) $paymentMethodCatalog[$paymentMethodKey]['label'] : (string) ($state['method'] ?? \__('Not recorded', 'must-hotel-booking'));
+
     $amountDue = (float) ($state['amount_due'] ?? 0.0);
     $amountPaid = (float) ($state['amount_paid'] ?? 0.0);
     $grossAmountPaid = (float) ($state['gross_amount_paid'] ?? $amountPaid);
     $amountRefunded = (float) ($state['amount_refunded'] ?? 0.0);
     $totalAmount = (float) ($state['total'] ?? 0.0);
     $transactionId = (string) ($state['transaction_id'] ?? '');
+
     $postForm = isset($paymentForms['post']) && \is_array($paymentForms['post']) ? $paymentForms['post'] : [];
     $refundForm = isset($paymentForms['refund']) && \is_array($paymentForms['refund']) ? $paymentForms['refund'] : [];
+
     $partialAmountValue = (string) ($postForm['amount'] ?? ($amountDue > 0.0 ? \number_format($amountDue, 2, '.', '') : ''));
     $postingReference = (string) ($postForm['transaction_id'] ?? '');
     $refundAmountValue = (string) ($refundForm['amount'] ?? ($amountPaid > 0.0 ? \number_format($amountPaid, 2, '.', '') : ''));
+
     $canManageOptions = \current_user_can('manage_options');
     $canPostPayment = \current_user_can(StaffAccess::CAP_PAYMENT_POST) || $canManageOptions;
     $canPostPartialPayment = \current_user_can(StaffAccess::CAP_PAYMENT_POST_PARTIAL) || $canManageOptions;
@@ -138,6 +147,7 @@ if (\is_array($detail)) {
     $canReconcile = \current_user_can(StaffAccess::CAP_PAYMENT_RECONCILE) || $canManageOptions;
     $canIssueReceipt = \current_user_can(StaffAccess::CAP_PAYMENT_RECEIPT) || $canManageOptions;
     $canIssueInvoice = \current_user_can(StaffAccess::CAP_PAYMENT_INVOICE) || $canManageOptions;
+
     $canPostBalance = $amountDue > 0.0 && !\in_array($reservationStatus, ['cancelled', 'blocked'], true);
     $canRenderReceipt = $canIssueReceipt && (!empty($payments) || $amountPaid > 0.0);
     $canRenderInvoice = $canIssueInvoice && $totalAmount > 0.0;
@@ -158,26 +168,32 @@ if (\is_array($detail)) {
     PortalRenderer::renderDefinitionRow(\__('Payment method', 'must-hotel-booking'), $paymentMethodLabel);
     PortalRenderer::renderDefinitionRow(\__('Reservation total', 'must-hotel-booking'), \number_format_i18n($totalAmount, 2) . ' ' . $currency);
     PortalRenderer::renderDefinitionRow(\__('Amount paid', 'must-hotel-booking'), \number_format_i18n($grossAmountPaid, 2) . ' ' . $currency);
+
     if ($amountRefunded > 0.0) {
         PortalRenderer::renderDefinitionRow(\__('Amount refunded', 'must-hotel-booking'), \number_format_i18n($amountRefunded, 2) . ' ' . $currency);
     }
+
     PortalRenderer::renderDefinitionRow(\__('Amount due', 'must-hotel-booking'), \number_format_i18n($amountDue, 2) . ' ' . $currency);
+
     if ($transactionId !== '') {
         PortalRenderer::renderDefinitionRow(\__('Gateway reference', 'must-hotel-booking'), $transactionId);
     }
+
     echo '</div><div class="must-portal-inline-actions">';
     PortalRenderer::renderBadge($paymentStatusKey !== '' ? $paymentStatusKey : 'info', $paymentStatusLabel);
     PortalRenderer::renderBadge($reservationStatus !== '' ? $reservationStatus : 'info', $reservationStatusLabel);
+
     if ($isProviderBacked) {
         PortalRenderer::renderBadge('info', (string) ($providerContext['provider_label'] ?? __('Provider mirror', 'must-hotel-booking')));
+
         if (!empty($providerPayment)) {
             PortalRenderer::renderBadge((string) ($providerPayment['provider_status'] ?? 'info'), \sprintf(
-                /* translators: %s: provider payment status. */
                 __('Provider payment: %s', 'must-hotel-booking'),
                 (string) ($providerPayment['provider_status_label'] ?? __('Not reported', 'must-hotel-booking'))
             ));
         }
     }
+
     echo '</div></article>';
 
     echo '<article class="must-portal-panel"><div class="must-portal-panel-header"><div><h2>' . \esc_html__('Operational actions', 'must-hotel-booking') . '</h2><p>' . \esc_html__('Collect funds, issue documents, and reconcile payment-state exceptions only when the current reservation state allows it.', 'must-hotel-booking') . '</p></div></div>';
@@ -194,9 +210,9 @@ if (\is_array($detail)) {
         echo '<div class="must-portal-feed-item"><div><strong>' . \esc_html__('Provider-backed local payment edits are read-only here.', 'must-hotel-booking') . '</strong><span>' . \esc_html__('Stripe refunds use provider-aware Clock sync; other local payment-state edits remain disabled.', 'must-hotel-booking') . '</span></div>';
         PortalRenderer::renderBadge('warning', \__('Read-only', 'must-hotel-booking'));
         echo '</div>';
+
         if (!empty($providerPayment)) {
             echo '<div class="must-portal-feed-item"><div><strong>' . \esc_html__('Provider/local payment state', 'must-hotel-booking') . '</strong><span>' . \esc_html(\sprintf(
-                /* translators: 1: local payment state, 2: provider payment state. */
                 __('Local: %1$s | Provider: %2$s', 'must-hotel-booking'),
                 (string) ($providerPayment['local_status_label'] ?? __('Not reported', 'must-hotel-booking')),
                 (string) ($providerPayment['provider_status_label'] ?? __('Not reported', 'must-hotel-booking'))
@@ -233,24 +249,69 @@ if (\is_array($detail)) {
     }
 
     if ($canRefund && $amountPaid > 0.0 && $paymentMethodKey === 'stripe' && $transactionId !== '') {
-        echo '<form method="post" action="' . \esc_url($detailUrl) . '" class="must-portal-form-grid">';
+        $refundTypeValue = (string) ($refundForm['refund_type'] ?? 'refund_only');
+        $refundModeValue = (string) ($refundForm['refund_amount_mode'] ?? 'fixed');
+        $refundPercentValue = (string) ($refundForm['refund_percent'] ?? '');
+
+        echo '<form method="post" action="' . \esc_url($detailUrl) . '" class="must-portal-form-grid must-portal-refund-form">';
         \wp_nonce_field('must_portal_payment_action_payment_refund_' . $reservationId, 'must_portal_payment_nonce');
         echo '<input type="hidden" name="must_portal_action" value="payment_refund" />';
         echo '<input type="hidden" name="reservation_id" value="' . \esc_attr((string) $reservationId) . '" />';
-        echo '<label><span>' . \esc_html__('Refund amount', 'must-hotel-booking') . '</span><input type="number" min="0.01" max="' . \esc_attr(\number_format($amountPaid, 2, '.', '')) . '" step="0.01" name="amount" value="' . \esc_attr($refundAmountValue) . '" /></label>';
-        echo '<label><span>' . \esc_html__('Refund action', 'must-hotel-booking') . '</span><select name="refund_type">';
+        echo '<input type="hidden" name="paid_amount" value="' . \esc_attr(\number_format($amountPaid, 2, '.', '')) . '" />';
+
+        echo '<label><span>' . \esc_html__('Refund type', 'must-hotel-booking') . '</span><select name="refund_type" class="must-refund-type-select">';
         foreach ([
-            'refund_only' => __('Refund only', 'must-hotel-booking'),
-            'full_refund_cancel' => __('Refund and cancel', 'must-hotel-booking'),
-            'partial_refund' => __('Partial refund', 'must-hotel-booking'),
+            'refund_only' => __('Full refund only', 'must-hotel-booking'),
+            'full_refund_cancel' => __('Full refund and cancel', 'must-hotel-booking'),
+            'partial_refund' => __('Partial refund only', 'must-hotel-booking'),
             'partial_refund_cancel' => __('Partial refund and cancel', 'must-hotel-booking'),
         ] as $value => $label) {
-            echo '<option value="' . \esc_attr((string) $value) . '"' . \selected((string) ($refundForm['refund_type'] ?? 'refund_only'), (string) $value, false) . '>' . \esc_html((string) $label) . '</option>';
+            echo '<option value="' . \esc_attr((string) $value) . '"' . \selected($refundTypeValue, (string) $value, false) . '>' . \esc_html((string) $label) . '</option>';
         }
         echo '</select></label>';
+
+        echo '<label class="must-refund-mode-field"><span>' . \esc_html__('Partial refund mode', 'must-hotel-booking') . '</span><select name="refund_amount_mode" class="must-refund-mode-select">';
+        foreach ([
+            'fixed' => __('Fixed amount', 'must-hotel-booking'),
+            'percent' => __('Percentage of paid amount', 'must-hotel-booking'),
+        ] as $value => $label) {
+            echo '<option value="' . \esc_attr((string) $value) . '"' . \selected($refundModeValue, (string) $value, false) . '>' . \esc_html((string) $label) . '</option>';
+        }
+        echo '</select></label>';
+
+        echo '<label class="must-refund-fixed-field"><span>' . \esc_html__('Refund amount', 'must-hotel-booking') . '</span><input type="number" min="0.01" max="' . \esc_attr(\number_format($amountPaid, 2, '.', '')) . '" step="0.01" name="amount" value="' . \esc_attr($refundAmountValue) . '" /></label>';
+        echo '<label class="must-refund-percent-field"><span>' . \esc_html__('Refund percentage', 'must-hotel-booking') . '</span><input type="number" min="1" max="99.99" step="0.01" name="refund_percent" value="' . \esc_attr($refundPercentValue) . '" placeholder="50" /></label>';
         echo '<label class="must-portal-form-full"><span>' . \esc_html__('Reason', 'must-hotel-booking') . '</span><input type="text" name="reason" value="' . \esc_attr((string) ($refundForm['reason'] ?? '')) . '" /></label>';
         echo '<div class="must-portal-form-full must-portal-inline-actions"><button type="submit" class="must-portal-secondary-button">' . \esc_html__('Issue refund', 'must-hotel-booking') . '</button></div>';
         echo '</form>';
+
+        echo '<script>';
+        echo '(function(){';
+        echo 'document.querySelectorAll(".must-portal-refund-form").forEach(function(form){';
+        echo 'var type=form.querySelector(".must-refund-type-select");';
+        echo 'var mode=form.querySelector(".must-refund-mode-select");';
+        echo 'var modeField=form.querySelector(".must-refund-mode-field");';
+        echo 'var fixed=form.querySelector(".must-refund-fixed-field");';
+        echo 'var percent=form.querySelector(".must-refund-percent-field");';
+        echo 'var amount=form.querySelector("input[name=\"amount\"]");';
+        echo 'var paid=form.querySelector("input[name=\"paid_amount\"]");';
+        echo 'if(!type||!mode||!modeField||!fixed||!percent||!amount||!paid){return;}';
+        echo 'function syncRefundForm(){';
+        echo 'var isPartial=type.value==="partial_refund"||type.value==="partial_refund_cancel";';
+        echo 'var isPercent=mode.value==="percent";';
+        echo 'var paidValue=parseFloat(paid.value||"0");';
+        echo 'modeField.style.display=isPartial?"":"none";';
+        echo 'fixed.style.display=(!isPartial||!isPercent)?"":"none";';
+        echo 'percent.style.display=(isPartial&&isPercent)?"":"none";';
+        echo 'amount.readOnly=!isPartial;';
+        echo 'if(!isPartial&&paidValue>0){amount.value=paidValue.toFixed(2);}';
+        echo '}';
+        echo 'type.addEventListener("change",syncRefundForm);';
+        echo 'mode.addEventListener("change",syncRefundForm);';
+        echo 'syncRefundForm();';
+        echo '});';
+        echo '})();';
+        echo '</script>';
     } elseif ($canRefund && $amountPaid > 0.0 && $paymentMethodKey === 'pay_at_hotel') {
         echo '<p class="must-portal-muted">' . \esc_html__('Pay-at-hotel refunds still need to be handled manually outside the plugin.', 'must-hotel-booking') . '</p>';
     }
@@ -335,10 +396,12 @@ if (\is_array($detail)) {
     if (!empty($refunds)) {
         echo '<article class="must-portal-panel"><div class="must-portal-panel-header"><div><h2>' . \esc_html__('Refund records', 'must-hotel-booking') . '</h2><p>' . \esc_html__('Stripe refund IDs and Clock folio sync state.', 'must-hotel-booking') . '</p></div></div>';
         echo '<div class="must-portal-table-wrap"><table class="must-portal-table"><thead><tr><th>' . \esc_html__('Amount', 'must-hotel-booking') . '</th><th>' . \esc_html__('Stripe', 'must-hotel-booking') . '</th><th>' . \esc_html__('Status', 'must-hotel-booking') . '</th><th>' . \esc_html__('Clock', 'must-hotel-booking') . '</th></tr></thead><tbody>';
+
         foreach ($refunds as $refundRow) {
             if (!\is_array($refundRow)) {
                 continue;
             }
+
             echo '<tr>';
             echo '<td>' . \esc_html(\number_format_i18n((float) ($refundRow['amount'] ?? 0.0), 2) . ' ' . (string) ($refundRow['currency'] ?? $currency)) . '</td>';
             echo '<td>' . \esc_html((string) ($refundRow['stripe_refund_id'] ?? '')) . '</td>';
@@ -348,6 +411,7 @@ if (\is_array($detail)) {
             PortalRenderer::renderBadge((string) ($refundRow['clock_sync_status'] ?? 'info'), (string) ($refundRow['clock_sync_status'] ?? ''));
             echo '</td></tr>';
         }
+
         echo '</tbody></table></div>';
         echo '</article>';
     }
