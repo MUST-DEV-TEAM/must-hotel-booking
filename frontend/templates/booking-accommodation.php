@@ -245,10 +245,15 @@ $continue_label = \function_exists('\must_hotel_booking\get_accommodation_contin
                         <?php foreach ($rooms as $room) : ?>
                             <?php
                             $room_id = isset($room['id']) ? (int) $room['id'] : 0;
+                            $room_type_id = isset($room['room_type_id']) ? (int) $room['room_type_id'] : $room_id;
+                            $inventory_room_id = isset($room['physical_room_id']) ? (int) $room['physical_room_id'] : 0;
                             $room_name = isset($room['name']) ? (string) $room['name'] : '';
                             $room_description = isset($room['description']) ? (string) $room['description'] : '';
                             $max_guests = isset($room['max_guests']) ? (int) $room['max_guests'] : 0;
                             $room_size = isset($room['room_size']) ? (string) $room['room_size'] : '';
+                            $beds = isset($room['beds']) ? (string) $room['beds'] : '';
+                            $view_type = isset($room['view_type']) ? (string) $room['view_type'] : '';
+                            $floor = isset($room['floor']) ? (int) $room['floor'] : 0;
                             $base_price = isset($room['base_price']) ? (float) $room['base_price'] : 0.0;
                             $available_count = isset($room['available_count']) ? (int) $room['available_count'] : 0;
                             $currency = isset($room['currency']) ? (string) $room['currency'] : 'USD';
@@ -397,7 +402,10 @@ $continue_label = \function_exists('\must_hotel_booking\get_accommodation_contin
                                                     >
                                                         <input type="hidden" name="must_accommodation_nonce" value="<?php echo \esc_attr($room_button_nonce); ?>" />
                                                         <input type="hidden" name="must_accommodation_action" value="<?php echo \esc_attr($room_button_action); ?>" />
-                                                        <input type="hidden" name="room_id" value="<?php echo \esc_attr((string) $room_id); ?>" />
+                                                        <input type="hidden" name="room_id" value="<?php echo \esc_attr((string) ($inventory_room_id > 0 ? $room_type_id : $room_id)); ?>" />
+                                                        <?php if ($inventory_room_id > 0) : ?>
+                                                            <input type="hidden" name="inventory_room_id" value="<?php echo \esc_attr((string) $inventory_room_id); ?>" />
+                                                        <?php endif; ?>
                                                         <input type="hidden" name="rate_plan_id" value="<?php echo \esc_attr((string) $primary_rate_plan_id); ?>" />
                                                         <input type="hidden" name="checkin" value="<?php echo \esc_attr($checkin); ?>" />
                                                         <input type="hidden" name="checkout" value="<?php echo \esc_attr($checkout); ?>" />
@@ -439,7 +447,7 @@ $continue_label = \function_exists('\must_hotel_booking\get_accommodation_contin
                                         <button type="button" class="must-booking-room-inline-details-close" data-room-inline-details-close="1" aria-label="<?php echo \esc_attr__('Close additional details', 'must-hotel-booking'); ?>"></button>
                                         <div class="must-booking-room-popup-layout">
                                             <div class="must-booking-room-popup-main">
-                                                <?php if ($max_guests > 0 || $room_size !== '') : ?>
+                                                <?php if ($max_guests > 0 || $room_size !== '' || $beds !== '' || $view_type !== '' || $floor !== 0) : ?>
                                                     <div class="must-booking-room-popup-meta">
                                                         <?php if ($max_guests > 0) : ?>
                                                             <p>
@@ -467,6 +475,15 @@ $continue_label = \function_exists('\must_hotel_booking\get_accommodation_contin
                                                                 <?php endif; ?>
                                                                 <span><?php echo \esc_html($room_size); ?></span>
                                                             </p>
+                                                        <?php endif; ?>
+                                                        <?php if ($beds !== '') : ?>
+                                                            <p><span><?php echo \esc_html($beds); ?></span></p>
+                                                        <?php endif; ?>
+                                                        <?php if ($view_type !== '') : ?>
+                                                            <p><span><?php echo \esc_html($view_type); ?></span></p>
+                                                        <?php endif; ?>
+                                                        <?php if ($floor !== 0) : ?>
+                                                            <p><span><?php echo \esc_html(\sprintf(__('Floor %d', 'must-hotel-booking'), $floor)); ?></span></p>
                                                         <?php endif; ?>
                                                     </div>
                                                 <?php endif; ?>

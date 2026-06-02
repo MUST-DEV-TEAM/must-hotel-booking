@@ -40,6 +40,162 @@ final class InventoryRepository extends AbstractRepository
         return $this->mhbTable('rooms');
     }
 
+    private function roomsColumnExists(string $column): bool
+    {
+        if ($column === '' || !$this->mhbTableExists('rooms')) {
+            return false;
+        }
+
+        $result = $this->wpdb->get_var(
+            $this->wpdb->prepare(
+                'SHOW COLUMNS FROM ' . $this->roomsTable() . ' LIKE %s',
+                $column
+            )
+        );
+
+        return \is_string($result) && $result !== '';
+    }
+
+    /**
+     * @return array<int, string>
+     */
+    private function inventoryRoomSelectColumns(string $alias = ''): array
+    {
+        $prefix = $alias !== '' ? $alias . '.' : '';
+        $columns = [
+            'id',
+            'room_type_id',
+            'title',
+            'room_number',
+            'floor',
+            'status',
+            'is_active',
+            'is_bookable',
+            'is_calendar_visible',
+            'sort_order',
+            'capacity_override',
+            'building',
+            'section',
+            'admin_notes',
+        ];
+        $optional = [
+            'public_title',
+            'public_description',
+            'featured_image_id',
+            'gallery_image_ids',
+            'amenities',
+            'room_size',
+            'bed_setup',
+            'max_guests_override',
+            'view_type',
+            'public_visible',
+            'display_order',
+        ];
+
+        foreach ($optional as $column) {
+            if ($this->roomsColumnExists($column)) {
+                $columns[] = $column;
+            }
+        }
+
+        return \array_map(
+            static function (string $column) use ($prefix): string {
+                return $prefix . $column;
+            },
+            $columns
+        );
+    }
+
+    private function inventoryRoomOrderBy(string $alias = ''): string
+    {
+        $prefix = $alias !== '' ? $alias . '.' : '';
+        $parts = [];
+
+        if ($this->roomsColumnExists('display_order')) {
+            $parts[] = $prefix . 'display_order ASC';
+        }
+
+        $parts[] = $prefix . 'sort_order ASC';
+        $parts[] = $prefix . 'floor ASC';
+        $parts[] = $prefix . 'room_number ASC';
+        $parts[] = $prefix . 'id ASC';
+
+        return \implode(', ', $parts);
+    }
+
+    /**
+     * @param array<string, mixed>|null $row
+     * @return array<string, mixed>|null
+     */
+    private function withInventoryRoomDefaults(?array $row): ?array
+    {
+        if (!\is_array($row)) {
+            return null;
+        }
+
+        return $row + [
+            'public_title' => '',
+            'public_description' => '',
+            'featured_image_id' => 0,
+            'gallery_image_ids' => '',
+            'amenities' => '',
+            'room_size' => '',
+            'bed_setup' => '',
+            'max_guests_override' => 0,
+            'view_type' => '',
+            'public_visible' => 1,
+            'display_order' => 0,
+        ];
+    }
+
+    /**
+     * @param array<string, mixed> $data
+     * @return array{0: array<string, mixed>, 1: array<int, string>}
+     */
+    private function inventoryRoomWriteData(array $data): array
+    {
+        $payload = [
+            'room_type_id' => (int) ($data['room_type_id'] ?? 0),
+            'title' => (string) ($data['title'] ?? ''),
+            'room_number' => (string) ($data['room_number'] ?? ''),
+            'floor' => (int) ($data['floor'] ?? 0),
+            'status' => (string) ($data['status'] ?? 'available'),
+            'is_active' => !empty($data['is_active']) ? 1 : 0,
+            'is_bookable' => !empty($data['is_bookable']) ? 1 : 0,
+            'is_calendar_visible' => !empty($data['is_calendar_visible']) ? 1 : 0,
+            'sort_order' => (int) ($data['sort_order'] ?? 0),
+            'capacity_override' => (int) ($data['capacity_override'] ?? 0),
+            'building' => (string) ($data['building'] ?? ''),
+            'section' => (string) ($data['section'] ?? ''),
+            'admin_notes' => (string) ($data['admin_notes'] ?? ''),
+        ];
+        $formats = ['%d', '%s', '%s', '%d', '%s', '%d', '%d', '%d', '%d', '%d', '%s', '%s', '%s'];
+        $optional = [
+            'public_title' => ['%s', (string) ($data['public_title'] ?? '')],
+            'public_description' => ['%s', (string) ($data['public_description'] ?? '')],
+            'featured_image_id' => ['%d', (int) ($data['featured_image_id'] ?? 0)],
+            'gallery_image_ids' => ['%s', (string) ($data['gallery_image_ids'] ?? '')],
+            'amenities' => ['%s', (string) ($data['amenities'] ?? '')],
+            'room_size' => ['%s', (string) ($data['room_size'] ?? '')],
+            'bed_setup' => ['%s', (string) ($data['bed_setup'] ?? '')],
+            'max_guests_override' => ['%d', (int) ($data['max_guests_override'] ?? 0)],
+            'view_type' => ['%s', (string) ($data['view_type'] ?? '')],
+            'public_visible' => ['%d', !empty($data['public_visible']) ? 1 : 0],
+            'display_order' => ['%d', (int) ($data['display_order'] ?? 0)],
+        ];
+
+        foreach ($optional as $column => $definition) {
+            if (!$this->roomsColumnExists($column)) {
+                continue;
+            }
+
+            $formats[] = (string) $definition[0];
+            $payload[$column] = $definition[1];
+        }
+
+        return [$payload, $formats];
+    }
+
     private function inventoryLockTable(): string
     {
         return $this->mhbTable('inventory_locks');
@@ -135,21 +291,7 @@ final class InventoryRepository extends AbstractRepository
 
         $row = $this->wpdb->get_row(
             $this->wpdb->prepare(
-                'SELECT
-                    id,
-                    room_type_id,
-                    title,
-                    room_number,
-                    floor,
-                    status,
-                    is_active,
-                    is_bookable,
-                    is_calendar_visible,
-                    sort_order,
-                    capacity_override,
-                    building,
-                    section,
-                    admin_notes
+                'SELECT ' . \implode(', ', $this->inventoryRoomSelectColumns()) . '
                 FROM ' . $this->roomsTable() . '
                 WHERE id = %d
                 LIMIT 1',
@@ -158,7 +300,7 @@ final class InventoryRepository extends AbstractRepository
             ARRAY_A
         );
 
-        return \is_array($row) ? $row : null;
+        return $this->withInventoryRoomDefaults(\is_array($row) ? $row : null);
     }
 
     /**
@@ -172,30 +314,16 @@ final class InventoryRepository extends AbstractRepository
 
         $rows = $this->wpdb->get_results(
             $this->wpdb->prepare(
-                'SELECT
-                    id,
-                    room_type_id,
-                    title,
-                    room_number,
-                    floor,
-                    status,
-                    is_active,
-                    is_bookable,
-                    is_calendar_visible,
-                    sort_order,
-                    capacity_override,
-                    building,
-                    section,
-                    admin_notes
+                'SELECT ' . \implode(', ', $this->inventoryRoomSelectColumns()) . '
                 FROM ' . $this->roomsTable() . '
                 WHERE room_type_id = %d
-                ORDER BY sort_order ASC, floor ASC, room_number ASC, id ASC',
+                ORDER BY ' . $this->inventoryRoomOrderBy(),
                 $roomTypeId
             ),
             ARRAY_A
         );
 
-        return \is_array($rows) ? $rows : [];
+        return \is_array($rows) ? \array_values(\array_filter(\array_map([$this, 'withInventoryRoomDefaults'], $rows))) : [];
     }
 
     /**
@@ -208,27 +336,13 @@ final class InventoryRepository extends AbstractRepository
         }
 
         $rows = $this->wpdb->get_results(
-            'SELECT
-                r.id,
-                r.room_type_id,
-                r.title,
-                r.room_number,
-                r.floor,
-                r.status,
-                r.is_active,
-                r.is_bookable,
-                r.is_calendar_visible,
-                r.sort_order,
-                r.capacity_override,
-                r.building,
-                r.section,
-                r.admin_notes
+            'SELECT ' . \implode(', ', $this->inventoryRoomSelectColumns('r')) . '
             FROM ' . $this->roomsTable() . ' r
-            ORDER BY r.sort_order ASC, r.room_type_id ASC, r.floor ASC, r.room_number ASC, r.id ASC',
+            ORDER BY ' . ($this->roomsColumnExists('display_order') ? 'r.display_order ASC, ' : '') . 'r.sort_order ASC, r.room_type_id ASC, r.floor ASC, r.room_number ASC, r.id ASC',
             ARRAY_A
         );
 
-        return \is_array($rows) ? $rows : [];
+        return \is_array($rows) ? \array_values(\array_filter(\array_map([$this, 'withInventoryRoomDefaults'], $rows))) : [];
     }
 
     public function roomNumberExists(string $roomNumber, int $excludeRoomId = 0): bool
@@ -335,25 +449,8 @@ final class InventoryRepository extends AbstractRepository
             return 0;
         }
 
-        $inserted = $this->wpdb->insert(
-            $this->roomsTable(),
-            [
-                'room_type_id' => (int) ($data['room_type_id'] ?? 0),
-                'title' => (string) ($data['title'] ?? ''),
-                'room_number' => (string) ($data['room_number'] ?? ''),
-                'floor' => (int) ($data['floor'] ?? 0),
-                'status' => (string) ($data['status'] ?? 'available'),
-                'is_active' => !empty($data['is_active']) ? 1 : 0,
-                'is_bookable' => !empty($data['is_bookable']) ? 1 : 0,
-                'is_calendar_visible' => !empty($data['is_calendar_visible']) ? 1 : 0,
-                'sort_order' => (int) ($data['sort_order'] ?? 0),
-                'capacity_override' => (int) ($data['capacity_override'] ?? 0),
-                'building' => (string) ($data['building'] ?? ''),
-                'section' => (string) ($data['section'] ?? ''),
-                'admin_notes' => (string) ($data['admin_notes'] ?? ''),
-            ],
-            ['%d', '%s', '%s', '%d', '%s', '%d', '%d', '%d', '%d', '%d', '%s', '%s', '%s']
-        );
+        [$payload, $formats] = $this->inventoryRoomWriteData($data);
+        $inserted = $this->wpdb->insert($this->roomsTable(), $payload, $formats);
 
         if ($inserted === false) {
             return 0;
@@ -371,27 +468,8 @@ final class InventoryRepository extends AbstractRepository
             return false;
         }
 
-        $updated = $this->wpdb->update(
-            $this->roomsTable(),
-            [
-                'room_type_id' => (int) ($data['room_type_id'] ?? 0),
-                'title' => (string) ($data['title'] ?? ''),
-                'room_number' => (string) ($data['room_number'] ?? ''),
-                'floor' => (int) ($data['floor'] ?? 0),
-                'status' => (string) ($data['status'] ?? 'available'),
-                'is_active' => !empty($data['is_active']) ? 1 : 0,
-                'is_bookable' => !empty($data['is_bookable']) ? 1 : 0,
-                'is_calendar_visible' => !empty($data['is_calendar_visible']) ? 1 : 0,
-                'sort_order' => (int) ($data['sort_order'] ?? 0),
-                'capacity_override' => (int) ($data['capacity_override'] ?? 0),
-                'building' => (string) ($data['building'] ?? ''),
-                'section' => (string) ($data['section'] ?? ''),
-                'admin_notes' => (string) ($data['admin_notes'] ?? ''),
-            ],
-            ['id' => $roomId],
-            ['%d', '%s', '%s', '%d', '%s', '%d', '%d', '%d', '%d', '%d', '%s', '%s', '%s'],
-            ['%d']
-        );
+        [$payload, $formats] = $this->inventoryRoomWriteData($data);
+        $updated = $this->wpdb->update($this->roomsTable(), $payload, ['id' => $roomId], $formats, ['%d']);
 
         return $updated !== false;
     }

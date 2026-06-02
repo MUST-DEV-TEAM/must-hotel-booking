@@ -339,6 +339,7 @@ final class AccommodationAdminDataProvider
         }
 
         $reservationSummary = $this->reservationRepository->getInventoryRoomReservationSummaryMap($unitIds, $today);
+        $clockPhysicalMappings = $this->getClockPhysicalRoomMappingMap($unitIds);
         $rows = [];
 
         foreach ($rawRows as $row) {
@@ -358,6 +359,9 @@ final class AccommodationAdminDataProvider
             $futureReservations = (int) ($reservationData['future_reservations'] ?? 0);
             $isActive = !empty($row['is_active']);
             $isBookable = !empty($row['is_bookable']);
+            $isPublic = !empty($row['public_visible']);
+            $clockMapping = isset($clockPhysicalMappings[$unitId]) && \is_array($clockPhysicalMappings[$unitId]) ? $clockPhysicalMappings[$unitId] : [];
+            $hasClockMapping = (string) ($clockMapping['external_id'] ?? '') !== '';
             $warnings = [];
 
             if (!$isActive && $futureReservations > 0) {
@@ -370,6 +374,10 @@ final class AccommodationAdminDataProvider
 
             if ((string) ($row['status'] ?? '') !== 'available' && $futureReservations > 0) {
                 $warnings[] = \__('Operational status is not available while future reservations remain assigned.', 'must-hotel-booking');
+            }
+
+            if (RoomCatalog::isClockBackendMode() && $isPublic && !$hasClockMapping) {
+                $warnings[] = \__('Public Clock-mode unit is not mapped to a Clock physical room and will not be publicly sellable.', 'must-hotel-booking');
             }
 
             $deleteUrl = '';
@@ -397,6 +405,19 @@ final class AccommodationAdminDataProvider
                 'capacity_override' => (int) ($row['capacity_override'] ?? 0),
                 'building' => (string) ($row['building'] ?? ''),
                 'section' => (string) ($row['section'] ?? ''),
+                'public_title' => (string) ($row['public_title'] ?? ''),
+                'public_description' => (string) ($row['public_description'] ?? ''),
+                'featured_image_id' => (int) ($row['featured_image_id'] ?? 0),
+                'gallery_image_ids' => (string) ($row['gallery_image_ids'] ?? ''),
+                'amenities' => (string) ($row['amenities'] ?? ''),
+                'room_size' => (string) ($row['room_size'] ?? ''),
+                'bed_setup' => (string) ($row['bed_setup'] ?? ''),
+                'max_guests_override' => (int) ($row['max_guests_override'] ?? 0),
+                'view_type' => (string) ($row['view_type'] ?? ''),
+                'public_visible' => $isPublic,
+                'display_order' => (int) ($row['display_order'] ?? 0),
+                'has_clock_physical_mapping' => $hasClockMapping,
+                'clock_physical_room_id' => (string) ($clockMapping['external_id'] ?? ''),
                 'admin_notes' => (string) ($row['admin_notes'] ?? ''),
                 'pricing_configured' => !empty($typeRow['pricing_configured']),
                 'availability_configured' => !empty($typeRow['availability_configured']),
@@ -709,6 +730,20 @@ final class AccommodationAdminDataProvider
             'capacity_override' => 0,
             'building' => '',
             'section' => '',
+            'public_title' => '',
+            'public_description' => '',
+            'featured_image_id' => 0,
+            'featured_image_id_input' => '',
+            'gallery_image_ids' => '',
+            'gallery_image_ids_input' => '',
+            'amenities' => '',
+            'amenity_keys' => [],
+            'room_size' => '',
+            'bed_setup' => '',
+            'max_guests_override' => 0,
+            'view_type' => '',
+            'public_visible' => 1,
+            'display_order' => 0,
             'admin_notes' => '',
             'quick_links' => [],
             'configuration' => [],
@@ -759,6 +794,20 @@ final class AccommodationAdminDataProvider
             'capacity_override' => (int) ($unit['capacity_override'] ?? 0),
             'building' => (string) ($unit['building'] ?? ''),
             'section' => (string) ($unit['section'] ?? ''),
+            'public_title' => (string) ($unit['public_title'] ?? ''),
+            'public_description' => (string) ($unit['public_description'] ?? ''),
+            'featured_image_id' => (int) ($unit['featured_image_id'] ?? 0),
+            'featured_image_id_input' => (string) ((int) ($unit['featured_image_id'] ?? 0)),
+            'gallery_image_ids' => (string) ($unit['gallery_image_ids'] ?? ''),
+            'gallery_image_ids_input' => (string) ($unit['gallery_image_ids'] ?? ''),
+            'amenities' => (string) ($unit['amenities'] ?? ''),
+            'amenity_keys' => $this->parseStoredUnitAmenities((string) ($unit['amenities'] ?? '')),
+            'room_size' => (string) ($unit['room_size'] ?? ''),
+            'bed_setup' => (string) ($unit['bed_setup'] ?? ''),
+            'max_guests_override' => (int) ($unit['max_guests_override'] ?? 0),
+            'view_type' => (string) ($unit['view_type'] ?? ''),
+            'public_visible' => !empty($unit['public_visible']) ? 1 : 0,
+            'display_order' => (int) ($unit['display_order'] ?? 0),
             'admin_notes' => (string) ($unit['admin_notes'] ?? ''),
             'quick_links' => $this->extractUnitQuickLinks($unitRow),
             'configuration' => $this->extractConfigurationSummary($unitRow),
@@ -954,6 +1003,52 @@ final class AccommodationAdminDataProvider
         }
 
         return [];
+    }
+
+    /**
+     * @param array<int, int> $unitIds
+     * @return array<int, array<string, mixed>>
+     */
+    private function getClockPhysicalRoomMappingMap(array $unitIds): array
+    {
+        $unitIds = \array_values(\array_filter(\array_map('intval', $unitIds), static function (int $unitId): bool {
+            return $unitId > 0;
+        }));
+
+        if (empty($unitIds) || !\class_exists(\MustHotelBooking\Provider\Storage\ProviderMappingRepository::class)) {
+            return [];
+        }
+
+        $map = [];
+        $repository = new \MustHotelBooking\Provider\Storage\ProviderMappingRepository();
+
+        foreach ($unitIds as $unitId) {
+            $mapping = $repository->findByLocal(\MustHotelBooking\Provider\ProviderManager::CLOCK_MODE, 'physical_room', $unitId, 'mhb_rooms');
+
+            if (\is_array($mapping)) {
+                $map[$unitId] = $mapping;
+            }
+        }
+
+        return $map;
+    }
+
+    /**
+     * @return array<int, string>
+     */
+    private function parseStoredUnitAmenities(string $stored): array
+    {
+        if ($stored === '') {
+            return [];
+        }
+
+        $decoded = \json_decode($stored, true);
+
+        if (\is_array($decoded)) {
+            return \array_values(\array_filter(\array_map('strval', $decoded)));
+        }
+
+        return \array_values(\array_filter(\array_map('trim', \explode(',', $stored))));
     }
 
     /**

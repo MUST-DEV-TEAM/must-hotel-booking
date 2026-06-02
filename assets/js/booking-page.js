@@ -173,6 +173,16 @@
         }
         return parsed;
     }
+    function getFixedAvailabilityRoomId() {
+        var fixedRoom = config.fixedRoom && typeof config.fixedRoom === 'object' ? config.fixedRoom : {};
+        var parsed = parseInt(String(fixedRoom.physical_room_id || fixedRoom.inventory_room_id || config.fixedInventoryRoomId || '0'), 10);
+
+        if (Number.isFinite(parsed) && parsed > 0) {
+            return parsed;
+        }
+
+        return getFixedRoomId();
+    }
     function isFixedRoomMode() {
         return Boolean(config.fixedRoomMode) && getFixedRoomId() > 0;
     }
@@ -193,6 +203,11 @@
             url.searchParams.set('room_id', String(context.roomId));
         } else {
             url.searchParams.delete('room_id');
+        }
+        if (Number(context.availabilityRoomId || 0) > 0 && Number(context.availabilityRoomId || 0) !== Number(context.roomId || 0)) {
+            url.searchParams.set('inventory_room_id', String(context.availabilityRoomId));
+        } else {
+            url.searchParams.delete('inventory_room_id');
         }
         return url.toString();
     }
@@ -406,7 +421,8 @@
             guests: guests,
             roomCount: roomCount,
             accommodationType: accommodationType,
-            roomId: isFixedRoomMode() ? getFixedRoomId() : 0
+            roomId: isFixedRoomMode() ? getFixedRoomId() : 0,
+            availabilityRoomId: isFixedRoomMode() ? getFixedAvailabilityRoomId() : 0
         };
     }
     function isValidRange(context) {
@@ -508,11 +524,20 @@
         var arrowIconUrl = String(config.arrowIconUrl || '');
         var bedIconUrl = String(config.bedIconUrl || '');
         var html = rooms.map(function (room) {
-            var roomId = Number(room.id || 0);
+                var roomId = Number(room.id || 0);
+                var roomTypeId = Number(room.room_type_id || roomId || 0);
+                var inventoryRoomId = Number(room.physical_room_id || 0);
+                var submittedRoomId = inventoryRoomId > 0 ? roomTypeId : roomId;
+                var inventoryRoomInput = inventoryRoomId > 0
+                    ? '<input type="hidden" name="inventory_room_id" value="' + escapeHtml(inventoryRoomId) + '" />'
+                    : '';
             var roomName = String(room.name || strings.roomLabel || 'Room');
             var roomDescription = String(room.description || '');
             var maxGuests = Number(room.max_guests || 0);
             var roomSize = String(room.room_size || '');
+            var beds = String(room.beds || room.bed_setup || '');
+            var viewType = String(room.view_type || '');
+            var floor = Number(room.floor || 0);
             var estimatedTotal = room.dynamic_total_price !== null && room.dynamic_total_price !== undefined
                 ? Number(room.dynamic_total_price)
                 : (
@@ -530,6 +555,15 @@
             }
             if (roomSize !== '') {
                 metaParts.push('<span>' + escapeHtml(roomSize) + '</span>');
+            }
+            if (beds !== '') {
+                metaParts.push('<span>' + escapeHtml(beds) + '</span>');
+            }
+            if (viewType !== '') {
+                metaParts.push('<span>' + escapeHtml(viewType) + '</span>');
+            }
+            if (floor !== 0) {
+                metaParts.push('<span>' + escapeHtml((strings.floorLabel || 'Floor') + ' ' + floor) + '</span>');
             }
             if (estimatedTotal !== null && Number.isFinite(estimatedTotal)) {
                 metaParts.push('<span>' + escapeHtml(formatTemplate(strings.estimatedTotalFormat || 'Estimated Total: %s', formatPrice(estimatedTotal))) + '</span>');
@@ -590,7 +624,8 @@
                     '<form class="must-hotel-booking-select-room-form" method="post" action="' + escapeHtml(bookingUrl) + '">' +
                     '<input type="hidden" name="must_booking_nonce" value="' + escapeHtml(nonce) + '" />' +
                     '<input type="hidden" name="must_booking_action" value="select_room" />' +
-                    '<input type="hidden" name="room_id" value="' + escapeHtml(roomId) + '" />' +
+                    '<input type="hidden" name="room_id" value="' + escapeHtml(submittedRoomId) + '" />' +
+                    inventoryRoomInput +
                     '<input type="hidden" name="rate_plan_id" value="' + escapeHtml(ratePlanId) + '" />' +
                     '<input class="must-booking-hidden-checkin" type="hidden" name="checkin" value="' + escapeHtml(context.checkin) + '" />' +
                     '<input class="must-booking-hidden-checkout" type="hidden" name="checkout" value="' + escapeHtml(context.checkout) + '" />' +
@@ -916,8 +951,8 @@ function markUnavailableDayElement(dayElement, unavailableDates) {
         params.append('room_count', String(context.roomCount || 0));
         params.append('accommodation_type', String(context.accommodationType || getAccommodationTypeValue()));
         params.append('window_days', String(config.windowDays || 180));
-        if (Number(context.roomId || 0) > 0) {
-            params.append('room_id', String(context.roomId));
+        if (Number(context.availabilityRoomId || context.roomId || 0) > 0) {
+            params.append('room_id', String(context.availabilityRoomId || context.roomId));
         }
         if (isValidDateString(context.checkin)) {
             params.append('checkin', context.checkin);
@@ -1015,8 +1050,8 @@ function markUnavailableDayElement(dayElement, unavailableDates) {
         params.append('guests', String(context.guests));
         params.append('room_count', String(context.roomCount || 0));
         params.append('accommodation_type', String(context.accommodationType || getAccommodationTypeValue()));
-        if (Number(context.roomId || 0) > 0) {
-            params.append('room_id', String(context.roomId));
+        if (Number(context.availabilityRoomId || context.roomId || 0) > 0) {
+            params.append('room_id', String(context.availabilityRoomId || context.roomId));
         }
         var requestToken = ++state.availabilityRequestToken;
         return fetch(String(config.ajaxUrl) + '?' + params.toString(), {

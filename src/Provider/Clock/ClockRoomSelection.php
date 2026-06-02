@@ -100,8 +100,9 @@ final class ClockRoomSelection
 
         $isActive = !isset($physicalRoom['is_active']) || (int) $physicalRoom['is_active'] === 1;
         $isBookable = !isset($physicalRoom['is_bookable']) || (int) $physicalRoom['is_bookable'] === 1;
+        $isPublic = !isset($physicalRoom['public_visible']) || (int) $physicalRoom['public_visible'] === 1;
 
-        if (!$isActive || !$isBookable) {
+        if (!$isActive || !$isBookable || !$isPublic) {
             return null;
         }
 
@@ -174,43 +175,24 @@ final class ClockRoomSelection
     private function physicalRoomDisplayData(array $physicalRoom, array $roomType, array $roomMapping, array $physicalMapping): array
     {
         $physicalRoomId = isset($physicalRoom['id']) ? (int) $physicalRoom['id'] : 0;
-        $roomTypeId = isset($roomType['id']) ? (int) $roomType['id'] : 0;
-        $roomNumber = \trim((string) ($physicalRoom['room_number'] ?? ''));
-        $title = \trim((string) ($physicalRoom['title'] ?? ''));
-        $name = $title !== '' ? $title : $roomNumber;
+        $display = \MustHotelBooking\Core\RoomData::getPhysicalRoomDisplayById($physicalRoomId);
 
-        if ($name === '') {
-            $name = \sprintf(
-                /* translators: %d is an inventory room ID. */
-                \__('Room %d', 'must-hotel-booking'),
-                $physicalRoomId
-            );
+        if (!\is_array($display)) {
+            $display = [];
         }
 
-        $description = \trim((string) ($physicalRoom['description'] ?? ''));
-
-        if ($description === '') {
-            $description = \trim((string) ($physicalRoom['admin_notes'] ?? ''));
-        }
-
-        if ($description === '') {
-            $description = (string) ($roomType['description'] ?? '');
-        }
-
-        return [
+        return $display + [
             'id' => $physicalRoomId,
             'booking_room_id' => $physicalRoomId,
-            'gallery_room_id' => $roomTypeId,
-            'room_type_id' => $roomTypeId,
+            'gallery_room_id' => isset($roomType['id']) ? (int) $roomType['id'] : 0,
+            'room_type_id' => isset($roomType['id']) ? (int) $roomType['id'] : 0,
             'physical_room_id' => $physicalRoomId,
-            'name' => $name,
+            'name' => (string) ($physicalRoom['title'] ?? $physicalRoom['room_number'] ?? ''),
             'slug' => (string) ($roomType['slug'] ?? ''),
             'details_slug' => (string) ($roomType['slug'] ?? ''),
             'category' => (string) ($roomType['category'] ?? ''),
-            'description' => $description,
-            'max_guests' => isset($physicalRoom['capacity_override']) && (int) $physicalRoom['capacity_override'] > 0
-                ? (int) $physicalRoom['capacity_override']
-                : (int) ($roomType['max_guests'] ?? 1),
+            'description' => (string) ($roomType['description'] ?? ''),
+            'max_guests' => (int) ($roomType['max_guests'] ?? 1),
             'base_price' => (float) ($roomType['base_price'] ?? 0.0),
             'room_size' => (string) ($roomType['room_size'] ?? ''),
             'beds' => (string) ($roomType['beds'] ?? ''),

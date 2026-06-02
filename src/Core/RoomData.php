@@ -88,6 +88,70 @@ final class RoomData
         return \is_array($metadata) ? $metadata : [];
     }
 
+    private static function hasClockPhysicalMapping(int $physicalRoomId): bool
+    {
+        if ($physicalRoomId <= 0 || !\class_exists(\MustHotelBooking\Provider\Storage\ProviderMappingRepository::class)) {
+            return false;
+        }
+
+        $mapping = (new \MustHotelBooking\Provider\Storage\ProviderMappingRepository())->findByLocal(
+            \MustHotelBooking\Provider\ProviderManager::CLOCK_MODE,
+            'physical_room',
+            $physicalRoomId,
+            'mhb_rooms'
+        );
+
+        return \is_array($mapping) && (string) ($mapping['external_id'] ?? '') !== '';
+    }
+
+    /**
+     * @return array<int, int>
+     */
+    private static function parseIdList(string $value): array
+    {
+        if ($value === '') {
+            return [];
+        }
+
+        $decoded = \json_decode($value, true);
+        $parts = \is_array($decoded) ? $decoded : \explode(',', $value);
+        $ids = [];
+
+        foreach ($parts as $part) {
+            $id = \absint($part);
+
+            if ($id > 0) {
+                $ids[$id] = $id;
+            }
+        }
+
+        return \array_values($ids);
+    }
+
+    /**
+     * @return array<int, string>
+     */
+    private static function parseAmenityList(string $value): array
+    {
+        if ($value === '') {
+            return [];
+        }
+
+        $decoded = \json_decode($value, true);
+        $parts = \is_array($decoded) ? $decoded : \explode(',', $value);
+        $items = [];
+
+        foreach ($parts as $part) {
+            $item = \sanitize_key((string) $part);
+
+            if ($item !== '') {
+                $items[$item] = $item;
+            }
+        }
+
+        return \array_values($items);
+    }
+
     public static function getRoomsTableName(): string
     {
         return self::repository()->getRoomsTableName();
@@ -310,8 +374,21 @@ final class RoomData
             return null;
         }
 
+        if (RoomCatalog::isClockBackendMode() && !self::hasClockPhysicalMapping($physicalRoomId)) {
+            return null;
+        }
+
+        if (isset($physicalRoom['public_visible']) && (int) $physicalRoom['public_visible'] !== 1) {
+            return null;
+        }
+
         $roomNumber = \trim((string) ($physicalRoom['room_number'] ?? ''));
-        $title = \trim((string) ($physicalRoom['title'] ?? ''));
+        $title = \trim((string) ($physicalRoom['public_title'] ?? ''));
+
+        if ($title === '') {
+            $title = \trim((string) ($physicalRoom['title'] ?? ''));
+        }
+
         $name = $title !== '' ? $title : $roomNumber;
 
         if ($name === '') {
@@ -322,7 +399,11 @@ final class RoomData
             );
         }
 
-        $description = \trim((string) ($physicalRoom['description'] ?? ''));
+        $description = \trim((string) ($physicalRoom['public_description'] ?? ''));
+
+        if ($description === '') {
+            $description = \trim((string) ($physicalRoom['description'] ?? ''));
+        }
 
         if (self::isInternalImportText($description)) {
             $description = '';
@@ -348,10 +429,17 @@ final class RoomData
             $description = self::firstMetadataText($roomTypeMetadata, ['description', 'descr', 'long_description', 'short_description', 'notes']);
         }
 
+        $featuredImageId = isset($physicalRoom['featured_image_id']) ? (int) $physicalRoom['featured_image_id'] : 0;
+        $galleryImageIds = self::parseIdList((string) ($physicalRoom['gallery_image_ids'] ?? ''));
+        $amenities = self::parseAmenityList((string) ($physicalRoom['amenities'] ?? ''));
+        $roomSize = \trim((string) ($physicalRoom['room_size'] ?? ''));
+        $bedSetup = \trim((string) ($physicalRoom['bed_setup'] ?? ''));
+        $maxGuestsOverride = isset($physicalRoom['max_guests_override']) ? (int) $physicalRoom['max_guests_override'] : 0;
+
         return [
             'id' => $physicalRoomId,
             'booking_room_id' => $physicalRoomId,
-            'gallery_room_id' => $roomTypeId,
+            'gallery_room_id' => ($featuredImageId > 0 || !empty($galleryImageIds)) ? $physicalRoomId : $roomTypeId,
             'room_type_id' => $roomTypeId,
             'physical_room_id' => $physicalRoomId,
             'room_number' => $roomNumber,
@@ -360,18 +448,32 @@ final class RoomData
             'details_slug' => (string) ($roomType['slug'] ?? ''),
             'category' => (string) ($roomType['category'] ?? ''),
             'description' => $description,
-            'max_guests' => isset($physicalRoom['capacity_override']) && (int) $physicalRoom['capacity_override'] > 0
+            'max_guests' => $maxGuestsOverride > 0
+                ? $maxGuestsOverride
+                : (isset($physicalRoom['capacity_override']) && (int) $physicalRoom['capacity_override'] > 0
                 ? (int) $physicalRoom['capacity_override']
-                : (int) ($roomType['max_guests'] ?? 1),
+                : (int) ($roomType['max_guests'] ?? 1)),
             'base_price' => (float) ($roomType['base_price'] ?? 0.0),
-            'room_size' => (string) ($roomType['room_size'] ?? ''),
-            'beds' => (string) ($roomType['beds'] ?? ''),
+            'room_size' => $roomSize !== '' ? $roomSize : (string) ($roomType['room_size'] ?? ''),
+            'beds' => $bedSetup !== '' ? $bedSetup : (string) ($roomType['beds'] ?? ''),
+            'bed_setup' => $bedSetup,
+            'view_type' => (string) ($physicalRoom['view_type'] ?? ''),
+            'floor' => isset($physicalRoom['floor']) ? (int) $physicalRoom['floor'] : 0,
+            'main_image_id' => $featuredImageId,
+            'gallery_image_ids' => $galleryImageIds,
+            'amenity_keys' => $amenities,
             'is_clock_physical_room' => true,
         ];
     }
 
     public static function getRoomMainImageId(int $roomId): int
     {
+        $physicalRoom = self::getPhysicalRoomDisplayById($roomId);
+
+        if (\is_array($physicalRoom) && (int) ($physicalRoom['main_image_id'] ?? 0) > 0) {
+            return (int) $physicalRoom['main_image_id'];
+        }
+
         return self::repository()->getRoomMainImageId($roomId);
     }
 
@@ -380,6 +482,12 @@ final class RoomData
      */
     public static function getRoomGalleryImageIds(int $roomId): array
     {
+        $physicalRoom = self::getPhysicalRoomDisplayById($roomId);
+
+        if (\is_array($physicalRoom) && !empty($physicalRoom['gallery_image_ids']) && \is_array($physicalRoom['gallery_image_ids'])) {
+            return \array_map('intval', $physicalRoom['gallery_image_ids']);
+        }
+
         return self::repository()->getRoomGalleryImageIds($roomId);
     }
 
@@ -388,6 +496,12 @@ final class RoomData
      */
     public static function getRoomAmenities(int $roomId): array
     {
+        $physicalRoom = self::getPhysicalRoomDisplayById($roomId);
+
+        if (\is_array($physicalRoom) && !empty($physicalRoom['amenity_keys']) && \is_array($physicalRoom['amenity_keys'])) {
+            return \array_map('strval', $physicalRoom['amenity_keys']);
+        }
+
         return self::repository()->getRoomAmenities($roomId);
     }
 

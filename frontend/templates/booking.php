@@ -25,11 +25,15 @@ $fixed_room_mode = !empty($view['fixed_room_mode']);
 $fixed_room_id = isset($view['fixed_room_id']) ? (int) $view['fixed_room_id'] : 0;
 $fixed_room = isset($view['fixed_room']) && \is_array($view['fixed_room']) ? $view['fixed_room'] : [];
 $fixed_room_name = isset($fixed_room['name']) ? (string) $fixed_room['name'] : '';
+$fixed_room_type_id = isset($fixed_room['room_type_id']) ? (int) $fixed_room['room_type_id'] : $fixed_room_id;
+$fixed_inventory_room_id = isset($fixed_room['physical_room_id']) ? (int) $fixed_room['physical_room_id'] : 0;
 $fixed_room_category_label = isset($fixed_room['category_label']) ? (string) $fixed_room['category_label'] : '';
 $fixed_room_description = isset($fixed_room['description']) ? (string) $fixed_room['description'] : '';
 $fixed_room_max_guests = isset($fixed_room['max_guests']) ? (int) $fixed_room['max_guests'] : 0;
 $fixed_room_room_size = isset($fixed_room['room_size']) ? (string) $fixed_room['room_size'] : '';
 $fixed_room_beds = isset($fixed_room['beds']) ? (string) $fixed_room['beds'] : '';
+$fixed_room_view_type = isset($fixed_room['view_type']) ? (string) $fixed_room['view_type'] : '';
+$fixed_room_floor = isset($fixed_room['floor']) ? (int) $fixed_room['floor'] : 0;
 $fixed_room_primary_image_url = isset($fixed_room['primary_image_url']) ? (string) $fixed_room['primary_image_url'] : '';
 $form_action_url = $fixed_room_mode ? \must_hotel_booking\get_checkout_page_url() : $accommodation_url;
 $show_results_section = false;
@@ -113,7 +117,10 @@ if ($checkout !== '') {
             <input id="must-booking-guests" class="must-hotel-booking-guests" type="hidden" name="guests" value="<?php echo \esc_attr((string) $guests); ?>" />
             <input id="must-booking-room-count" class="must-booking-room-count" type="hidden" name="room_count" value="<?php echo \esc_attr((string) ($fixed_room_mode ? 1 : $room_count)); ?>" />
             <?php if ($fixed_room_mode) : ?>
-                <input id="must-booking-fixed-room-id" class="must-booking-hidden-room-id" type="hidden" name="room_id" value="<?php echo \esc_attr((string) $fixed_room_id); ?>" />
+                <input id="must-booking-fixed-room-id" class="must-booking-hidden-room-id" type="hidden" name="room_id" value="<?php echo \esc_attr((string) ($fixed_inventory_room_id > 0 ? $fixed_room_type_id : $fixed_room_id)); ?>" />
+                <?php if ($fixed_inventory_room_id > 0) : ?>
+                    <input type="hidden" name="inventory_room_id" value="<?php echo \esc_attr((string) $fixed_inventory_room_id); ?>" />
+                <?php endif; ?>
                 <input type="hidden" name="accommodation_type" value="<?php echo \esc_attr($accommodation_type); ?>" />
             <?php endif; ?>
 
@@ -188,7 +195,7 @@ if ($checkout !== '') {
                                 <p class="must-booking-fixed-room-kicker"><?php echo \esc_html__('Selected Room', 'must-hotel-booking'); ?></p>
                                 <h2><?php echo \esc_html($fixed_room_name); ?></h2>
 
-                                <?php if ($fixed_room_category_label !== '' || $fixed_room_max_guests > 0 || $fixed_room_room_size !== '' || $fixed_room_beds !== '') : ?>
+                                <?php if ($fixed_room_category_label !== '' || $fixed_room_max_guests > 0 || $fixed_room_room_size !== '' || $fixed_room_beds !== '' || $fixed_room_view_type !== '' || $fixed_room_floor !== 0) : ?>
                                     <div class="must-booking-fixed-room-meta">
                                         <?php if ($fixed_room_category_label !== '') : ?>
                                             <span><?php echo \esc_html($fixed_room_category_label); ?></span>
@@ -211,6 +218,12 @@ if ($checkout !== '') {
                                         <?php endif; ?>
                                         <?php if ($fixed_room_beds !== '') : ?>
                                             <span><?php echo \esc_html($fixed_room_beds); ?></span>
+                                        <?php endif; ?>
+                                        <?php if ($fixed_room_view_type !== '') : ?>
+                                            <span><?php echo \esc_html($fixed_room_view_type); ?></span>
+                                        <?php endif; ?>
+                                        <?php if ($fixed_room_floor !== 0) : ?>
+                                            <span><?php echo \esc_html(\sprintf(__('Floor %d', 'must-hotel-booking'), $fixed_room_floor)); ?></span>
                                         <?php endif; ?>
                                     </div>
                                 <?php endif; ?>
@@ -319,11 +332,16 @@ if ($checkout !== '') {
                     <?php foreach ($rooms as $room) : ?>
                         <?php
                         $room_id = isset($room['id']) ? (int) $room['id'] : 0;
+                        $room_type_id = isset($room['room_type_id']) ? (int) $room['room_type_id'] : $room_id;
+                        $inventory_room_id = isset($room['physical_room_id']) ? (int) $room['physical_room_id'] : 0;
                         $room_name = isset($room['name']) ? (string) $room['name'] : '';
                         $room_description = isset($room['description']) ? (string) $room['description'] : '';
                         $max_guests = isset($room['max_guests']) ? (int) $room['max_guests'] : 0;
                         $available_count = isset($room['available_count']) ? (int) $room['available_count'] : 0;
                         $room_size = isset($room['room_size']) ? (string) $room['room_size'] : '';
+                        $beds = isset($room['beds']) ? (string) $room['beds'] : '';
+                        $view_type = isset($room['view_type']) ? (string) $room['view_type'] : '';
+                        $floor = isset($room['floor']) ? (int) $room['floor'] : 0;
                         $primary_image_url = isset($room['primary_image_url']) ? (string) $room['primary_image_url'] : '';
                         $gallery_images = isset($room['gallery_images']) && \is_array($room['gallery_images']) ? $room['gallery_images'] : [];
                         $details_url = isset($room['details_url']) ? (string) $room['details_url'] : '';
@@ -362,7 +380,7 @@ if ($checkout !== '') {
                                         <p class="must-booking-room-description"><?php echo \esc_html($room_description); ?></p>
                                     <?php endif; ?>
 
-                                    <?php if ($max_guests > 0 || $room_size !== '' || $total_preview !== null) : ?>
+                                    <?php if ($max_guests > 0 || $room_size !== '' || $beds !== '' || $view_type !== '' || $floor !== 0 || $total_preview !== null) : ?>
                                         <div class="must-booking-room-meta">
                                             <?php if ($max_guests > 0) : ?>
                                                 <span>
@@ -380,6 +398,15 @@ if ($checkout !== '') {
 
                                             <?php if ($room_size !== '') : ?>
                                                 <span><?php echo \esc_html($room_size); ?></span>
+                                            <?php endif; ?>
+                                            <?php if ($beds !== '') : ?>
+                                                <span><?php echo \esc_html($beds); ?></span>
+                                            <?php endif; ?>
+                                            <?php if ($view_type !== '') : ?>
+                                                <span><?php echo \esc_html($view_type); ?></span>
+                                            <?php endif; ?>
+                                            <?php if ($floor !== 0) : ?>
+                                                <span><?php echo \esc_html(\sprintf(__('Floor %d', 'must-hotel-booking'), $floor)); ?></span>
                                             <?php endif; ?>
 
                                             <?php if ($total_preview !== null) : ?>
@@ -461,7 +488,10 @@ if ($checkout !== '') {
                                                     <form class="must-hotel-booking-select-room-form" method="post" action="<?php echo \esc_url($booking_url); ?>">
                                                         <?php \wp_nonce_field('must_booking_select_room', 'must_booking_nonce'); ?>
                                                         <input type="hidden" name="must_booking_action" value="select_room" />
-                                                        <input type="hidden" name="room_id" value="<?php echo \esc_attr((string) $room_id); ?>" />
+                                                        <input type="hidden" name="room_id" value="<?php echo \esc_attr((string) ($inventory_room_id > 0 ? $room_type_id : $room_id)); ?>" />
+                                                        <?php if ($inventory_room_id > 0) : ?>
+                                                            <input type="hidden" name="inventory_room_id" value="<?php echo \esc_attr((string) $inventory_room_id); ?>" />
+                                                        <?php endif; ?>
                                                         <input type="hidden" name="rate_plan_id" value="<?php echo \esc_attr((string) $rate_plan_id); ?>" />
                                                         <input class="must-booking-hidden-checkin" type="hidden" name="checkin" value="<?php echo \esc_attr($checkin); ?>" />
                                                         <input class="must-booking-hidden-checkout" type="hidden" name="checkout" value="<?php echo \esc_attr($checkout); ?>" />

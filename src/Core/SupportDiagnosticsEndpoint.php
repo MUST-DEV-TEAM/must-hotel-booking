@@ -500,6 +500,9 @@ final class SupportDiagnosticsEndpoint
         $missingInventory = [];
         $missingPrice = [];
         $missingRate = [];
+        $totalPublicUnits = 0;
+        $unmappedPublicUnits = 0;
+        $unitMetadataWarnings = 0;
         foreach ($rows as $row) {
             if (!\is_array($row)) {
                 continue;
@@ -513,6 +516,7 @@ final class SupportDiagnosticsEndpoint
             $inventoryUnits = $inventoryCheckAvailable ? (int) $wpdb->get_var($wpdb->prepare('SELECT COUNT(*) FROM `' . $inventoryTable . '` WHERE room_type_id = %d', $id)) : 0;
             $rateCount = $rateCheckAvailable ? (int) $wpdb->get_var($wpdb->prepare('SELECT COUNT(*) FROM `' . $rateTable . '` WHERE room_type_id = %d', $id)) : 0;
             $clockMappings = $mappingCheckAvailable ? (int) $wpdb->get_var($wpdb->prepare('SELECT COUNT(*) FROM `' . $mappingTable . '` WHERE provider = %s AND entity_type = %s AND local_id = %d AND external_id <> %s', ProviderManager::CLOCK_MODE, 'accommodation', $id, '')) : 0;
+            $clockPriceResolvable = $clockActive && !empty($clockMappings) && $rateCount > 0 && !empty($inventoryUnits);
             $itemWarnings = [];
             if ($inventoryCheckAvailable && $inventoryUnits <= 0) {
                 $missingInventory[] = $id;
@@ -522,7 +526,12 @@ final class SupportDiagnosticsEndpoint
             if ($price <= 0) {
                 $missingPrice[] = $id;
                 $itemWarnings[] = 'Base price is missing or zero.';
-                $blockers[] = 'Active sellable accommodation has no price: ' . $title;
+
+                if (!$clockPriceResolvable) {
+                    $blockers[] = 'Active sellable accommodation has no price: ' . $title;
+                } else {
+                    $warnings[] = 'Local base price is missing, but Clock mode will use Clock rate pricing for: ' . $title;
+                }
             }
             if ($rateCheckAvailable && $rateCount <= 0) {
                 $missingRate[] = $id;
@@ -534,6 +543,38 @@ final class SupportDiagnosticsEndpoint
                 $itemWarnings[] = 'No Clock accommodation mapping is configured.';
                 $blockers[] = 'Clock mode is active and accommodation has no Clock mapping: ' . $title;
             }
+            if ($clockActive && $inventoryCheckAvailable) {
+                $publicVisibleExpr = self::columnExists($inventoryTable, 'public_visible') ? 'public_visible = 1' : '1=1';
+                $publicUnitRows = $wpdb->get_results($wpdb->prepare('SELECT id, title, room_number'
+                    . (self::columnExists($inventoryTable, 'featured_image_id') ? ', featured_image_id' : ', 0 AS featured_image_id')
+                    . (self::columnExists($inventoryTable, 'public_title') ? ', public_title' : ', "" AS public_title')
+                    . (self::columnExists($inventoryTable, 'public_description') ? ', public_description' : ', "" AS public_description')
+                    . ' FROM `' . $inventoryTable . '` WHERE room_type_id = %d AND is_active = 1 AND is_bookable = 1 AND ' . $publicVisibleExpr, $id), ARRAY_A);
+
+                foreach (\is_array($publicUnitRows) ? $publicUnitRows : [] as $unitRow) {
+                    if (!\is_array($unitRow)) {
+                        continue;
+                    }
+
+                    $unitId = (int) ($unitRow['id'] ?? 0);
+
+                    if ($unitId <= 0) {
+                        continue;
+                    }
+
+                    $totalPublicUnits++;
+                    $physicalMappings = $mappingCheckAvailable ? (int) $wpdb->get_var($wpdb->prepare('SELECT COUNT(*) FROM `' . $mappingTable . '` WHERE provider = %s AND entity_type = %s AND local_id = %d AND external_id <> %s', ProviderManager::CLOCK_MODE, 'physical_room', $unitId, '')) : 0;
+
+                    if ($physicalMappings <= 0) {
+                        $unmappedPublicUnits++;
+                        $blockers[] = 'Clock mode public unit has no Clock physical room mapping: ' . \trim((string) ($unitRow['public_title'] ?? $unitRow['title'] ?? $unitRow['room_number'] ?? ('#' . $unitId)));
+                    }
+
+                    if ((int) ($unitRow['featured_image_id'] ?? 0) <= 0 || \trim((string) ($unitRow['public_title'] ?? '')) === '' || \trim((string) ($unitRow['public_description'] ?? '')) === '') {
+                        $unitMetadataWarnings++;
+                    }
+                }
+            }
             $items[] = [
                 'id' => $id,
                 'title' => $title,
@@ -541,15 +582,25 @@ final class SupportDiagnosticsEndpoint
                 'has_inventory_units' => $inventoryCheckAvailable ? $inventoryUnits > 0 : false,
                 'has_price' => $price > 0,
                 'has_rate_mapping' => $rateCheckAvailable ? $rateCount > 0 : false,
+                'clock_price_resolvable' => $clockPriceResolvable,
                 'can_book' => empty($itemWarnings),
                 'warnings' => $itemWarnings,
             ];
+        }
+        if ($unitMetadataWarnings > 0) {
+            $warnings[] = $unitMetadataWarnings . ' public unit(s) are missing public image/title/description metadata.';
+        }
+        if ($clockActive && !\MustHotelBooking\Provider\Clock\ClockConfig::isPublicBookingConfigured()) {
+            $warnings[] = 'Guaranteed individual room booking is enabled by Clock mode, but Clock public booking endpoints are not fully configured.';
         }
         if ($mappingLimited || !$inventoryCheckAvailable || !$rateCheckAvailable) {
             $warnings[] = 'Inventory, rate, or Clock mapping checks are limited by unavailable tables or columns.';
         }
         return [
             'total_active_sellable_rooms_or_room_types' => \count($items),
+            'total_public_units' => $totalPublicUnits,
+            'unmapped_public_units' => $unmappedPublicUnits,
+            'public_units_missing_metadata_warning_count' => $unitMetadataWarnings,
             'items_checked' => $items,
             'items_missing_clock_mapping' => $missingMapping,
             'items_missing_inventory' => $missingInventory,

@@ -117,6 +117,9 @@ final class ClockReservationProvider implements ReservationProviderInterface
         if (!\is_array($selection) || !\is_array($room)) {
             return [\__('The selected room could not be found.', 'must-hotel-booking')];
         }
+        if (empty($selection['is_physical'])) {
+            return [\__('Please select an exact room unit before checkout.', 'must-hotel-booking')];
+        }
         $context = BookingValidationEngine::parseRequestContext($source, true);
         $context = BookingValidationEngine::applyFixedRoomContext($context, $room);
         if (empty($context['is_valid'])) {
@@ -202,6 +205,14 @@ final class ClockReservationProvider implements ReservationProviderInterface
                 'redirect_url' => '',
             ];
         }
+        if (empty($selection['is_physical'])) {
+            return [
+                'handled' => true,
+                'success' => false,
+                'message' => \__('Please select an exact room unit before continuing.', 'must-hotel-booking'),
+                'redirect_url' => '',
+            ];
+        }
         if ($ratePlanId > 0 && !$this->isValidRatePlanForSelection($selection, $ratePlanId)) {
             return [
                 'handled' => true,
@@ -223,15 +234,21 @@ final class ClockReservationProvider implements ReservationProviderInterface
             'success' => true,
             'message' => '',
             'redirect_url' => \add_query_arg(
-                [
-                    'room_id' => $roomId,
+                \array_filter(
+                    [
+                    'room_id' => \is_array($selection) && !empty($selection['is_physical']) ? (int) ($selection['room_type_id'] ?? $roomId) : $roomId,
+                    'inventory_room_id' => \is_array($selection) && !empty($selection['is_physical']) ? (int) ($selection['physical_room_id'] ?? 0) : 0,
                     'checkin' => (string) $context['checkin'],
                     'checkout' => (string) $context['checkout'],
                     'guests' => (int) $context['guests'],
                     'room_count' => (int) ($context['room_count'] ?? 1),
                     'accommodation_type' => (string) $context['accommodation_type'],
                     'rate_plan_id' => $ratePlanId,
-                ],
+                    ],
+                    static function ($value): bool {
+                        return $value !== 0 && $value !== '';
+                    }
+                ),
                 \MustHotelBooking\Frontend\get_checkout_page_url()
             ),
         ];
@@ -267,6 +284,15 @@ final class ClockReservationProvider implements ReservationProviderInterface
             return [
                 'success' => false,
                 'messages' => [\__('Please select a room to continue.', 'must-hotel-booking')],
+                'context' => $context,
+                'redirect_url' => '',
+                'should_redirect' => false,
+            ];
+        }
+        if ($action === 'select_room' && empty($selection['is_physical'])) {
+            return [
+                'success' => false,
+                'messages' => [\__('Please select an exact room unit before continuing.', 'must-hotel-booking')],
                 'context' => $context,
                 'redirect_url' => '',
                 'should_redirect' => false,
@@ -539,6 +565,9 @@ final class ClockReservationProvider implements ReservationProviderInterface
             if (!$this->hasExternalId($roomMapping) || !$this->hasExternalId($ratePlanMapping)) {
                 return $this->errorResult([\__('Clock mapping is missing for one of the selected rooms or rate plans.', 'must-hotel-booking')]);
             }
+            if (!\is_array($selection) || empty($selection['is_physical']) || !$this->hasExternalId($physicalMapping)) {
+                return $this->errorResult([\__('Clock exact-room booking requires a mapped physical room. Please select another room or contact the hotel.', 'must-hotel-booking')]);
+            }
             $validatedRooms[] = [
                 'room_id' => $roomId,
                 'rate_plan_id' => $resolvedRatePlanId,
@@ -685,10 +714,71 @@ final class ClockReservationProvider implements ReservationProviderInterface
                 'message' => \__('Clock reservation response did not include a reservation identifier.', 'must-hotel-booking'),
             ];
         }
+        if (!$this->clockReservationHasRequestedPhysicalRoom($reservation, $validatedRoom)) {
+            $this->rollbackUnassignedClockBooking($providerId);
+
+            return [
+                'success' => false,
+                'message' => \__('Clock did not confirm the exact selected room. No payment was collected; please select another room or contact the hotel.', 'must-hotel-booking'),
+            ];
+        }
         return [
             'success' => true,
             'reservation' => $reservation,
         ];
+    }
+
+    /** @param array<string, mixed> $reservation @param array<string, mixed> $validatedRoom */
+    private function clockReservationHasRequestedPhysicalRoom(array $reservation, array $validatedRoom): bool
+    {
+        $physicalMapping = isset($validatedRoom['physical_mapping']) && \is_array($validatedRoom['physical_mapping']) ? $validatedRoom['physical_mapping'] : [];
+        $requestedPhysicalId = (string) ($physicalMapping['external_id'] ?? '');
+
+        if ($requestedPhysicalId === '') {
+            return false;
+        }
+
+        $assignedPhysicalId = $this->firstString($reservation, ['current_room_id', 'arrival_room_id', 'room_id', 'physical_room_id']);
+
+        if ($assignedPhysicalId !== '') {
+            return $assignedPhysicalId === $requestedPhysicalId;
+        }
+
+        foreach (['room', 'physical_room', 'arrival_room', 'current_room'] as $key) {
+            if (isset($reservation[$key]) && \is_array($reservation[$key])) {
+                $nestedId = $this->firstString($reservation[$key], ['id', 'room_id', 'physical_room_id']);
+
+                if ($nestedId !== '') {
+                    return $nestedId === $requestedPhysicalId;
+                }
+            }
+        }
+
+        return false;
+    }
+
+    private function rollbackUnassignedClockBooking(string $providerId): void
+    {
+        $cancelPath = ClockConfig::reservationCancelPath();
+
+        if ($cancelPath === '' || $providerId === '') {
+            return;
+        }
+
+        $path = \str_replace(['{booking_id}', '{reservation_id}', ':booking_id', ':reservation_id'], $providerId, $cancelPath);
+        $this->client->request(
+            'POST',
+            $path,
+            [
+                'body' => [
+                    'booking_id' => $providerId,
+                    'reservation_id' => $providerId,
+                    'status' => 'cancelled',
+                    'reason' => 'exact_room_assignment_failed',
+                ],
+            ],
+            'clock.reservation_cancel'
+        );
     }
     /**
      * @param array<string, mixed> $context

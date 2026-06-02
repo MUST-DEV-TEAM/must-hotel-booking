@@ -759,6 +759,16 @@ final class AccommodationAdminActions
         $capacityOverride = isset($source['capacity_override']) ? \max(0, \absint(\wp_unslash($source['capacity_override']))) : 0;
         $building = isset($source['building']) ? \sanitize_text_field((string) \wp_unslash($source['building'])) : '';
         $section = isset($source['section']) ? \sanitize_text_field((string) \wp_unslash($source['section'])) : '';
+        $publicTitle = isset($source['public_title']) ? \sanitize_text_field((string) \wp_unslash($source['public_title'])) : '';
+        $publicDescription = isset($source['public_description']) ? \sanitize_textarea_field((string) \wp_unslash($source['public_description'])) : '';
+        $featuredImageInput = isset($source['featured_image_id']) ? (string) \wp_unslash($source['featured_image_id']) : '';
+        $galleryInput = isset($source['gallery_image_ids']) ? (string) \wp_unslash($source['gallery_image_ids']) : '';
+        $amenities = isset($source['amenities']) ? parse_room_amenity_keys($source['amenities']) : [];
+        $roomSize = isset($source['room_size']) ? \sanitize_text_field((string) \wp_unslash($source['room_size'])) : '';
+        $bedSetup = isset($source['bed_setup']) ? \sanitize_text_field((string) \wp_unslash($source['bed_setup'])) : '';
+        $maxGuestsOverride = isset($source['max_guests_override']) ? \max(0, \absint(\wp_unslash($source['max_guests_override']))) : 0;
+        $viewType = isset($source['view_type']) ? \sanitize_text_field((string) \wp_unslash($source['view_type'])) : '';
+        $displayOrder = isset($source['display_order']) ? (int) \wp_unslash($source['display_order']) : 0;
         $adminNotes = isset($source['admin_notes']) ? \sanitize_textarea_field((string) \wp_unslash($source['admin_notes'])) : '';
         $errors = [];
 
@@ -784,6 +794,10 @@ final class AccommodationAdminActions
             $errors[] = \__('Capacity override cannot exceed the linked room listing max guests.', 'must-hotel-booking');
         }
 
+        if (\is_array($typeRow) && $maxGuestsOverride > 0 && $maxGuestsOverride > (int) ($typeRow['max_guests'] ?? 0)) {
+            $errors[] = \__('Public max guests override cannot exceed the linked room listing max guests.', 'must-hotel-booking');
+        }
+
         if ($title === '') {
             $title = $roomNumber;
         }
@@ -802,6 +816,20 @@ final class AccommodationAdminActions
             'capacity_override' => $capacityOverride,
             'building' => $building,
             'section' => $section,
+            'public_title' => $publicTitle,
+            'public_description' => $publicDescription,
+            'featured_image_id' => parse_room_main_image_id($featuredImageInput),
+            'featured_image_id_input' => $featuredImageInput,
+            'gallery_image_ids' => \implode(',', parse_room_gallery_ids($galleryInput)),
+            'gallery_image_ids_input' => $galleryInput,
+            'amenities' => \implode(',', $amenities),
+            'amenity_keys' => $amenities,
+            'room_size' => $roomSize,
+            'bed_setup' => $bedSetup,
+            'max_guests_override' => $maxGuestsOverride,
+            'view_type' => $viewType,
+            'public_visible' => !empty($source['public_visible']) ? 1 : 0,
+            'display_order' => $displayOrder,
             'admin_notes' => $adminNotes,
             'errors' => $errors,
         ];

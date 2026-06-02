@@ -1729,6 +1729,41 @@ function render_accommodation_unit_form(array $form, array $typeOptions, array $
     echo '</div>';
     echo '</section>';
 
+    $unitFeaturedImageId = isset($form['featured_image_id']) ? (int) $form['featured_image_id'] : 0;
+    $unitGalleryIds = parse_room_gallery_ids((string) ($form['gallery_image_ids_input'] ?? $form['gallery_image_ids'] ?? ''));
+    $unitSelectedAmenities = isset($form['amenity_keys']) && \is_array($form['amenity_keys']) ? \array_map('strval', $form['amenity_keys']) : [];
+    $availableAmenities = get_available_room_amenities();
+
+    echo '<section class="must-accommodation-form-section">';
+    echo '<div class="must-accommodation-section-head"><h3>' . \esc_html__('Public Unit Details', 'must-hotel-booking') . '</h3><p>' . \esc_html__('Guest-facing metadata for this exact physical room. Empty fields fall back to the linked room listing.', 'must-hotel-booking') . '</p></div>';
+    echo '<div class="must-accommodation-field-grid is-two-col">';
+    echo '<label><span>' . \esc_html__('Public Title', 'must-hotel-booking') . '</span><input type="text" name="public_title" value="' . \esc_attr((string) ($form['public_title'] ?? '')) . '" /></label>';
+    echo '<label><span>' . \esc_html__('Display Order', 'must-hotel-booking') . '</span><input type="number" name="display_order" value="' . \esc_attr((string) ((int) ($form['display_order'] ?? 0))) . '" step="1" /></label>';
+    echo '<label><span>' . \esc_html__('Room Size', 'must-hotel-booking') . '</span><input type="text" name="room_size" value="' . \esc_attr((string) ($form['room_size'] ?? '')) . '" /></label>';
+    echo '<label><span>' . \esc_html__('Bed Setup', 'must-hotel-booking') . '</span><input type="text" name="bed_setup" value="' . \esc_attr((string) ($form['bed_setup'] ?? '')) . '" /></label>';
+    echo '<label><span>' . \esc_html__('View Type', 'must-hotel-booking') . '</span><input type="text" name="view_type" value="' . \esc_attr((string) ($form['view_type'] ?? '')) . '" /></label>';
+    echo '<label><span>' . \esc_html__('Public Max Guests Override', 'must-hotel-booking') . '</span><input type="number" min="0" name="max_guests_override" value="' . \esc_attr((string) ((int) ($form['max_guests_override'] ?? 0))) . '" /><small>' . \esc_html__('Leave 0 to inherit the operational capacity.', 'must-hotel-booking') . '</small></label>';
+    echo '</div>';
+    echo '<label><span>' . \esc_html__('Public Description', 'must-hotel-booking') . '</span><textarea name="public_description" rows="5">' . \esc_textarea((string) ($form['public_description'] ?? '')) . '</textarea></label>';
+    echo '<div class="must-accommodation-field-grid is-two-col">';
+    echo '<div><label><span>' . \esc_html__('Featured Image ID', 'must-hotel-booking') . '</span><input type="number" min="0" name="featured_image_id" class="must-room-main-image-id" value="' . \esc_attr((string) $unitFeaturedImageId) . '" /></label>';
+    render_room_main_image_preview($unitFeaturedImageId);
+    echo '<button type="button" class="button must-room-main-image-select">' . \esc_html__('Select Image', 'must-hotel-booking') . '</button></div>';
+    echo '<div><label><span>' . \esc_html__('Gallery Image IDs', 'must-hotel-booking') . '</span><input type="text" name="gallery_image_ids" class="must-room-gallery-ids" value="' . \esc_attr((string) ($form['gallery_image_ids_input'] ?? $form['gallery_image_ids'] ?? '')) . '" /></label>';
+    render_room_gallery_preview($unitGalleryIds);
+    echo '<button type="button" class="button must-room-gallery-select">' . \esc_html__('Select Gallery', 'must-hotel-booking') . '</button></div>';
+    echo '</div>';
+    echo '<div class="must-accommodation-amenity-grid">';
+    foreach ($availableAmenities as $amenityKey => $amenity) {
+        $isSelected = \in_array((string) $amenityKey, $unitSelectedAmenities, true);
+        echo '<label><input type="checkbox" name="amenities[]" value="' . \esc_attr((string) $amenityKey) . '"' . \checked($isSelected, true, false) . ' /> ' . \esc_html((string) ($amenity['label'] ?? $amenityKey)) . '</label>';
+    }
+    echo '</div>';
+    echo '<div class="must-accommodation-toggle-grid">';
+    echo '<label class="must-accommodation-toggle"><input type="checkbox" name="public_visible" value="1"' . \checked(!empty($form['public_visible']), true, false) . ' /><span><strong>' . \esc_html__('Publicly visible', 'must-hotel-booking') . '</strong><small>' . \esc_html__('In Clock mode, this still requires a Clock physical-room mapping before it can be sold online.', 'must-hotel-booking') . '</small></span></label>';
+    echo '</div>';
+    echo '</section>';
+
     $unitHasNotes = (string) ($form['admin_notes'] ?? '') !== '';
     echo '<details class="must-accommodation-disclosure">';
     echo '<summary><div><strong>' . \esc_html__('Operational Notes', 'must-hotel-booking') . '</strong><small>' . \esc_html($unitHasNotes ? __('Internal notes saved for this unit', 'must-hotel-booking') : __('No internal notes yet', 'must-hotel-booking')) . '</small></div></summary>';
@@ -2049,6 +2084,10 @@ function render_accommodation_unit_list(AccommodationAdminQuery $query, array $p
                 render_accommodation_badge(!empty($row['is_bookable']) ? __('Bookable', 'must-hotel-booking') : __('Not bookable', 'must-hotel-booking'), !empty($row['is_bookable']) ? 'info' : 'warning');
                 render_accommodation_badge((string) ($row['status_label'] ?? __('Available', 'must-hotel-booking')), (string) ($row['status'] ?? '') === 'available' ? 'neutral' : 'warning');
                 render_accommodation_badge(!empty($row['is_calendar_visible']) ? __('Calendar visible', 'must-hotel-booking') : __('Calendar hidden', 'must-hotel-booking'), !empty($row['is_calendar_visible']) ? 'neutral' : 'muted');
+                render_accommodation_badge(!empty($row['public_visible']) ? __('Public', 'must-hotel-booking') : __('Private', 'must-hotel-booking'), !empty($row['public_visible']) ? 'info' : 'muted');
+                if (RoomCatalog::isClockBackendMode()) {
+                    render_accommodation_badge(!empty($row['has_clock_physical_mapping']) ? __('Mapped to Clock', 'must-hotel-booking') : __('Not mapped to Clock', 'must-hotel-booking'), !empty($row['has_clock_physical_mapping']) ? 'success' : 'warning');
+                }
                 echo '</div>';
                 echo '</div>';
 
