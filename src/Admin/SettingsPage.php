@@ -939,6 +939,7 @@ final class SettingsPage
                 $newUser = \get_user_by('ID', $userId);
                 if ($newUser instanceof \WP_User) {
                     $newUser->set_role($roleSlug);
+                    StaffAccess::syncRoleCapabilities();
                 }
             }
             if ($persist) {

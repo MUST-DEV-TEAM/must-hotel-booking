@@ -69,14 +69,14 @@ final class PortalAuthController
                 } elseif (StaffAccess::userHasPortalRole($user) && StaffAccess::isStaffUserDisabled($user)) {
                     \wp_logout();
                     $errors[] = \__('Your staff account has been disabled. Please contact an administrator.', 'must-hotel-booking');
-                } elseif (!StaffAccess::userCanAccessPortal($user)) {
+                } elseif (!self::userCanAccessPortalAfterSync($user)) {
                     \wp_logout();
                     $errors[] = \__('Your account does not have staff portal access.', 'must-hotel-booking');
-                } elseif (!\user_can($user, 'manage_options') && PortalAccessGuard::getFirstAccessibleModuleKey($user) === '') {
+                } elseif (!\user_can(\wp_get_current_user(), 'manage_options') && PortalAccessGuard::getFirstAccessibleModuleKey(\wp_get_current_user()) === '') {
                     \wp_logout();
                     $errors[] = \__('No portal modules are currently enabled for your account.', 'must-hotel-booking');
                 } else {
-                    \wp_safe_redirect(PortalAccessGuard::getPostLoginRedirectUrl($user, true));
+                    \wp_safe_redirect(PortalAccessGuard::getPostLoginRedirectUrl(\wp_get_current_user(), true));
                     exit;
                 }
             }
@@ -97,6 +97,28 @@ final class PortalAuthController
             'notices' => $notices,
             'action_url' => PortalRouter::getLoginUrl(),
         ];
+    }
+
+    private static function userCanAccessPortalAfterSync(\WP_User $user): bool
+    {
+        if (StaffAccess::userCanAccessPortal($user)) {
+            return true;
+        }
+
+        if (!StaffAccess::userHasPortalRole($user)) {
+            return false;
+        }
+
+        StaffAccess::syncRoleCapabilities();
+        $freshUser = \get_user_by('ID', $user->ID);
+
+        if (!$freshUser instanceof \WP_User || !StaffAccess::userCanAccessPortal($freshUser)) {
+            return false;
+        }
+
+        \wp_set_current_user($freshUser->ID);
+
+        return true;
     }
 
     /**

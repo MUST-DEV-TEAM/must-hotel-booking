@@ -157,17 +157,6 @@ class Rooms_List_Widget extends \Elementor\Widget_Base
             $physical_room_id = isset($room['physical_room_id']) ? (int) $room['physical_room_id'] : 0;
             $gallery_urls = $gallery_room_id > 0 ? get_room_gallery_urls_for_widget($gallery_room_id, 4) : [];
             $primary_image = $gallery_room_id > 0 ? get_room_main_image_url_for_widget($gallery_room_id) : '';
-            $provider_image_urls = $gallery_room_id > 0
-                ? \MustHotelBooking\Core\RoomData::getProviderImageUrls($gallery_room_id, $physical_room_id)
-                : [];
-
-            if ($primary_image === '' && !empty($provider_image_urls)) {
-                $primary_image = (string) \array_shift($provider_image_urls);
-                $gallery_urls = $provider_image_urls;
-            } elseif (!empty($provider_image_urls)) {
-                $gallery_urls = \array_values(\array_unique(\array_merge($gallery_urls, $provider_image_urls)));
-            }
-
             $thumbnail_urls = $gallery_urls;
 
             if ($primary_image === '' && !empty($gallery_urls)) {
