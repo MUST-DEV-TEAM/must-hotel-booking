@@ -73,6 +73,7 @@ final class ProviderReservationActionPolicy
                     'reservation_checkout',
                     'reservation_assign_room',
                     'reservation_update_stay',
+                    'payment_refund',
                 ],
                 true
             );
