@@ -159,10 +159,10 @@ if (\is_array($detail)) {
     $nights = isset($stay['nights']) ? (int) $stay['nights'] : 0;
     $guestsCount = isset($stay['guests']) ? (int) $stay['guests'] : 0;
     $amountDue = isset($pricing['amount_due']) ? (float) $pricing['amount_due'] : 0.0;
-$storedTotal = isset($pricing['stored_total']) ? (float) $pricing['stored_total'] : 0.0;
-$amountPaid = isset($pricing['amount_paid']) ? (float) $pricing['amount_paid'] : 0.0;
+    $storedTotal = isset($pricing['stored_total']) ? (float) $pricing['stored_total'] : 0.0;
+    $amountPaid = isset($pricing['amount_paid']) ? (float) $pricing['amount_paid'] : 0.0;
 
-if ($requiresManualClockFolioPayment) {
+    if ($requiresManualClockFolioPayment) {
         if ($manualClockFolioPaymentAmount === '' && $amountPaid > 0.0) {
             $manualClockFolioPaymentAmount = \number_format_i18n($amountPaid, 2);
         }
@@ -369,7 +369,55 @@ if ($requiresManualClockFolioPayment) {
     echo '<article class="must-portal-reservation-status-card"><span>' . \esc_html__('Stay facts', 'must-hotel-booking') . '</span><strong>' . \esc_html(\sprintf(\_n('%d night', '%d nights', $nights, 'must-hotel-booking'), $nights)) . '</strong><small>' . \esc_html(\sprintf(\_n('%d guest', '%d guests', $guestsCount, 'must-hotel-booking'), $guestsCount)) . '</small></article>';
     echo '</div></section>';
     echo '<section class="must-portal-grid must-portal-grid--2">';
-    echo '<article class="must-portal-panel"><div class="must-portal-panel-header"><div><h2>' . \esc_html__('Immediate actions', 'must-hotel-booking') . '</h2><p>' . \esc_html__('Reservation, payment, and communication updates that staff can complete directly here.', 'must-hotel-booking') . '</p></div></div><div class="must-portal-reservation-action-grid">';
+    echo '<article class="must-portal-panel must-portal-panel--actions"><div class="must-portal-panel-header"><div><h2>' . \esc_html__('Immediate actions', 'must-hotel-booking') . '</h2><p>' . \esc_html__('Complete only the actions that are currently needed for this reservation. Provider-backed actions update Clock first when supported.', 'must-hotel-booking') . '</p></div></div><div class="must-portal-reservation-action-grid">';
+
+    if ($requiresManualClockFolioPayment && $canManagePayment) {
+        echo '<div class="must-portal-action-callout must-portal-form-full">';
+        echo '<div class="must-portal-feed-item must-portal-feed-item--stacked">';
+        echo '<div class="must-portal-feed-body">';
+        echo '<div class="must-portal-feed-meta"><strong>' . \esc_html__('Manual Clock folio payment required', 'must-hotel-booking') . '</strong>';
+        echo '<span>' . \esc_html__('After you add the website Stripe payment manually in Clock PMS, mark it done here so staff no longer see this warning.', 'must-hotel-booking') . '</span>';
+
+        if ($manualClockFolioPaymentAmount !== '' || $manualClockFolioPaymentReference !== '') {
+            $manualSummary = [];
+
+            if ($manualClockFolioPaymentAmount !== '') {
+                $manualSummary[] = \sprintf(
+                    \__('Amount: %1$s %2$s', 'must-hotel-booking'),
+                    $manualClockFolioPaymentAmount,
+                    $manualClockFolioPaymentCurrency
+                );
+            }
+
+            if ($manualClockFolioPaymentReference !== '') {
+                $manualSummary[] = \sprintf(
+                    \__('Stripe reference: %s', 'must-hotel-booking'),
+                    $manualClockFolioPaymentReference
+                );
+            }
+
+            echo '<small class="must-portal-feed-reference">' . \esc_html(\implode(' | ', $manualSummary)) . '</small>';
+        }
+
+        echo '</div><div class="must-portal-feed-actions">';
+        PortalRenderer::renderBadge('warning', \__('Manual Clock Action', 'must-hotel-booking'));
+
+        echo '<form method="post" action="' . \esc_url($detailUrl) . '" class="must-portal-reservation-action-form" onsubmit="return confirm(\'' . \esc_js(__('Only click OK after the Stripe payment has been manually added to the Clock folio.', 'must-hotel-booking')) . '\');">';
+        \wp_nonce_field('must_portal_reservation_manual_clock_folio_payment_done_' . $reservationId, 'must_portal_reservation_nonce');
+        echo '<input type="hidden" name="must_portal_action" value="reservation_manual_clock_folio_payment_done" />';
+        echo '<input type="hidden" name="reservation_id" value="' . \esc_attr((string) $reservationId) . '" />';
+
+        if ($returnMode === 'edit') {
+            echo '<input type="hidden" name="portal_return_mode" value="edit" />';
+        }
+
+        echo '<button type="submit" class="must-portal-reservation-action-button is-primary">';
+        echo '<span class="dashicons dashicons-yes-alt" aria-hidden="true"></span>';
+        echo '<span>' . \esc_html__('Mark Clock folio payment done', 'must-hotel-booking') . '</span>';
+        echo '</button></form>';
+
+        echo '</div></div></div></div>';
+    }
     if ($isProviderBacked) {
         if ($canProviderCheckIn || $canProviderCheckOut || $canProviderRoomOperation || $canProviderStayEdit || $canProviderGuestEdit || $canProviderCancellation) {
             echo '<p class="must-portal-muted">' . \esc_html__('Supported Clock-backed actions update the provider first. Unsupported local-only actions remain read-only.', 'must-hotel-booking') . '</p>';

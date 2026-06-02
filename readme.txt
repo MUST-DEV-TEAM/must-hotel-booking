@@ -4,7 +4,7 @@ Tags: hotel, booking, reservation, accommodation
 Requires at least: 5.0
 Tested up to: 6.0
 Requires PHP: 7.4
-Stable tag: 0.4.51
+Stable tag: 0.4.52
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -31,6 +31,9 @@ Main features include:
 5. When updating, upload the new release ZIP or use the configured updater, then review **Diagnostics & Maintenance** after the update completes.
 
 == Changelog ==
+
+= 0.4.52 =
+* Added staff portal immediate action to mark manual Clock folio payment accounting as done after staff manually posts the website Stripe payment in Clock PMS.
 
 = 0.4.51 =
 * Fixed staff portal and payments critical errors caused by missing local payment status and amount-paid initialization in the manual Clock folio notice logic.

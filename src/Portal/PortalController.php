@@ -85,15 +85,19 @@ final class PortalController
 
         $action = isset($_POST['must_portal_action']) ? \sanitize_key((string) \wp_unslash($_POST['must_portal_action'])) : '';
 
-        if ($action === '') {
-            return [];
-        }
+if ($action === '') {
+    return [];
+}
 
-        if (self::shouldBlockProviderBackedPortalAction($action)) {
-            self::redirectToPortalReservationDetail(self::getPostedReservationId(), 'provider_backed_read_only');
-            return [];
-        }
+if ($action === 'reservation_manual_clock_folio_payment_done') {
+    self::handleReservationManualClockFolioPaymentDone();
+    return [];
+}
 
+if (self::shouldBlockProviderBackedPortalAction($action)) {
+    self::redirectToPortalReservationDetail(self::getPostedReservationId(), 'provider_backed_read_only');
+    return [];
+}
         if ($action === 'quick_booking_create') {
             return self::handleQuickBookingAction();
         }
@@ -351,6 +355,87 @@ final class PortalController
                 ProviderReservationActionPolicy::SURFACE_PORTAL
             );
     }
+
+    private static function handleReservationManualClockFolioPaymentDone(): void
+{
+    $reservationId = isset($_POST['reservation_id']) ? \absint(\wp_unslash($_POST['reservation_id'])) : 0;
+    $nonce = isset($_POST['must_portal_reservation_nonce']) ? (string) \wp_unslash($_POST['must_portal_reservation_nonce']) : '';
+
+    if ($reservationId <= 0 || !\wp_verify_nonce($nonce, 'must_portal_reservation_manual_clock_folio_payment_done_' . $reservationId)) {
+        self::redirectToPortalReservationDetail($reservationId, 'invalid_nonce');
+    }
+
+    if (!\current_user_can(StaffAccess::CAP_PAYMENT_MARK_PAID) && !\current_user_can('manage_options')) {
+        self::redirectToPortalReservationDetail($reservationId, 'access_denied');
+    }
+
+    $reservationRepository = \MustHotelBooking\Engine\get_reservation_repository();
+    $reservation = $reservationRepository->getReservation($reservationId);
+
+    if (!\is_array($reservation)) {
+        self::redirectToPortalReservationDetail($reservationId, 'reservation_not_found');
+    }
+
+    $provider = \sanitize_key((string) ($reservation['provider'] ?? ''));
+
+    if ($provider !== \MustHotelBooking\Provider\ProviderManager::CLOCK_MODE) {
+        self::redirectToPortalReservationDetail($reservationId, 'portal_action_failed');
+    }
+
+    $metadata = [];
+
+    if (isset($reservation['provider_metadata']) && \is_array($reservation['provider_metadata'])) {
+        $metadata = $reservation['provider_metadata'];
+    } elseif (isset($reservation['provider_metadata']) && \is_string($reservation['provider_metadata']) && \trim($reservation['provider_metadata']) !== '') {
+        $decoded = \json_decode((string) $reservation['provider_metadata'], true);
+        $metadata = \is_array($decoded) ? $decoded : [];
+    }
+
+    $existing = isset($metadata['clock_folio_payment_sync']) && \is_array($metadata['clock_folio_payment_sync'])
+        ? $metadata['clock_folio_payment_sync']
+        : [];
+
+    $metadata['clock_folio_payment_sync'] = \array_merge(
+        $existing,
+        [
+            'success' => true,
+            'sync_status' => 'manual_done',
+            'sync_error' => '',
+            'manual_done_at' => \current_time('mysql'),
+            'manual_done_by' => \get_current_user_id(),
+            'manual_done_by_name' => self::getCurrentPortalActorName(),
+            'source' => 'portal_manual_clock_folio_payment_done',
+        ]
+    );
+
+    $updatePayload = [
+        'provider_metadata' => $metadata,
+    ];
+
+    $providerSyncError = \strtolower((string) ($reservation['provider_sync_error'] ?? ''));
+
+    if (\strpos($providerSyncError, 'pms_api_booking_folios_default') !== false) {
+        $updatePayload['provider_sync_status'] = 'synced';
+        $updatePayload['provider_synced_at'] = \current_time('mysql');
+        $updatePayload['provider_sync_error'] = '';
+    }
+
+    $updated = $reservationRepository->updateProviderMetadata($reservationId, $updatePayload);
+
+    if (!$updated) {
+        self::redirectToPortalReservationDetail($reservationId, 'portal_action_failed');
+    }
+
+    self::logReservationActivity(
+        $reservationId,
+        $reservation,
+        'clock_folio_payment_manual_done',
+        'info',
+        \__('Manual Clock folio payment accounting marked done by staff.', 'must-hotel-booking')
+    );
+
+    self::redirectToPortalReservationDetail($reservationId, 'clock_folio_payment_manual_done');
+}
 
     /**
      * @return array<string, mixed>
@@ -6262,6 +6347,7 @@ private static function handlePaymentRefund(): array
             'reservation_already_checked_in' => \__('This reservation is already checked in.', 'must-hotel-booking'),
             'access_denied' => \__('You do not have permission for that portal action.', 'must-hotel-booking'),
             'portal_action_failed' => \__('The requested portal action could not be completed.', 'must-hotel-booking'),
+            'clock_folio_payment_manual_done' => \__('Manual Clock folio payment accounting was marked done.', 'must-hotel-booking'),
         ];
 
         if ($noticeKey !== '' && isset($messages[$noticeKey])) {
