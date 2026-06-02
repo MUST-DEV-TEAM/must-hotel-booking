@@ -31,13 +31,19 @@ final class ClockPaymentReconciliationService
     /** @param array<int, int> $reservationIds */
     public function reconcilePaymentSucceeded(array $reservationIds, string $paymentMethod = 'stripe', string $transactionId = ''): void
     {
+        $paymentMethod = \sanitize_key($paymentMethod);
+        $transactionId = \sanitize_text_field($transactionId);
+        $folioPaymentSync = new ClockFolioPaymentSyncService($this->client);
         foreach ($this->clockReservationRows($reservationIds) as $row) {
+            if ($paymentMethod === 'stripe') {
+                $folioPaymentSync->syncStripePaymentForReservation($row, $transactionId);
+            }
             $this->reconcileRow($row, [
                 'operation' => 'payment_succeeded',
                 'target_provider_status' => 'confirmed',
                 'target_provider_payment_status' => 'paid',
-                'local_payment_method' => \sanitize_key($paymentMethod),
-                'transaction_id' => \sanitize_text_field($transactionId),
+                'local_payment_method' => $paymentMethod,
+                'transaction_id' => $transactionId,
                 'endpoint_path' => ClockConfig::reservationStatusUpdatePath(),
                 'request_operation' => 'clock.reservation_payment_update',
                 'retry_operation' => 'reservation_payment_update',
@@ -497,11 +503,9 @@ final class ClockPaymentReconciliationService
             $missingEndpointStatus = isset($action['missing_endpoint_status'])
                 ? (string) $action['missing_endpoint_status']
                 : 'pending_retry';
-
             $missingEndpointMessage = isset($action['missing_endpoint_message'])
                 ? (string) $action['missing_endpoint_message']
                 : \__('Clock reconciliation endpoint is not configured.', 'must-hotel-booking');
-
             if ($missingEndpointStatus === 'local_only') {
                 $this->updateMetadata(
                     $reservationId,
@@ -512,16 +516,13 @@ final class ClockPaymentReconciliationService
                     'local_only',
                     $missingEndpointMessage
                 );
-
                 return [
                     'success' => true,
                     'retry' => false,
                     'message' => $missingEndpointMessage,
                 ];
             }
-
             $this->recordSkippedLog($row, $action, $idempotencyKey);
-
             $this->updateMetadata(
                 $reservationId,
                 $row,
@@ -531,7 +532,6 @@ final class ClockPaymentReconciliationService
                 $missingEndpointStatus,
                 $missingEndpointMessage
             );
-
             return [
                 'success' => false,
                 'retry' => true,
@@ -619,11 +619,9 @@ final class ClockPaymentReconciliationService
             $missingEndpointStatus = isset($action['missing_endpoint_status'])
                 ? (string) $action['missing_endpoint_status']
                 : 'pending_retry';
-
             $missingEndpointMessage = isset($action['missing_endpoint_message'])
                 ? (string) $action['missing_endpoint_message']
                 : \__('Clock reconciliation endpoint is not configured.', 'must-hotel-booking');
-
             if ($missingEndpointStatus === 'local_only') {
                 $this->updateMetadata(
                     $reservationId,
@@ -634,16 +632,13 @@ final class ClockPaymentReconciliationService
                     'local_only',
                     $missingEndpointMessage
                 );
-
                 return [
                     'success' => true,
                     'queued' => false,
                     'message' => $missingEndpointMessage,
                 ];
             }
-
             $this->recordSkippedLog($row, $action, $idempotencyKey);
-
             $this->updateMetadata(
                 $reservationId,
                 $row,
@@ -653,11 +648,9 @@ final class ClockPaymentReconciliationService
                 $missingEndpointStatus,
                 $missingEndpointMessage
             );
-
             if (!empty($action['missing_endpoint_retry'])) {
                 $this->enqueueRetry($row, $action, $payload, $missingEndpointMessage);
             }
-
             return [
                 'success' => false,
                 'queued' => !empty($action['missing_endpoint_retry']),
