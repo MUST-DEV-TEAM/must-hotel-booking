@@ -264,10 +264,18 @@ final class SupportDiagnosticsEndpoint
         }
         $refundSummary = self::getRefundSummary();
         if ((int) ($refundSummary['manual_review'] ?? 0) > 0) {
-            $findings[] = \sprintf(
-                '%d refund(s) require manual Clock review.',
-                (int) $refundSummary['manual_review']
-            );
+            $manualReviewReason = (string) ($refundSummary['latest_manual_review_reason'] ?? '');
+
+            $findings[] = $manualReviewReason !== ''
+                ? \sprintf(
+                    '%d refund(s) require manual Clock review. Latest reason: %s',
+                    (int) $refundSummary['manual_review'],
+                    $manualReviewReason
+                )
+                : \sprintf(
+                    '%d refund(s) require manual Clock review.',
+                    (int) $refundSummary['manual_review']
+                );
         }
         if (empty($findings)) {
             $findings[] = 'No critical support findings detected by this report.';
@@ -337,16 +345,38 @@ final class SupportDiagnosticsEndpoint
         $manualReview = self::columnExists($table, 'clock_sync_status')
             ? (int) $wpdb->get_var("SELECT COUNT(*) FROM `{$table}` WHERE clock_sync_status = 'manual_review'")
             : 0;
-        $latestError = self::columnExists($table, 'error_message')
-            ? (string) $wpdb->get_var("SELECT error_message FROM `{$table}` WHERE error_message <> '' ORDER BY id DESC LIMIT 1")
-            : '';
+        $reasonColumn = '';
+
+        if (self::columnExists($table, 'failed_reason')) {
+            $reasonColumn = 'failed_reason';
+        } elseif (self::columnExists($table, 'error_message')) {
+            $reasonColumn = 'error_message';
+        }
+
+        $latestError = '';
+        $latestManualReviewReason = '';
+
+        if ($reasonColumn !== '') {
+            $latestError = (string) $wpdb->get_var(
+                "SELECT `{$reasonColumn}` FROM `{$table}` WHERE `{$reasonColumn}` <> '' ORDER BY id DESC LIMIT 1"
+            );
+
+            if (self::columnExists($table, 'clock_sync_status')) {
+                $latestManualReviewReason = (string) $wpdb->get_var(
+                    "SELECT `{$reasonColumn}` FROM `{$table}` WHERE clock_sync_status = 'manual_review' AND `{$reasonColumn}` <> '' ORDER BY id DESC LIMIT 1"
+                );
+            }
+        }
+
         return [
             'table_exists' => true,
             'total' => $total,
             'succeeded' => $succeeded,
             'failed' => $failed,
             'manual_review' => $manualReview,
-            'latest_error' => $latestError,
+            'latest_error' => $latestManualReviewReason !== '' ? $latestManualReviewReason : $latestError,
+            'latest_manual_review_reason' => $latestManualReviewReason,
+            'reason_column' => $reasonColumn,
         ];
     }
     /**
@@ -702,6 +732,7 @@ final class SupportDiagnosticsEndpoint
             'max_attempts',
             'message',
             'error_message',
+            'failed_reason',
             'notice',
             'reference',
             'transaction_id',

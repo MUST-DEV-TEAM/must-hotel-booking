@@ -4,7 +4,7 @@ Tags: hotel, booking, reservation, accommodation
 Requires at least: 5.0
 Tested up to: 6.0
 Requires PHP: 7.4
-Stable tag: 0.4.40
+Stable tag: 0.4.41
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -31,6 +31,9 @@ Main features include:
 5. When updating, upload the new release ZIP or use the configured updater, then review **Diagnostics & Maintenance** after the update completes.
 
 == Changelog ==
+
+= 0.4.41 =
+* Improved refund diagnostics so Clock manual-review refunds now expose the stored failure reason, including missing Clock folio IDs or Clock refund sync API errors, instead of showing an empty latest_error value.
 
 = 0.4.40 =
 * Clock diagnostics now include an automated Phase 1 trial summary, confirming whether the latest paid Stripe booking was created locally, synced to Clock, confirmed locally, and completed without creating a false Clock payment-update failure when payment sync is intentionally local-only.
