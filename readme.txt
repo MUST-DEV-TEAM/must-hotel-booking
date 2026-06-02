@@ -4,7 +4,7 @@ Tags: hotel, booking, reservation, accommodation
 Requires at least: 5.0
 Tested up to: 6.0
 Requires PHP: 7.4
-Stable tag: 0.4.43
+Stable tag: 0.4.44
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -31,6 +31,9 @@ Main features include:
 5. When updating, upload the new release ZIP or use the configured updater, then review **Diagnostics & Maintenance** after the update completes.
 
 == Changelog ==
+
+= 0.4.44 =
+* Added a read-only Clock folio readiness check to diagnostics. If the latest paid Clock booking does not have a folio ID saved locally, diagnostics now fetches the Clock booking and reports whether Clock exposes a folio ID before any refund is tested.
 
 = 0.4.43 =
 * Added Clock folio ID recovery before refund sync. When a Stripe refund is requested and the local reservation does not already have a Clock folio ID, the plugin now fetches the Clock booking, tries to recover the folio ID, saves it to reservation metadata, and only falls back to manual review if Clock still does not provide one.

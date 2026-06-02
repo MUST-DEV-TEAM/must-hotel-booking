@@ -1,6 +1,7 @@
 <?php
 namespace MustHotelBooking\Core;
 use MustHotelBooking\Admin\SettingsDiagnostics;
+use MustHotelBooking\Provider\Clock\ClockApiClient;
 use MustHotelBooking\Provider\Clock\ClockConfig;
 use MustHotelBooking\Provider\ProviderManager;
 final class SupportDiagnosticsEndpoint
@@ -266,7 +267,6 @@ final class SupportDiagnosticsEndpoint
         $refundSummary = self::getRefundSummary();
         if ((int) ($refundSummary['manual_review'] ?? 0) > 0) {
             $manualReviewReason = (string) ($refundSummary['latest_manual_review_reason'] ?? '');
-
             $findings[] = $manualReviewReason !== ''
                 ? \sprintf(
                     '%d refund(s) require manual Clock review. Latest reason: %s',
@@ -347,28 +347,23 @@ final class SupportDiagnosticsEndpoint
             ? (int) $wpdb->get_var("SELECT COUNT(*) FROM `{$table}` WHERE clock_sync_status = 'manual_review'")
             : 0;
         $reasonColumn = '';
-
         if (self::columnExists($table, 'failed_reason')) {
             $reasonColumn = 'failed_reason';
         } elseif (self::columnExists($table, 'error_message')) {
             $reasonColumn = 'error_message';
         }
-
         $latestError = '';
         $latestManualReviewReason = '';
-
         if ($reasonColumn !== '') {
             $latestError = (string) $wpdb->get_var(
                 "SELECT `{$reasonColumn}` FROM `{$table}` WHERE `{$reasonColumn}` <> '' ORDER BY id DESC LIMIT 1"
             );
-
             if (self::columnExists($table, 'clock_sync_status')) {
                 $latestManualReviewReason = (string) $wpdb->get_var(
                     "SELECT `{$reasonColumn}` FROM `{$table}` WHERE clock_sync_status = 'manual_review' AND `{$reasonColumn}` <> '' ORDER BY id DESC LIMIT 1"
                 );
             }
         }
-
         return [
             'table_exists' => true,
             'total' => $total,
@@ -667,191 +662,314 @@ final class SupportDiagnosticsEndpoint
             || \strpos($message, 'local payment status was recorded only in the mirror reservation') !== false
             || \strpos($message, 'payment status remains local-only') !== false;
     }
-
-
-
-/**
- * @return array<string, mixed>
- */
-private static function getFutureRefundReadiness(): array
-{
-    global $wpdb;
-
-    $paymentsTable = $wpdb->prefix . 'must_payments';
-    $reservationsTable = $wpdb->prefix . 'must_reservations';
-
-    if (
-        !self::tableExists($paymentsTable)
-        || !self::tableExists($reservationsTable)
-        || !self::columnExists($paymentsTable, 'id')
-        || !self::columnExists($paymentsTable, 'reservation_id')
-        || !self::columnExists($paymentsTable, 'status')
-        || !self::columnExists($reservationsTable, 'id')
-    ) {
-        return [
-            'checked' => false,
-            'status' => 'not_available',
-            'message' => 'Required payment or reservation tables/columns are missing.',
-            'latest_paid_reservation_id' => 0,
-            'latest_booking_reference' => '',
-            'clock_folio_id_present' => false,
-            'clock_folio_id_source' => '',
-        ];
-    }
-
-    $bookingReferenceSelect = self::columnExists($reservationsTable, 'booking_id') ? 'r.booking_id' : "''";
-    $providerSelect = self::columnExists($reservationsTable, 'provider') ? 'r.provider' : "''";
-    $providerMetadataSelect = self::columnExists($reservationsTable, 'provider_metadata') ? 'r.provider_metadata' : "''";
-
-    $row = $wpdb->get_row(
-        "SELECT
+    /**
+     * @return array<string, mixed>
+     */
+    private static function getFutureRefundReadiness(): array
+    {
+        global $wpdb;
+        $paymentsTable = $wpdb->prefix . 'must_payments';
+        $reservationsTable = $wpdb->prefix . 'must_reservations';
+        if (
+            !self::tableExists($paymentsTable)
+            || !self::tableExists($reservationsTable)
+            || !self::columnExists($paymentsTable, 'id')
+            || !self::columnExists($paymentsTable, 'reservation_id')
+            || !self::columnExists($paymentsTable, 'status')
+            || !self::columnExists($reservationsTable, 'id')
+        ) {
+            return [
+                'checked' => false,
+                'status' => 'not_available',
+                'message' => 'Required payment or reservation tables/columns are missing.',
+                'latest_paid_reservation_id' => 0,
+                'latest_booking_reference' => '',
+                'local_provider_metadata_folio_id_present' => false,
+                'clock_folio_id_present' => false,
+                'clock_folio_id_source' => '',
+                'clock_fetch_checked' => false,
+                'clock_fetch_status' => '',
+                'clock_fetch_message' => '',
+                'clock_fetch_folio_id_present' => false,
+                'clock_fetch_folio_id_source' => '',
+            ];
+        }
+        $bookingReferenceSelect = self::columnExists($reservationsTable, 'booking_id') ? 'r.booking_id' : "''";
+        $providerSelect = self::columnExists($reservationsTable, 'provider') ? 'r.provider' : "''";
+        $providerMetadataSelect = self::columnExists($reservationsTable, 'provider_metadata') ? 'r.provider_metadata' : "''";
+        $providerBookingIdSelect = self::columnExists($reservationsTable, 'provider_booking_id') ? 'r.provider_booking_id' : "''";
+        $providerReservationIdSelect = self::columnExists($reservationsTable, 'provider_reservation_id') ? 'r.provider_reservation_id' : "''";
+        $providerWhere = self::columnExists($reservationsTable, 'provider')
+            ? $wpdb->prepare(' AND r.provider = %s', ProviderManager::CLOCK_MODE)
+            : '';
+        $row = $wpdb->get_row(
+            "SELECT
             r.id AS reservation_id,
             {$bookingReferenceSelect} AS booking_reference,
             {$providerSelect} AS provider,
-            {$providerMetadataSelect} AS provider_metadata
+            {$providerMetadataSelect} AS provider_metadata,
+            {$providerBookingIdSelect} AS provider_booking_id,
+            {$providerReservationIdSelect} AS provider_reservation_id
         FROM `{$paymentsTable}` p
         INNER JOIN `{$reservationsTable}` r ON r.id = p.reservation_id
         WHERE p.status = 'paid'
+        {$providerWhere}
         ORDER BY p.id DESC
         LIMIT 1",
-        ARRAY_A
-    );
-
-    if (!\is_array($row)) {
+            ARRAY_A
+        );
+        if (!\is_array($row)) {
+            return [
+                'checked' => true,
+                'status' => 'no_paid_booking_found',
+                'message' => 'No paid Clock booking was found to check future refund readiness.',
+                'latest_paid_reservation_id' => 0,
+                'latest_booking_reference' => '',
+                'local_provider_metadata_folio_id_present' => false,
+                'clock_folio_id_present' => false,
+                'clock_folio_id_source' => '',
+                'clock_fetch_checked' => false,
+                'clock_fetch_status' => '',
+                'clock_fetch_message' => '',
+                'clock_fetch_folio_id_present' => false,
+                'clock_fetch_folio_id_source' => '',
+            ];
+        }
+        $reservationId = (int) ($row['reservation_id'] ?? 0);
+        $bookingReference = (string) ($row['booking_reference'] ?? '');
+        $provider = (string) ($row['provider'] ?? '');
+        $metadata = self::decodeJsonObject((string) ($row['provider_metadata'] ?? ''));
+        $folio = self::findClockFolioIdInMetadata($metadata);
+        $isClockBooking = $provider === ProviderManager::CLOCK_MODE;
+        $localFolioPresent = (string) ($folio['value'] ?? '') !== '';
+        $clockFetch = [
+            'checked' => false,
+            'status' => '',
+            'message' => '',
+            'folio_id_present' => false,
+            'folio_id_source' => '',
+        ];
+        if ($isClockBooking && !$localFolioPresent) {
+            $clockFetch = self::checkClockFolioByFetchingBooking($row);
+        }
+        $ready = $isClockBooking && $localFolioPresent;
+        $readyAfterClockFetch = $isClockBooking && !$localFolioPresent && !empty($clockFetch['folio_id_present']);
+        $status = $ready ? 'ready' : 'needs_folio_recovery';
+        $message = $ready
+            ? 'Latest paid Clock booking has a Clock folio ID available for future automatic refund sync.'
+            : 'Latest paid Clock booking does not show a Clock folio ID in provider metadata; future refunds may still require manual Clock review.';
+        if ($readyAfterClockFetch) {
+            $status = 'ready_after_clock_fetch';
+            $message = 'Latest paid Clock booking does not show a Clock folio ID in local provider metadata, but the read-only Clock booking fetch exposes one.';
+        }
         return [
             'checked' => true,
-            'status' => 'no_paid_booking_found',
-            'message' => 'No paid booking was found to check future refund readiness.',
-            'latest_paid_reservation_id' => 0,
-            'latest_booking_reference' => '',
-            'clock_folio_id_present' => false,
-            'clock_folio_id_source' => '',
+            'status' => $status,
+            'message' => $message,
+            'latest_paid_reservation_id' => $reservationId,
+            'latest_booking_reference' => $bookingReference,
+            'provider' => $provider,
+            'local_provider_metadata_folio_id_present' => $localFolioPresent,
+            'clock_folio_id_present' => $ready || $readyAfterClockFetch,
+            'clock_folio_id_source' => (string) ($folio['source'] ?? ''),
+            'clock_folio_id_value_masked' => $ready || $readyAfterClockFetch ? '[present]' : '',
+            'clock_fetch_checked' => !empty($clockFetch['checked']),
+            'clock_fetch_status' => (string) ($clockFetch['status'] ?? ''),
+            'clock_fetch_message' => (string) ($clockFetch['message'] ?? ''),
+            'clock_fetch_folio_id_present' => !empty($clockFetch['folio_id_present']),
+            'clock_fetch_folio_id_source' => (string) ($clockFetch['folio_id_source'] ?? ''),
         ];
     }
-
-    $reservationId = (int) ($row['reservation_id'] ?? 0);
-    $bookingReference = (string) ($row['booking_reference'] ?? '');
-    $provider = (string) ($row['provider'] ?? '');
-    $metadata = self::decodeJsonObject((string) ($row['provider_metadata'] ?? ''));
-
-    $folio = self::findClockFolioIdInMetadata($metadata);
-
-    $isClockBooking = $provider === ProviderManager::CLOCK_MODE;
-    $ready = $isClockBooking && (string) ($folio['value'] ?? '') !== '';
-
-    return [
-        'checked' => true,
-        'status' => $ready ? 'ready' : 'needs_folio_recovery',
-        'message' => $ready
-            ? 'Latest paid Clock booking has a Clock folio ID available for future automatic refund sync.'
-            : 'Latest paid Clock booking does not show a Clock folio ID in provider metadata; future refunds may still require manual Clock review.',
-        'latest_paid_reservation_id' => $reservationId,
-        'latest_booking_reference' => $bookingReference,
-        'provider' => $provider,
-        'clock_folio_id_present' => $ready,
-        'clock_folio_id_source' => (string) ($folio['source'] ?? ''),
-        'clock_folio_id_value_masked' => (string) ($folio['value'] ?? '') !== '' ? '[present]' : '',
-    ];
-}
-
-/**
- * @return array<string, mixed>
- */
-private static function decodeJsonObject(string $json): array
-{
-    $decoded = \json_decode($json, true);
-
-    return \is_array($decoded) ? $decoded : [];
-}
-
-/**
- * @param array<string, mixed> $metadata
- * @return array{value:string,source:string}
- */
-private static function findClockFolioIdInMetadata(array $metadata): array
-{
-    foreach (['clock_folio_id', 'folio_id', 'default_folio_id'] as $key) {
-        if (isset($metadata[$key]) && \trim((string) $metadata[$key]) !== '') {
+    /**
+     * @param array<string, mixed> $row
+     * @return array<string, mixed>
+     */
+    private static function checkClockFolioByFetchingBooking(array $row): array
+    {
+        $externalId = \sanitize_text_field((string) ($row['provider_booking_id'] ?? ''));
+        if ($externalId === '') {
+            $externalId = \sanitize_text_field((string) ($row['provider_reservation_id'] ?? ''));
+        }
+        if ($externalId === '') {
             return [
-                'value' => \sanitize_text_field((string) $metadata[$key]),
-                'source' => $key,
+                'checked' => true,
+                'status' => 'missing_clock_booking_id',
+                'message' => 'No Clock booking ID is available for a read-only folio readiness fetch.',
+                'folio_id_present' => false,
+                'folio_id_source' => '',
             ];
         }
-    }
-
-    $providerResponse = isset($metadata['provider_response']) && \is_array($metadata['provider_response'])
-        ? $metadata['provider_response']
-        : [];
-
-    foreach (['clock_folio_id', 'folio_id', 'default_folio_id'] as $key) {
-        if (isset($providerResponse[$key]) && \trim((string) $providerResponse[$key]) !== '') {
+        $path = ClockConfig::reservationFetchPath();
+        if ($path === '') {
+            $path = '/bookings/{booking_id}';
+        }
+        $path = \str_replace(
+            ['{booking_id}', '{reservation_id}', '{id}', '{clock_booking_id}'],
+            \rawurlencode($externalId),
+            $path
+        );
+        $response = (new ClockApiClient())->request(
+            'GET',
+            $path,
+            [
+                'api_type' => 'pms_api',
+                'reservation_id' => (int) ($row['reservation_id'] ?? 0),
+                'external_id' => $externalId,
+            ],
+            'clock.reservation_folio_readiness_check'
+        );
+        if (!$response->isSuccess()) {
             return [
-                'value' => \sanitize_text_field((string) $providerResponse[$key]),
-                'source' => 'provider_response.' . $key,
+                'checked' => true,
+                'status' => 'clock_fetch_failed',
+                'message' => 'Clock booking fetch did not succeed.',
+                'folio_id_present' => false,
+                'folio_id_source' => '',
             ];
         }
+        $data = $response->getData();
+        $folio = self::findClockFolioIdInClockResponse(\is_array($data) ? $data : []);
+        $folioPresent = (string) ($folio['value'] ?? '') !== '';
+        return [
+            'checked' => true,
+            'status' => $folioPresent ? 'folio_found_in_clock_response' : 'folio_missing_in_clock_response',
+            'message' => $folioPresent
+                ? 'Read-only Clock booking fetch found a folio ID in the Clock response.'
+                : 'Read-only Clock booking fetch did not find a folio ID in the Clock response.',
+            'folio_id_present' => $folioPresent,
+            'folio_id_source' => (string) ($folio['source'] ?? ''),
+        ];
     }
-
-    foreach (['folios', 'folio', 'accounts'] as $containerKey) {
-        if (!isset($providerResponse[$containerKey])) {
-            continue;
-        }
-
-        $container = $providerResponse[$containerKey];
-
-        if (\is_array($container)) {
-            $found = self::findFirstIdInNestedArray($container, $containerKey);
-
-            if ((string) ($found['value'] ?? '') !== '') {
+    /**
+     * @return array<string, mixed>
+     */
+    private static function decodeJsonObject(string $json): array
+    {
+        $decoded = \json_decode($json, true);
+        return \is_array($decoded) ? $decoded : [];
+    }
+    /**
+     * @param array<string, mixed> $metadata
+     * @return array{value:string,source:string}
+     */
+    private static function findClockFolioIdInMetadata(array $metadata): array
+    {
+        foreach (['clock_folio_id', 'folio_id', 'default_folio_id'] as $key) {
+            if (isset($metadata[$key]) && \trim((string) $metadata[$key]) !== '') {
                 return [
-                    'value' => (string) $found['value'],
-                    'source' => (string) $found['source'],
+                    'value' => \sanitize_text_field((string) $metadata[$key]),
+                    'source' => $key,
                 ];
             }
         }
-    }
-
-    return [
-        'value' => '',
-        'source' => '',
-    ];
-}
-
-/**
- * @param array<mixed> $source
- * @return array{value:string,source:string}
- */
-private static function findFirstIdInNestedArray(array $source, string $path): array
-{
-    foreach ($source as $key => $value) {
-        $currentPath = $path . '.' . (string) $key;
-
-        if (\is_array($value)) {
-            $nested = self::findFirstIdInNestedArray($value, $currentPath);
-
-            if ((string) ($nested['value'] ?? '') !== '') {
-                return $nested;
+        $providerResponse = isset($metadata['provider_response']) && \is_array($metadata['provider_response'])
+            ? $metadata['provider_response']
+            : [];
+        foreach (['clock_folio_id', 'folio_id', 'default_folio_id'] as $key) {
+            if (isset($providerResponse[$key]) && \trim((string) $providerResponse[$key]) !== '') {
+                return [
+                    'value' => \sanitize_text_field((string) $providerResponse[$key]),
+                    'source' => 'provider_response.' . $key,
+                ];
             }
-
-            continue;
         }
-
-        if (\in_array((string) $key, ['id', 'folio_id', 'default_folio_id', 'clock_folio_id'], true) && \trim((string) $value) !== '') {
-            return [
-                'value' => \sanitize_text_field((string) $value),
-                'source' => $currentPath,
-            ];
+        foreach (['folios', 'folio', 'accounts'] as $containerKey) {
+            if (!isset($providerResponse[$containerKey])) {
+                continue;
+            }
+            $container = $providerResponse[$containerKey];
+            if (\is_array($container)) {
+                $found = self::findFirstIdInNestedArray($container, $containerKey);
+                if ((string) ($found['value'] ?? '') !== '') {
+                    return [
+                        'value' => (string) $found['value'],
+                        'source' => (string) $found['source'],
+                    ];
+                }
+            }
         }
+        return [
+            'value' => '',
+            'source' => '',
+        ];
     }
-
-    return [
-        'value' => '',
-        'source' => '',
-    ];
-}
-
-
-
+    /**
+     * @param array<string, mixed> $source
+     * @return array{value:string,source:string}
+     */
+    private static function findClockFolioIdInClockResponse(array $source): array
+    {
+        foreach (['clock_folio_id', 'folio_id', 'default_folio_id'] as $key) {
+            if (isset($source[$key]) && \trim((string) $source[$key]) !== '') {
+                return [
+                    'value' => \sanitize_text_field((string) $source[$key]),
+                    'source' => $key,
+                ];
+            }
+        }
+        $providerResponse = isset($source['provider_response']) && \is_array($source['provider_response'])
+            ? $source['provider_response']
+            : [];
+        foreach (['clock_folio_id', 'folio_id', 'default_folio_id'] as $key) {
+            if (isset($providerResponse[$key]) && \trim((string) $providerResponse[$key]) !== '') {
+                return [
+                    'value' => \sanitize_text_field((string) $providerResponse[$key]),
+                    'source' => 'provider_response.' . $key,
+                ];
+            }
+        }
+        foreach (['folio', 'folios', 'account', 'accounts'] as $containerKey) {
+            if (isset($source[$containerKey]) && \is_array($source[$containerKey])) {
+                $found = self::findFirstIdInNestedArray($source[$containerKey], $containerKey);
+                if ((string) ($found['value'] ?? '') !== '') {
+                    return [
+                        'value' => (string) $found['value'],
+                        'source' => (string) $found['source'],
+                    ];
+                }
+            }
+            if (isset($providerResponse[$containerKey]) && \is_array($providerResponse[$containerKey])) {
+                $found = self::findFirstIdInNestedArray($providerResponse[$containerKey], 'provider_response.' . $containerKey);
+                if ((string) ($found['value'] ?? '') !== '') {
+                    return [
+                        'value' => (string) $found['value'],
+                        'source' => (string) $found['source'],
+                    ];
+                }
+            }
+        }
+        return [
+            'value' => '',
+            'source' => '',
+        ];
+    }
+    /**
+     * @param array<mixed> $source
+     * @return array{value:string,source:string}
+     */
+    private static function findFirstIdInNestedArray(array $source, string $path): array
+    {
+        foreach ($source as $key => $value) {
+            $currentPath = $path . '.' . (string) $key;
+            if (\is_array($value)) {
+                $nested = self::findFirstIdInNestedArray($value, $currentPath);
+                if ((string) ($nested['value'] ?? '') !== '') {
+                    return $nested;
+                }
+                continue;
+            }
+            if (\in_array((string) $key, ['id', 'folio_id', 'default_folio_id', 'clock_folio_id'], true) && \trim((string) $value) !== '') {
+                return [
+                    'value' => \sanitize_text_field((string) $value),
+                    'source' => $currentPath,
+                ];
+            }
+        }
+        return [
+            'value' => '',
+            'source' => '',
+        ];
+    }
     /**
      * @return array<string, mixed>
      */
