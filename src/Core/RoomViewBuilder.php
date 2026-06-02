@@ -27,6 +27,7 @@ final class RoomViewBuilder
         $currency = MustBookingConfig::get_currency();
         $primaryImageUrl = RoomData::getRoomMainImageUrl($galleryRoomId, 'large');
         $galleryImages = RoomData::getRoomGalleryImageUrls($galleryRoomId, 12, 'large');
+        $providerImageUrls = RoomData::getProviderImageUrls($galleryRoomId, isset($room['physical_room_id']) ? (int) $room['physical_room_id'] : 0);
         $galleryImages = \array_values(
             \array_filter(
                 \array_map('strval', \is_array($galleryImages) ? $galleryImages : []),
@@ -38,6 +39,13 @@ final class RoomViewBuilder
 
         if ($primaryImageUrl === '' && !empty($galleryImages)) {
             $primaryImageUrl = (string) \array_shift($galleryImages);
+        }
+
+        if ($primaryImageUrl === '' && !empty($providerImageUrls)) {
+            $primaryImageUrl = (string) \array_shift($providerImageUrls);
+            $galleryImages = $providerImageUrls;
+        } elseif (!empty($providerImageUrls)) {
+            $galleryImages = \array_values(\array_unique(\array_merge($galleryImages, $providerImageUrls)));
         }
 
         $lightboxImages = [];
@@ -71,6 +79,12 @@ final class RoomViewBuilder
             $detailsUrl = $roomSlug !== ''
                 ? \add_query_arg(['room' => \sanitize_title($roomSlug)], $roomsPageUrl)
                 : $roomsPageUrl;
+        }
+
+        $amenities = RoomData::getRoomAmenityDisplayItems($galleryRoomId);
+
+        if (empty($amenities)) {
+            $amenities = RoomData::getProviderFeatureDisplayItems($galleryRoomId, isset($room['physical_room_id']) ? (int) $room['physical_room_id'] : 0);
         }
 
         return [
@@ -111,7 +125,7 @@ final class RoomViewBuilder
             'gallery_images' => \array_slice($galleryImages, 0, 3),
             'lightbox_images' => $lightboxImages,
             'room_rules' => RoomData::getRoomRulesText($galleryRoomId),
-            'amenities' => RoomData::getRoomAmenityDisplayItems($galleryRoomId),
+            'amenities' => $amenities,
             'people_icon_url' => MUST_HOTEL_BOOKING_URL . 'assets/img/PeopleFill.svg',
             'surface_icon_url' => MUST_HOTEL_BOOKING_URL . 'assets/img/Surface.svg',
         ];

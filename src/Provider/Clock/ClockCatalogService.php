@@ -559,6 +559,35 @@ final class ClockCatalogService
     {
         $out = ['type' => 'array', 'count' => \count($value)];
 
+        if ($this->isList($value)) {
+            $items = [];
+
+            foreach (\array_slice($value, 0, 20) as $item) {
+                if (\is_scalar($item) || $item === null) {
+                    $items[] = $item;
+                    continue;
+                }
+
+                if (\is_array($item)) {
+                    $compactItem = [];
+
+                    foreach (['id', 'name', 'label', 'title', 'description', 'url', 'image_url', 'photo_url'] as $key) {
+                        if (isset($item[$key]) && (\is_scalar($item[$key]) || $item[$key] === null)) {
+                            $compactItem[$key] = $item[$key];
+                        }
+                    }
+
+                    if (!empty($compactItem)) {
+                        $items[] = $compactItem;
+                    }
+                }
+            }
+
+            if (!empty($items)) {
+                $out['items'] = $items;
+            }
+        }
+
         if (!$this->isList($value)) {
             $out['keys'] = \array_slice(\array_map('strval', \array_keys($value)), 0, 10);
         }

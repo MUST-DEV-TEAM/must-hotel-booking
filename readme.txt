@@ -4,7 +4,7 @@ Tags: hotel, booking, reservation, accommodation
 Requires at least: 5.0
 Tested up to: 6.0
 Requires PHP: 7.4
-Stable tag: 0.4.28
+Stable tag: 0.4.29
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -31,6 +31,11 @@ Main features include:
 5. When updating, upload the new release ZIP or use the configured updater, then review **Diagnostics & Maintenance** after the update completes.
 
 == Changelog ==
+
+= 0.4.29 =
+* Fixed Stripe checkout selection in Clock backend mode so website payments use enabled plugin gateways instead of Clock PMS
+* Added public room content fallbacks for Clock physical rooms, including provider images and feature labels when available
+* Prevented internal Clock import notes from showing as public room descriptions
 
 = 0.4.28 =
 * Added Stripe refund tracking with admin and portal refund controls plus Clock folio refund sync support

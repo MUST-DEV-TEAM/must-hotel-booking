@@ -2930,7 +2930,7 @@ final class SettingsPage
             'clock_api_backend' => [
                 'icon' => 'dashicons-cloud',
                 'label' => \__('Clock PMS backend', 'must-hotel-booking'),
-                'description' => \__('The plugin keeps the frontend, while Clock PMS supplies catalog, rates, availability, guests, reservations, and payment handling.', 'must-hotel-booking'),
+                'description' => \__('The plugin keeps the frontend and checkout payments, while Clock PMS supplies catalog, rates, availability, guests, and reservations.', 'must-hotel-booking'),
             ],
         ];
         foreach ($providerChoices as $value => $choice) {

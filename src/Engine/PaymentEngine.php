@@ -62,15 +62,6 @@ final class PaymentEngine
      */
     public static function getCheckoutPaymentMethods(): array
     {
-        if (self::isClockBackendPaymentMode()) {
-            return [
-                'clock_pms' => [
-                    'label' => \__('Clock PMS payment', 'must-hotel-booking'),
-                    'description' => \__('Payment is handled by Clock PMS for the mirrored booking.', 'must-hotel-booking'),
-                ],
-            ];
-        }
-
         $catalog = PaymentMethodRegistry::getCatalog();
         $enabled = PaymentMethodRegistry::getEnabled();
         $options = [];
@@ -183,13 +174,6 @@ final class PaymentEngine
         }
 
         return \__('Confirm reservation', 'must-hotel-booking');
-    }
-
-    private static function isClockBackendPaymentMode(): bool
-    {
-        return \class_exists(\MustHotelBooking\Provider\ProviderManager::class)
-            && MustBookingConfig::get_provider_mode() === \MustHotelBooking\Provider\ProviderManager::CLOCK_MODE
-            && MustBookingConfig::is_clock_enabled();
     }
 
     /**

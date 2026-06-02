@@ -338,6 +338,7 @@ function build_single_room_similar_room_card(array $row): ?array
 
     $main_image_url = RoomData::getRoomMainImageUrl($gallery_room_id, 'large');
     $gallery_urls = RoomData::getRoomGalleryImageUrls($gallery_room_id, 10, 'large');
+    $provider_image_urls = RoomData::getProviderImageUrls($gallery_room_id, $physical_room_id);
     $images = [];
 
     if ($main_image_url !== '') {
@@ -349,6 +350,14 @@ function build_single_room_similar_room_card(array $row): ?array
 
         if ($gallery_url !== '') {
             $images[] = $gallery_url;
+        }
+    }
+
+    foreach ($provider_image_urls as $provider_image_url) {
+        $provider_image_url = (string) $provider_image_url;
+
+        if ($provider_image_url !== '') {
+            $images[] = $provider_image_url;
         }
     }
 
@@ -482,10 +491,18 @@ function get_single_room_page_view_data(): array
     $room_category = isset($room['category']) ? (string) $room['category'] : '';
     $main_image_url = RoomData::getRoomMainImageUrl($gallery_room_id, 'large');
     $gallery_urls = RoomData::getRoomGalleryImageUrls($gallery_room_id, 12, 'large');
+    $provider_image_urls = RoomData::getProviderImageUrls($gallery_room_id, $physical_room_id);
 
     if ($main_image_url === '' && !empty($gallery_urls)) {
         $main_image_url = (string) $gallery_urls[0];
         $gallery_urls = \array_slice($gallery_urls, 1);
+    }
+
+    if ($main_image_url === '' && !empty($provider_image_urls)) {
+        $main_image_url = (string) \array_shift($provider_image_urls);
+        $gallery_urls = $provider_image_urls;
+    } elseif (!empty($provider_image_urls)) {
+        $gallery_urls = \array_values(\array_unique(\array_merge($gallery_urls, $provider_image_urls)));
     }
 
     $booking_args = ['room_id' => $gallery_room_id];
@@ -496,6 +513,11 @@ function get_single_room_page_view_data(): array
 
     $booking_url = \add_query_arg($booking_args, ManagedPages::getBookingPageUrl());
     $related_rooms = get_single_room_similar_rooms($physical_room_id, $room_type_id, $room_category, $gallery_room_id, 3);
+    $amenities = RoomData::getRoomAmenityDisplayItems($gallery_room_id);
+
+    if (empty($amenities)) {
+        $amenities = RoomData::getProviderFeatureDisplayItems($gallery_room_id, $physical_room_id);
+    }
 
     return [
         'success' => true,
@@ -516,7 +538,7 @@ function get_single_room_page_view_data(): array
         'room_size' => isset($room['room_size']) ? (string) $room['room_size'] : '',
         'room_rules' => RoomData::getRoomRulesText($gallery_room_id),
         'amenities_intro' => RoomData::getRoomAmenitiesIntroText($gallery_room_id),
-        'amenities' => RoomData::getRoomAmenityDisplayItems($gallery_room_id),
+        'amenities' => $amenities,
         'main_image_url' => $main_image_url,
         'gallery_urls' => $gallery_urls,
         'related_rooms' => $related_rooms,

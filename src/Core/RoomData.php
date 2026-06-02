@@ -18,6 +18,76 @@ final class RoomData
         return new RoomRepository();
     }
 
+    private static function isInternalImportText(string $value): bool
+    {
+        $value = \trim($value);
+
+        if ($value === '') {
+            return true;
+        }
+
+        return \preg_match('/^clock\s+pms\s+import$/i', $value) === 1
+            || \preg_match('/^imported\s+from\s+clock\s+pms\b/i', $value) === 1;
+    }
+
+    /**
+     * @param array<string, mixed> $metadata
+     */
+    private static function firstMetadataText(array $metadata, array $keys): string
+    {
+        foreach ($keys as $key) {
+            if (isset($metadata[$key]) && \is_scalar($metadata[$key])) {
+                $value = \trim((string) $metadata[$key]);
+
+                if ($value !== '' && !self::isInternalImportText($value)) {
+                    return $value;
+                }
+            }
+        }
+
+        foreach (['metadata', 'details', 'content', 'public', 'web', 'wbe'] as $containerKey) {
+            if (isset($metadata[$containerKey]) && \is_array($metadata[$containerKey])) {
+                $value = self::firstMetadataText($metadata[$containerKey], $keys);
+
+                if ($value !== '') {
+                    return $value;
+                }
+            }
+        }
+
+        return '';
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private static function providerMappingMetadata(string $entityType, int $localId, string $localTable): array
+    {
+        if ($localId <= 0 || !\class_exists(\MustHotelBooking\Provider\Storage\ProviderMappingRepository::class)) {
+            return [];
+        }
+
+        $mapping = (new \MustHotelBooking\Provider\Storage\ProviderMappingRepository())->findByLocal(
+            \MustHotelBooking\Provider\ProviderManager::CLOCK_MODE,
+            $entityType,
+            $localId,
+            $localTable
+        );
+
+        if (!\is_array($mapping)) {
+            return [];
+        }
+
+        $metadata = $mapping['metadata'] ?? [];
+
+        if (\is_string($metadata) && $metadata !== '') {
+            $decoded = \json_decode($metadata, true);
+            $metadata = \is_array($decoded) ? $decoded : [];
+        }
+
+        return \is_array($metadata) ? $metadata : [];
+    }
+
     public static function getRoomsTableName(): string
     {
         return self::repository()->getRoomsTableName();
@@ -254,12 +324,28 @@ final class RoomData
 
         $description = \trim((string) ($physicalRoom['description'] ?? ''));
 
-        if ($description === '') {
-            $description = \trim((string) ($physicalRoom['admin_notes'] ?? ''));
+        if (self::isInternalImportText($description)) {
+            $description = '';
         }
 
         if ($description === '') {
-            $description = (string) ($roomType['description'] ?? '');
+            $adminNotes = \trim((string) ($physicalRoom['admin_notes'] ?? ''));
+            $description = self::isInternalImportText($adminNotes) ? '' : $adminNotes;
+        }
+
+        if ($description === '') {
+            $physicalMetadata = self::providerMappingMetadata('physical_room', $physicalRoomId, 'mhb_rooms');
+            $description = self::firstMetadataText($physicalMetadata, ['description', 'descr', 'long_description', 'short_description', 'notes']);
+        }
+
+        if ($description === '') {
+            $roomTypeDescription = \trim((string) ($roomType['description'] ?? ''));
+            $description = self::isInternalImportText($roomTypeDescription) ? '' : $roomTypeDescription;
+        }
+
+        if ($description === '') {
+            $roomTypeMetadata = self::providerMappingMetadata('accommodation', $roomTypeId, 'must_rooms');
+            $description = self::firstMetadataText($roomTypeMetadata, ['description', 'descr', 'long_description', 'short_description', 'notes']);
         }
 
         return [
@@ -323,6 +409,36 @@ final class RoomData
         return \is_string($url) ? $url : '';
     }
 
+    /**
+     * @return array<int, string>
+     */
+    public static function getProviderImageUrls(int $roomTypeId, int $physicalRoomId = 0): array
+    {
+        $metadataBlocks = [];
+
+        if ($physicalRoomId > 0) {
+            $metadataBlocks[] = self::providerMappingMetadata('physical_room', $physicalRoomId, 'mhb_rooms');
+        }
+
+        if ($roomTypeId > 0) {
+            $metadataBlocks[] = self::providerMappingMetadata('accommodation', $roomTypeId, 'must_rooms');
+        }
+
+        $urls = [];
+
+        foreach ($metadataBlocks as $metadata) {
+            foreach (self::extractUrlValues($metadata, '/(image|photo|picture|gallery|media|thumbnail|url)$/i') as $url) {
+                if (\preg_match('/\.(?:jpe?g|png|webp|gif)(?:\?.*)?$/i', $url) !== 1) {
+                    continue;
+                }
+
+                $urls[] = $url;
+            }
+        }
+
+        return \array_values(\array_unique($urls));
+    }
+
     public static function getRoomRulesText(int $roomId): string
     {
         return self::getRoomMetaTextValue($roomId, 'room_rules');
@@ -365,6 +481,174 @@ final class RoomData
         }
 
         return \array_values($items);
+    }
+
+    /**
+     * @return array<int, array<string, string>>
+     */
+    public static function getProviderFeatureDisplayItems(int $roomTypeId, int $physicalRoomId = 0): array
+    {
+        $metadataBlocks = [];
+
+        if ($physicalRoomId > 0) {
+            $metadataBlocks[] = self::providerMappingMetadata('physical_room', $physicalRoomId, 'mhb_rooms');
+        }
+
+        if ($roomTypeId > 0) {
+            $metadataBlocks[] = self::providerMappingMetadata('accommodation', $roomTypeId, 'must_rooms');
+        }
+
+        $labels = [];
+
+        foreach ($metadataBlocks as $metadata) {
+            $labels = \array_merge($labels, self::extractFeatureLabels($metadata));
+        }
+
+        $items = [];
+
+        foreach (\array_values(\array_unique($labels)) as $label) {
+            $label = \trim((string) $label);
+
+            if ($label === '') {
+                continue;
+            }
+
+            $key = RoomCatalog::normalizeAmenityKey($label);
+            $icon = self::featureIconForLabel($label);
+
+            if ($key === '' || isset($items[$key])) {
+                continue;
+            }
+
+            $items[$key] = [
+                'key' => $key,
+                'label' => $label,
+                'icon' => MUST_HOTEL_BOOKING_URL . 'assets/img/' . $icon,
+            ];
+        }
+
+        return \array_values($items);
+    }
+
+    /**
+     * @param mixed $value
+     * @return array<int, string>
+     */
+    private static function extractFeatureLabels($value): array
+    {
+        if (!\is_array($value)) {
+            return [];
+        }
+
+        $labels = [];
+
+        foreach ($value as $key => $item) {
+            $keyString = \is_string($key) ? \strtolower($key) : '';
+            $isFeatureContainer = \preg_match('/(amenit|facilit|feature|equipment|service)/i', $keyString) === 1;
+
+            if ($isFeatureContainer) {
+                $labels = \array_merge($labels, self::flattenFeatureValue($item));
+                continue;
+            }
+
+            if (\is_array($item)) {
+                $labels = \array_merge($labels, self::extractFeatureLabels($item));
+            }
+        }
+
+        return \array_values(\array_filter(\array_map('strval', $labels)));
+    }
+
+    /**
+     * @param mixed $value
+     * @return array<int, string>
+     */
+    private static function flattenFeatureValue($value): array
+    {
+        if (\is_scalar($value)) {
+            return \preg_split('/\s*[,;|]\s*/', (string) $value, -1, \PREG_SPLIT_NO_EMPTY) ?: [];
+        }
+
+        if (!\is_array($value)) {
+            return [];
+        }
+
+        if (isset($value['items']) && \is_array($value['items'])) {
+            return self::flattenFeatureValue($value['items']);
+        }
+
+        $labels = [];
+
+        foreach ($value as $key => $item) {
+            if (\is_string($key) && \in_array($key, ['type', 'count', 'keys'], true)) {
+                continue;
+            }
+
+            if (\is_scalar($item)) {
+                $labels[] = (string) $item;
+                continue;
+            }
+
+            if (\is_array($item)) {
+                foreach (['name', 'label', 'title', 'description', 'text'] as $labelKey) {
+                    if (isset($item[$labelKey]) && \is_scalar($item[$labelKey])) {
+                        $labels[] = (string) $item[$labelKey];
+                        continue 2;
+                    }
+                }
+
+                $labels = \array_merge($labels, self::flattenFeatureValue($item));
+            }
+        }
+
+        return $labels;
+    }
+
+    private static function featureIconForLabel(string $label): string
+    {
+        $key = RoomCatalog::normalizeAmenityKey($label);
+        $map = [
+            'safetydepositbox' => 'safetydepositbox.svg',
+            'streaming' => 'streaming.svg',
+            'dryer' => 'dryer.svg',
+            'telephone' => 'telephone.svg',
+            'sheets' => 'linen.svg',
+            'cablechannels' => 'cablechannels.svg',
+            'flatscreentv' => 'flatscreentv.svg',
+            'refrigerator' => 'refrigerator.svg',
+            'airconditioning' => 'airconditioning.svg',
+        ];
+
+        return $map[$key] ?? 'check.svg';
+    }
+
+    /**
+     * @param mixed $value
+     * @return array<int, string>
+     */
+    private static function extractUrlValues($value, string $keyPattern): array
+    {
+        if (!\is_array($value)) {
+            return [];
+        }
+
+        $urls = [];
+
+        foreach ($value as $key => $item) {
+            $keyString = \is_string($key) ? $key : '';
+
+            if (\is_scalar($item) && ($keyString === '' || \preg_match($keyPattern, $keyString) === 1)) {
+                $url = \esc_url_raw((string) $item);
+
+                if ($url !== '') {
+                    $urls[] = $url;
+                }
+            } elseif (\is_array($item)) {
+                $urls = \array_merge($urls, self::extractUrlValues($item, $keyPattern));
+            }
+        }
+
+        return $urls;
     }
 
     /**
