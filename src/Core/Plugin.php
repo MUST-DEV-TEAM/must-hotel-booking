@@ -47,6 +47,7 @@ final class Plugin
         \MustHotelBooking\Core\Updater::boot();
         \MustHotelBooking\Provider\ProviderManager::registerDefaultProviders();
         \MustHotelBooking\Core\PluginSupportWidget::registerHooks();
+        \MustHotelBooking\Core\SupportDiagnosticsEndpoint::registerHooks();
         \MustHotelBooking\Core\ActivityLogger::registerHooks();
         \MustHotelBooking\Engine\LockEngine::registerHooks();
         \MustHotelBooking\Provider\Sync\ProviderSyncJobRunner::registerHooks();

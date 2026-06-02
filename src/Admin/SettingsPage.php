@@ -161,6 +161,11 @@ final class SettingsPage
         self::renderOverviewCards($diagnostics);
         self::renderTabNavigation($activeTab);
         self::renderActiveTab($activeTab, $forms, $diagnostics);
+
+        if ($activeTab === 'maintenance') {
+            \MustHotelBooking\Core\SupportDiagnosticsEndpoint::renderSettingsCard();
+        }
+
         echo '</div>';
     }
     /**
