@@ -774,6 +774,12 @@ final class ReservationEngine
         $paymentStatus = isset($options['payment_status'])
             ? \sanitize_key((string) $options['payment_status'])
             : 'pending';
+        $bookingSource = isset($options['booking_source'])
+            ? \sanitize_key((string) $options['booking_source'])
+            : 'website';
+        $notes = isset($options['notes'])
+            ? \sanitize_textarea_field((string) $options['notes'])
+            : '';
         $clearSelection = !isset($options['clear_selection']) || (bool) $options['clear_selection'];
 
         if (empty($context['is_valid'])) {
@@ -906,7 +912,9 @@ final class ReservationEngine
                 (float) ($pricing['total_price'] ?? 0.0),
                 $paymentStatus,
                 $reservationStatus,
-                $ratePlanId
+                $ratePlanId,
+                $bookingSource,
+                $notes
             );
 
             if ($reservationId <= 0) {
@@ -982,7 +990,9 @@ final class ReservationEngine
         float $totalPrice,
         string $paymentStatus = 'pending',
         string $reservationStatus = 'pending',
-        int $ratePlanId = 0
+        int $ratePlanId = 0,
+        string $bookingSource = 'website',
+        string $notes = ''
     ): int {
         if (
             $roomId <= 0 ||
@@ -1029,6 +1039,8 @@ final class ReservationEngine
                 'checkout' => $checkout,
                 'guests' => $guests,
                 'status' => $reservationStatus,
+                'booking_source' => $bookingSource,
+                'notes' => $notes,
                 'total_price' => $totalPrice,
                 'payment_status' => $paymentStatus,
                 'created_at' => $now,

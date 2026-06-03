@@ -212,6 +212,8 @@ function get_pending_confirmation_page_view_data(): array
     $submitted_coupon_code = isset($request_source['coupon_code']) ? \sanitize_text_field((string) \wp_unslash($request_source['coupon_code'])) : '';
     $persisted_coupon_code = isset($request_source['applied_coupon_code']) ? \sanitize_text_field((string) \wp_unslash($request_source['applied_coupon_code'])) : '';
     $stored_coupon_code = isset($flow_data['coupon_code']) ? \sanitize_text_field((string) $flow_data['coupon_code']) : '';
+    $stored_booking_source = isset($flow_data['booking_source']) ? \sanitize_key((string) $flow_data['booking_source']) : 'website';
+    $stored_booking_notes = isset($flow_data['booking_notes']) ? \sanitize_textarea_field((string) $flow_data['booking_notes']) : '';
     $coupon_code = '';
 
     if ($request_action === 'preview_coupon') {
@@ -350,6 +352,8 @@ function get_pending_confirmation_page_view_data(): array
                                 'payment_status' => (string) $payment_creation_options['payment_status'],
                                 'clear_selection' => (bool) $payment_creation_options['clear_selection'],
                                 'increment_coupon_usage' => (bool) $payment_creation_options['increment_coupon_usage'],
+                                'booking_source' => $stored_booking_source,
+                                'notes' => $stored_booking_notes,
                             ]
                         );
 
@@ -449,6 +453,8 @@ function get_pending_confirmation_page_view_data(): array
                             'payment_status' => (string) $payment_creation_options['payment_status'],
                             'clear_selection' => (bool) $payment_creation_options['clear_selection'],
                             'increment_coupon_usage' => (bool) $payment_creation_options['increment_coupon_usage'],
+                            'booking_source' => $stored_booking_source,
+                            'notes' => $stored_booking_notes,
                         ]
                     );
 

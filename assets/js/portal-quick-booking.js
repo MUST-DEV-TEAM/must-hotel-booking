@@ -99,6 +99,7 @@
         var checkoutCalendar = form.querySelector('[data-must-portal-checkout-calendar]');
         var statusEl = form.querySelector('[data-must-portal-date-status]');
         var estimateEl = form.querySelector('[data-must-portal-estimate-total]');
+        var roomOptionsEl = form.querySelector('[data-must-portal-room-options]');
 
         if (!roomSelect || !checkinInput || !checkoutInput || !checkinCalendar || !checkoutCalendar || typeof window.flatpickr !== 'function') {
             return;
@@ -110,6 +111,13 @@
             loading: false
         };
         var previewTimer = 0;
+        var roomsTimer = 0;
+        var initialRoomOptions = Array.prototype.slice.call(roomSelect.options).map(function (option) {
+            return {
+                value: option.value,
+                text: option.textContent
+            };
+        });
 
         function isDisabledCheckin(date) {
             return state.disabledCheckinDates.indexOf(formatDate(date)) !== -1;
@@ -173,6 +181,108 @@
             if (estimateEl) {
                 estimateEl.textContent = String(text || '');
             }
+        }
+
+        function resetRoomOptions() {
+            var selected = roomSelect.value;
+            roomSelect.innerHTML = '';
+            initialRoomOptions.forEach(function (option) {
+                var node = document.createElement('option');
+                node.value = option.value;
+                node.textContent = option.text;
+                roomSelect.appendChild(node);
+            });
+            roomSelect.value = selected;
+        }
+
+        function renderAvailableRooms(rooms) {
+            var selected = roomSelect.value;
+
+            if (!Array.isArray(rooms) || rooms.length === 0) {
+                if (roomOptionsEl) {
+                    roomOptionsEl.innerHTML = '';
+                }
+                resetRoomOptions();
+                return;
+            }
+
+            roomSelect.innerHTML = '';
+
+            var placeholder = document.createElement('option');
+            placeholder.value = '0';
+            placeholder.textContent = strings.selectRoomOption || 'Select a room';
+            roomSelect.appendChild(placeholder);
+
+            rooms.forEach(function (room) {
+                var option = document.createElement('option');
+                option.value = String(room.id || 0);
+                option.textContent = String(room.name || ('#' + option.value)) + (room.formatted_total ? ' - ' + String(room.formatted_total) : '');
+                roomSelect.appendChild(option);
+            });
+
+            if (selected && roomSelect.querySelector('option[value="' + selected.replace(/"/g, '\\"') + '"]')) {
+                roomSelect.value = selected;
+            }
+
+            if (roomOptionsEl) {
+                roomOptionsEl.innerHTML = rooms.map(function (room) {
+                    return '<button type="button" class="must-portal-room-option" data-room-id="' + String(room.id || 0) + '">' +
+                        '<strong>' + String(room.name || '') + '</strong>' +
+                        '<span>' + String(room.formatted_total || '') + '</span>' +
+                        '</button>';
+                }).join('');
+            }
+        }
+
+        function fetchAvailableRooms() {
+            var checkin = normalizeDateValue(checkinInput.value);
+            var checkout = normalizeDateValue(checkoutInput.value);
+            var guests = guestsInput ? String(Math.max(1, parseInt(guestsInput.value || '1', 10) || 1)) : '1';
+            var body;
+
+            checkinInput.value = checkin;
+            checkoutInput.value = checkout;
+
+            if (!isValidDateString(checkin) || !isValidDateString(checkout) || checkout <= checkin) {
+                return Promise.resolve();
+            }
+
+            body = new URLSearchParams();
+            body.set('action', String(config.availableRoomsAction || 'must_portal_quick_booking_available_rooms'));
+            body.set('nonce', String(config.availableRoomsNonce || ''));
+            body.set('checkin', checkin);
+            body.set('checkout', checkout);
+            body.set('guests', guests);
+
+            return window.fetch(String(config.ajaxUrl || ''), {
+                method: 'POST',
+                credentials: 'same-origin',
+                headers: {
+                    'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8'
+                },
+                body: body.toString()
+            }).then(function (response) {
+                if (!response.ok) {
+                    throw new Error('available-rooms-request-failed');
+                }
+
+                return response.json();
+            }).then(function (json) {
+                if (!json || !json.success || !json.data) {
+                    throw new Error('available-rooms-response-invalid');
+                }
+
+                renderAvailableRooms(json.data.rooms || []);
+            }).catch(function () {
+                if (roomOptionsEl) {
+                    roomOptionsEl.innerHTML = '';
+                }
+            });
+        }
+
+        function scheduleAvailableRooms() {
+            window.clearTimeout(roomsTimer);
+            roomsTimer = window.setTimeout(fetchAvailableRooms, 250);
         }
 
         function previewBooking() {
@@ -301,6 +411,7 @@
             disable: [isDisabledCheckout],
             onChange: function (selectedDates, dateStr) {
                 checkoutInput.value = dateStr || '';
+                scheduleAvailableRooms();
                 schedulePreview();
             }
         }));
@@ -322,6 +433,7 @@
                 }
 
                 fetchDisabledDates(dateStr);
+                scheduleAvailableRooms();
                 schedulePreview();
             }
         }));
@@ -337,6 +449,21 @@
 
         if (guestsInput) {
             guestsInput.addEventListener('change', function () {
+                fetchDisabledDates(checkinInput.value);
+                scheduleAvailableRooms();
+                schedulePreview();
+            });
+        }
+
+        if (roomOptionsEl) {
+            roomOptionsEl.addEventListener('click', function (event) {
+                var button = event.target && event.target.closest ? event.target.closest('[data-room-id]') : null;
+
+                if (!button) {
+                    return;
+                }
+
+                roomSelect.value = String(button.getAttribute('data-room-id') || '0');
                 fetchDisabledDates(checkinInput.value);
                 schedulePreview();
             });
@@ -356,6 +483,7 @@
         });
 
         fetchDisabledDates(checkinInput.value);
+        scheduleAvailableRooms();
         schedulePreview();
     }
 

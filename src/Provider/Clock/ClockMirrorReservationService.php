@@ -32,7 +32,14 @@ final class ClockMirrorReservationService
         $ratePlanId = isset($validatedRoom['rate_plan_id']) ? (int) $validatedRoom['rate_plan_id'] : 0;
         $pricing = isset($validatedRoom['pricing']) && \is_array($validatedRoom['pricing']) ? $validatedRoom['pricing'] : [];
         $bookingId = $this->generateBookingId();
+        $bookingSource = isset($options['booking_source']) ? \sanitize_key((string) $options['booking_source']) : 'website';
+        $extraNotes = isset($options['notes']) ? \trim(\sanitize_textarea_field((string) $options['notes'])) : '';
         $note = ReservationEngine::buildReservationNote($noteRoomId, $guestForm);
+
+        if ($extraNotes !== '') {
+            $note = \trim($note);
+            $note .= ($note !== '' ? "\n\n" : '') . $extraNotes;
+        }
         $cancellationPolicy = $ratePlanId > 0 ? CancellationEngine::getCancellationPolicy($ratePlanId) : null;
 
         if (\is_array($cancellationPolicy) && (string) ($cancellationPolicy['name'] ?? '') !== '') {
@@ -65,7 +72,7 @@ final class ClockMirrorReservationService
             'checkout' => (string) ($context['checkout'] ?? ''),
             'guests' => isset($validatedRoom['guests']) ? (int) $validatedRoom['guests'] : \max(1, (int) ($context['guests'] ?? 1)),
             'status' => isset($options['reservation_status']) ? \sanitize_key((string) $options['reservation_status']) : 'pending',
-            'booking_source' => 'website',
+            'booking_source' => $bookingSource !== '' ? $bookingSource : 'website',
             'notes' => $note,
             'total_price' => isset($pricing['total_price']) ? (float) $pricing['total_price'] : 0.0,
             'coupon_id' => $couponId,
@@ -81,7 +88,7 @@ final class ClockMirrorReservationService
             'provider_synced_at' => $now,
             'provider_payload_ref' => $providerReservationId !== '' ? $providerReservationId : $providerBookingId,
             'provider_metadata' => [
-                'source' => 'public_booking_mvp',
+                'source' => $bookingSource !== '' && $bookingSource !== 'website' ? $bookingSource : 'public_booking_mvp',
                 'payment_strategy' => 'clock_pms',
                 'provider_created_before_payment' => (string) ($options['payment_status'] ?? '') === 'pending',
                 'payment_reconciliation_required' => false,

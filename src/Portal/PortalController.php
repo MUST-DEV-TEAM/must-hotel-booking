@@ -28,6 +28,7 @@ use MustHotelBooking\Engine\AvailabilityEngine;
 use MustHotelBooking\Engine\BookingStatusEngine;
 use MustHotelBooking\Engine\PaymentEngine;
 use MustHotelBooking\Provider\Dto\DisabledDatesRequest;
+use MustHotelBooking\Provider\Dto\AvailabilitySearchRequest;
 use MustHotelBooking\Provider\Dto\QuoteRequest;
 use MustHotelBooking\Provider\Clock\ClockPaymentReconciliationService;
 use MustHotelBooking\Provider\ProviderManager;
@@ -121,6 +122,8 @@ final class PortalController
             'disabledDatesNonce' => \wp_create_nonce('must_portal_quick_booking_disabled_dates'),
             'previewAction' => 'must_portal_quick_booking_preview',
             'previewNonce' => \wp_create_nonce('must_portal_quick_booking_preview'),
+            'availableRoomsAction' => 'must_portal_quick_booking_available_rooms',
+            'availableRoomsNonce' => \wp_create_nonce('must_portal_quick_booking_available_rooms'),
             'today' => \current_time('Y-m-d'),
             'currency' => MustBookingConfig::get_currency(),
             'strings' => [
@@ -149,12 +152,12 @@ final class PortalController
         }
 
         $roomId = isset($_REQUEST['room_id']) ? \absint(\wp_unslash($_REQUEST['room_id'])) : 0;
-        $checkin = isset($_REQUEST['checkin']) ? \sanitize_text_field((string) \wp_unslash($_REQUEST['checkin'])) : '';
+        $checkin = self::normalizeQuickBookingDate($_REQUEST['checkin'] ?? '');
         $guests = isset($_REQUEST['guests']) ? \max(1, \absint(\wp_unslash($_REQUEST['guests']))) : 1;
         $windowDays = isset($_REQUEST['window_days']) ? \absint(\wp_unslash($_REQUEST['window_days'])) : 180;
         $windowDays = AvailabilityAjaxController::normalize_disabled_dates_window_days($windowDays);
 
-        if ($roomId <= 0 || !\MustHotelBooking\Admin\does_admin_quick_booking_room_exist($roomId)) {
+        if ($roomId <= 0 || !self::doesQuickBookingRoomExist($roomId)) {
             \wp_send_json_error(['message' => \__('Please select a valid room.', 'must-hotel-booking')], 400);
         }
 
@@ -162,7 +165,7 @@ final class PortalController
             \wp_send_json_error(['message' => \__('Invalid check-in date.', 'must-hotel-booking')], 400);
         }
 
-        $roomRow = \MustHotelBooking\Admin\get_admin_quick_booking_room_row($roomId);
+        $roomRow = self::getQuickBookingRoomRow($roomId);
         $category = isset($roomRow['category']) ? (string) $roomRow['category'] : 'standard-rooms';
         $provider = ProviderManager::configured();
 
@@ -196,6 +199,80 @@ final class PortalController
         ]);
     }
 
+    public static function ajaxQuickBookingAvailableRooms(): void
+    {
+        if (!\current_user_can(StaffAccess::CAP_RESERVATION_CREATE)) {
+            \wp_send_json_error(['message' => \__('You do not have permission to create reservations.', 'must-hotel-booking')], 403);
+        }
+
+        $nonce = isset($_REQUEST['nonce']) ? (string) \wp_unslash($_REQUEST['nonce']) : '';
+
+        if (!\wp_verify_nonce($nonce, 'must_portal_quick_booking_available_rooms')) {
+            \wp_send_json_error(['message' => \__('Security check failed.', 'must-hotel-booking')], 403);
+        }
+
+        $checkin = self::normalizeQuickBookingDate($_REQUEST['checkin'] ?? '');
+        $checkout = self::normalizeQuickBookingDate($_REQUEST['checkout'] ?? '');
+        $guests = isset($_REQUEST['guests']) ? \max(1, \absint(\wp_unslash($_REQUEST['guests']))) : 1;
+        $context = BookingValidationEngine::parseRequestContext(
+            [
+                'checkin' => $checkin,
+                'checkout' => $checkout,
+                'guests' => $guests,
+                'room_count' => 1,
+                'accommodation_type' => 'all',
+            ],
+            true
+        );
+
+        if (empty($context['is_valid'])) {
+            \wp_send_json_error([
+                'message' => \__('Please provide valid check-in and check-out dates.', 'must-hotel-booking'),
+                'errors' => (array) ($context['errors'] ?? []),
+            ], 400);
+        }
+
+        $provider = self::getBookingProvider();
+        $rooms = $provider->availability()->getAvailableRooms(AvailabilitySearchRequest::fromContext($context));
+        $items = [];
+
+        foreach ($rooms as $room) {
+            if (!\is_array($room)) {
+                continue;
+            }
+
+            $roomId = isset($room['id']) ? (int) $room['id'] : 0;
+
+            if ($roomId <= 0) {
+                continue;
+            }
+
+            $pricing = $provider->quote()->calculateTotal($roomId, $checkin, $checkout, $guests);
+
+            if (empty($pricing['success'])) {
+                continue;
+            }
+
+            $total = isset($pricing['total_price']) ? (float) $pricing['total_price'] : 0.0;
+
+            $items[] = [
+                'id' => $roomId,
+                'name' => (string) ($room['public_title'] ?? $room['name'] ?? ('#' . $roomId)),
+                'max_guests' => isset($room['max_guests']) ? (int) $room['max_guests'] : 0,
+                'total_price' => $total,
+                'currency' => MustBookingConfig::get_currency(),
+                'formatted_total' => \number_format_i18n($total, 2) . ' ' . MustBookingConfig::get_currency(),
+            ];
+        }
+
+        \wp_send_json_success([
+            'checkin' => $checkin,
+            'checkout' => $checkout,
+            'guests' => $guests,
+            'rooms' => $items,
+        ]);
+    }
+
     public static function ajaxQuickBookingPreview(): void
     {
         if (!\current_user_can(StaffAccess::CAP_RESERVATION_CREATE)) {
@@ -209,12 +286,12 @@ final class PortalController
         }
 
         $roomId = isset($_REQUEST['room_id']) ? \absint(\wp_unslash($_REQUEST['room_id'])) : 0;
-        $checkin = isset($_REQUEST['checkin']) ? \sanitize_text_field((string) \wp_unslash($_REQUEST['checkin'])) : '';
-        $checkout = isset($_REQUEST['checkout']) ? \sanitize_text_field((string) \wp_unslash($_REQUEST['checkout'])) : '';
+        $checkin = self::normalizeQuickBookingDate($_REQUEST['checkin'] ?? '');
+        $checkout = self::normalizeQuickBookingDate($_REQUEST['checkout'] ?? '');
         $guests = isset($_REQUEST['guests']) ? \max(1, \absint(\wp_unslash($_REQUEST['guests']))) : 1;
         $errors = [];
 
-        if ($roomId <= 0 || !\MustHotelBooking\Admin\does_admin_quick_booking_room_exist($roomId)) {
+        if ($roomId <= 0 || !self::doesQuickBookingRoomExist($roomId)) {
             $errors[] = \__('Please select a valid room.', 'must-hotel-booking');
         }
 
@@ -222,7 +299,7 @@ final class PortalController
             $errors[] = \__('Please provide valid check-in and check-out dates.', 'must-hotel-booking');
         }
 
-        if (empty($errors) && !\MustHotelBooking\Admin\is_admin_quick_booking_room_available($roomId, $checkin, $checkout)) {
+        if (empty($errors) && !self::getBookingProvider()->availability()->checkAvailability($roomId, $checkin, $checkout)) {
             $errors[] = \__('This room is not available for the selected dates.', 'must-hotel-booking');
         }
 
@@ -646,7 +723,7 @@ if (self::shouldBlockProviderBackedPortalAction($action)) {
 
         /** @var array<string, mixed> $rawPost */
         $rawPost = \is_array($_POST) ? $_POST : [];
-        $form = \MustHotelBooking\Admin\sanitize_admin_quick_booking_form_values($rawPost);
+        $form = self::sanitizeQuickBookingFormValues($rawPost);
         $form = self::mergeQuickBookingBillingFields($form, $rawPost);
         $errors = isset($form['errors']) && \is_array($form['errors']) ? $form['errors'] : [];
 
@@ -695,7 +772,7 @@ if (self::shouldBlockProviderBackedPortalAction($action)) {
         }
 
         $roomId = isset($form['room_id']) ? (int) $form['room_id'] : 0;
-        $room = \MustHotelBooking\Admin\get_admin_quick_booking_room_row($roomId);
+        $room = self::getQuickBookingRoomRow($roomId);
 
         if ($roomId <= 0 || !\is_array($room)) {
             return [
@@ -756,6 +833,8 @@ if (self::shouldBlockProviderBackedPortalAction($action)) {
             'billing_form' => $billingForm,
             'coupon_code' => '',
             'payment_method' => PaymentEngine::isStripeCheckoutConfigured() ? 'stripe' : PaymentEngine::getSelectedCheckoutPaymentMethod([], []),
+            'booking_source' => self::normalizeQuickBookingSource((string) ($form['booking_source'] ?? 'staff_portal')),
+            'booking_notes' => isset($form['notes']) ? (string) $form['notes'] : '',
         ]);
 
         return [
@@ -849,16 +928,186 @@ if (self::shouldBlockProviderBackedPortalAction($action)) {
     }
 
     /**
+     * @param mixed $value
+     */
+    private static function normalizeQuickBookingDate($value): string
+    {
+        $raw = \trim(\sanitize_text_field((string) \wp_unslash($value)));
+
+        if ($raw === '') {
+            return '';
+        }
+
+        if (AvailabilityEngine::isValidBookingDate($raw)) {
+            return $raw;
+        }
+
+        foreach (['m/d/Y', 'n/j/Y', 'm/j/Y', 'n/d/Y'] as $format) {
+            $date = \DateTimeImmutable::createFromFormat('!' . $format, $raw);
+            $errors = \DateTimeImmutable::getLastErrors();
+
+            if (
+                $date instanceof \DateTimeImmutable &&
+                (
+                    $errors === false ||
+                    (
+                        \is_array($errors) &&
+                        (int) ($errors['warning_count'] ?? 0) === 0 &&
+                        (int) ($errors['error_count'] ?? 0) === 0
+                    )
+                )
+            ) {
+                return $date->format('Y-m-d');
+            }
+        }
+
+        return '';
+    }
+
+    private static function getBookingProvider()
+    {
+        $provider = ProviderManager::configured();
+
+        return $provider !== null ? $provider : ProviderManager::active();
+    }
+
+    private static function doesQuickBookingRoomExist(int $roomId): bool
+    {
+        return $roomId > 0 && \is_array(self::getQuickBookingRoomRow($roomId));
+    }
+
+    /**
+     * @return array<string, mixed>|null
+     */
+    private static function getQuickBookingRoomRow(int $roomId): ?array
+    {
+        if ($roomId <= 0) {
+            return null;
+        }
+
+        return self::getBookingProvider()->reservations()->getCheckoutRoomData($roomId);
+    }
+
+    private static function normalizeQuickBookingSource(string $source): string
+    {
+        $source = \sanitize_key($source);
+        $options = self::getQuickBookingSourceOptions();
+
+        return isset($options[$source]) ? $source : 'staff_portal';
+    }
+
+    /**
+     * @return array<string, string>
+     */
+    private static function getQuickBookingSourceOptions(): array
+    {
+        $options = \function_exists('\MustHotelBooking\Admin\get_admin_quick_booking_source_options')
+            ? \MustHotelBooking\Admin\get_admin_quick_booking_source_options()
+            : [];
+
+        return \array_merge(
+            $options,
+            [
+                'walk_in' => \__('Walk-in', 'must-hotel-booking'),
+                'phone' => \__('Phone', 'must-hotel-booking'),
+                'reception' => \__('Reception', 'must-hotel-booking'),
+                'staff_portal' => \__('Staff Portal', 'must-hotel-booking'),
+            ]
+        );
+    }
+
+    /**
+     * @param array<string, mixed> $source
+     * @return array<string, mixed>
+     */
+    private static function sanitizeQuickBookingFormValues(array $source): array
+    {
+        $defaults = \MustHotelBooking\Admin\get_admin_quick_booking_form_defaults();
+        $roomId = isset($source['room_id']) ? \absint(\wp_unslash($source['room_id'])) : 0;
+        $checkin = self::normalizeQuickBookingDate($source['checkin'] ?? '');
+        $checkout = self::normalizeQuickBookingDate($source['checkout'] ?? '');
+        $guests = isset($source['guests']) ? \max(1, \absint(\wp_unslash($source['guests']))) : 1;
+        $guestName = isset($source['guest_name']) ? \sanitize_text_field((string) \wp_unslash($source['guest_name'])) : '';
+        $nameParts = \preg_split('/\s+/', \trim($guestName));
+        $nameParts = \is_array($nameParts) ? \array_values(\array_filter($nameParts)) : [];
+        $firstName = isset($nameParts[0]) ? (string) $nameParts[0] : '';
+        $lastName = \trim(\implode(' ', \array_slice($nameParts, 1)));
+        $phone = isset($source['phone']) ? \sanitize_text_field((string) \wp_unslash($source['phone'])) : '';
+        $phoneParts = \function_exists('MustHotelBooking\\Frontend\\split_checkout_phone_value')
+            ? \MustHotelBooking\Frontend\split_checkout_phone_value($phone)
+            : ['phone_country_code' => '', 'phone_number' => $phone];
+        $country = isset($source['country']) ? \sanitize_text_field((string) \wp_unslash($source['country'])) : (string) ($defaults['country'] ?? 'AL');
+        $email = isset($source['email']) ? \sanitize_email((string) \wp_unslash($source['email'])) : '';
+        $bookingSource = self::normalizeQuickBookingSource(isset($source['booking_source']) ? (string) \wp_unslash($source['booking_source']) : 'staff_portal');
+        $notes = isset($source['notes']) ? \sanitize_textarea_field((string) \wp_unslash($source['notes'])) : '';
+        $errors = [];
+        $room = self::getQuickBookingRoomRow($roomId);
+
+        if (!\is_array($room)) {
+            $errors[] = \__('Please select a valid room.', 'must-hotel-booking');
+        }
+
+        $context = BookingValidationEngine::parseRequestContext(
+            [
+                'checkin' => $checkin,
+                'checkout' => $checkout,
+                'guests' => $guests,
+                'room_count' => 1,
+                'accommodation_type' => \is_array($room) ? (string) ($room['category'] ?? 'standard-rooms') : 'standard-rooms',
+            ],
+            true
+        );
+
+        foreach ((array) ($context['errors'] ?? []) as $contextError) {
+            $errors[] = (string) $contextError;
+        }
+
+        if (\is_array($room)) {
+            $maxGuests = isset($room['max_guests']) ? (int) $room['max_guests'] : 1;
+
+            if ($maxGuests > 0 && $guests > $maxGuests) {
+                $errors[] = \__('Selected room cannot host that many guests.', 'must-hotel-booking');
+            }
+        }
+
+        $guestValidation = BookingValidationEngine::validateGuestForm([
+            'first_name' => $firstName,
+            'last_name' => $lastName !== '' ? $lastName : '-',
+            'email' => $email,
+            'phone_number' => (string) ($phoneParts['phone_number'] ?? ''),
+            'country' => $country,
+        ]);
+
+        foreach ($guestValidation as $guestError) {
+            $errors[] = $guestError;
+        }
+
+        if (empty($errors) && !self::getBookingProvider()->availability()->checkAvailability($roomId, $checkin, $checkout)) {
+            $errors[] = \__('This room is not available for the selected dates.', 'must-hotel-booking');
+        }
+
+        return [
+            'room_id' => $roomId,
+            'checkin' => $checkin,
+            'checkout' => $checkout,
+            'guests' => $guests,
+            'guest_name' => $guestName,
+            'phone' => $phone,
+            'email' => $email,
+            'country' => $country !== '' ? $country : (string) ($defaults['country'] ?? 'AL'),
+            'booking_source' => $bookingSource,
+            'notes' => $notes,
+            'errors' => \array_values(\array_unique($errors)),
+        ];
+    }
+
+    /**
      * @param array<string, mixed> $form
      * @return array<string, mixed>
      */
     private static function getQuickBookingPricingPreview(array $form): array
     {
-        $provider = ProviderManager::configured();
-
-        if ($provider === null) {
-            $provider = ProviderManager::active();
-        }
+        $provider = self::getBookingProvider();
 
         $pricing = $provider->quote()->calculateTotal(
             (int) ($form['room_id'] ?? 0),
@@ -869,21 +1118,6 @@ if (self::shouldBlockProviderBackedPortalAction($action)) {
 
         if (\is_array($pricing) && !empty($pricing['success'])) {
             return $pricing;
-        }
-
-        $fallbackTotal = \MustHotelBooking\Admin\get_admin_quick_booking_total_price(
-            (int) ($form['room_id'] ?? 0),
-            (string) ($form['checkin'] ?? ''),
-            (string) ($form['checkout'] ?? ''),
-            \max(1, (int) ($form['guests'] ?? 1))
-        );
-
-        if ($fallbackTotal > 0) {
-            return [
-                'success' => true,
-                'total_price' => $fallbackTotal,
-                'nights' => self::calculateQuickBookingNights((string) ($form['checkin'] ?? ''), (string) ($form['checkout'] ?? '')),
-            ];
         }
 
         return \is_array($pricing) ? $pricing : [
@@ -2595,8 +2829,9 @@ private static function handlePaymentRefund(): array
             'city' => '',
             'county' => '',
             'postcode' => '',
+            'booking_source' => 'staff_portal',
         ]);
-        $sourceOptions = \MustHotelBooking\Admin\get_admin_quick_booking_source_options();
+        $sourceOptions = self::getQuickBookingSourceOptions();
         $resolvedDefaults = \array_replace($defaults, $defaultOverrides);
         $form = isset($actionState['form']) && \is_array($actionState['form']) ? $actionState['form'] : $resolvedDefaults;
         $estimate = 0.0;
