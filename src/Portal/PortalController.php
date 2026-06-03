@@ -25,6 +25,7 @@ use MustHotelBooking\Core\MustBookingConfig;
 use MustHotelBooking\Core\StaffAccess;
 use MustHotelBooking\Engine\AvailabilityAjaxController;
 use MustHotelBooking\Engine\AvailabilityEngine;
+use MustHotelBooking\Engine\BookingValidationEngine;
 use MustHotelBooking\Engine\BookingStatusEngine;
 use MustHotelBooking\Engine\PaymentEngine;
 use MustHotelBooking\Provider\Dto\DisabledDatesRequest;
@@ -151,6 +152,7 @@ final class PortalController
             \wp_send_json_error(['message' => \__('Security check failed.', 'must-hotel-booking')], 403);
         }
 
+        try {
         $roomId = isset($_REQUEST['room_id']) ? \absint(\wp_unslash($_REQUEST['room_id'])) : 0;
         $checkin = self::normalizeQuickBookingDate($_REQUEST['checkin'] ?? '');
         $guests = isset($_REQUEST['guests']) ? \max(1, \absint(\wp_unslash($_REQUEST['guests']))) : 1;
@@ -197,6 +199,9 @@ final class PortalController
             'disabled_dates_status' => (string) ($disabledDates['disabled_dates_status'] ?? ''),
             'disabled_dates_message' => (string) ($disabledDates['disabled_dates_message'] ?? ''),
         ]);
+        } catch (\Throwable $throwable) {
+            \wp_send_json_error(['message' => \__('Unable to load unavailable dates for this room.', 'must-hotel-booking')], 500);
+        }
     }
 
     public static function ajaxQuickBookingAvailableRooms(): void
@@ -211,6 +216,7 @@ final class PortalController
             \wp_send_json_error(['message' => \__('Security check failed.', 'must-hotel-booking')], 403);
         }
 
+        try {
         $checkin = self::normalizeQuickBookingDate($_REQUEST['checkin'] ?? '');
         $checkout = self::normalizeQuickBookingDate($_REQUEST['checkout'] ?? '');
         $guests = isset($_REQUEST['guests']) ? \max(1, \absint(\wp_unslash($_REQUEST['guests']))) : 1;
@@ -271,6 +277,9 @@ final class PortalController
             'guests' => $guests,
             'rooms' => $items,
         ]);
+        } catch (\Throwable $throwable) {
+            \wp_send_json_error(['message' => \__('Unable to load available rooms for these dates.', 'must-hotel-booking')], 500);
+        }
     }
 
     public static function ajaxQuickBookingPreview(): void
@@ -285,6 +294,7 @@ final class PortalController
             \wp_send_json_error(['message' => \__('Security check failed.', 'must-hotel-booking')], 403);
         }
 
+        try {
         $roomId = isset($_REQUEST['room_id']) ? \absint(\wp_unslash($_REQUEST['room_id'])) : 0;
         $checkin = self::normalizeQuickBookingDate($_REQUEST['checkin'] ?? '');
         $checkout = self::normalizeQuickBookingDate($_REQUEST['checkout'] ?? '');
@@ -333,6 +343,9 @@ final class PortalController
             'formatted_total' => \number_format_i18n($total, 2) . ' ' . $currency,
             'nights' => isset($pricing['nights']) ? (int) $pricing['nights'] : 0,
         ]);
+        } catch (\Throwable $throwable) {
+            \wp_send_json_error(['message' => \__('Unable to preview this booking.', 'must-hotel-booking')], 500);
+        }
     }
 
     /**
@@ -721,6 +734,7 @@ if (self::shouldBlockProviderBackedPortalAction($action)) {
             ];
         }
 
+        try {
         /** @var array<string, mixed> $rawPost */
         $rawPost = \is_array($_POST) ? $_POST : [];
         $form = self::sanitizeQuickBookingFormValues($rawPost);
@@ -753,6 +767,13 @@ if (self::shouldBlockProviderBackedPortalAction($action)) {
 
         \wp_safe_redirect($redirectUrl !== '' ? $redirectUrl : ManagedPages::getBookingConfirmationPageUrl());
         exit;
+        } catch (\Throwable $throwable) {
+            return [
+                'module_key' => 'front_desk',
+                'errors' => [\__('Unable to prepare this booking. Please review the details and try again.', 'must-hotel-booking')],
+                'form' => isset($form) && \is_array($form) ? $form : null,
+            ];
+        }
     }
 
     /**
