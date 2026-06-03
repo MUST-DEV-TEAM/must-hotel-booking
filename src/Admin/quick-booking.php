@@ -3,9 +3,14 @@
 namespace MustHotelBooking\Admin;
 
 use MustHotelBooking\Core\MustBookingConfig;
+use MustHotelBooking\Engine\BookingValidationEngine;
 use MustHotelBooking\Engine\AvailabilityEngine;
 use MustHotelBooking\Engine\PricingEngine;
 use MustHotelBooking\Engine\ReservationEngine;
+use MustHotelBooking\Provider\Clock\ClockConfig;
+use MustHotelBooking\Provider\Clock\ClockRoomSelection;
+use MustHotelBooking\Provider\Dto\ReservationCreateRequest;
+use MustHotelBooking\Provider\ProviderManager;
 
 /**
  * Build Dashboard admin page URL.
@@ -41,9 +46,15 @@ function get_admin_quick_booking_form_defaults(): array
         'guest_name' => '',
         'phone' => '',
         'email' => '',
+        'country' => 'AL',
         'booking_source' => 'website',
         'notes' => '',
     ];
+}
+
+function is_admin_quick_booking_clock_mode(): bool
+{
+    return ProviderManager::configuredKey() === ProviderManager::CLOCK_MODE;
 }
 
 /**
@@ -53,6 +64,51 @@ function get_admin_quick_booking_form_defaults(): array
  */
 function get_admin_quick_booking_rooms(): array
 {
+    if (is_admin_quick_booking_clock_mode()) {
+        $inventory = \MustHotelBooking\Engine\get_inventory_repository();
+
+        if ($inventory->inventoryRoomsTableExists()) {
+            $rows = [];
+
+            foreach ($inventory->getInventoryUnitAdminRows() as $unit) {
+                if (!\is_array($unit)) {
+                    continue;
+                }
+
+                $unit_id = isset($unit['id']) ? (int) $unit['id'] : 0;
+                $room_type_id = isset($unit['room_type_id']) ? (int) $unit['room_type_id'] : 0;
+                $room_type = $room_type_id > 0 ? \MustHotelBooking\Engine\get_room_repository()->getRoomById($room_type_id) : null;
+                $room_name = \is_array($room_type) ? (string) ($room_type['name'] ?? '') : '';
+                $unit_label = \trim((string) ($unit['room_number'] ?? ''));
+
+                if ($unit_label === '') {
+                    $unit_label = \trim((string) ($unit['title'] ?? ''));
+                }
+
+                if ($unit_id <= 0 || $unit_label === '') {
+                    continue;
+                }
+
+                $selection = (new ClockRoomSelection())->resolve($unit_id);
+
+                if (!\is_array($selection) || empty($selection['is_physical'])) {
+                    continue;
+                }
+
+                $selection_room = isset($selection['room']) && \is_array($selection['room']) ? $selection['room'] : [];
+
+                $rows[] = [
+                    'id' => $unit_id,
+                    'name' => $room_name !== '' ? $unit_label . ' - ' . $room_name : $unit_label,
+                    'max_guests' => isset($selection_room['max_guests']) ? (int) $selection_room['max_guests'] : 1,
+                    'room_type_id' => $room_type_id,
+                ];
+            }
+
+            return $rows;
+        }
+    }
+
     if (\function_exists(__NAMESPACE__ . '\get_calendar_rooms')) {
         return get_calendar_rooms();
     }
@@ -90,6 +146,10 @@ function does_admin_quick_booking_room_exist(int $room_id): bool
         return false;
     }
 
+    if (is_admin_quick_booking_clock_mode()) {
+        return \is_array((new ClockRoomSelection())->resolve($room_id));
+    }
+
     if (\function_exists(__NAMESPACE__ . '\does_calendar_room_exist')) {
         return does_calendar_room_exist($room_id);
     }
@@ -104,6 +164,14 @@ function does_admin_quick_booking_room_exist(int $room_id): bool
  */
 function get_admin_quick_booking_room_row(int $room_id): ?array
 {
+    if (is_admin_quick_booking_clock_mode()) {
+        $selection = (new ClockRoomSelection())->resolve($room_id);
+
+        return \is_array($selection) && isset($selection['room']) && \is_array($selection['room'])
+            ? $selection['room']
+            : null;
+    }
+
     return \MustHotelBooking\Engine\get_room_repository()->getRoomById($room_id);
 }
 
@@ -112,6 +180,16 @@ function get_admin_quick_booking_room_row(int $room_id): ?array
  */
 function is_admin_quick_booking_room_available(int $room_id, string $checkin, string $checkout): bool
 {
+    if (is_admin_quick_booking_clock_mode()) {
+        $provider = ProviderManager::configured();
+
+        if ($provider === null || !ClockConfig::isPublicBookingConfigured()) {
+            return false;
+        }
+
+        return $provider->availability()->checkAvailability($room_id, $checkin, $checkout);
+    }
+
     return AvailabilityEngine::checkAvailability($room_id, $checkin, $checkout);
 }
 
@@ -120,6 +198,12 @@ function is_admin_quick_booking_room_available(int $room_id, string $checkin, st
  */
 function get_admin_quick_booking_total_price(int $room_id, string $checkin, string $checkout, int $guests): float
 {
+    if (is_admin_quick_booking_clock_mode()) {
+        $selection = (new ClockRoomSelection())->resolve($room_id);
+        $room_type_id = \is_array($selection) ? (int) ($selection['room_type_id'] ?? $room_id) : $room_id;
+        $room_id = $room_type_id > 0 ? $room_type_id : $room_id;
+    }
+
     $pricing = PricingEngine::calculateTotal($room_id, $checkin, $checkout, $guests);
 
     if (\is_array($pricing) && !empty($pricing['success']) && isset($pricing['total_price'])) {
@@ -163,6 +247,12 @@ function save_admin_quick_booking_guest(string $guest_name, string $email, strin
  */
 function create_admin_quick_booking_reservation(array $form): int
 {
+    $GLOBALS['must_hotel_booking_admin_quick_booking_errors'] = [];
+
+    if (is_admin_quick_booking_clock_mode()) {
+        return create_admin_quick_booking_clock_reservation($form);
+    }
+
     $room_id = isset($form['room_id']) ? (int) $form['room_id'] : 0;
     $checkin = isset($form['checkin']) ? (string) $form['checkin'] : '';
     $checkout = isset($form['checkout']) ? (string) $form['checkout'] : '';
@@ -196,6 +286,134 @@ function create_admin_quick_booking_reservation(array $form): int
 }
 
 /**
+ * @param array<string, mixed> $form
+ */
+function create_admin_quick_booking_clock_reservation(array $form): int
+{
+    $provider = ProviderManager::configured();
+
+    if ($provider === null || !ClockConfig::isPublicBookingConfigured()) {
+        $GLOBALS['must_hotel_booking_admin_quick_booking_errors'] = ClockConfig::publicBookingConfigurationErrors();
+
+        return 0;
+    }
+
+    $room_id = isset($form['room_id']) ? (int) $form['room_id'] : 0;
+    $selection = (new ClockRoomSelection())->resolve($room_id);
+
+    if (!\is_array($selection) || empty($selection['is_physical'])) {
+        $GLOBALS['must_hotel_booking_admin_quick_booking_errors'] = [
+            \__('Quick Booking in Clock mode requires a mapped individual room, not a room type.', 'must-hotel-booking'),
+        ];
+
+        return 0;
+    }
+
+    $guest_name = isset($form['guest_name']) ? \trim((string) $form['guest_name']) : '';
+    $name_parts = \preg_split('/\s+/', $guest_name);
+    $name_parts = \is_array($name_parts) ? \array_values(\array_filter($name_parts)) : [];
+    $first_name = isset($name_parts[0]) ? (string) $name_parts[0] : $guest_name;
+    $last_name = \trim(\implode(' ', \array_slice($name_parts, 1)));
+
+    if ($last_name === '') {
+        $last_name = '-';
+    }
+
+    $phone = isset($form['phone']) ? (string) $form['phone'] : '';
+    $phone_parts = \function_exists('MustHotelBooking\Frontend\split_checkout_phone_value')
+        ? \MustHotelBooking\Frontend\split_checkout_phone_value($phone)
+        : ['phone_country_code' => '', 'phone_number' => $phone];
+
+    $guest_form = [
+        'first_name' => $first_name,
+        'last_name' => $last_name,
+        'email' => isset($form['email']) ? (string) $form['email'] : '',
+        'phone' => $phone,
+        'phone_country_code' => (string) ($phone_parts['phone_country_code'] ?? ''),
+        'phone_number' => (string) ($phone_parts['phone_number'] ?? $phone),
+        'country' => isset($form['country']) ? (string) $form['country'] : 'AL',
+        'special_requests' => isset($form['notes']) ? (string) $form['notes'] : '',
+        'marketing_opt_in' => '',
+        'room_guests' => [
+            $room_id => [
+                'guest_count' => (string) \max(1, (int) ($form['guests'] ?? 1)),
+                'first_name' => $first_name,
+                'last_name' => $last_name,
+            ],
+        ],
+    ];
+    $context = BookingValidationEngine::parseRequestContext(
+        [
+            'checkin' => (string) ($form['checkin'] ?? ''),
+            'checkout' => (string) ($form['checkout'] ?? ''),
+            'guests' => \max(1, (int) ($form['guests'] ?? 1)),
+            'room_count' => 1,
+            'accommodation_type' => 'standard-rooms',
+        ],
+        true
+    );
+    $context = BookingValidationEngine::applyFixedRoomContext($context, (array) ($selection['room'] ?? []));
+
+    if (!\function_exists('MustHotelBooking\Frontend\clear_booking_selection')) {
+        $GLOBALS['must_hotel_booking_admin_quick_booking_errors'] = [
+            \__('Booking selection services are not loaded.', 'must-hotel-booking'),
+        ];
+
+        return 0;
+    }
+
+    \MustHotelBooking\Frontend\clear_booking_selection();
+
+    if (!$provider->reservations()->ensureRoomLock($room_id, (string) $context['checkin'], (string) $context['checkout'])) {
+        $GLOBALS['must_hotel_booking_admin_quick_booking_errors'] = [
+            \__('This room is no longer available in Clock for the selected dates.', 'must-hotel-booking'),
+        ];
+
+        return 0;
+    }
+
+    if (!\MustHotelBooking\Frontend\add_room_to_booking_selection($room_id, $context, 0)) {
+        $GLOBALS['must_hotel_booking_admin_quick_booking_errors'] = [
+            \__('Unable to store the selected Clock room before booking.', 'must-hotel-booking'),
+        ];
+
+        return 0;
+    }
+
+    \MustHotelBooking\Frontend\update_booking_selection_flow_data([
+        'booking_mode' => 'fixed-room',
+        'fixed_room_id' => $room_id,
+        'guest_form' => $guest_form,
+        'coupon_code' => '',
+    ]);
+
+    $result = $provider->reservations()->createReservations(
+        new ReservationCreateRequest(
+            $context,
+            $guest_form,
+            '',
+            [
+                'reservation_status' => 'confirmed',
+                'payment_status' => 'unpaid',
+                'clear_selection' => true,
+            ]
+        )
+    );
+
+    if (!empty($result['errors'])) {
+        $GLOBALS['must_hotel_booking_admin_quick_booking_errors'] = (array) $result['errors'];
+
+        return 0;
+    }
+
+    $reservation_ids = isset($result['reservation_ids']) && \is_array($result['reservation_ids'])
+        ? \array_values(\array_filter(\array_map('intval', $result['reservation_ids'])))
+        : [];
+
+    return isset($reservation_ids[0]) ? (int) $reservation_ids[0] : 0;
+}
+
+/**
  * Sanitize and validate quick booking form values.
  *
  * @param array<string, mixed> $source
@@ -211,6 +429,7 @@ function sanitize_admin_quick_booking_form_values(array $source): array
     $guest_name = isset($source['guest_name']) ? \sanitize_text_field((string) \wp_unslash($source['guest_name'])) : '';
     $phone = isset($source['phone']) ? \sanitize_text_field((string) \wp_unslash($source['phone'])) : '';
     $email = isset($source['email']) ? \sanitize_email((string) \wp_unslash($source['email'])) : '';
+    $country = isset($source['country']) ? \sanitize_text_field((string) \wp_unslash($source['country'])) : (string) $defaults['country'];
     $booking_source = isset($source['booking_source']) ? \sanitize_key((string) \wp_unslash($source['booking_source'])) : 'website';
     $notes = isset($source['notes']) ? \sanitize_textarea_field((string) \wp_unslash($source['notes'])) : '';
     $errors = [];
@@ -233,6 +452,14 @@ function sanitize_admin_quick_booking_form_values(array $source): array
         $errors[] = \__('Please provide the guest name.', 'must-hotel-booking');
     }
 
+    if (is_admin_quick_booking_clock_mode() && $phone === '') {
+        $errors[] = \__('Please provide the guest phone number for Clock booking.', 'must-hotel-booking');
+    }
+
+    if (is_admin_quick_booking_clock_mode() && $country === '') {
+        $errors[] = \__('Please provide the guest country for Clock booking.', 'must-hotel-booking');
+    }
+
     if ($email === '' || !\is_email($email)) {
         $errors[] = \__('Please provide a valid guest email.', 'must-hotel-booking');
     }
@@ -253,6 +480,14 @@ function sanitize_admin_quick_booking_form_values(array $source): array
         }
     }
 
+    if (is_admin_quick_booking_clock_mode()) {
+        $selection = $room_id > 0 ? (new ClockRoomSelection())->resolve($room_id) : null;
+
+        if (!\is_array($selection) || empty($selection['is_physical'])) {
+            $errors[] = \__('Please select a mapped individual Clock room, not an accommodation type.', 'must-hotel-booking');
+        }
+    }
+
     if (empty($errors) && !is_admin_quick_booking_room_available($room_id, $checkin, $checkout)) {
         $errors[] = \__('This room is not available for the selected dates.', 'must-hotel-booking');
     }
@@ -265,6 +500,7 @@ function sanitize_admin_quick_booking_form_values(array $source): array
         'guest_name' => $guest_name,
         'phone' => $phone,
         'email' => $email,
+        'country' => $country !== '' ? $country : (string) $defaults['country'],
         'booking_source' => $booking_source,
         'notes' => $notes,
         'errors' => $errors,
@@ -320,8 +556,14 @@ function maybe_handle_admin_quick_booking_submission(): array
     $reservation_id = create_admin_quick_booking_reservation($form);
 
     if ($reservation_id <= 0) {
+        $providerErrors = isset($GLOBALS['must_hotel_booking_admin_quick_booking_errors']) && \is_array($GLOBALS['must_hotel_booking_admin_quick_booking_errors'])
+            ? $GLOBALS['must_hotel_booking_admin_quick_booking_errors']
+            : [];
+
         return [
-            'errors' => [\__('Unable to create reservation. This room may no longer be available for the selected dates.', 'must-hotel-booking')],
+            'errors' => !empty($providerErrors)
+                ? $providerErrors
+                : [\__('Unable to create reservation. This room may no longer be available for the selected dates.', 'must-hotel-booking')],
             'form' => $form,
         ];
     }
@@ -567,6 +809,11 @@ function render_admin_quick_booking_panel(?array $submitted_form = null, array $
     echo '<label class="must-quick-booking-field">';
     echo '<span>' . \esc_html__('Email', 'must-hotel-booking') . '</span>';
     echo '<input type="email" name="email" value="' . \esc_attr((string) ($form['email'] ?? '')) . '" required />';
+    echo '</label>';
+
+    echo '<label class="must-quick-booking-field">';
+    echo '<span>' . \esc_html__('Country', 'must-hotel-booking') . '</span>';
+    echo '<input type="text" name="country" value="' . \esc_attr((string) ($form['country'] ?? 'AL')) . '" maxlength="2" required />';
     echo '</label>';
 
     echo '<label class="must-quick-booking-field">';

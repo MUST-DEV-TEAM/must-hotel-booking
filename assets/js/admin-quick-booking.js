@@ -135,7 +135,7 @@
                     setPrice(priceElement, config.strings.priceUnavailable || '-');
 
                     if (submitButton) {
-                        submitButton.disabled = false;
+                        submitButton.disabled = true;
                     }
                 });
         };
