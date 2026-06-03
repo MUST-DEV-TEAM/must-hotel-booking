@@ -703,7 +703,7 @@ final class PaymentEngine
      * @param array<int, int> $couponIds
      * @return array<string, mixed>
      */
-    public static function createStripeCheckoutSession(array $reservationIds, array $guestForm, float $totalAmount, string $currency, array $couponIds = []): array
+    public static function createStripeCheckoutSession(array $reservationIds, array $guestForm, float $totalAmount, string $currency, array $couponIds = [], array $options = []): array
     {
         $reservationIds = self::normalizeReservationIds($reservationIds);
 
@@ -726,22 +726,32 @@ final class PaymentEngine
             ];
         }
 
-        $successUrl = \add_query_arg(
-            [
-                'reservation_ids' => \implode(',', $reservationIds),
-                'payment_method' => 'stripe',
-                'stripe_return' => 'success',
-                'session_id' => '{CHECKOUT_SESSION_ID}',
-            ],
-            ManagedPages::getBookingConfirmationPageUrl()
-        );
-        $cancelUrl = \add_query_arg(
-            [
-                'payment_method' => 'stripe',
-                'stripe_return' => 'cancel',
-            ],
-            ManagedPages::getBookingConfirmationPageUrl()
-        );
+        $successUrl = isset($options['success_url']) ? \esc_url_raw((string) $options['success_url']) : '';
+        $cancelUrl = isset($options['cancel_url']) ? \esc_url_raw((string) $options['cancel_url']) : '';
+
+        if ($successUrl === '') {
+            $successUrl = \add_query_arg(
+                [
+                    'reservation_ids' => \implode(',', $reservationIds),
+                    'payment_method' => 'stripe',
+                    'stripe_return' => 'success',
+                    'session_id' => '{CHECKOUT_SESSION_ID}',
+                ],
+                ManagedPages::getBookingConfirmationPageUrl()
+            );
+        }
+
+        if ($cancelUrl === '') {
+            $cancelUrl = \add_query_arg(
+                [
+                    'payment_method' => 'stripe',
+                    'stripe_return' => 'cancel',
+                ],
+                ManagedPages::getBookingConfirmationPageUrl()
+            );
+        }
+
+        $successUrl = \str_replace('%7BCHECKOUT_SESSION_ID%7D', '{CHECKOUT_SESSION_ID}', $successUrl);
         $expiresAt = \time() + (self::getStripeCheckoutExpiryMinutes() * 60);
         $payload = [
             'mode' => 'payment',

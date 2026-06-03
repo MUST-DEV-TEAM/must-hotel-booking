@@ -1,7 +1,5 @@
 <?php
-
 namespace MustHotelBooking\Portal;
-
 use MustHotelBooking\Admin\AccommodationAdminDataProvider;
 use MustHotelBooking\Admin\AccommodationAdminQuery;
 use MustHotelBooking\Admin\AvailabilityAdminDataProvider;
@@ -36,7 +34,6 @@ use MustHotelBooking\Provider\Clock\ClockPaymentReconciliationService;
 use MustHotelBooking\Provider\ProviderManager;
 use MustHotelBooking\Provider\ProviderReservationActionPolicy;
 use MustHotelBooking\Provider\ProviderReservationView;
-
 final class PortalController
 {
     /**
@@ -47,10 +44,11 @@ final class PortalController
         // Redirect deprecated routes (quick-booking, accommodations, availability-rules)
         // before any rendering takes place.
         self::maybeRedirectDeprecatedRoute();
-
         $moduleKey = PortalRouter::getRequestedModuleKey();
         $actionState = self::handlePostedActions($moduleKey);
-
+        if ($moduleKey === 'front_desk') {
+            self::maybeSyncPortalStripeReturn();
+        }
         return [
             'branding' => self::getBrandingData(),
             'user' => self::getCurrentUserData(),
@@ -65,87 +63,87 @@ final class PortalController
             'module_data' => self::getModuleData($moduleKey, $actionState),
         ];
     }
-
+    private static function maybeSyncPortalStripeReturn(): void
+    {
+        $portalPayment = isset($_GET['portal_payment'])
+            ? \sanitize_key((string) \wp_unslash($_GET['portal_payment']))
+            : '';
+        if ($portalPayment !== 'success') {
+            return;
+        }
+        $sessionId = isset($_GET['session_id'])
+            ? \sanitize_text_field((string) \wp_unslash($_GET['session_id']))
+            : '';
+        $reservationIds = isset($_GET['reservation_ids'])
+            ? \array_values(\array_filter(\array_map('intval', \explode(',', (string) \wp_unslash($_GET['reservation_ids'])))))
+            : [];
+        if ($sessionId === '' || empty($reservationIds)) {
+            return;
+        }
+        PaymentEngine::syncReturnSession('stripe', $sessionId, $reservationIds);
+    }
     private static function isPortalPathRequest(): bool
-{
-    return self::isCurrentRequestPathUnder(PortalRouter::getPortalBasePath(), true);
-}
-
-private static function isPortalLoginPathRequest(): bool
-{
-    return self::isCurrentRequestPathUnder(PortalRouter::getPortalLoginPath(), false);
-}
-
-private static function isCurrentRequestPathUnder(string $configuredPath, bool $allowChildren): bool
-{
-    if (\is_admin()) {
-        return false;
+    {
+        return self::isCurrentRequestPathUnder(PortalRouter::getPortalBasePath(), true);
     }
-
-    $configuredPath = \trim($configuredPath, '/');
-
-    if ($configuredPath === '') {
-        return false;
+    private static function isPortalLoginPathRequest(): bool
+    {
+        return self::isCurrentRequestPathUnder(PortalRouter::getPortalLoginPath(), false);
     }
-
-    $requestUri = isset($_SERVER['REQUEST_URI']) ? (string) \wp_unslash($_SERVER['REQUEST_URI']) : '';
-    $requestPath = \wp_parse_url($requestUri, \PHP_URL_PATH);
-
-    if (!\is_string($requestPath) || $requestPath === '') {
-        return false;
+    private static function isCurrentRequestPathUnder(string $configuredPath, bool $allowChildren): bool
+    {
+        if (\is_admin()) {
+            return false;
+        }
+        $configuredPath = \trim($configuredPath, '/');
+        if ($configuredPath === '') {
+            return false;
+        }
+        $requestUri = isset($_SERVER['REQUEST_URI']) ? (string) \wp_unslash($_SERVER['REQUEST_URI']) : '';
+        $requestPath = \wp_parse_url($requestUri, \PHP_URL_PATH);
+        if (!\is_string($requestPath) || $requestPath === '') {
+            return false;
+        }
+        $sitePath = \wp_parse_url(\home_url('/'), \PHP_URL_PATH);
+        $sitePath = \is_string($sitePath) ? \trim($sitePath, '/') : '';
+        $requestPath = \trim($requestPath, '/');
+        if ($sitePath !== '' && \strpos($requestPath, $sitePath . '/') === 0) {
+            $requestPath = \substr($requestPath, \strlen($sitePath) + 1);
+        } elseif ($sitePath !== '' && $requestPath === $sitePath) {
+            $requestPath = '';
+        }
+        if ($requestPath === $configuredPath) {
+            return true;
+        }
+        return $allowChildren && \strpos($requestPath, $configuredPath . '/') === 0;
     }
-
-    $sitePath = \wp_parse_url(\home_url('/'), \PHP_URL_PATH);
-    $sitePath = \is_string($sitePath) ? \trim($sitePath, '/') : '';
-    $requestPath = \trim($requestPath, '/');
-
-    if ($sitePath !== '' && \strpos($requestPath, $sitePath . '/') === 0) {
-        $requestPath = \substr($requestPath, \strlen($sitePath) + 1);
-    } elseif ($sitePath !== '' && $requestPath === $sitePath) {
-        $requestPath = '';
-    }
-
-    if ($requestPath === $configuredPath) {
-        return true;
-    }
-
-    return $allowChildren && \strpos($requestPath, $configuredPath . '/') === 0;
-}
-
     public static function enqueueAssets(): void
     {
         $isPortalRequest = PortalRouter::isPortalRequest() || self::isPortalPathRequest();
         $isLoginRequest = PortalRouter::isLoginRequest() || self::isPortalLoginPathRequest();
-
         if (!$isPortalRequest && !$isLoginRequest) {
             return;
         }
-
         \wp_enqueue_style('dashicons');
-
         $portalCssPath = \defined('MUST_HOTEL_BOOKING_PATH') ? MUST_HOTEL_BOOKING_PATH . 'assets/css/portal.css' : '';
         $portalCssVersion = $portalCssPath !== '' && \file_exists($portalCssPath)
             ? (string) \filemtime($portalCssPath)
             : MUST_HOTEL_BOOKING_VERSION;
-
         \wp_enqueue_style(
             'must-hotel-booking-portal',
             MUST_HOTEL_BOOKING_URL . 'assets/css/portal.css',
             ['dashicons'],
             $portalCssVersion
         );
-
         if (!$isPortalRequest) {
-    return;
-}
-
+            return;
+        }
         \wp_enqueue_style(
             'must-hotel-booking-flatpickr',
             'https://cdn.jsdelivr.net/npm/flatpickr/dist/flatpickr.min.css',
             [],
             '4.6.13'
         );
-
         \wp_enqueue_script(
             'must-hotel-booking-flatpickr',
             'https://cdn.jsdelivr.net/npm/flatpickr',
@@ -153,12 +151,10 @@ private static function isCurrentRequestPathUnder(string $configuredPath, bool $
             '4.6.13',
             true
         );
-
         $quickBookingScriptPath = \defined('MUST_HOTEL_BOOKING_PATH') ? MUST_HOTEL_BOOKING_PATH . 'assets/js/portal-quick-booking.js' : '';
         $quickBookingScriptVersion = $quickBookingScriptPath !== '' && \file_exists($quickBookingScriptPath)
             ? (string) \filemtime($quickBookingScriptPath)
             : MUST_HOTEL_BOOKING_VERSION;
-
         \wp_enqueue_script(
             'must-hotel-booking-portal-quick-booking',
             MUST_HOTEL_BOOKING_URL . 'assets/js/portal-quick-booking.js',
@@ -166,7 +162,6 @@ private static function isCurrentRequestPathUnder(string $configuredPath, bool $
             $quickBookingScriptVersion,
             true
         );
-
         \wp_localize_script('must-hotel-booking-portal-quick-booking', 'MustPortalQuickBooking', [
             'ajaxUrl' => \admin_url('admin-ajax.php'),
             'today' => \current_time('Y-m-d'),
@@ -176,42 +171,33 @@ private static function isCurrentRequestPathUnder(string $configuredPath, bool $
             ],
         ]);
     }
-
     public static function ajaxQuickBookingDisabledDates(): void
     {
         if (!\current_user_can(StaffAccess::CAP_RESERVATION_CREATE)) {
             \wp_send_json_error(['message' => \__('You do not have permission to create reservations.', 'must-hotel-booking')], 403);
         }
-
         $nonce = isset($_REQUEST['nonce']) ? (string) \wp_unslash($_REQUEST['nonce']) : '';
-
         if (!\wp_verify_nonce($nonce, 'must_portal_quick_booking_disabled_dates')) {
             \wp_send_json_error(['message' => \__('Security check failed.', 'must-hotel-booking')], 403);
         }
-
         try {
             $roomId = isset($_REQUEST['room_id']) ? \absint(\wp_unslash($_REQUEST['room_id'])) : 0;
             $checkin = self::normalizeQuickBookingDate($_REQUEST['checkin'] ?? '');
             $guests = isset($_REQUEST['guests']) ? \max(1, \absint(\wp_unslash($_REQUEST['guests']))) : 1;
             $windowDays = isset($_REQUEST['window_days']) ? \absint(\wp_unslash($_REQUEST['window_days'])) : 180;
             $windowDays = AvailabilityAjaxController::normalize_disabled_dates_window_days($windowDays);
-
             if ($roomId <= 0 || !self::doesQuickBookingRoomExist($roomId)) {
                 \wp_send_json_error(['message' => \__('Please select a valid room.', 'must-hotel-booking')], 400);
             }
-
             if ($checkin !== '' && !AvailabilityEngine::isValidBookingDate($checkin)) {
                 \wp_send_json_error(['message' => \__('Invalid check-in date.', 'must-hotel-booking')], 400);
             }
-
             $roomRow = self::getQuickBookingRoomRow($roomId);
             $category = isset($roomRow['category']) ? (string) $roomRow['category'] : 'standard-rooms';
             $provider = ProviderManager::configured();
-
             if ($provider === null) {
                 $provider = ProviderManager::active();
             }
-
             try {
                 $disabledDates = $provider->availability()->getDisabledDates(
                     new DisabledDatesRequest($checkin, $guests, 1, $roomId, $category, $windowDays)
@@ -219,7 +205,6 @@ private static function isCurrentRequestPathUnder(string $configuredPath, bool $
             } catch (\Throwable $throwable) {
                 \wp_send_json_error(['message' => \__('Unable to load unavailable dates for this room.', 'must-hotel-booking')], 500);
             }
-
             \wp_send_json_success([
                 'room_id' => $roomId,
                 'checkin' => $checkin,
@@ -240,31 +225,24 @@ private static function isCurrentRequestPathUnder(string $configuredPath, bool $
             \wp_send_json_error(['message' => \__('Unable to load unavailable dates for this room.', 'must-hotel-booking')], 500);
         }
     }
-
     public static function ajaxQuickBookingAvailableRooms(): void
     {
         if (!\current_user_can(StaffAccess::CAP_RESERVATION_CREATE)) {
             \wp_send_json_error(['message' => \__('You do not have permission to create reservations.', 'must-hotel-booking')], 403);
         }
-
         $nonce = isset($_REQUEST['nonce']) ? (string) \wp_unslash($_REQUEST['nonce']) : '';
-
         if (!\wp_verify_nonce($nonce, 'must_portal_quick_booking_available_rooms')) {
             \wp_send_json_error(['message' => \__('Security check failed.', 'must-hotel-booking')], 403);
         }
-
         try {
             $checkin = self::normalizeQuickBookingDate($_REQUEST['checkin'] ?? '');
             $checkout = self::normalizeQuickBookingDate($_REQUEST['checkout'] ?? '');
             $guests = isset($_REQUEST['guests']) ? \max(1, \absint(\wp_unslash($_REQUEST['guests']))) : 1;
             $roomTypeId = isset($_REQUEST['room_type_id']) ? \absint(\wp_unslash($_REQUEST['room_type_id'])) : 0;
-
             $accommodationType = 'all';
-
             if ($roomTypeId > 0 && RoomCatalog::isClockBackendMode()) {
                 $accommodationType = RoomCatalog::roomTypeBookingValue($roomTypeId);
             }
-
             $context = BookingValidationEngine::parseRequestContext(
                 [
                     'checkin' => $checkin,
@@ -275,63 +253,47 @@ private static function isCurrentRequestPathUnder(string $configuredPath, bool $
                 ],
                 true
             );
-
             if (empty($context['is_valid'])) {
                 \wp_send_json_error([
                     'message' => \__('Please provide valid check-in and check-out dates.', 'must-hotel-booking'),
                     'errors' => (array) ($context['errors'] ?? []),
                 ], 400);
             }
-
             $provider = self::getBookingProvider();
             $rooms = $provider->availability()->getAvailableRooms(AvailabilitySearchRequest::fromContext($context));
             $items = [];
             $pricingCache = [];
-
             foreach ($rooms as $room) {
                 if (!\is_array($room)) {
                     continue;
                 }
-
                 $physicalRoomId = isset($room['id']) ? (int) $room['id'] : 0;
-
                 if ($physicalRoomId <= 0) {
                     continue;
                 }
-
                 $parentRoomTypeId = isset($room['room_type_id']) ? (int) $room['room_type_id'] : 0;
-
                 if ($roomTypeId > 0 && $parentRoomTypeId > 0 && $parentRoomTypeId !== $roomTypeId) {
                     continue;
                 }
-
                 $quoteRoomId = $parentRoomTypeId > 0 ? $parentRoomTypeId : $physicalRoomId;
                 $cacheKey = $quoteRoomId . '|' . $checkin . '|' . $checkout . '|' . $guests;
-
                 if (!isset($pricingCache[$cacheKey])) {
                     $pricingCache[$cacheKey] = $provider->quote()->calculateTotal($quoteRoomId, $checkin, $checkout, $guests);
                 }
-
                 $pricing = \is_array($pricingCache[$cacheKey]) ? $pricingCache[$cacheKey] : [];
-
                 if (empty($pricing['success'])) {
                     continue;
                 }
-
                 $total = isset($pricing['total_price']) ? (float) $pricing['total_price'] : 0.0;
                 $currency = MustBookingConfig::get_currency();
-
                 $roomTypeName = '';
-
                 if ($parentRoomTypeId > 0) {
                     $parentRoom = \MustHotelBooking\Engine\get_room_repository()->getRoomById($parentRoomTypeId);
                     $roomTypeName = \is_array($parentRoom) ? (string) ($parentRoom['name'] ?? '') : '';
                 }
-
                 if ($roomTypeName === '') {
                     $roomTypeName = (string) ($room['category_label'] ?? $room['category'] ?? '');
                 }
-
                 $items[] = [
                     'id' => $physicalRoomId,
                     'room_type_id' => $parentRoomTypeId,
@@ -343,7 +305,6 @@ private static function isCurrentRequestPathUnder(string $configuredPath, bool $
                     'formatted_total' => \number_format_i18n($total, 2) . ' ' . $currency,
                 ];
             }
-
             \wp_send_json_success([
                 'checkin' => $checkin,
                 'checkout' => $checkout,
@@ -364,55 +325,44 @@ private static function isCurrentRequestPathUnder(string $configuredPath, bool $
         if (!\current_user_can(StaffAccess::CAP_RESERVATION_CREATE)) {
             \wp_send_json_error(['message' => \__('You do not have permission to create reservations.', 'must-hotel-booking')], 403);
         }
-
         $nonce = isset($_REQUEST['nonce']) ? (string) \wp_unslash($_REQUEST['nonce']) : '';
-
         if (!\wp_verify_nonce($nonce, 'must_portal_quick_booking_preview')) {
             \wp_send_json_error(['message' => \__('Security check failed.', 'must-hotel-booking')], 403);
         }
-
         try {
             $roomId = isset($_REQUEST['room_id']) ? \absint(\wp_unslash($_REQUEST['room_id'])) : 0;
             $checkin = self::normalizeQuickBookingDate($_REQUEST['checkin'] ?? '');
             $checkout = self::normalizeQuickBookingDate($_REQUEST['checkout'] ?? '');
             $guests = isset($_REQUEST['guests']) ? \max(1, \absint(\wp_unslash($_REQUEST['guests']))) : 1;
             $errors = [];
-
             if ($roomId <= 0 || !self::doesQuickBookingRoomExist($roomId)) {
                 $errors[] = \__('Please select a valid room.', 'must-hotel-booking');
             }
-
             if (!AvailabilityEngine::isValidBookingDate($checkin) || !AvailabilityEngine::isValidBookingDate($checkout) || $checkin >= $checkout) {
                 $errors[] = \__('Please provide valid check-in and check-out dates.', 'must-hotel-booking');
             }
-
             if (empty($errors) && !self::getBookingProvider()->availability()->checkAvailability($roomId, $checkin, $checkout)) {
                 $errors[] = \__('This room is not available for the selected dates.', 'must-hotel-booking');
             }
-
             if (!empty($errors)) {
                 \wp_send_json_error([
                     'message' => isset($errors[0]) ? $errors[0] : \__('Unable to preview this booking.', 'must-hotel-booking'),
                     'errors' => $errors,
                 ], 400);
             }
-
             $pricing = self::getQuickBookingPricingPreview([
                 'room_id' => $roomId,
                 'checkin' => $checkin,
                 'checkout' => $checkout,
                 'guests' => $guests,
             ]);
-
             if (empty($pricing['success'])) {
                 \wp_send_json_error([
                     'message' => (string) ($pricing['message'] ?? \__('Unable to calculate the room price for these dates.', 'must-hotel-booking')),
                 ], 400);
             }
-
             $total = isset($pricing['total_price']) ? (float) $pricing['total_price'] : 0.0;
             $currency = MustBookingConfig::get_currency();
-
             \wp_send_json_success([
                 'available' => true,
                 'total_price' => $total,
@@ -424,29 +374,23 @@ private static function isCurrentRequestPathUnder(string $configuredPath, bool $
             \wp_send_json_error(['message' => \__('Unable to preview this booking.', 'must-hotel-booking')], 500);
         }
     }
-
     /**
      * @return array<string, mixed>
      */
     private static function handlePostedActions(string $moduleKey): array
     {
         $requestMethod = isset($_SERVER['REQUEST_METHOD']) ? \strtoupper((string) $_SERVER['REQUEST_METHOD']) : 'GET';
-
         if ($requestMethod !== 'POST') {
             return [];
         }
-
         $action = isset($_POST['must_portal_action']) ? \sanitize_key((string) \wp_unslash($_POST['must_portal_action'])) : '';
-
         if ($action === '') {
             return [];
         }
-
         if ($action === 'reservation_manual_clock_folio_payment_done') {
             self::handleReservationManualClockFolioPaymentDone();
             return [];
         }
-
         if (self::shouldBlockProviderBackedPortalAction($action)) {
             self::redirectToPortalReservationDetail(self::getPostedReservationId(), 'provider_backed_read_only');
             return [];
@@ -454,158 +398,124 @@ private static function isCurrentRequestPathUnder(string $configuredPath, bool $
         if ($action === 'quick_booking_create') {
             return self::handleQuickBookingAction();
         }
-
         if ($action === 'reservation_confirm') {
             self::handleReservationTransition('confirm', StaffAccess::CAP_RESERVATION_EDIT_BASIC);
             return [];
         }
-
         if ($action === 'reservation_cancel') {
             self::handleReservationTransition('cancel', StaffAccess::CAP_RESERVATION_CANCEL);
             return [];
         }
-
         if ($action === 'reservation_checkin') {
             self::handleReservationCheckin();
             return [];
         }
-
         if ($action === 'reservation_checkout') {
             self::handleReservationCheckout();
             return [];
         }
-
         if ($action === 'reservation_assign_room') {
             self::handleReservationAssignRoom();
             return [];
         }
-
         if ($action === 'reservation_update_stay') {
             return self::handleReservationUpdateStay();
         }
-
         if ($action === 'reservation_mark_no_show') {
             self::handleReservationMarkNoShow();
             return [];
         }
-
         if ($action === 'reservation_add_note') {
             self::handleReservationAddNote();
             return [];
         }
-
         if ($action === 'reservation_request_cancel') {
             self::handleReservationRequestCancel();
             return [];
         }
-
         if ($action === 'reservation_reject_cancel') {
             self::handleReservationRejectCancel();
             return [];
         }
-
         if ($action === 'reservation_approve_cancel') {
             self::handleReservationApproveCancel();
             return [];
         }
-
         if ($action === 'reservation_mark_pending') {
             self::handleReservationPaymentStateChange('mark_pending');
             return [];
         }
-
         if ($action === 'reservation_mark_paid') {
             self::handleReservationPaymentStateChange('mark_paid');
             return [];
         }
-
         if ($action === 'reservation_mark_unpaid') {
             self::handleReservationPaymentStateChange('mark_unpaid');
             return [];
         }
-
         if ($action === 'reservation_resend_guest_email') {
             self::handleReservationEmailAction('resend_guest_email');
             return [];
         }
-
         if ($action === 'reservation_resend_admin_email') {
             self::handleReservationEmailAction('resend_admin_email');
             return [];
         }
-
         if ($action === 'reservation_save_guest') {
             self::handleReservationGuestSave();
             return [];
         }
-
         if ($action === 'reservation_save_admin_details') {
             self::handleReservationAdminDetailsSave();
             return [];
         }
-
         if ($action === 'guest_save_contact') {
             return self::handleGuestSaveContact();
         }
-
         if ($action === 'guest_save_flags') {
             return self::handleGuestSaveFlags();
         }
-
         if ($action === 'guest_add_note') {
             return self::handleGuestAddNote();
         }
-
         if ($action === 'guest_merge') {
             return self::handleGuestMerge();
         }
-
         if ($action === 'payment_post') {
             return self::handlePaymentPost(false);
         }
-
         if ($action === 'payment_post_partial') {
             return self::handlePaymentPost(true);
         }
-
         if ($action === 'payment_mark_paid') {
             return self::handlePaymentStateChange('mark_paid', StaffAccess::CAP_PAYMENT_MARK_PAID, 'payment_marked_paid');
         }
-
         if ($action === 'payment_mark_unpaid') {
             return self::handlePaymentStateChange('mark_unpaid', StaffAccess::CAP_PAYMENT_RECONCILE, 'payment_marked_unpaid');
         }
-
         if ($action === 'payment_mark_pending') {
             return self::handlePaymentStateChange('mark_pending', StaffAccess::CAP_PAYMENT_RECONCILE, 'payment_marked_pending');
         }
-
         if ($action === 'payment_mark_pay_at_hotel') {
             return self::handlePaymentStateChange('mark_pay_at_hotel', StaffAccess::CAP_PAYMENT_RECONCILE, 'payment_marked_pay_at_hotel');
         }
-
         if ($action === 'payment_mark_failed') {
             return self::handlePaymentStateChange('mark_failed', StaffAccess::CAP_PAYMENT_RECONCILE, 'payment_marked_failed');
         }
-
         if ($action === 'payment_refund') {
             return self::handlePaymentRefund();
         }
-
         if ($action === 'payment_issue_receipt') {
             self::handlePaymentDocumentRequest('receipt');
             return [];
         }
-
         if ($action === 'payment_issue_invoice') {
             self::handlePaymentDocumentRequest('invoice');
             return [];
         }
-
         if ($action === 'calendar_create_block') {
             return self::handleCalendarCreateBlock();
         }
-
         if ($action === 'housekeeping_mark_dirty') {
             self::handleHousekeepingStatusUpdate(
                 HousekeepingRepository::STATUS_DIRTY,
@@ -614,7 +524,6 @@ private static function isCurrentRequestPathUnder(string $configuredPath, bool $
             );
             return [];
         }
-
         if ($action === 'housekeeping_mark_clean') {
             self::handleHousekeepingStatusUpdate(
                 HousekeepingRepository::STATUS_CLEAN,
@@ -623,7 +532,6 @@ private static function isCurrentRequestPathUnder(string $configuredPath, bool $
             );
             return [];
         }
-
         if ($action === 'housekeeping_mark_inspected') {
             self::handleHousekeepingStatusUpdate(
                 HousekeepingRepository::STATUS_INSPECTED,
@@ -632,75 +540,58 @@ private static function isCurrentRequestPathUnder(string $configuredPath, bool $
             );
             return [];
         }
-
         if ($action === 'housekeeping_assign_room') {
             return self::handleHousekeepingAssignRoom();
         }
-
         if ($action === 'housekeeping_create_issue') {
             return self::handleHousekeepingCreateIssue();
         }
-
         if ($action === 'housekeeping_update_issue_status') {
             self::handleHousekeepingUpdateIssueStatus();
             return [];
         }
-
         if ($action === 'housekeeping_create_handoff') {
             return self::handleHousekeepingCreateHandoff();
         }
-
         if ($action === 'rooms_availability_save_block') {
             return self::handleRoomsAvailabilitySaveBlock();
         }
-
         if ($action === 'rooms_availability_delete_block') {
             self::handleRoomsAvailabilityDeleteBlock();
             return [];
         }
-
         if ($action === 'rooms_availability_save_rule') {
             return self::handleRoomsAvailabilitySaveRule();
         }
-
         if ($action === 'rooms_availability_delete_rule') {
             self::handleRoomsAvailabilityDeleteRule();
             return [];
         }
-
         if ($action === 'rooms_availability_toggle_rule_status') {
             self::handleRoomsAvailabilityToggleRuleStatus();
             return [];
         }
-
         return [
             'module_key' => $moduleKey,
             'errors' => [\__('Unknown portal action.', 'must-hotel-booking')],
         ];
     }
-
     private static function getPostedReservationId(): int
     {
         return isset($_POST['reservation_id']) ? \absint(\wp_unslash($_POST['reservation_id'])) : 0;
     }
-
     private static function getPostedReservationProviderMetadata(): array
     {
         $reservationId = self::getPostedReservationId();
-
         if ($reservationId <= 0) {
             return [];
         }
-
         $reservation = \MustHotelBooking\Engine\get_reservation_repository()->getProviderMetadata($reservationId);
-
         return \is_array($reservation) ? $reservation : [];
     }
-
     private static function shouldBlockProviderBackedPortalAction(string $action): bool
     {
         $reservation = self::getPostedReservationProviderMetadata();
-
         return !empty($reservation)
             && ProviderReservationActionPolicy::shouldBlockProviderBackedAction(
                 $reservation,
@@ -708,46 +599,35 @@ private static function isCurrentRequestPathUnder(string $configuredPath, bool $
                 ProviderReservationActionPolicy::SURFACE_PORTAL
             );
     }
-
     private static function handleReservationManualClockFolioPaymentDone(): void
     {
         $reservationId = isset($_POST['reservation_id']) ? \absint(\wp_unslash($_POST['reservation_id'])) : 0;
         $nonce = isset($_POST['must_portal_reservation_nonce']) ? (string) \wp_unslash($_POST['must_portal_reservation_nonce']) : '';
-
         if ($reservationId <= 0 || !\wp_verify_nonce($nonce, 'must_portal_reservation_manual_clock_folio_payment_done_' . $reservationId)) {
             self::redirectToPortalReservationDetail($reservationId, 'invalid_nonce');
         }
-
         if (!\current_user_can(StaffAccess::CAP_PAYMENT_MARK_PAID) && !\current_user_can('manage_options')) {
             self::redirectToPortalReservationDetail($reservationId, 'access_denied');
         }
-
         $reservationRepository = \MustHotelBooking\Engine\get_reservation_repository();
         $reservation = $reservationRepository->getReservation($reservationId);
-
         if (!\is_array($reservation)) {
             self::redirectToPortalReservationDetail($reservationId, 'reservation_not_found');
         }
-
         $provider = \sanitize_key((string) ($reservation['provider'] ?? ''));
-
         if ($provider !== \MustHotelBooking\Provider\ProviderManager::CLOCK_MODE) {
             self::redirectToPortalReservationDetail($reservationId, 'portal_action_failed');
         }
-
         $metadata = [];
-
         if (isset($reservation['provider_metadata']) && \is_array($reservation['provider_metadata'])) {
             $metadata = $reservation['provider_metadata'];
         } elseif (isset($reservation['provider_metadata']) && \is_string($reservation['provider_metadata']) && \trim($reservation['provider_metadata']) !== '') {
             $decoded = \json_decode((string) $reservation['provider_metadata'], true);
             $metadata = \is_array($decoded) ? $decoded : [];
         }
-
         $existing = isset($metadata['clock_folio_payment_sync']) && \is_array($metadata['clock_folio_payment_sync'])
             ? $metadata['clock_folio_payment_sync']
             : [];
-
         $metadata['clock_folio_payment_sync'] = \array_merge(
             $existing,
             [
@@ -760,25 +640,19 @@ private static function isCurrentRequestPathUnder(string $configuredPath, bool $
                 'source' => 'portal_manual_clock_folio_payment_done',
             ]
         );
-
         $updatePayload = [
             'provider_metadata' => $metadata,
         ];
-
         $providerSyncError = \strtolower((string) ($reservation['provider_sync_error'] ?? ''));
-
         if (\strpos($providerSyncError, 'pms_api_booking_folios_default') !== false) {
             $updatePayload['provider_sync_status'] = 'synced';
             $updatePayload['provider_synced_at'] = \current_time('mysql');
             $updatePayload['provider_sync_error'] = '';
         }
-
         $updated = $reservationRepository->updateProviderMetadata($reservationId, $updatePayload);
-
         if (!$updated) {
             self::redirectToPortalReservationDetail($reservationId, 'portal_action_failed');
         }
-
         self::logReservationActivity(
             $reservationId,
             $reservation,
@@ -786,10 +660,8 @@ private static function isCurrentRequestPathUnder(string $configuredPath, bool $
             'info',
             \__('Manual Clock folio payment accounting marked done by staff.', 'must-hotel-booking')
         );
-
         self::redirectToPortalReservationDetail($reservationId, 'clock_folio_payment_manual_done');
     }
-
     /**
      * @return array<string, mixed>
      */
@@ -801,23 +673,19 @@ private static function isCurrentRequestPathUnder(string $configuredPath, bool $
                 'errors' => [\__('You do not have permission to create reservations.', 'must-hotel-booking')],
             ];
         }
-
         $nonce = isset($_POST['must_portal_quick_booking_nonce']) ? (string) \wp_unslash($_POST['must_portal_quick_booking_nonce']) : '';
-
         if (!\wp_verify_nonce($nonce, 'must_portal_quick_booking')) {
             return [
                 'module_key' => 'front_desk',
                 'errors' => [\__('Security check failed. Please try again.', 'must-hotel-booking')],
             ];
         }
-
         try {
             /** @var array<string, mixed> $rawPost */
             $rawPost = \is_array($_POST) ? $_POST : [];
             $form = self::sanitizeQuickBookingFormValues($rawPost);
             $form = self::mergeQuickBookingBillingFields($form, $rawPost);
             $errors = isset($form['errors']) && \is_array($form['errors']) ? $form['errors'] : [];
-
             if (!empty($errors)) {
                 return [
                     'module_key' => 'front_desk',
@@ -825,23 +693,22 @@ private static function isCurrentRequestPathUnder(string $configuredPath, bool $
                     'form' => $form,
                 ];
             }
-
             $checkoutResult = self::prepareQuickBookingCheckoutFlow($form, $rawPost);
-
             if (empty($checkoutResult['success'])) {
                 $checkoutErrors = isset($checkoutResult['errors']) && \is_array($checkoutResult['errors'])
                     ? \array_values(\array_map('strval', $checkoutResult['errors']))
                     : [\__('Unable to prepare this booking for payment.', 'must-hotel-booking')];
-
                 return [
                     'module_key' => 'front_desk',
                     'errors' => $checkoutErrors,
                     'form' => $form,
                 ];
             }
-
             $redirectUrl = isset($checkoutResult['redirect_url']) ? (string) $checkoutResult['redirect_url'] : '';
-
+            if ($redirectUrl !== '' && PaymentEngine::isStripeCheckoutUrl($redirectUrl)) {
+                \wp_redirect($redirectUrl);
+                exit;
+            }
             \wp_safe_redirect($redirectUrl !== '' ? $redirectUrl : ManagedPages::getBookingConfirmationPageUrl());
             exit;
         } catch (\Throwable $throwable) {
@@ -856,7 +723,6 @@ private static function isCurrentRequestPathUnder(string $configuredPath, bool $
             ];
         }
     }
-
     /**
      * @param array<string, mixed> $form
      * @param array<string, mixed> $source
@@ -872,17 +738,14 @@ private static function isCurrentRequestPathUnder(string $configuredPath, bool $
                 ];
             }
         }
-
         $roomId = isset($form['room_id']) ? (int) $form['room_id'] : 0;
         $room = self::getQuickBookingRoomRow($roomId);
-
         if ($roomId <= 0 || !\is_array($room)) {
             return [
                 'success' => false,
                 'errors' => [\__('Please select a valid room.', 'must-hotel-booking')],
             ];
         }
-
         $guestForm = self::buildQuickBookingGuestForm($form);
         $billingForm = self::buildQuickBookingBillingForm($form, $source, $guestForm);
         $context = BookingValidationEngine::parseRequestContext(
@@ -896,31 +759,24 @@ private static function isCurrentRequestPathUnder(string $configuredPath, bool $
             true
         );
         $context = BookingValidationEngine::applyFixedRoomContext($context, $room);
-
         if (empty($context['is_valid'])) {
             $contextErrors = isset($context['errors']) && \is_array($context['errors']) ? \array_values(\array_map('strval', $context['errors'])) : [];
-
             return [
                 'success' => false,
                 'errors' => !empty($contextErrors) ? $contextErrors : [\__('Please provide valid check-in and check-out dates.', 'must-hotel-booking')],
             ];
         }
-
         $provider = ProviderManager::configured();
-
         if ($provider === null) {
             $provider = ProviderManager::active();
         }
-
         \MustHotelBooking\Frontend\clear_booking_selection(true);
-
         if (!\MustHotelBooking\Frontend\add_room_to_booking_selection($roomId, $context, 0)) {
             return [
                 'success' => false,
                 'errors' => [\__('Unable to store the selected room before payment.', 'must-hotel-booking')],
             ];
         }
-
         \MustHotelBooking\Frontend\update_booking_selection_flow_data([
             'booking_mode' => 'fixed-room',
             'fixed_room_id' => $roomId,
@@ -931,13 +787,121 @@ private static function isCurrentRequestPathUnder(string $configuredPath, bool $
             'booking_source' => self::normalizeQuickBookingSource((string) ($form['booking_source'] ?? 'staff_portal')),
             'booking_notes' => isset($form['notes']) ? (string) $form['notes'] : '',
         ]);
-
+        $roomItems = $provider->quote()->buildCheckoutRoomItems(
+            new QuoteRequest($context, '', $guestForm, false)
+        );
+        if (!empty($roomItems['errors'])) {
+            return [
+                'success' => false,
+                'errors' => \array_values(\array_map('strval', (array) $roomItems['errors'])),
+            ];
+        }
+        $summary = isset($roomItems['summary']) && \is_array($roomItems['summary']) ? $roomItems['summary'] : [];
+        $totalAmount = isset($summary['total_price']) ? (float) $summary['total_price'] : 0.0;
+        if ($totalAmount <= 0.0) {
+            return [
+                'success' => false,
+                'errors' => [\__('Unable to calculate the total amount for Stripe payment.', 'must-hotel-booking')],
+            ];
+        }
+        $paymentCreationOptions = PaymentEngine::getReservationCreationOptions('stripe');
+        $confirmationGuestForm = BookingValidationEngine::buildConfirmationGuestForm($guestForm, $billingForm);
+        $reservationResult = $provider->reservations()->createReservations(
+            new \MustHotelBooking\Provider\Dto\ReservationCreateRequest(
+                $context,
+                $confirmationGuestForm,
+                '',
+                [
+                    'anti_abuse_surface' => 'portal_quick_booking',
+                    'anti_abuse_prechecked' => true,
+                    'reservation_status' => (string) $paymentCreationOptions['reservation_status'],
+                    'payment_status' => (string) $paymentCreationOptions['payment_status'],
+                    'clear_selection' => false,
+                    'increment_coupon_usage' => false,
+                    'booking_source' => self::normalizeQuickBookingSource((string) ($form['booking_source'] ?? 'staff_portal')),
+                    'notes' => isset($form['notes']) ? (string) $form['notes'] : '',
+                ]
+            )
+        );
+        if (!empty($reservationResult['errors'])) {
+            return [
+                'success' => false,
+                'errors' => \array_values(\array_map('strval', (array) $reservationResult['errors'])),
+            ];
+        }
+        $reservationIds = \array_values(\array_filter(\array_map('intval', (array) ($reservationResult['reservation_ids'] ?? []))));
+        if (empty($reservationIds)) {
+            return [
+                'success' => false,
+                'errors' => [\__('Unable to create the pending reservation before Stripe payment.', 'must-hotel-booking')],
+            ];
+        }
+        $successUrl = \add_query_arg(
+            [
+                'tab' => 'new-booking',
+                'portal_payment' => 'success',
+                'reservation_ids' => \implode(',', $reservationIds),
+                'payment_method' => 'stripe',
+                'session_id' => '{CHECKOUT_SESSION_ID}',
+            ],
+            PortalRouter::getModuleUrl('front_desk')
+        );
+        $successUrl = \str_replace('%7BCHECKOUT_SESSION_ID%7D', '{CHECKOUT_SESSION_ID}', $successUrl);
+        $cancelUrl = \add_query_arg(
+            [
+                'tab' => 'new-booking',
+                'portal_payment' => 'cancel',
+            ],
+            PortalRouter::getModuleUrl('front_desk')
+        );
+        $paymentResult = PaymentEngine::processPayment(
+            'stripe',
+            $reservationIds,
+            $totalAmount,
+            [
+                'guest_form' => $confirmationGuestForm,
+                'currency' => MustBookingConfig::get_currency(),
+                'success_url' => $successUrl,
+                'cancel_url' => $cancelUrl,
+            ]
+        );
+        if (empty($paymentResult['success'])) {
+            BookingStatusEngine::failPendingPaymentReservations(
+                $reservationIds,
+                'stripe',
+                'payment_failed'
+            );
+            return [
+                'success' => false,
+                'errors' => [
+                    isset($paymentResult['message']) && (string) $paymentResult['message'] !== ''
+                    ? (string) $paymentResult['message']
+                    : \__('Unable to start Stripe checkout.', 'must-hotel-booking'),
+                ],
+            ];
+        }
+        $stripeCheckoutUrl = isset($paymentResult['redirect_url']) ? (string) $paymentResult['redirect_url'] : '';
+        if ($stripeCheckoutUrl === '' || !PaymentEngine::isStripeCheckoutUrl($stripeCheckoutUrl)) {
+            return [
+                'success' => false,
+                'errors' => [\__('Stripe did not return a valid checkout URL.', 'must-hotel-booking')],
+            ];
+        }
+        \MustHotelBooking\Frontend\update_booking_selection_flow_data([
+            'pending_payment' => PaymentEngine::normalizePendingPaymentFlowData([
+                'method' => 'stripe',
+                'reservation_ids' => $reservationIds,
+                'session_id' => (string) ($paymentResult['session_id'] ?? $paymentResult['transaction_id'] ?? ''),
+                'checkout_url' => $stripeCheckoutUrl,
+                'expires_at' => (string) ($paymentResult['expires_at'] ?? ''),
+                'created_at' => \current_time('mysql'),
+            ]),
+        ]);
         return [
             'success' => true,
-            'redirect_url' => ManagedPages::getBookingConfirmationPageUrl(),
+            'redirect_url' => $stripeCheckoutUrl,
         ];
     }
-
     /**
      * @param array<string, mixed> $form
      * @return array<string, mixed>
@@ -949,17 +913,14 @@ private static function isCurrentRequestPathUnder(string $configuredPath, bool $
         $nameParts = \is_array($nameParts) ? \array_values(\array_filter($nameParts)) : [];
         $firstName = isset($nameParts[0]) ? (string) $nameParts[0] : $guestName;
         $lastName = \trim(\implode(' ', \array_slice($nameParts, 1)));
-
         if ($lastName === '') {
             $lastName = '-';
         }
-
         $phone = isset($form['phone']) ? (string) $form['phone'] : '';
         $phoneParts = \function_exists('MustHotelBooking\\Frontend\\split_checkout_phone_value')
             ? \MustHotelBooking\Frontend\split_checkout_phone_value($phone)
             : ['phone_country_code' => '', 'phone_number' => $phone];
         $roomId = isset($form['room_id']) ? (int) $form['room_id'] : 0;
-
         return [
             'first_name' => $firstName,
             'last_name' => $lastName,
@@ -979,7 +940,6 @@ private static function isCurrentRequestPathUnder(string $configuredPath, bool $
             ],
         ];
     }
-
     /**
      * @param array<string, mixed> $form
      * @param array<string, mixed> $source
@@ -989,7 +949,6 @@ private static function isCurrentRequestPathUnder(string $configuredPath, bool $
     private static function buildQuickBookingBillingForm(array $form, array $source, array $guestForm): array
     {
         $country = isset($form['country']) ? (string) $form['country'] : 'AL';
-
         return [
             'first_name' => (string) ($guestForm['first_name'] ?? ''),
             'last_name' => (string) ($guestForm['last_name'] ?? ''),
@@ -1007,7 +966,6 @@ private static function isCurrentRequestPathUnder(string $configuredPath, bool $
             'special_requests' => isset($form['notes']) ? (string) $form['notes'] : '',
         ];
     }
-
     /**
      * @param array<string, mixed> $form
      * @param array<string, mixed> $source
@@ -1018,29 +976,23 @@ private static function isCurrentRequestPathUnder(string $configuredPath, bool $
         foreach (['street_address', 'address_line_2', 'city', 'county', 'postcode'] as $key) {
             $form[$key] = isset($source[$key]) ? \sanitize_text_field((string) \wp_unslash($source[$key])) : '';
         }
-
         return $form;
     }
-
     /**
      * @param mixed $value
      */
     private static function normalizeQuickBookingDate($value): string
     {
         $raw = \trim(\sanitize_text_field((string) \wp_unslash($value)));
-
         if ($raw === '') {
             return '';
         }
-
         if (AvailabilityEngine::isValidBookingDate($raw)) {
             return $raw;
         }
-
         foreach (['m/d/Y', 'n/j/Y', 'm/j/Y', 'n/d/Y'] as $format) {
             $date = \DateTimeImmutable::createFromFormat('!' . $format, $raw);
             $errors = \DateTimeImmutable::getLastErrors();
-
             if (
                 $date instanceof \DateTimeImmutable &&
                 (
@@ -1055,32 +1007,25 @@ private static function isCurrentRequestPathUnder(string $configuredPath, bool $
                 return $date->format('Y-m-d');
             }
         }
-
         return '';
     }
-
     private static function getBookingProvider()
     {
         $provider = ProviderManager::configured();
-
         return $provider !== null ? $provider : ProviderManager::active();
     }
-
     private static function isClockRateLimitThrowable(\Throwable $throwable): bool
     {
         $message = \strtolower($throwable->getMessage());
-
         return \strpos($message, '429') !== false
             || \strpos($message, 'too many requests') !== false
             || \strpos($message, 'rate limit') !== false
             || \strpos($message, 'rate limiting') !== false;
     }
-
     private static function doesQuickBookingRoomExist(int $roomId): bool
     {
         return $roomId > 0 && \is_array(self::getQuickBookingRoomRow($roomId));
     }
-
     /**
      * @return array<string, mixed>|null
      */
@@ -1089,18 +1034,14 @@ private static function isCurrentRequestPathUnder(string $configuredPath, bool $
         if ($roomId <= 0) {
             return null;
         }
-
         return self::getBookingProvider()->reservations()->getCheckoutRoomData($roomId);
     }
-
     private static function normalizeQuickBookingSource(string $source): string
     {
         $source = \sanitize_key($source);
         $options = self::getQuickBookingSourceOptions();
-
         return isset($options[$source]) ? $source : 'staff_portal';
     }
-
     /**
      * @return array<string, string>
      */
@@ -1109,7 +1050,6 @@ private static function isCurrentRequestPathUnder(string $configuredPath, bool $
         $options = \function_exists('\MustHotelBooking\Admin\get_admin_quick_booking_source_options')
             ? \MustHotelBooking\Admin\get_admin_quick_booking_source_options()
             : [];
-
         return \array_merge(
             $options,
             [
@@ -1120,7 +1060,6 @@ private static function isCurrentRequestPathUnder(string $configuredPath, bool $
             ]
         );
     }
-
     /**
      * @return array<int, array{id: int, name: string}>
      */
@@ -1128,35 +1067,27 @@ private static function isCurrentRequestPathUnder(string $configuredPath, bool $
     {
         $bookingCategories = RoomCatalog::getBookingCategories();
         $options = [];
-
         foreach ($bookingCategories as $value => $label) {
             $value = (string) $value;
-
             if (RoomCatalog::isBookingAllCategory($value)) {
                 continue;
             }
-
             if (RoomCatalog::isRoomTypeBookingValue($value)) {
                 $roomId = RoomCatalog::resolveBookingRoomTypeId($value);
                 $room = $roomId > 0 ? \MustHotelBooking\Engine\get_room_repository()->getRoomById($roomId) : null;
-
                 if ($roomId > 0 && \is_array($room)) {
                     $options[] = [
                         'id' => $roomId,
                         'name' => (string) $label,
                     ];
                 }
-
                 continue;
             }
-
             foreach (\MustHotelBooking\Engine\get_room_repository()->getRoomsByType($value, 1) as $room) {
                 if (!\is_array($room)) {
                     continue;
                 }
-
                 $roomId = isset($room['id']) ? (int) $room['id'] : 0;
-
                 if ($roomId > 0) {
                     $options[] = [
                         'id' => $roomId,
@@ -1165,21 +1096,16 @@ private static function isCurrentRequestPathUnder(string $configuredPath, bool $
                 }
             }
         }
-
         if (!empty($options)) {
             return $options;
         }
-
         $rows = \MustHotelBooking\Engine\get_room_repository()->getRoomSelectorRows(false, true);
         $fallback = [];
-
         foreach ($rows as $row) {
             if (!\is_array($row)) {
                 continue;
             }
-
             $roomId = isset($row['id']) ? (int) $row['id'] : 0;
-
             if ($roomId > 0) {
                 $fallback[] = [
                     'id' => $roomId,
@@ -1187,10 +1113,8 @@ private static function isCurrentRequestPathUnder(string $configuredPath, bool $
                 ];
             }
         }
-
         return $fallback;
     }
-
     /**
      * @param array<string, mixed> $source
      * @return array<string, mixed>
@@ -1217,11 +1141,9 @@ private static function isCurrentRequestPathUnder(string $configuredPath, bool $
         $notes = isset($source['notes']) ? \sanitize_textarea_field((string) \wp_unslash($source['notes'])) : '';
         $errors = [];
         $room = self::getQuickBookingRoomRow($roomId);
-
         if (!\is_array($room)) {
             $errors[] = \__('Please select a valid room.', 'must-hotel-booking');
         }
-
         $context = BookingValidationEngine::parseRequestContext(
             [
                 'checkin' => $checkin,
@@ -1232,19 +1154,15 @@ private static function isCurrentRequestPathUnder(string $configuredPath, bool $
             ],
             true
         );
-
         foreach ((array) ($context['errors'] ?? []) as $contextError) {
             $errors[] = (string) $contextError;
         }
-
         if (\is_array($room)) {
             $maxGuests = isset($room['max_guests']) ? (int) $room['max_guests'] : 1;
-
             if ($maxGuests > 0 && $guests > $maxGuests) {
                 $errors[] = \__('Selected room cannot host that many guests.', 'must-hotel-booking');
             }
         }
-
         $guestValidation = BookingValidationEngine::validateGuestForm([
             'first_name' => $firstName,
             'last_name' => $lastName !== '' ? $lastName : '-',
@@ -1252,11 +1170,9 @@ private static function isCurrentRequestPathUnder(string $configuredPath, bool $
             'phone_number' => (string) ($phoneParts['phone_number'] ?? ''),
             'country' => $country,
         ]);
-
         foreach ($guestValidation as $guestError) {
             $errors[] = $guestError;
         }
-
         return [
             'room_id' => $roomId,
             'checkin' => $checkin,
@@ -1271,7 +1187,6 @@ private static function isCurrentRequestPathUnder(string $configuredPath, bool $
             'errors' => \array_values(\array_unique($errors)),
         ];
     }
-
     private static function calculateQuickBookingNights(string $checkin, string $checkout): int
     {
         try {
@@ -1280,30 +1195,24 @@ private static function isCurrentRequestPathUnder(string $configuredPath, bool $
             return 0;
         }
     }
-
     private static function handleReservationTransition(string $transition, string $capability): void
     {
         $reservationId = isset($_POST['reservation_id']) ? \absint(\wp_unslash($_POST['reservation_id'])) : 0;
         $nonce = isset($_POST['must_portal_reservation_nonce']) ? (string) \wp_unslash($_POST['must_portal_reservation_nonce']) : '';
         $moduleKey = 'reservations';
         $notice = 'portal_action_failed';
-
         if ($reservationId <= 0 || !\wp_verify_nonce($nonce, 'must_portal_reservation_action_' . $transition . '_' . $reservationId)) {
             \wp_safe_redirect(PortalRouter::getModuleUrl($moduleKey, ['portal_notice' => 'invalid_nonce']));
             exit;
         }
-
         if (!\current_user_can($capability) && !\current_user_can('manage_options')) {
             self::redirectToPortalReservationDetail($reservationId, 'access_denied');
             exit;
         }
-
         $reservationRepository = \MustHotelBooking\Engine\get_reservation_repository();
         $reservation = $reservationRepository->getReservation($reservationId);
-
         if (\is_array($reservation)) {
             $providerContext = ProviderReservationView::metadata($reservation);
-
             if (!empty($providerContext['is_provider_backed'])) {
                 if (
                     $transition !== 'cancel'
@@ -1315,9 +1224,7 @@ private static function isCurrentRequestPathUnder(string $configuredPath, bool $
                 ) {
                     self::redirectToPortalReservationDetail($reservationId, 'provider_backed_read_only');
                 }
-
                 $result = (new ClockPaymentReconciliationService())->cancelReservation($reservationId, 'portal_cancelled', 'portal');
-
                 if (!empty($result['success'])) {
                     self::logReservationActivity(
                         $reservationId,
@@ -1326,10 +1233,8 @@ private static function isCurrentRequestPathUnder(string $configuredPath, bool $
                         'warning',
                         \__('Clock reservation cancellation completed.', 'must-hotel-booking')
                     );
-
                     self::redirectToPortalReservationDetail($reservationId, 'reservation_cancelled');
                 }
-
                 if (!empty($result['queued'])) {
                     self::logReservationActivity(
                         $reservationId,
@@ -1338,21 +1243,16 @@ private static function isCurrentRequestPathUnder(string $configuredPath, bool $
                         'warning',
                         \__('Clock reservation cancellation was queued for provider retry.', 'must-hotel-booking')
                     );
-
                     self::redirectToPortalReservationDetail($reservationId, 'reservation_cancellation_queued');
                 }
-
                 self::redirectToPortalReservationDetail($reservationId, 'reservation_cancellation_failed');
             }
-
             $status = \sanitize_key((string) ($reservation['status'] ?? ''));
             $paymentStatus = \sanitize_key((string) ($reservation['payment_status'] ?? ''));
-
             if ($transition === 'confirm' && !\in_array($status, ['cancelled', 'blocked', 'confirmed', 'completed'], true)) {
                 BookingStatusEngine::updateReservationStatuses([$reservationId], 'confirmed', $paymentStatus !== '' ? $paymentStatus : 'unpaid');
                 $notice = 'reservation_confirmed';
             }
-
             if ($transition === 'cancel' && !\in_array($status, ['cancelled', 'blocked', 'completed'], true)) {
                 if (!empty($reservation['cancellation_requested'])) {
                     $notice = self::approveReservationCancellationRequest($reservationId, $reservation)
@@ -1364,23 +1264,18 @@ private static function isCurrentRequestPathUnder(string $configuredPath, bool $
                 }
             }
         }
-
         self::redirectToPortalReservationDetail($reservationId, $notice);
     }
-
     private static function handleReservationPaymentStateChange(string $action): void
     {
         $reservationId = isset($_POST['reservation_id']) ? \absint(\wp_unslash($_POST['reservation_id'])) : 0;
         $nonce = isset($_POST['must_portal_reservation_nonce']) ? (string) \wp_unslash($_POST['must_portal_reservation_nonce']) : '';
-
         if ($reservationId <= 0 || !\wp_verify_nonce($nonce, 'must_portal_reservation_action_' . $action . '_' . $reservationId)) {
             self::redirectToPortalReservationDetail($reservationId, 'invalid_nonce');
         }
-
         if (!\current_user_can(StaffAccess::CAP_PAYMENT_MARK_PAID) && !\current_user_can('manage_options')) {
             self::redirectToPortalReservationDetail($reservationId, 'access_denied');
         }
-
         $noticeMap = [
             'mark_pending' => 'reservation_marked_pending',
             'mark_paid' => 'reservation_marked_paid',
@@ -1392,24 +1287,19 @@ private static function isCurrentRequestPathUnder(string $configuredPath, bool $
             $success ? (string) ($noticeMap[$action] ?? 'portal_action_completed') : 'portal_action_failed'
         );
     }
-
     private static function handleReservationEmailAction(string $action): void
     {
         $reservationId = isset($_POST['reservation_id']) ? \absint(\wp_unslash($_POST['reservation_id'])) : 0;
         $nonce = isset($_POST['must_portal_reservation_nonce']) ? (string) \wp_unslash($_POST['must_portal_reservation_nonce']) : '';
-
         if ($reservationId <= 0 || !\wp_verify_nonce($nonce, 'must_portal_reservation_action_' . $action . '_' . $reservationId)) {
             self::redirectToPortalReservationDetail($reservationId, 'invalid_nonce');
         }
-
         if (!\current_user_can(StaffAccess::CAP_RESERVATION_EDIT_BASIC) && !\current_user_can('manage_options')) {
             self::redirectToPortalReservationDetail($reservationId, 'access_denied');
         }
-
         $success = $action === 'resend_guest_email'
             ? \MustHotelBooking\Engine\EmailEngine::resendGuestReservationEmail($reservationId)
             : \MustHotelBooking\Engine\EmailEngine::resendAdminReservationEmail($reservationId);
-
         self::redirectToPortalReservationDetail(
             $reservationId,
             $success
@@ -1417,45 +1307,35 @@ private static function isCurrentRequestPathUnder(string $configuredPath, bool $
             : 'portal_action_failed'
         );
     }
-
     private static function handleReservationGuestSave(): void
     {
         $reservationId = isset($_POST['reservation_id']) ? \absint(\wp_unslash($_POST['reservation_id'])) : 0;
         $nonce = isset($_POST['must_portal_reservation_nonce']) ? (string) \wp_unslash($_POST['must_portal_reservation_nonce']) : '';
-
         if ($reservationId <= 0 || !\wp_verify_nonce($nonce, 'must_portal_reservation_save_guest_' . $reservationId)) {
             self::redirectToPortalReservationDetail($reservationId, 'invalid_nonce');
         }
-
         if (!\current_user_can(StaffAccess::CAP_GUEST_EDIT_CONTACT) && !\current_user_can('manage_options')) {
             self::redirectToPortalReservationDetail($reservationId, 'access_denied');
         }
-
         $reservationRepository = \MustHotelBooking\Engine\get_reservation_repository();
         $guestRepository = \MustHotelBooking\Engine\get_guest_repository();
         $reservation = $reservationRepository->getReservation($reservationId);
-
         if (!\is_array($reservation)) {
             self::redirectToPortalReservationDetail($reservationId, 'reservation_not_found');
         }
-
         $firstName = isset($_POST['guest_first_name']) ? \sanitize_text_field((string) \wp_unslash($_POST['guest_first_name'])) : '';
         $lastName = isset($_POST['guest_last_name']) ? \sanitize_text_field((string) \wp_unslash($_POST['guest_last_name'])) : '';
         $email = isset($_POST['guest_email']) ? \sanitize_email((string) \wp_unslash($_POST['guest_email'])) : '';
         $phone = isset($_POST['guest_phone']) ? \sanitize_text_field((string) \wp_unslash($_POST['guest_phone'])) : '';
         $country = isset($_POST['guest_country']) ? \sanitize_text_field((string) \wp_unslash($_POST['guest_country'])) : '';
-
         if ($email !== '' && !\is_email($email)) {
             self::redirectToPortalReservationDetail($reservationId, 'invalid_guest_email');
         }
-
         $providerContext = ProviderReservationView::metadata($reservation);
-
         if (!empty($providerContext['is_provider_backed'])) {
             if (!ProviderReservationActionPolicy::supportsProviderAction($providerContext, 'reservation_save_guest', ProviderReservationActionPolicy::SURFACE_PORTAL)) {
                 self::redirectToPortalReservationDetail($reservationId, 'provider_backed_read_only');
             }
-
             $result = (new ClockPaymentReconciliationService())->updateGuestDetails(
                 $reservationId,
                 [
@@ -1467,7 +1347,6 @@ private static function isCurrentRequestPathUnder(string $configuredPath, bool $
                 ],
                 'portal'
             );
-
             if (!empty($result['success'])) {
                 self::logReservationActivity(
                     $reservationId,
@@ -1476,10 +1355,8 @@ private static function isCurrentRequestPathUnder(string $configuredPath, bool $
                     'info',
                     \__('Clock guest details updated.', 'must-hotel-booking')
                 );
-
                 self::redirectToPortalReservationDetail($reservationId, 'reservation_guest_updated');
             }
-
             if (!empty($result['queued'])) {
                 self::logReservationActivity(
                     $reservationId,
@@ -1488,13 +1365,10 @@ private static function isCurrentRequestPathUnder(string $configuredPath, bool $
                     'warning',
                     \__('Clock guest detail edit was queued for provider retry.', 'must-hotel-booking')
                 );
-
                 self::redirectToPortalReservationDetail($reservationId, 'reservation_guest_update_queued');
             }
-
             self::redirectToPortalReservationDetail($reservationId, 'reservation_guest_update_failed');
         }
-
         $guestId = $guestRepository->saveAdminGuestProfile(
             isset($reservation['guest_id']) ? (int) $reservation['guest_id'] : 0,
             $firstName,
@@ -1503,15 +1377,12 @@ private static function isCurrentRequestPathUnder(string $configuredPath, bool $
             $phone,
             $country
         );
-
         if ($guestId <= 0) {
             self::redirectToPortalReservationDetail($reservationId, 'portal_action_failed');
         }
-
         if ($guestId !== (int) ($reservation['guest_id'] ?? 0)) {
             $reservationRepository->updateReservation($reservationId, ['guest_id' => $guestId]);
         }
-
         self::logReservationActivity(
             $reservationId,
             $reservation,
@@ -1519,56 +1390,43 @@ private static function isCurrentRequestPathUnder(string $configuredPath, bool $
             'info',
             \__('Guest details updated.', 'must-hotel-booking')
         );
-
         self::redirectToPortalReservationDetail($reservationId, 'reservation_guest_updated');
     }
-
     private static function handleReservationAdminDetailsSave(): void
     {
         $reservationId = isset($_POST['reservation_id']) ? \absint(\wp_unslash($_POST['reservation_id'])) : 0;
         $nonce = isset($_POST['must_portal_reservation_nonce']) ? (string) \wp_unslash($_POST['must_portal_reservation_nonce']) : '';
-
         if ($reservationId <= 0 || !\wp_verify_nonce($nonce, 'must_portal_reservation_save_admin_' . $reservationId)) {
             self::redirectToPortalReservationDetail($reservationId, 'invalid_nonce');
         }
-
         if (!\current_user_can(StaffAccess::CAP_RESERVATION_EDIT_BASIC) && !\current_user_can('manage_options')) {
             self::redirectToPortalReservationDetail($reservationId, 'access_denied');
         }
-
         $reservationRepository = \MustHotelBooking\Engine\get_reservation_repository();
         $reservation = $reservationRepository->getReservation($reservationId);
-
         if (!\is_array($reservation)) {
             self::redirectToPortalReservationDetail($reservationId, 'reservation_not_found');
         }
-
         $bookingSource = isset($_POST['booking_source']) ? \sanitize_key((string) \wp_unslash($_POST['booking_source'])) : 'website';
         $sourceOptions = \function_exists('\MustHotelBooking\Admin\get_admin_quick_booking_source_options')
             ? \MustHotelBooking\Admin\get_admin_quick_booking_source_options()
             : [];
-
         if (!isset($sourceOptions[$bookingSource])) {
             $bookingSource = isset($reservation['booking_source']) ? (string) $reservation['booking_source'] : 'website';
         }
-
         $currentSource = isset($reservation['booking_source']) ? (string) $reservation['booking_source'] : 'website';
-
         if ($bookingSource === $currentSource) {
             self::redirectToPortalReservationDetail($reservationId, 'reservation_updated');
         }
-
         $updated = $reservationRepository->updateReservation(
             $reservationId,
             [
                 'booking_source' => $bookingSource,
             ]
         );
-
         if (!$updated) {
             self::redirectToPortalReservationDetail($reservationId, 'portal_action_failed');
         }
-
         self::logReservationActivity(
             $reservationId,
             $reservation,
@@ -1576,10 +1434,8 @@ private static function isCurrentRequestPathUnder(string $configuredPath, bool $
             'info',
             \__('Reservation source updated.', 'must-hotel-booking')
         );
-
         self::redirectToPortalReservationDetail($reservationId, 'reservation_updated');
     }
-
     /**
      * @return array<string, mixed>
      */
@@ -1587,31 +1443,24 @@ private static function isCurrentRequestPathUnder(string $configuredPath, bool $
     {
         $guestId = isset($_POST['guest_id']) ? \absint(\wp_unslash($_POST['guest_id'])) : 0;
         $nonce = isset($_POST['must_portal_guest_nonce']) ? (string) \wp_unslash($_POST['must_portal_guest_nonce']) : '';
-
         if ($guestId <= 0 || !\wp_verify_nonce($nonce, 'must_portal_guest_save_contact_' . $guestId)) {
             self::redirectToPortalGuestDetail($guestId, 'invalid_nonce');
         }
-
         if (!\current_user_can(StaffAccess::CAP_GUEST_EDIT_CONTACT) && !\current_user_can('manage_options')) {
             self::redirectToPortalGuestDetail($guestId, 'access_denied');
         }
-
         $guestRepository = \MustHotelBooking\Engine\get_guest_repository();
         $guest = $guestRepository->getGuestById($guestId);
-
         if (!\is_array($guest)) {
             self::redirectToPortalGuestDetail($guestId, 'guest_not_found');
         }
-
         /** @var array<string, mixed> $rawPost */
         $rawPost = \is_array($_POST) ? $_POST : [];
         $form = GuestAdminActions::sanitizeGuestForm($rawPost);
         $errors = GuestAdminActions::validateGuestForm($form);
-
         if (!empty($errors)) {
             return self::buildGuestActionState($guestId, $form, $errors);
         }
-
         $updated = $guestRepository->updateAdminGuestRecord(
             $guestId,
             self::mergeGuestUpdatePayload(
@@ -1625,7 +1474,6 @@ private static function isCurrentRequestPathUnder(string $configuredPath, bool $
                 ]
             )
         );
-
         if (!$updated) {
             return self::buildGuestActionState(
                 $guestId,
@@ -1633,7 +1481,6 @@ private static function isCurrentRequestPathUnder(string $configuredPath, bool $
                 [\__('Unable to save the guest profile.', 'must-hotel-booking')]
             );
         }
-
         self::logGuestActivity(
             $guestId,
             $guest,
@@ -1641,10 +1488,8 @@ private static function isCurrentRequestPathUnder(string $configuredPath, bool $
             'info',
             \__('Guest contact details updated.', 'must-hotel-booking')
         );
-
         self::redirectToPortalGuestDetail($guestId, 'guest_contact_updated');
     }
-
     /**
      * @return array<string, mixed>
      */
@@ -1652,22 +1497,17 @@ private static function isCurrentRequestPathUnder(string $configuredPath, bool $
     {
         $guestId = isset($_POST['guest_id']) ? \absint(\wp_unslash($_POST['guest_id'])) : 0;
         $nonce = isset($_POST['must_portal_guest_nonce']) ? (string) \wp_unslash($_POST['must_portal_guest_nonce']) : '';
-
         if ($guestId <= 0 || !\wp_verify_nonce($nonce, 'must_portal_guest_save_flags_' . $guestId)) {
             self::redirectToPortalGuestDetail($guestId, 'invalid_nonce');
         }
-
         if (!\current_user_can(StaffAccess::CAP_GUEST_EDIT_FLAGS) && !\current_user_can('manage_options')) {
             self::redirectToPortalGuestDetail($guestId, 'access_denied');
         }
-
         $guestRepository = \MustHotelBooking\Engine\get_guest_repository();
         $guest = $guestRepository->getGuestById($guestId);
-
         if (!\is_array($guest)) {
             self::redirectToPortalGuestDetail($guestId, 'guest_not_found');
         }
-
         /** @var array<string, mixed> $rawPost */
         $rawPost = \is_array($_POST) ? $_POST : [];
         $form = GuestAdminActions::sanitizeGuestForm($rawPost);
@@ -1681,7 +1521,6 @@ private static function isCurrentRequestPathUnder(string $configuredPath, bool $
                 ]
             )
         );
-
         if (!$updated) {
             return self::buildGuestActionState(
                 $guestId,
@@ -1692,17 +1531,13 @@ private static function isCurrentRequestPathUnder(string $configuredPath, bool $
                 [\__('Unable to save the guest flags.', 'must-hotel-booking')]
             );
         }
-
         $statusLabels = [];
-
         if (!empty($form['vip_flag'])) {
             $statusLabels[] = \__('VIP', 'must-hotel-booking');
         }
-
         if (!empty($form['problem_flag'])) {
             $statusLabels[] = \__('Problem', 'must-hotel-booking');
         }
-
         $message = empty($statusLabels)
             ? \__('Guest flags cleared.', 'must-hotel-booking')
             : \sprintf(
@@ -1710,12 +1545,9 @@ private static function isCurrentRequestPathUnder(string $configuredPath, bool $
                 \__('Guest flags updated: %s.', 'must-hotel-booking'),
                 \implode(', ', $statusLabels)
             );
-
         self::logGuestActivity($guestId, $guest, 'guest_flags_updated', 'info', $message);
-
         self::redirectToPortalGuestDetail($guestId, 'guest_flags_updated');
     }
-
     /**
      * @return array<string, mixed>
      */
@@ -1723,25 +1555,19 @@ private static function isCurrentRequestPathUnder(string $configuredPath, bool $
     {
         $guestId = isset($_POST['guest_id']) ? \absint(\wp_unslash($_POST['guest_id'])) : 0;
         $nonce = isset($_POST['must_portal_guest_nonce']) ? (string) \wp_unslash($_POST['must_portal_guest_nonce']) : '';
-
         if ($guestId <= 0 || !\wp_verify_nonce($nonce, 'must_portal_guest_add_note_' . $guestId)) {
             self::redirectToPortalGuestDetail($guestId, 'invalid_nonce');
         }
-
         if (!\current_user_can(StaffAccess::CAP_GUEST_ADD_NOTE) && !\current_user_can('manage_options')) {
             self::redirectToPortalGuestDetail($guestId, 'access_denied');
         }
-
         $guestRepository = \MustHotelBooking\Engine\get_guest_repository();
         $guest = $guestRepository->getGuestById($guestId);
-
         if (!\is_array($guest)) {
             self::redirectToPortalGuestDetail($guestId, 'guest_not_found');
         }
-
         $note = isset($_POST['internal_note']) ? \sanitize_textarea_field((string) \wp_unslash($_POST['internal_note'])) : '';
         $note = \trim($note);
-
         if ($note === '') {
             return self::buildGuestActionState(
                 $guestId,
@@ -1749,14 +1575,12 @@ private static function isCurrentRequestPathUnder(string $configuredPath, bool $
                 [\__('Enter a guest service note before saving.', 'must-hotel-booking')]
             );
         }
-
         $currentUser = \wp_get_current_user();
         $authorName = $currentUser instanceof \WP_User && $currentUser->display_name !== '' ? (string) $currentUser->display_name : \__('Staff', 'must-hotel-booking');
         $timestamp = \date_i18n('d M Y H:i', \current_time('timestamp'));
         $noteEntry = '[' . $timestamp . ' - ' . $authorName . '] ' . $note;
         $existingNotes = \trim((string) ($guest['admin_notes'] ?? ''));
         $updatedNotes = $existingNotes !== '' ? $existingNotes . "\n\n" . $noteEntry : $noteEntry;
-
         $updated = $guestRepository->updateAdminGuestRecord(
             $guestId,
             self::mergeGuestUpdatePayload(
@@ -1766,7 +1590,6 @@ private static function isCurrentRequestPathUnder(string $configuredPath, bool $
                 ]
             )
         );
-
         if (!$updated) {
             return self::buildGuestActionState(
                 $guestId,
@@ -1774,7 +1597,6 @@ private static function isCurrentRequestPathUnder(string $configuredPath, bool $
                 [\__('Unable to save the guest service note.', 'must-hotel-booking')]
             );
         }
-
         self::logGuestActivity(
             $guestId,
             $guest,
@@ -1786,10 +1608,8 @@ private static function isCurrentRequestPathUnder(string $configuredPath, bool $
                 $authorName
             )
         );
-
         self::redirectToPortalGuestDetail($guestId, 'guest_note_added');
     }
-
     /**
      * @return array<string, mixed>
      */
@@ -1798,29 +1618,22 @@ private static function isCurrentRequestPathUnder(string $configuredPath, bool $
         $primaryId = isset($_POST['guest_id']) ? \absint(\wp_unslash($_POST['guest_id'])) : 0;
         $secondaryId = isset($_POST['merge_guest_id']) ? \absint(\wp_unslash($_POST['merge_guest_id'])) : 0;
         $nonce = isset($_POST['must_portal_guest_nonce']) ? (string) \wp_unslash($_POST['must_portal_guest_nonce']) : '';
-
         if ($primaryId <= 0 || $secondaryId <= 0 || !\wp_verify_nonce($nonce, 'must_portal_guest_merge_' . $primaryId . '_' . $secondaryId)) {
             self::redirectToPortalGuestDetail($primaryId, 'invalid_nonce');
         }
-
         if (!\current_user_can(StaffAccess::CAP_GUEST_EDIT_CONTACT) && !\current_user_can('manage_options')) {
             self::redirectToPortalGuestDetail($primaryId, 'access_denied');
         }
-
         $guestRepository = \MustHotelBooking\Engine\get_guest_repository();
         $primary = $guestRepository->getGuestById($primaryId);
         $secondary = $guestRepository->getGuestById($secondaryId);
-
         if (!\is_array($primary)) {
             self::redirectToPortalGuestDetail($primaryId, 'guest_not_found');
         }
-
         if (!\is_array($secondary)) {
             self::redirectToPortalGuestDetail($primaryId, 'guest_not_found');
         }
-
         $merged = $guestRepository->mergeGuests($primaryId, $secondaryId);
-
         if (!$merged) {
             return self::buildGuestActionState(
                 $primaryId,
@@ -1828,7 +1641,6 @@ private static function isCurrentRequestPathUnder(string $configuredPath, bool $
                 [\__('Unable to merge the guest profiles. Please try again.', 'must-hotel-booking')]
             );
         }
-
         self::logGuestActivity(
             $primaryId,
             $primary,
@@ -1840,10 +1652,8 @@ private static function isCurrentRequestPathUnder(string $configuredPath, bool $
                 $secondaryId
             )
         );
-
         self::redirectToPortalGuestDetail($primaryId, 'guest_merged');
     }
-
     /**
      * @return array<string, mixed>
      */
@@ -1862,25 +1672,19 @@ private static function isCurrentRequestPathUnder(string $configuredPath, bool $
             'amount' => $amount > 0 ? \number_format($amount, 2, '.', '') : '',
             'transaction_id' => $transactionId,
         ];
-
         if ($reservationId <= 0 || !\wp_verify_nonce($nonce, 'must_portal_payment_action_' . $action . '_' . $reservationId)) {
             return self::buildPaymentActionState($reservationId, ['post' => $form], [\__('Security check failed. Please try again.', 'must-hotel-booking')]);
         }
-
         if (!\current_user_can($capability) && !\current_user_can('manage_options')) {
             return self::buildPaymentActionState($reservationId, ['post' => $form], [\__('You do not have permission to post payments from the portal.', 'must-hotel-booking')]);
         }
-
         $paymentActions = new PaymentAdminActions();
-
         if (!$allowPartial) {
             $detail = (new PaymentAdminDataProvider())->getDetailDataForReservation($reservationId);
             $amount = \is_array($detail) ? (float) (($detail['state']['amount_due'] ?? 0.0)) : 0.0;
             $form['amount'] = $amount > 0 ? \number_format($amount, 2, '.', '') : '';
         }
-
         $result = $paymentActions->recordPostedPayment($reservationId, $amount, 'pay_at_hotel', $transactionId);
-
         if (empty($result['success'])) {
             return self::buildPaymentActionState(
                 $reservationId,
@@ -1888,10 +1692,8 @@ private static function isCurrentRequestPathUnder(string $configuredPath, bool $
                 [isset($result['message']) ? (string) $result['message'] : \__('Unable to record the payment.', 'must-hotel-booking')]
             );
         }
-
         self::redirectToPortalPaymentDetail($reservationId, (string) ($result['notice'] ?? 'payment_posted'));
     }
-
     /**
      * @return array<string, mixed>
      */
@@ -1899,37 +1701,28 @@ private static function isCurrentRequestPathUnder(string $configuredPath, bool $
     {
         $reservationId = isset($_POST['reservation_id']) ? \absint(\wp_unslash($_POST['reservation_id'])) : 0;
         $nonce = isset($_POST['must_portal_payment_nonce']) ? (string) \wp_unslash($_POST['must_portal_payment_nonce']) : '';
-
         $rawAmount = isset($_POST['amount']) && !\is_array($_POST['amount']) ? (string) \wp_unslash($_POST['amount']) : '';
         $amount = (float) $rawAmount;
-
         $reason = isset($_POST['reason']) && !\is_array($_POST['reason'])
             ? \sanitize_text_field((string) \wp_unslash($_POST['reason']))
             : '';
-
         $refundType = isset($_POST['refund_type']) && !\is_array($_POST['refund_type'])
             ? \sanitize_key((string) \wp_unslash($_POST['refund_type']))
             : 'refund_only';
-
         $refundAmountMode = isset($_POST['refund_amount_mode']) && !\is_array($_POST['refund_amount_mode'])
             ? \sanitize_key((string) \wp_unslash($_POST['refund_amount_mode']))
             : 'fixed';
-
         $refundPercent = isset($_POST['refund_percent']) && !\is_array($_POST['refund_percent'])
             ? (float) \wp_unslash($_POST['refund_percent'])
             : 0.0;
-
         if (!\in_array($refundType, ['refund_only', 'full_refund_cancel', 'partial_refund', 'partial_refund_cancel'], true)) {
             $refundType = 'refund_only';
         }
-
         if (!\in_array($refundAmountMode, ['fixed', 'percent'], true)) {
             $refundAmountMode = 'fixed';
         }
-
         $cancelReservation = \in_array($refundType, ['full_refund_cancel', 'partial_refund_cancel'], true);
         $isPartialRefund = \in_array($refundType, ['partial_refund', 'partial_refund_cancel'], true);
-
         $form = [
             'amount' => $amount > 0 ? \number_format($amount, 2, '.', '') : '',
             'reason' => $reason,
@@ -1937,7 +1730,6 @@ private static function isCurrentRequestPathUnder(string $configuredPath, bool $
             'refund_amount_mode' => $refundAmountMode,
             'refund_percent' => $refundPercent > 0 ? (string) $refundPercent : '',
         ];
-
         if ($reservationId <= 0 || !\wp_verify_nonce($nonce, 'must_portal_payment_action_payment_refund_' . $reservationId)) {
             return self::buildPaymentActionState(
                 $reservationId,
@@ -1945,7 +1737,6 @@ private static function isCurrentRequestPathUnder(string $configuredPath, bool $
                 [\__('Security check failed. Please try again.', 'must-hotel-booking')]
             );
         }
-
         if (!\current_user_can(StaffAccess::CAP_PAYMENT_REFUND) && !\current_user_can('manage_options')) {
             return self::buildPaymentActionState(
                 $reservationId,
@@ -1953,21 +1744,16 @@ private static function isCurrentRequestPathUnder(string $configuredPath, bool $
                 [\__('You do not have permission to issue refunds from the portal.', 'must-hotel-booking')]
             );
         }
-
         $detail = (new PaymentAdminDataProvider())->getDetailDataForReservation($reservationId);
         $state = \is_array($detail) && isset($detail['state']) && \is_array($detail['state']) ? $detail['state'] : [];
         $amountPaid = (float) ($state['amount_paid'] ?? 0.0);
-
         if (!$isPartialRefund && $amountPaid > 0.0) {
             $amount = $amountPaid;
         }
-
         if ($isPartialRefund && $refundAmountMode === 'percent') {
             $amount = \round($amountPaid * ($refundPercent / 100), 2);
         }
-
         $form['amount'] = $amount > 0 ? \number_format($amount, 2, '.', '') : '';
-
         if ($isPartialRefund) {
             if ($amountPaid <= 0.0) {
                 return self::buildPaymentActionState(
@@ -1976,7 +1762,6 @@ private static function isCurrentRequestPathUnder(string $configuredPath, bool $
                     [\__('There is no recorded paid balance available to refund.', 'must-hotel-booking')]
                 );
             }
-
             if ($amount <= 0.0) {
                 return self::buildPaymentActionState(
                     $reservationId,
@@ -1984,7 +1769,6 @@ private static function isCurrentRequestPathUnder(string $configuredPath, bool $
                     [\__('Partial refund amount must be greater than zero.', 'must-hotel-booking')]
                 );
             }
-
             if ($amount >= $amountPaid) {
                 return self::buildPaymentActionState(
                     $reservationId,
@@ -1992,7 +1776,6 @@ private static function isCurrentRequestPathUnder(string $configuredPath, bool $
                     [\__('Partial refund amount must be lower than the total paid amount. Use full refund instead.', 'must-hotel-booking')]
                 );
             }
-
             if ($refundAmountMode === 'percent' && ($refundPercent <= 0.0 || $refundPercent >= 100.0)) {
                 return self::buildPaymentActionState(
                     $reservationId,
@@ -2001,14 +1784,12 @@ private static function isCurrentRequestPathUnder(string $configuredPath, bool $
                 );
             }
         }
-
         $result = (new PaymentAdminActions())->refundRecordedPayment($reservationId, $amount, [
             'reason' => $reason,
             'refund_type' => $refundType,
             'cancel_reservation' => $cancelReservation,
             'source' => 'portal',
         ]);
-
         if (empty($result['success'])) {
             return self::buildPaymentActionState(
                 $reservationId,
@@ -2016,7 +1797,6 @@ private static function isCurrentRequestPathUnder(string $configuredPath, bool $
                 [isset($result['message']) ? (string) $result['message'] : \__('Unable to issue the refund.', 'must-hotel-booking')]
             );
         }
-
         self::redirectToPortalPaymentDetail($reservationId, (string) ($result['notice'] ?? 'payment_refunded'));
     }
     /**
@@ -2026,57 +1806,43 @@ private static function isCurrentRequestPathUnder(string $configuredPath, bool $
     {
         $reservationId = isset($_POST['reservation_id']) ? \absint(\wp_unslash($_POST['reservation_id'])) : 0;
         $nonce = isset($_POST['must_portal_payment_nonce']) ? (string) \wp_unslash($_POST['must_portal_payment_nonce']) : '';
-
         if ($reservationId <= 0 || !\wp_verify_nonce($nonce, 'must_portal_payment_action_' . $action . '_' . $reservationId)) {
             return self::buildPaymentActionState($reservationId, [], [\__('Security check failed. Please try again.', 'must-hotel-booking')]);
         }
-
         if (!\current_user_can($capability) && !\current_user_can('manage_options')) {
             return self::buildPaymentActionState($reservationId, [], [\__('You do not have permission to perform that payment action.', 'must-hotel-booking')]);
         }
-
         $success = (new PaymentAdminActions())->applyAdminPaymentAction($reservationId, $action);
-
         if (!$success) {
             return self::buildPaymentActionState($reservationId, [], [\__('The requested payment action could not be completed for this reservation state.', 'must-hotel-booking')]);
         }
-
         self::redirectToPortalPaymentDetail($reservationId, $successNotice);
     }
-
     private static function handlePaymentDocumentRequest(string $documentType): void
     {
         $reservationId = isset($_POST['reservation_id']) ? \absint(\wp_unslash($_POST['reservation_id'])) : 0;
         $nonce = isset($_POST['must_portal_payment_nonce']) ? (string) \wp_unslash($_POST['must_portal_payment_nonce']) : '';
         $capability = $documentType === 'invoice' ? StaffAccess::CAP_PAYMENT_INVOICE : StaffAccess::CAP_PAYMENT_RECEIPT;
-
         if ($reservationId <= 0 || !\wp_verify_nonce($nonce, 'must_portal_payment_action_payment_issue_' . $documentType . '_' . $reservationId)) {
             self::redirectToPortalPaymentDetail($reservationId, 'invalid_nonce');
         }
-
         if (!\current_user_can($capability) && !\current_user_can('manage_options')) {
             self::redirectToPortalPaymentDetail($reservationId, 'access_denied');
         }
-
         $detail = (new PaymentAdminDataProvider())->getDetailDataForReservation($reservationId);
-
         if (!\is_array($detail)) {
             self::redirectToPortalPaymentDetail($reservationId, 'reservation_not_found');
         }
-
         $state = isset($detail['state']) && \is_array($detail['state']) ? $detail['state'] : [];
         $hasRecordedPayments = !empty($detail['payments']) || (float) ($state['amount_paid'] ?? 0.0) > 0.0;
         $canRender = $documentType === 'invoice'
             ? (float) ($state['total'] ?? 0.0) > 0.0
             : $hasRecordedPayments;
-
         if (!$canRender) {
             self::redirectToPortalPaymentDetail($reservationId, 'portal_action_failed');
         }
-
         self::renderPaymentDocument($documentType, $detail);
     }
-
     /**
      * @param array<string, mixed> $detail
      */
@@ -2092,11 +1858,9 @@ private static function isCurrentRequestPathUnder(string $configuredPath, bool $
         $guestEmail = (string) ($detail['guest_email'] ?? '');
         $guestPhone = (string) ($detail['guest_phone'] ?? '');
         $documentLabel = $documentType === 'invoice' ? \__('Invoice', 'must-hotel-booking') : \__('Receipt', 'must-hotel-booking');
-
         \nocache_headers();
         \status_header(200);
         \header('Content-Type: text/html; charset=' . \get_option('blog_charset'));
-
         echo '<!DOCTYPE html><html><head><meta charset="' . \esc_attr((string) \get_option('blog_charset')) . '" />';
         echo '<title>' . \esc_html($documentLabel . ' ' . $bookingId) . '</title>';
         echo '<style>body{font-family:Arial,sans-serif;color:#16212b;margin:32px;background:#fff}h1,h2{margin:0 0 8px}p{margin:0 0 10px}table{width:100%;border-collapse:collapse;margin-top:20px}th,td{border:1px solid #d7dde5;padding:10px;text-align:left;font-size:14px}th{background:#f5f7fa} .meta{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px;margin:24px 0} .meta-block{padding:16px;border:1px solid #d7dde5;border-radius:10px} .summary{margin-top:24px;padding:16px;border:1px solid #d7dde5;border-radius:10px;background:#f9fbfc} .summary strong{display:block;margin-bottom:4px} .print-note{margin-top:24px;font-size:12px;color:#5f6b7a}</style>';
@@ -2120,7 +1884,6 @@ private static function isCurrentRequestPathUnder(string $configuredPath, bool $
         echo '<p>' . \esc_html(\sprintf(\__('Reservation status: %s', 'must-hotel-booking'), (string) ($reservation['status'] ?? ''))) . '</p>';
         echo '</div>';
         echo '</div>';
-
         echo '<div class="summary">';
         echo '<strong>' . \esc_html($documentType === 'invoice' ? \__('Invoice summary', 'must-hotel-booking') : \__('Payment summary', 'must-hotel-booking')) . '</strong>';
         echo '<p>' . \esc_html(\sprintf(\__('Reservation total: %1$s %2$s', 'must-hotel-booking'), \number_format_i18n((float) ($state['total'] ?? 0.0), 2), $currency)) . '</p>';
@@ -2130,15 +1893,12 @@ private static function isCurrentRequestPathUnder(string $configuredPath, bool $
         }
         echo '<p>' . \esc_html(\sprintf(\__('Outstanding due: %1$s %2$s', 'must-hotel-booking'), \number_format_i18n((float) ($state['amount_due'] ?? 0.0), 2), $currency)) . '</p>';
         echo '</div>';
-
         if (!empty($payments)) {
             echo '<table><thead><tr><th>' . \esc_html__('Amount', 'must-hotel-booking') . '</th><th>' . \esc_html__('Method', 'must-hotel-booking') . '</th><th>' . \esc_html__('Status', 'must-hotel-booking') . '</th><th>' . \esc_html__('Reference', 'must-hotel-booking') . '</th><th>' . \esc_html__('Recorded', 'must-hotel-booking') . '</th></tr></thead><tbody>';
-
             foreach ($payments as $paymentRow) {
                 if (!\is_array($paymentRow)) {
                     continue;
                 }
-
                 echo '<tr>';
                 echo '<td>' . \esc_html(\number_format_i18n((float) ($paymentRow['amount'] ?? 0.0), 2) . ' ' . (string) ($paymentRow['currency'] ?? $currency)) . '</td>';
                 echo '<td>' . \esc_html((string) ($paymentRow['method'] ?? '')) . '</td>';
@@ -2147,15 +1907,12 @@ private static function isCurrentRequestPathUnder(string $configuredPath, bool $
                 echo '<td>' . \esc_html((string) (($paymentRow['paid_at'] ?? '') !== '' ? $paymentRow['paid_at'] : ($paymentRow['created_at'] ?? ''))) . '</td>';
                 echo '</tr>';
             }
-
             echo '</tbody></table>';
         }
-
         echo '<p class="print-note">' . \esc_html__('This document was generated from the current portal reservation and payment records. Print or save it using your browser if needed.', 'must-hotel-booking') . '</p>';
         echo '</body></html>';
         exit;
     }
-
     /**
      * @param array<string, mixed> $actionState
      * @return array<string, mixed>
@@ -2165,42 +1922,32 @@ private static function isCurrentRequestPathUnder(string $configuredPath, bool $
         if ($moduleKey === 'dashboard') {
             return self::prepareDashboardData();
         }
-
         if ($moduleKey === 'reservations') {
             return self::prepareReservationsData($actionState);
         }
-
         if ($moduleKey === 'calendar') {
             return self::prepareCalendarData($actionState);
         }
-
         if ($moduleKey === 'front_desk') {
             return self::prepareFrontDeskData($actionState);
         }
-
         if ($moduleKey === 'guests') {
             return self::prepareGuestsData($actionState);
         }
-
         if ($moduleKey === 'payments') {
             return self::preparePaymentsData($actionState);
         }
-
         if ($moduleKey === 'reports') {
             return self::prepareReportsData();
         }
-
         if ($moduleKey === 'housekeeping') {
             return self::prepareHousekeepingData($actionState);
         }
-
         if ($moduleKey === 'rooms_availability') {
             return self::prepareRoomsAvailabilityData($actionState);
         }
-
         return [];
     }
-
     /**
      * @return array<string, mixed>
      */
@@ -2211,12 +1958,10 @@ private static function isCurrentRequestPathUnder(string $configuredPath, bool $
         $data = self::mapDashboardActionUrlsToPortal($data);
         $data = self::filterDashboardDataForCurrentUser($data);
         $quickActions = [];
-
         foreach (PortalRegistry::getVisibleDefinitionsForCurrentUser() as $key => $definition) {
             if ($key === 'dashboard') {
                 continue;
             }
-
             $quickActions[] = [
                 'key' => $key,
                 'label' => (string) ($definition['label'] ?? $key),
@@ -2225,7 +1970,6 @@ private static function isCurrentRequestPathUnder(string $configuredPath, bool $
                 'description' => self::getPortalQuickActionDescription($key),
             ];
         }
-
         $data['quick_actions'] = $quickActions;
         $data['show_health'] = \current_user_can('manage_options');
         $data['portal_counts'] = [
@@ -2234,10 +1978,8 @@ private static function isCurrentRequestPathUnder(string $configuredPath, bool $
             'recent_reservations' => \count(isset($data['recent_reservations']) && \is_array($data['recent_reservations']) ? $data['recent_reservations'] : []),
             'recent_activity' => \count(isset($data['recent_activity']) && \is_array($data['recent_activity']) ? $data['recent_activity'] : []),
         ];
-
         return $data;
     }
-
     /**
      * @param array<int, array<string, mixed>> $cards
      * @return array<int, array<string, mixed>>
@@ -2248,10 +1990,8 @@ private static function isCurrentRequestPathUnder(string $configuredPath, bool $
             if (!\is_array($card)) {
                 continue;
             }
-
             $key = \sanitize_key((string) ($card['key'] ?? ''));
             $linkUrl = '';
-
             if ($key === 'arrivals_today') {
                 $linkUrl = PortalRouter::getModuleUrl('reservations', ['preset' => 'arrivals_today']);
             } elseif ($key === 'departures_today') {
@@ -2269,17 +2009,13 @@ private static function isCurrentRequestPathUnder(string $configuredPath, bool $
             } elseif ($key === 'blocked_units') {
                 $linkUrl = PortalRouter::getModuleUrl('rooms_availability', ['tab' => 'blocks']);
             }
-
             if ($linkUrl !== '') {
                 $card['link_url'] = $linkUrl;
             }
-
             $cards[$index] = $card;
         }
-
         return $cards;
     }
-
     /**
      * @param array<string, mixed> $data
      * @return array<string, mixed>
@@ -2290,113 +2026,86 @@ private static function isCurrentRequestPathUnder(string $configuredPath, bool $
             if (empty($data[$key]) || !\is_array($data[$key])) {
                 continue;
             }
-
             foreach ($data[$key] as $index => $item) {
                 if (!\is_array($item)) {
                     continue;
                 }
-
                 if (!empty($item['action_url'])) {
                     $item['action_url'] = self::mapAdminUrlToPortalUrl((string) $item['action_url']);
                 }
-
                 $data[$key][$index] = $item;
             }
         }
-
         if (!empty($data['recent_reservations']) && \is_array($data['recent_reservations'])) {
             foreach ($data['recent_reservations'] as $index => $item) {
                 if (!\is_array($item)) {
                     continue;
                 }
-
                 if (!empty($item['view_url'])) {
                     $item['view_url'] = self::mapAdminUrlToPortalUrl((string) $item['view_url']);
                 }
-
                 if (!empty($item['edit_url'])) {
                     $item['edit_url'] = self::mapAdminUrlToPortalUrl((string) $item['edit_url']);
                 }
-
                 $data['recent_reservations'][$index] = $item;
             }
         }
-
         return $data;
     }
-
     private static function mapAdminUrlToPortalUrl(string $url): string
     {
         if ($url === '') {
             return $url;
         }
-
         $parts = \wp_parse_url($url);
-
         if (!\is_array($parts) || empty($parts['query'])) {
             return $url;
         }
-
         $queryArgs = [];
         \parse_str((string) $parts['query'], $queryArgs);
         $page = isset($queryArgs['page']) ? \sanitize_key((string) $queryArgs['page']) : '';
-
         if ($page === 'must-hotel-booking-reservation' && StaffAccess::userCanAccessPortalModule('reservations')) {
             $reservationId = isset($queryArgs['reservation_id']) ? \absint($queryArgs['reservation_id']) : 0;
-
             if ($reservationId > 0) {
                 return PortalRouter::getModuleUrl('reservations', ['reservation_id' => $reservationId]);
             }
         }
-
         if ($page === 'must-hotel-booking-reservations' && StaffAccess::userCanAccessPortalModule('reservations')) {
             $allowedArgs = self::filterPortalModuleArgs(
                 $queryArgs,
                 ['quick_filter', 'preset', 'search', 'status', 'payment_status', 'payment_method', 'room_id', 'checkin_from', 'checkin_to', 'checkin_month', 'paged']
             );
-
             if (!empty($allowedArgs['preset']) && empty($allowedArgs['quick_filter'])) {
                 $allowedArgs['quick_filter'] = (string) $allowedArgs['preset'];
             }
-
             unset($allowedArgs['preset']);
-
             return PortalRouter::getModuleUrl('reservations', $allowedArgs);
         }
-
         if ($page === 'must-hotel-booking-payments' && StaffAccess::userCanAccessPortalModule('payments')) {
             $reservationId = isset($queryArgs['reservation_id']) ? \absint($queryArgs['reservation_id']) : 0;
             $allowedArgs = self::filterPortalModuleArgs($queryArgs, ['payment_group', 'search', 'paged']);
-
             if ($reservationId > 0) {
                 $allowedArgs['reservation_id'] = $reservationId;
             }
-
             return PortalRouter::getModuleUrl('payments', $allowedArgs);
         }
-
         if ($page === 'must-hotel-booking-calendar' && StaffAccess::userCanAccessPortalModule('calendar')) {
             return PortalRouter::getModuleUrl(
                 'calendar',
                 self::filterPortalModuleArgs($queryArgs, ['start_date', 'weeks', 'room_id', 'focus_room_id', 'focus_date', 'reservation_id'])
             );
         }
-
         if ($page === 'must-hotel-booking-guests' && StaffAccess::userCanAccessPortalModule('guests')) {
             return PortalRouter::getModuleUrl('guests', self::filterPortalModuleArgs($queryArgs, ['guest_id', 'search', 'paged']));
         }
-
         if ($page === 'must-hotel-booking-availability-rules' && StaffAccess::userCanAccessPortalModule('rooms_availability')) {
             return PortalRouter::getModuleUrl('rooms_availability', \array_merge(['tab' => 'rules'], self::filterPortalModuleArgs($queryArgs, ['room_id'])));
         }
-
         if ($page === 'must-hotel-booking-rooms' && StaffAccess::userCanAccessPortalModule('rooms_availability')) {
             return PortalRouter::getModuleUrl('rooms_availability', ['tab' => 'rooms']);
         }
-
         return $url;
     }
-
     /**
      * @param array<string, mixed> $args
      * @param array<int, string> $allowedKeys
@@ -2405,29 +2114,22 @@ private static function isCurrentRequestPathUnder(string $configuredPath, bool $
     private static function filterPortalModuleArgs(array $args, array $allowedKeys): array
     {
         $filtered = [];
-
         foreach ($allowedKeys as $key) {
             if (!isset($args[$key]) || !\is_scalar($args[$key])) {
                 continue;
             }
-
             $value = \wp_unslash((string) $args[$key]);
-
             if ($value === '') {
                 continue;
             }
-
             if (\in_array($key, ['room_id', 'guest_id', 'reservation_id', 'paged', 'weeks', 'focus_room_id'], true)) {
                 $filtered[$key] = \absint($value);
                 continue;
             }
-
             $filtered[$key] = \sanitize_text_field($value);
         }
-
         return $filtered;
     }
-
     private static function getPortalQuickActionDescription(string $moduleKey): string
     {
         $descriptions = [
@@ -2440,32 +2142,25 @@ private static function isCurrentRequestPathUnder(string $configuredPath, bool $
             'rooms_availability' => \__('Inspect room inventory, blocks, rules, and operational statuses.', 'must-hotel-booking'),
             'reports' => \__('Open revenue and operational reporting views.', 'must-hotel-booking'),
         ];
-
         return isset($descriptions[$moduleKey]) ? $descriptions[$moduleKey] : \__('Open this workspace module.', 'must-hotel-booking');
     }
-
     /**
      * @param array<int, array<string, mixed>> $items
      */
     private static function countActionableHealthItems(array $items): int
     {
         $count = 0;
-
         foreach ($items as $item) {
             if (!\is_array($item)) {
                 continue;
             }
-
             $status = \sanitize_key((string) ($item['status'] ?? ''));
-
             if (\in_array($status, ['warning', 'error'], true)) {
                 $count++;
             }
         }
-
         return $count;
     }
-
     /**
      * @return array<string, mixed>
      */
@@ -2481,17 +2176,14 @@ private static function isCurrentRequestPathUnder(string $configuredPath, bool $
             : (isset($_GET['reservation_id']) ? \absint(\wp_unslash($_GET['reservation_id'])) : 0);
         $mode = isset($_GET['mode']) ? \sanitize_key((string) \wp_unslash($_GET['mode'])) : 'view';
         $detail = $reservationId > 0 ? $provider->getDetailPageData($reservationId, $mode) : null;
-
         if (\is_array($detail) && isset($actionState['forms']) && \is_array($actionState['forms'])) {
             $detail['forms'] = $actionState['forms'];
         }
-
         if (!self::currentUserCanViewFinanceContext()) {
             if (isset($data['filters']) && \is_array($data['filters'])) {
                 $data['filters']['payment_status'] = '';
                 $data['filters']['payment_method'] = '';
             }
-
             $data['payment_status_options'] = [];
             $data['payment_method_options'] = [];
             $data['quick_filters'] = \array_values(
@@ -2501,7 +2193,6 @@ private static function isCurrentRequestPathUnder(string $configuredPath, bool $
                         if (!\is_array($filter)) {
                             return false;
                         }
-
                         return !\in_array(
                             \sanitize_key((string) ($filter['slug'] ?? '')),
                             ['unpaid', 'paid', 'failed_payment'],
@@ -2511,15 +2202,12 @@ private static function isCurrentRequestPathUnder(string $configuredPath, bool $
                 )
             );
         }
-
         $data['detail'] = $detail;
         $data['source_options'] = \function_exists('\MustHotelBooking\Admin\get_admin_quick_booking_source_options')
             ? \MustHotelBooking\Admin\get_admin_quick_booking_source_options()
             : [];
-
         return $data;
     }
-
     /**
      * @param array<string, mixed> $request
      * @return array<string, mixed>
@@ -2529,24 +2217,18 @@ private static function isCurrentRequestPathUnder(string $configuredPath, bool $
         if (self::currentUserCanViewFinanceContext()) {
             return $request;
         }
-
         unset($request['payment_status'], $request['payment_method']);
-
         $quickFilter = isset($request['quick_filter']) ? \sanitize_key((string) $request['quick_filter']) : '';
         $preset = isset($request['preset']) ? \sanitize_key((string) $request['preset']) : '';
         $blockedQuickFilters = ['unpaid', 'paid', 'failed_payment'];
-
         if (\in_array($quickFilter, $blockedQuickFilters, true)) {
             unset($request['quick_filter']);
         }
-
         if (\in_array($preset, $blockedQuickFilters, true)) {
             unset($request['preset']);
         }
-
         return $request;
     }
-
     /**
      * @return array<string, mixed>
      */
@@ -2554,11 +2236,9 @@ private static function isCurrentRequestPathUnder(string $configuredPath, bool $
     {
         /** @var array<string, mixed> $request */
         $request = \is_array($_GET) ? \wp_unslash($_GET) : [];
-
         if (isset($actionState['calendar_query']) && \is_array($actionState['calendar_query'])) {
             $request = \array_merge($request, $actionState['calendar_query']);
         }
-
         $query = CalendarViewQuery::fromRequest($request);
         $data = (new CalendarDataProvider())->getPageData($query);
         $summary = isset($data['summary']) && \is_array($data['summary']) ? $data['summary'] : [];
@@ -2580,10 +2260,8 @@ private static function isCurrentRequestPathUnder(string $configuredPath, bool $
             $query,
             $actionState
         );
-
         return $data;
     }
-
     /**
      * @return array<string, mixed>
      */
@@ -2598,29 +2276,24 @@ private static function isCurrentRequestPathUnder(string $configuredPath, bool $
             'cancellation_request_approved',
             'cancellation_request_rejected',
         ];
-
         if (StaffAccess::userCanAccessPortalModule('payments')) {
             $eventTypes[] = 'payment_recorded';
             $eventTypes[] = 'payment_failed';
             $eventTypes[] = 'payment_refunded';
         }
-
         $activityRows = \MustHotelBooking\Engine\get_activity_repository()->getRecentActivitiesByEventTypes($eventTypes, 40);
         $rows = [];
         $reservationCount = 0;
         $paymentCount = 0;
         $cancellationCount = 0;
-
         foreach ($activityRows as $activityRow) {
             if (!\is_array($activityRow)) {
                 continue;
             }
-
             $eventType = \sanitize_key((string) ($activityRow['event_type'] ?? ''));
             $entityType = \sanitize_key((string) ($activityRow['entity_type'] ?? ''));
             $context = self::decodeActivityContext((string) ($activityRow['context_json'] ?? ''));
             $actionUrl = self::buildAuditActionUrl($activityRow, $context);
-
             if (\str_starts_with($eventType, 'payment_')) {
                 $paymentCount++;
             } elseif (\str_contains($eventType, 'cancellation')) {
@@ -2628,7 +2301,6 @@ private static function isCurrentRequestPathUnder(string $configuredPath, bool $
             } else {
                 $reservationCount++;
             }
-
             $rows[] = [
                 'created_at' => self::formatPortalDateTime((string) ($activityRow['created_at'] ?? '')),
                 'severity' => (string) ($activityRow['severity'] ?? 'info'),
@@ -2639,7 +2311,6 @@ private static function isCurrentRequestPathUnder(string $configuredPath, bool $
                 'action_label' => self::buildFrontDeskLogActionLabel($entityType, $actionUrl),
             ];
         }
-
         return [
             'title' => \__('Desk Log', 'must-hotel-booking'),
             'description' => \__('Recent front-desk operations, using the same activity records already written by reservation and payment actions.', 'must-hotel-booking'),
@@ -2669,24 +2340,19 @@ private static function isCurrentRequestPathUnder(string $configuredPath, bool $
             'rows' => $rows,
         ];
     }
-
     private static function buildFrontDeskLogActionLabel(string $entityType, string $actionUrl): string
     {
         if ($actionUrl === '') {
             return '';
         }
-
         if ($entityType === 'payment') {
             return \__('Open payment', 'must-hotel-booking');
         }
-
         if ($entityType === 'inventory_room') {
             return \__('Open room board', 'must-hotel-booking');
         }
-
         return \__('Open reservation', 'must-hotel-booking');
     }
-
     /**
      * @param array<int, array<string, mixed>> $rows
      * @return array<int, array<string, mixed>>
@@ -2697,15 +2363,12 @@ private static function isCurrentRequestPathUnder(string $configuredPath, bool $
             if (!\is_array($row)) {
                 continue;
             }
-
             $roomId = isset($row['id']) ? (int) $row['id'] : 0;
             $cells = isset($row['cells']) && \is_array($row['cells']) ? $row['cells'] : [];
-
             foreach ($cells as $cellIndex => $cell) {
                 if (!\is_array($cell)) {
                     continue;
                 }
-
                 $date = isset($cell['date']) ? (string) $cell['date'] : '';
                 $action = self::buildCalendarCellAction($roomId, $date, $cell, $query);
                 $cell['action_url'] = (string) ($action['url'] ?? '');
@@ -2713,14 +2376,11 @@ private static function isCurrentRequestPathUnder(string $configuredPath, bool $
                 $cell['focus_url'] = self::buildCalendarFocusUrl($query, $roomId, $date);
                 $cells[$cellIndex] = $cell;
             }
-
             $row['cells'] = $cells;
             $rows[$rowIndex] = $row;
         }
-
         return $rows;
     }
-
     /**
      * @param array<string, mixed> $selected
      * @param array<string, mixed> $actionState
@@ -2735,52 +2395,40 @@ private static function isCurrentRequestPathUnder(string $configuredPath, bool $
         $canOpenRoomsAvailability = StaffAccess::userCanAccessPortalModule('rooms_availability');
         $canViewAvailability = $canOpenRoomsAvailability
             && (\current_user_can(StaffAccess::CAP_AVAILABILITY_RULES_VIEW) || \current_user_can(StaffAccess::CAP_ROOM_BLOCK_MANAGE) || \current_user_can('manage_options'));
-
         if ($roomId <= 0 || $date === '') {
             $selected['portal_actions'] = [];
             $selected['can_create_block'] = false;
             $selected['block_form'] = isset($actionState['block_form']) && \is_array($actionState['block_form']) ? $actionState['block_form'] : [];
             $selected['block_form_action'] = PortalRouter::getModuleUrl('calendar', $query->buildUrlArgs());
-
             return $selected;
         }
-
         foreach (['stays', 'arrivals', 'departures'] as $sectionKey) {
             $items = isset($selected[$sectionKey]) && \is_array($selected[$sectionKey]) ? $selected[$sectionKey] : [];
-
             foreach ($items as $itemIndex => $item) {
                 if (!\is_array($item)) {
                     continue;
                 }
-
                 $status = \sanitize_key((string) ($item['status'] ?? ''));
                 $itemDate = isset($item['checkin']) ? (string) $item['checkin'] : $date;
                 $item['portal_url'] = '';
                 $item['payment_url'] = !empty($item['payment_url']) ? self::mapAdminUrlToPortalUrl((string) $item['payment_url']) : '';
-
                 if ($status === 'blocked' && $canViewAvailability) {
                     $item['portal_url'] = self::buildRoomsAvailabilityCalendarUrl('blocks', $roomId, $itemDate);
                 } elseif (!empty($item['view_url'])) {
                     $item['portal_url'] = self::mapAdminUrlToPortalUrl((string) $item['view_url']);
                 }
-
                 $items[$itemIndex] = $item;
             }
-
             $selected[$sectionKey] = $items;
         }
-
         $rules = isset($selected['rules']) && \is_array($selected['rules']) ? $selected['rules'] : [];
-
         foreach ($rules as $ruleIndex => $rule) {
             if (!\is_array($rule)) {
                 continue;
             }
-
             $rule['portal_url'] = $canViewAvailability ? self::buildRoomsAvailabilityCalendarUrl('rules', $roomId, $date) : '';
             $rules[$ruleIndex] = $rule;
         }
-
         $selected['rules'] = $rules;
         $selected['portal_actions'] = \array_values(
             \array_filter(
@@ -2832,10 +2480,8 @@ private static function isCurrentRequestPathUnder(string $configuredPath, bool $
                 ]
             )
         );
-
         return $selected;
     }
-
     /**
      * @param array<string, mixed> $cell
      * @return array{url: string, label: string}
@@ -2853,28 +2499,23 @@ private static function isCurrentRequestPathUnder(string $configuredPath, bool $
         $ruleCount = isset($cell['rule_count']) ? (int) $cell['rule_count'] : 0;
         $counts = isset($cell['counts']) && \is_array($cell['counts']) ? $cell['counts'] : [];
         $flags = isset($cell['flags']) && \is_array($cell['flags']) ? $cell['flags'] : [];
-
         if ($roomId <= 0 || $date === '') {
             return ['url' => '', 'label' => ''];
         }
-
         if (!empty($cell['hidden_state'])) {
             return [
                 'url' => $focusUrl,
                 'label' => \__('Inspect day', 'must-hotel-booking'),
             ];
         }
-
         if (\in_array($actualState, ['booked', 'partial', 'pending'], true) && $stayCount === 1 && $reservationId > 0 && $canOpenReservations) {
             return [
                 'url' => PortalRouter::getModuleUrl('reservations', ['reservation_id' => $reservationId]),
                 'label' => \__('Open reservation', 'must-hotel-booking'),
             ];
         }
-
         if ($actualState === 'blocked' && $canViewAvailability) {
             $targetTab = (!empty($counts['blocked'])) ? 'blocks' : 'rules';
-
             return [
                 'url' => self::buildRoomsAvailabilityCalendarUrl($targetTab, $roomId, $date),
                 'label' => $targetTab === 'blocks'
@@ -2882,7 +2523,6 @@ private static function isCurrentRequestPathUnder(string $configuredPath, bool $
                     : \__('Open rules', 'must-hotel-booking'),
             ];
         }
-
         if ($actualState === 'unavailable' && $canOpenRoomsAvailability) {
             if ($ruleCount > 0 || !empty($flags['maintenance_block']) || !empty($flags['closed_arrival']) || !empty($flags['closed_departure'])) {
                 return [
@@ -2890,7 +2530,6 @@ private static function isCurrentRequestPathUnder(string $configuredPath, bool $
                     'label' => \__('Open rules', 'must-hotel-booking'),
                 ];
             }
-
             if (!empty($flags['inventory_unavailable'])) {
                 return [
                     'url' => PortalRouter::getModuleUrl('rooms_availability', ['tab' => 'statuses', 'room_type_id' => $roomId]),
@@ -2898,13 +2537,11 @@ private static function isCurrentRequestPathUnder(string $configuredPath, bool $
                 ];
             }
         }
-
         return [
             'url' => $focusUrl,
             'label' => \__('Inspect day', 'must-hotel-booking'),
         ];
     }
-
     private static function buildCalendarFocusUrl(CalendarViewQuery $query, int $roomId, string $date): string
     {
         return PortalRouter::getModuleUrl(
@@ -2918,13 +2555,11 @@ private static function isCurrentRequestPathUnder(string $configuredPath, bool $
             )
         );
     }
-
     private static function buildRoomsAvailabilityCalendarUrl(string $tab, int $roomId, string $date): string
     {
         if ($tab === 'statuses') {
             return PortalRouter::getModuleUrl('rooms_availability', ['tab' => 'statuses', 'room_type_id' => $roomId]);
         }
-
         $args = [
             'tab' => $tab,
             'room_id' => $roomId,
@@ -2932,31 +2567,24 @@ private static function isCurrentRequestPathUnder(string $configuredPath, bool $
             'start_date' => $date,
             'end_date' => $date,
         ];
-
         if ($tab === 'blocks') {
             $args['mode'] = 'blocked';
         } elseif ($tab === 'rules') {
             $args['mode'] = 'restriction';
         }
-
         return PortalRouter::getModuleUrl('rooms_availability', $args);
     }
-
     private static function resolveCalendarTimeline(string $date): string
     {
         $today = \current_time('Y-m-d');
-
         if ($date < $today) {
             return 'past';
         }
-
         if ($date > $today) {
             return 'future';
         }
-
         return 'current';
     }
-
     /**
      * @param array<string, mixed> $actionState
      * @return array<string, mixed>
@@ -2991,7 +2619,6 @@ private static function isCurrentRequestPathUnder(string $configuredPath, bool $
             'submit_label' => (string) ($presentation['submit_label'] ?? \__('Continue to payment', 'must-hotel-booking')),
         ];
     }
-
     /**
      * @return array<string, mixed>
      */
@@ -3000,7 +2627,6 @@ private static function isCurrentRequestPathUnder(string $configuredPath, bool $
         /** @var array<string, mixed> $request */
         $request = \is_array($_GET) ? \wp_unslash($_GET) : [];
         $query = GuestAdminQuery::fromRequest($request);
-
         return (new GuestAdminDataProvider())->getPageData(
             $query,
             [
@@ -3010,7 +2636,6 @@ private static function isCurrentRequestPathUnder(string $configuredPath, bool $
             ]
         );
     }
-
     /**
      * @return array<string, mixed>
      */
@@ -3019,7 +2644,6 @@ private static function isCurrentRequestPathUnder(string $configuredPath, bool $
         /** @var array<string, mixed> $request */
         $request = \is_array($_GET) ? \wp_unslash($_GET) : [];
         $query = PaymentAdminQuery::fromRequest($request);
-
         return (new PaymentAdminDataProvider())->getPageData(
             $query,
             [
@@ -3029,7 +2653,6 @@ private static function isCurrentRequestPathUnder(string $configuredPath, bool $
             ]
         );
     }
-
     /**
      * @return array<string, mixed>
      */
@@ -3044,38 +2667,30 @@ private static function isCurrentRequestPathUnder(string $configuredPath, bool $
             'focus_date' => $checkin,
             'reservation_id' => 0,
         ];
-
         if (!\wp_verify_nonce($nonce, 'must_portal_calendar_block_dates')) {
             self::redirectToPortalCalendar($queryState, 'invalid_nonce');
         }
-
         if (!\current_user_can(StaffAccess::CAP_CALENDAR_CREATE_BLOCK) && !\current_user_can('manage_options')) {
             self::redirectToPortalCalendar($queryState, 'access_denied');
         }
-
         $errors = [];
         $room = $roomId > 0 ? \MustHotelBooking\Engine\get_room_repository()->getRoomById($roomId) : null;
-
         if (!\is_array($room)) {
             $errors[] = \__('Please select a valid accommodation.', 'must-hotel-booking');
         }
-
         if (!\MustHotelBooking\Engine\AvailabilityEngine::isValidBookingDate($checkin) || !\MustHotelBooking\Engine\AvailabilityEngine::isValidBookingDate($checkout)) {
             $errors[] = \__('Please provide valid dates.', 'must-hotel-booking');
         } elseif ($checkin >= $checkout) {
             $errors[] = \__('The block end date must be after the start date.', 'must-hotel-booking');
         }
-
         if (empty($errors) && !\MustHotelBooking\Engine\AvailabilityEngine::checkAvailability($roomId, $checkin, $checkout)) {
             $errors[] = \__('This accommodation is already unavailable for the selected dates.', 'must-hotel-booking');
         }
-
         $form = [
             'room_id' => $roomId,
             'checkin' => $checkin,
             'checkout' => $checkout,
         ];
-
         if (!empty($errors)) {
             return [
                 'module_key' => 'calendar',
@@ -3084,14 +2699,12 @@ private static function isCurrentRequestPathUnder(string $configuredPath, bool $
                 'calendar_query' => $queryState,
             ];
         }
-
         $reservationId = \MustHotelBooking\Engine\get_reservation_repository()->createBlockedReservation(
             $roomId,
             $checkin,
             $checkout,
             \current_time('mysql')
         );
-
         if ($reservationId <= 0) {
             return [
                 'module_key' => 'calendar',
@@ -3100,11 +2713,9 @@ private static function isCurrentRequestPathUnder(string $configuredPath, bool $
                 'calendar_query' => $queryState,
             ];
         }
-
         if (\is_array($room)) {
             self::logCalendarBlockActivity($reservationId, $roomId, $room, $checkin, $checkout);
         }
-
         self::redirectToPortalCalendar(
             [
                 'focus_room_id' => $roomId,
@@ -3114,7 +2725,6 @@ private static function isCurrentRequestPathUnder(string $configuredPath, bool $
             'calendar_block_created'
         );
     }
-
     /**
      * @param array<string, mixed> $reservation
      */
@@ -3130,18 +2740,15 @@ private static function isCurrentRequestPathUnder(string $configuredPath, bool $
         $actorUserId = \get_current_user_id();
         $actorRole = '';
         $actorIp = '';
-
         if ($actorUserId > 0) {
             $actorUser = \wp_get_current_user();
             if ($actorUser instanceof \WP_User && !empty($actorUser->roles)) {
                 $actorRole = (string) \reset($actorUser->roles);
             }
         }
-
         if (isset($_SERVER['REMOTE_ADDR'])) {
             $actorIp = \sanitize_text_field(\wp_unslash((string) $_SERVER['REMOTE_ADDR']));
         }
-
         \MustHotelBooking\Engine\get_activity_repository()->createActivity(
             [
                 'event_type' => $eventType,
@@ -3163,7 +2770,6 @@ private static function isCurrentRequestPathUnder(string $configuredPath, bool $
             ]
         );
     }
-
     /**
      * @param array<string, mixed> $guest
      */
@@ -3184,19 +2790,15 @@ private static function isCurrentRequestPathUnder(string $configuredPath, bool $
         $actorUserId = \get_current_user_id();
         $actorRole = '';
         $actorIp = '';
-
         if ($actorUserId > 0) {
             $actorUser = \wp_get_current_user();
-
             if ($actorUser instanceof \WP_User && !empty($actorUser->roles)) {
                 $actorRole = (string) \reset($actorUser->roles);
             }
         }
-
         if (isset($_SERVER['REMOTE_ADDR'])) {
             $actorIp = \sanitize_text_field(\wp_unslash((string) $_SERVER['REMOTE_ADDR']));
         }
-
         \MustHotelBooking\Engine\get_activity_repository()->createActivity(
             [
                 'event_type' => $eventType,
@@ -3218,7 +2820,6 @@ private static function isCurrentRequestPathUnder(string $configuredPath, bool $
             ]
         );
     }
-
     /**
      * @param array<string, mixed> $room
      */
@@ -3229,19 +2830,15 @@ private static function isCurrentRequestPathUnder(string $configuredPath, bool $
         $actorIp = '';
         $roomName = \trim((string) ($room['name'] ?? ''));
         $reference = $roomName !== '' ? $roomName : ('ROOM-' . $roomId);
-
         if ($actorUserId > 0) {
             $actorUser = \wp_get_current_user();
-
             if ($actorUser instanceof \WP_User && !empty($actorUser->roles)) {
                 $actorRole = (string) \reset($actorUser->roles);
             }
         }
-
         if (isset($_SERVER['REMOTE_ADDR'])) {
             $actorIp = \sanitize_text_field(\wp_unslash((string) $_SERVER['REMOTE_ADDR']));
         }
-
         \MustHotelBooking\Engine\get_activity_repository()->createActivity(
             [
                 'event_type' => 'calendar_block_created',
@@ -3272,40 +2869,30 @@ private static function isCurrentRequestPathUnder(string $configuredPath, bool $
             ]
         );
     }
-
     // -------------------------------------------------------------------------
     // Check-in
     // -------------------------------------------------------------------------
-
     private static function handleReservationCheckin(): void
     {
         $reservationId = isset($_POST['reservation_id']) ? \absint(\wp_unslash($_POST['reservation_id'])) : 0;
         $nonce = isset($_POST['must_portal_reservation_nonce']) ? (string) \wp_unslash($_POST['must_portal_reservation_nonce']) : '';
-
         if ($reservationId <= 0 || !\wp_verify_nonce($nonce, 'must_portal_reservation_action_checkin_' . $reservationId)) {
             self::redirectToPortalReservationDetail($reservationId, 'invalid_nonce');
         }
-
         if (!\current_user_can(StaffAccess::CAP_RESERVATION_CHECKIN) && !\current_user_can('manage_options')) {
             self::redirectToPortalReservationDetail($reservationId, 'access_denied');
         }
-
         $reservationRepository = \MustHotelBooking\Engine\get_reservation_repository();
         $reservation = $reservationRepository->getReservation($reservationId);
-
         if (!\is_array($reservation)) {
             self::redirectToPortalReservationDetail($reservationId, 'reservation_not_found');
         }
-
         $providerContext = ProviderReservationView::metadata($reservation);
-
         if (!empty($providerContext['is_provider_backed'])) {
             if (!ProviderReservationActionPolicy::supportsProviderAction($providerContext, 'reservation_checkin', ProviderReservationActionPolicy::SURFACE_PORTAL)) {
                 self::redirectToPortalReservationDetail($reservationId, 'provider_backed_read_only');
             }
-
             $result = (new ClockPaymentReconciliationService())->checkInReservation($reservationId, 'portal');
-
             if (!empty($result['success'])) {
                 self::logReservationActivity(
                     $reservationId,
@@ -3314,10 +2901,8 @@ private static function isCurrentRequestPathUnder(string $configuredPath, bool $
                     'info',
                     \__('Clock guest check-in completed.', 'must-hotel-booking')
                 );
-
                 self::redirectToPortalReservationDetail($reservationId, 'reservation_checked_in');
             }
-
             if (!empty($result['queued'])) {
                 self::logReservationActivity(
                     $reservationId,
@@ -3326,27 +2911,20 @@ private static function isCurrentRequestPathUnder(string $configuredPath, bool $
                     'warning',
                     \__('Clock guest check-in was queued for provider retry.', 'must-hotel-booking')
                 );
-
                 self::redirectToPortalReservationDetail($reservationId, 'reservation_checkin_queued');
             }
-
             self::redirectToPortalReservationDetail($reservationId, 'reservation_checkin_failed');
         }
-
         $status = \sanitize_key((string) ($reservation['status'] ?? ''));
         $checkedInAt = \trim((string) ($reservation['checked_in_at'] ?? ''));
-
         // Only check in if the reservation is active and not already checked in.
         if (!\in_array($status, ['confirmed', 'pending', 'pending_payment'], true)) {
             self::redirectToPortalReservationDetail($reservationId, 'reservation_wrong_status');
         }
-
         if ($checkedInAt !== '' && $checkedInAt !== '0000-00-00 00:00:00') {
             self::redirectToPortalReservationDetail($reservationId, 'reservation_already_checked_in');
         }
-
         $reservationRepository->updateReservation($reservationId, ['checked_in_at' => \current_time('mysql')]);
-
         self::logReservationActivity(
             $reservationId,
             $reservation,
@@ -3354,43 +2932,32 @@ private static function isCurrentRequestPathUnder(string $configuredPath, bool $
             'info',
             \__('Guest checked in.', 'must-hotel-booking')
         );
-
         self::redirectToPortalReservationDetail($reservationId, 'reservation_checked_in');
     }
-
     // -------------------------------------------------------------------------
     // Check-out
     // -------------------------------------------------------------------------
-
     private static function handleReservationCheckout(): void
     {
         $reservationId = isset($_POST['reservation_id']) ? \absint(\wp_unslash($_POST['reservation_id'])) : 0;
         $nonce = isset($_POST['must_portal_reservation_nonce']) ? (string) \wp_unslash($_POST['must_portal_reservation_nonce']) : '';
-
         if ($reservationId <= 0 || !\wp_verify_nonce($nonce, 'must_portal_reservation_action_checkout_' . $reservationId)) {
             self::redirectToPortalReservationDetail($reservationId, 'invalid_nonce');
         }
-
         if (!\current_user_can(StaffAccess::CAP_RESERVATION_CHECKOUT) && !\current_user_can('manage_options')) {
             self::redirectToPortalReservationDetail($reservationId, 'access_denied');
         }
-
         $reservationRepository = \MustHotelBooking\Engine\get_reservation_repository();
         $reservation = $reservationRepository->getReservation($reservationId);
-
         if (!\is_array($reservation)) {
             self::redirectToPortalReservationDetail($reservationId, 'reservation_not_found');
         }
-
         $providerContext = ProviderReservationView::metadata($reservation);
-
         if (!empty($providerContext['is_provider_backed'])) {
             if (!ProviderReservationActionPolicy::supportsProviderAction($providerContext, 'reservation_checkout', ProviderReservationActionPolicy::SURFACE_PORTAL)) {
                 self::redirectToPortalReservationDetail($reservationId, 'provider_backed_read_only');
             }
-
             $result = (new ClockPaymentReconciliationService())->checkOutReservation($reservationId, 'portal');
-
             if (!empty($result['success'])) {
                 self::logReservationActivity(
                     $reservationId,
@@ -3399,10 +2966,8 @@ private static function isCurrentRequestPathUnder(string $configuredPath, bool $
                     'info',
                     \__('Clock guest check-out completed.', 'must-hotel-booking')
                 );
-
                 self::redirectToPortalReservationDetail($reservationId, 'reservation_checked_out');
             }
-
             if (!empty($result['queued'])) {
                 self::logReservationActivity(
                     $reservationId,
@@ -3411,33 +2976,25 @@ private static function isCurrentRequestPathUnder(string $configuredPath, bool $
                     'warning',
                     \__('Clock guest check-out was queued for provider retry.', 'must-hotel-booking')
                 );
-
                 self::redirectToPortalReservationDetail($reservationId, 'reservation_checkout_queued');
             }
-
             self::redirectToPortalReservationDetail($reservationId, 'reservation_checkout_failed');
         }
-
         $status = \sanitize_key((string) ($reservation['status'] ?? ''));
         $paymentStatus = \sanitize_key((string) ($reservation['payment_status'] ?? 'unpaid'));
         $checkedInAt = \trim((string) ($reservation['checked_in_at'] ?? ''));
         $checkedOutAt = \trim((string) ($reservation['checked_out_at'] ?? ''));
-
         if ($status !== 'confirmed') {
             self::redirectToPortalReservationDetail($reservationId, 'reservation_wrong_status');
         }
-
         if ($checkedInAt === '' || $checkedInAt === '0000-00-00 00:00:00') {
             self::redirectToPortalReservationDetail($reservationId, 'reservation_wrong_status');
         }
-
         if ($checkedOutAt !== '' && $checkedOutAt !== '0000-00-00 00:00:00') {
             self::redirectToPortalReservationDetail($reservationId, 'reservation_wrong_status');
         }
-
         $reservationRepository->updateReservation($reservationId, ['checked_out_at' => \current_time('mysql')]);
         BookingStatusEngine::updateReservationStatuses([$reservationId], 'completed', $paymentStatus);
-
         self::logReservationActivity(
             $reservationId,
             $reservation,
@@ -3445,82 +3002,64 @@ private static function isCurrentRequestPathUnder(string $configuredPath, bool $
             'info',
             \__('Guest checked out.', 'must-hotel-booking')
         );
-
         self::redirectToPortalReservationDetail($reservationId, 'reservation_checked_out');
     }
-
     // -------------------------------------------------------------------------
     // Assign / reassign room
     // -------------------------------------------------------------------------
-
     private static function handleReservationAssignRoom(): void
     {
         $reservationId = isset($_POST['reservation_id']) ? \absint(\wp_unslash($_POST['reservation_id'])) : 0;
         $nonce = isset($_POST['must_portal_reservation_nonce']) ? (string) \wp_unslash($_POST['must_portal_reservation_nonce']) : '';
         $roomMoveRequest = self::isFrontDeskRoomMoveRequest();
-
         if ($reservationId <= 0 || !\wp_verify_nonce($nonce, 'must_portal_reservation_assign_room_' . $reservationId)) {
             self::redirectAfterReservationAssignRoom($reservationId, 'invalid_nonce');
         }
-
         $reservationRepository = \MustHotelBooking\Engine\get_reservation_repository();
         $reservation = $reservationRepository->getReservation($reservationId);
-
         if (!\is_array($reservation)) {
             self::redirectAfterReservationAssignRoom($reservationId, 'reservation_not_found');
         }
-
         $status = \sanitize_key((string) ($reservation['status'] ?? ''));
         $checkedInAt = \trim((string) ($reservation['checked_in_at'] ?? ''));
         $checkedOutAt = \trim((string) ($reservation['checked_out_at'] ?? ''));
         $isCheckedIn = $checkedInAt !== '' && $checkedInAt !== '0000-00-00 00:00:00';
         $isCheckedOut = $checkedOutAt !== '' && $checkedOutAt !== '0000-00-00 00:00:00';
         $requiresMoveCapability = $isCheckedIn && !$isCheckedOut;
-
         $requiredCapability = $requiresMoveCapability
             ? StaffAccess::CAP_RESERVATION_MOVE_ROOM
             : StaffAccess::CAP_RESERVATION_ASSIGN_ROOM;
-
         if (!\current_user_can($requiredCapability) && !\current_user_can('manage_options')) {
             self::redirectAfterReservationAssignRoom($reservationId, 'access_denied');
         }
-
         if (\in_array($status, ['cancelled', 'completed', 'blocked'], true)) {
             self::redirectAfterReservationAssignRoom($reservationId, 'reservation_wrong_status');
         }
-
         if (
             $roomMoveRequest
             && !$requiresMoveCapability
         ) {
             self::redirectAfterReservationAssignRoom($reservationId, 'reservation_wrong_status');
         }
-
         if (
             $requiresMoveCapability
             && $isCheckedOut
         ) {
             self::redirectAfterReservationAssignRoom($reservationId, 'reservation_wrong_status');
         }
-
         // 0 = unassign; any positive integer = assign to that inventory room.
         $newRoomId = isset($_POST['assigned_room_id']) ? \absint(\wp_unslash($_POST['assigned_room_id'])) : 0;
         $roomTypeId = isset($reservation['room_type_id']) ? (int) $reservation['room_type_id'] : (int) ($reservation['room_id'] ?? 0);
         $currentAssignedRoomId = isset($reservation['assigned_room_id']) ? (int) $reservation['assigned_room_id'] : 0;
-
         if ($requiresMoveCapability && $newRoomId <= 0) {
             self::redirectAfterReservationAssignRoom($reservationId, 'portal_action_failed');
         }
-
         $providerContext = ProviderReservationView::metadata($reservation);
-
         if (!empty($providerContext['is_provider_backed'])) {
             if (!ProviderReservationActionPolicy::supportsProviderAction($providerContext, 'reservation_assign_room', ProviderReservationActionPolicy::SURFACE_PORTAL)) {
                 self::redirectAfterReservationAssignRoom($reservationId, 'provider_backed_read_only');
             }
-
             $result = (new ClockPaymentReconciliationService())->assignRoom($reservationId, $newRoomId, 'portal');
-
             if (!empty($result['success'])) {
                 self::logReservationActivity(
                     $reservationId,
@@ -3529,10 +3068,8 @@ private static function isCurrentRequestPathUnder(string $configuredPath, bool $
                     'info',
                     \__('Clock room assignment completed.', 'must-hotel-booking')
                 );
-
                 self::redirectAfterReservationAssignRoom($reservationId, 'reservation_room_assigned');
             }
-
             if (!empty($result['queued'])) {
                 self::logReservationActivity(
                     $reservationId,
@@ -3541,42 +3078,32 @@ private static function isCurrentRequestPathUnder(string $configuredPath, bool $
                     'warning',
                     \__('Clock room assignment was queued for provider retry.', 'must-hotel-booking')
                 );
-
                 self::redirectAfterReservationAssignRoom($reservationId, 'reservation_room_assignment_queued');
             }
-
             self::redirectAfterReservationAssignRoom($reservationId, 'reservation_room_assignment_failed');
         }
-
         $inventoryRepository = \MustHotelBooking\Engine\get_inventory_repository();
         $roomLabel = \__('Unassigned', 'must-hotel-booking');
         $updated = false;
-
         if ($newRoomId > 0) {
             $inventoryRoom = $inventoryRepository->getInventoryRoomById($newRoomId);
-
             if (!\is_array($inventoryRoom)) {
                 self::redirectAfterReservationAssignRoom($reservationId, 'portal_action_failed');
             }
-
             $inventoryRoomTypeId = isset($inventoryRoom['room_type_id']) ? (int) $inventoryRoom['room_type_id'] : 0;
-
             if ($roomTypeId > 0 && $inventoryRoomTypeId > 0 && $inventoryRoomTypeId !== $roomTypeId) {
                 self::redirectAfterReservationAssignRoom($reservationId, 'portal_action_failed');
             }
-
             if ($newRoomId !== $currentAssignedRoomId) {
                 $today = \current_time('Y-m-d');
                 $effectiveCheckin = isset($reservation['checkin']) && (string) $reservation['checkin'] > $today
                     ? (string) $reservation['checkin']
                     : $today;
                 $effectiveCheckout = isset($reservation['checkout']) ? (string) $reservation['checkout'] : '';
-
                 if ($effectiveCheckout === '' || $effectiveCheckout <= $effectiveCheckin) {
                     $timestamp = \strtotime($effectiveCheckin . ' +1 day');
                     $effectiveCheckout = $timestamp !== false ? \wp_date('Y-m-d', $timestamp) : $effectiveCheckin;
                 }
-
                 $availableRooms = $inventoryRepository->getAvailableRooms(
                     $roomTypeId,
                     $effectiveCheckin,
@@ -3585,39 +3112,30 @@ private static function isCurrentRequestPathUnder(string $configuredPath, bool $
                     \current_time('mysql')
                 );
                 $availableRoomIds = [];
-
                 foreach ($availableRooms as $availableRoom) {
                     if (!\is_array($availableRoom)) {
                         continue;
                     }
-
                     $availableRoomIds[] = isset($availableRoom['id']) ? (int) $availableRoom['id'] : 0;
                 }
-
                 if (!\in_array($newRoomId, $availableRoomIds, true)) {
                     self::redirectAfterReservationAssignRoom($reservationId, 'portal_action_failed');
                 }
             }
-
             $roomLabel = \trim((string) ($inventoryRoom['room_number'] ?? ''));
-
             if ($roomLabel === '') {
                 $roomLabel = \trim((string) ($inventoryRoom['title'] ?? ''));
             }
-
             if ($roomLabel === '') {
                 $roomLabel = (string) $newRoomId;
             }
-
             $updated = $inventoryRepository->assignRoomToReservation($newRoomId, $reservationId, $roomTypeId);
         } else {
             $updated = $reservationRepository->updateReservation($reservationId, ['assigned_room_id' => 0]);
         }
-
         if (!$updated) {
             self::redirectAfterReservationAssignRoom($reservationId, 'portal_action_failed');
         }
-
         self::logReservationActivity(
             $reservationId,
             $reservation,
@@ -3629,14 +3147,11 @@ private static function isCurrentRequestPathUnder(string $configuredPath, bool $
                 $roomLabel
             )
         );
-
         self::redirectAfterReservationAssignRoom($reservationId, 'reservation_room_assigned');
     }
-
     // -------------------------------------------------------------------------
     // Stay change
     // -------------------------------------------------------------------------
-
     /**
      * @return array<string, mixed>
      */
@@ -3644,22 +3159,17 @@ private static function isCurrentRequestPathUnder(string $configuredPath, bool $
     {
         $reservationId = isset($_POST['reservation_id']) ? \absint(\wp_unslash($_POST['reservation_id'])) : 0;
         $nonce = isset($_POST['must_portal_reservation_nonce']) ? (string) \wp_unslash($_POST['must_portal_reservation_nonce']) : '';
-
         if ($reservationId <= 0 || !\wp_verify_nonce($nonce, 'must_portal_reservation_update_stay_' . $reservationId)) {
             self::redirectToPortalReservationDetail($reservationId, 'invalid_nonce');
         }
-
         if (!\current_user_can(StaffAccess::CAP_RESERVATION_EDIT_STAY) && !\current_user_can('manage_options')) {
             self::redirectToPortalReservationDetail($reservationId, 'access_denied');
         }
-
         $reservationRepository = \MustHotelBooking\Engine\get_reservation_repository();
         $reservation = $reservationRepository->getReservation($reservationId);
-
         if (!\is_array($reservation)) {
             self::redirectToPortalReservationDetail($reservationId, 'reservation_not_found');
         }
-
         $status = \sanitize_key((string) ($reservation['status'] ?? ''));
         $currentCheckin = (string) ($reservation['checkin'] ?? '');
         $currentCheckout = (string) ($reservation['checkout'] ?? '');
@@ -3674,27 +3184,21 @@ private static function isCurrentRequestPathUnder(string $configuredPath, bool $
                 : $currentCheckout,
         ];
         $errors = [];
-
         if (\in_array($status, ['cancelled', 'completed', 'blocked', 'expired', 'payment_failed'], true)) {
             self::redirectToPortalReservationDetail($reservationId, 'reservation_wrong_status');
         }
-
         if ($checkedOutAt !== '' && $checkedOutAt !== '0000-00-00 00:00:00') {
             self::redirectToPortalReservationDetail($reservationId, 'reservation_wrong_status');
         }
-
         if (!\MustHotelBooking\Engine\AvailabilityEngine::isValidBookingDate($form['checkin'])) {
             $errors[] = \__('Enter a valid check-in date.', 'must-hotel-booking');
         }
-
         if (!\MustHotelBooking\Engine\AvailabilityEngine::isValidBookingDate($form['checkout'])) {
             $errors[] = \__('Enter a valid check-out date.', 'must-hotel-booking');
         }
-
         if (empty($errors) && $form['checkout'] <= $form['checkin']) {
             $errors[] = \__('Check-out must be later than check-in.', 'must-hotel-booking');
         }
-
         if (
             empty($errors)
             && $checkedInAt !== ''
@@ -3703,7 +3207,6 @@ private static function isCurrentRequestPathUnder(string $configuredPath, bool $
         ) {
             $errors[] = \__('Check-in date cannot be changed after the guest has already checked in.', 'must-hotel-booking');
         }
-
         if (!empty($errors)) {
             return self::buildReservationActionState(
                 $reservationId,
@@ -3711,21 +3214,17 @@ private static function isCurrentRequestPathUnder(string $configuredPath, bool $
                 $errors
             );
         }
-
         $providerContext = ProviderReservationView::metadata($reservation);
-
         if (!empty($providerContext['is_provider_backed'])) {
             if (!ProviderReservationActionPolicy::supportsProviderAction($providerContext, 'reservation_update_stay', ProviderReservationActionPolicy::SURFACE_PORTAL)) {
                 self::redirectToPortalReservationDetail($reservationId, 'provider_backed_read_only');
             }
-
             $result = (new ClockPaymentReconciliationService())->updateStayDates(
                 $reservationId,
                 $form['checkin'],
                 $form['checkout'],
                 'portal'
             );
-
             if (!empty($result['success']) && !empty($result['pricing_pending'])) {
                 self::logReservationActivity(
                     $reservationId,
@@ -3734,13 +3233,11 @@ private static function isCurrentRequestPathUnder(string $configuredPath, bool $
                     'warning',
                     \__('Clock stay dates updated, but pricing reconciliation is pending.', 'must-hotel-booking')
                 );
-
                 self::redirectToPortalReservationDetail(
                     $reservationId,
                     !empty($result['queued']) ? 'reservation_stay_pricing_queued' : 'reservation_stay_pricing_pending'
                 );
             }
-
             if (!empty($result['success'])) {
                 self::logReservationActivity(
                     $reservationId,
@@ -3749,10 +3246,8 @@ private static function isCurrentRequestPathUnder(string $configuredPath, bool $
                     'info',
                     \__('Clock stay dates updated.', 'must-hotel-booking')
                 );
-
                 self::redirectToPortalReservationDetail($reservationId, 'reservation_stay_updated');
             }
-
             if (!empty($result['queued'])) {
                 self::logReservationActivity(
                     $reservationId,
@@ -3761,30 +3256,24 @@ private static function isCurrentRequestPathUnder(string $configuredPath, bool $
                     'warning',
                     \__('Clock stay-date edit was queued for provider retry.', 'must-hotel-booking')
                 );
-
                 self::redirectToPortalReservationDetail($reservationId, 'reservation_stay_update_queued');
             }
-
             self::redirectToPortalReservationDetail($reservationId, 'reservation_stay_update_failed');
         }
-
         $roomTypeId = isset($reservation['room_type_id']) ? (int) $reservation['room_type_id'] : (int) ($reservation['room_id'] ?? 0);
         $stayAvailability = [
             'clear_assigned_room' => false,
             'errors' => [],
         ];
-
         if (empty($errors) && $roomTypeId <= 0) {
             $errors[] = \__('This reservation is missing its accommodation context, so stay dates cannot be updated safely.', 'must-hotel-booking');
         }
-
         if (
             empty($errors)
             && !\MustHotelBooking\Engine\AvailabilityEngine::checkBookingRestrictions($roomTypeId, $form['checkin'], $form['checkout'])
         ) {
             $errors[] = \__('The selected stay dates are blocked by the current booking rules for this accommodation.', 'must-hotel-booking');
         }
-
         if (empty($errors)) {
             $stayAvailability = self::validateReservationStayAvailability(
                 $reservationId,
@@ -3795,13 +3284,11 @@ private static function isCurrentRequestPathUnder(string $configuredPath, bool $
             );
             $errors = \array_merge($errors, isset($stayAvailability['errors']) && \is_array($stayAvailability['errors']) ? $stayAvailability['errors'] : []);
         }
-
         $pricing = null;
         $newTotalPrice = isset($reservation['total_price']) ? (float) $reservation['total_price'] : 0.0;
         $newCouponId = isset($reservation['coupon_id']) ? (int) $reservation['coupon_id'] : 0;
         $newCouponCode = (string) ($reservation['coupon_code'] ?? '');
         $newCouponDiscountTotal = isset($reservation['coupon_discount_total']) ? (float) $reservation['coupon_discount_total'] : 0.0;
-
         if (empty($errors)) {
             $pricing = \MustHotelBooking\Engine\PricingEngine::calculateTotal(
                 $roomTypeId,
@@ -3811,7 +3298,6 @@ private static function isCurrentRequestPathUnder(string $configuredPath, bool $
                 (string) ($reservation['coupon_code'] ?? ''),
                 (int) ($reservation['rate_plan_id'] ?? 0)
             );
-
             if (!\is_array($pricing) || empty($pricing['success']) || !isset($pricing['total_price'])) {
                 $errors[] = isset($pricing['message']) && \is_string($pricing['message']) && $pricing['message'] !== ''
                     ? (string) $pricing['message']
@@ -3823,7 +3309,6 @@ private static function isCurrentRequestPathUnder(string $configuredPath, bool $
                 $newCouponDiscountTotal = isset($pricing['discount_total']) ? (float) $pricing['discount_total'] : 0.0;
             }
         }
-
         if (!empty($errors)) {
             return self::buildReservationActionState(
                 $reservationId,
@@ -3831,7 +3316,6 @@ private static function isCurrentRequestPathUnder(string $configuredPath, bool $
                 $errors
             );
         }
-
         $updatePayload = [
             'checkin' => $form['checkin'],
             'checkout' => $form['checkout'],
@@ -3841,13 +3325,10 @@ private static function isCurrentRequestPathUnder(string $configuredPath, bool $
             'coupon_discount_total' => $newCouponDiscountTotal,
         ];
         $assignedRoomWasCleared = !empty($stayAvailability['clear_assigned_room']);
-
         if ($assignedRoomWasCleared) {
             $updatePayload['assigned_room_id'] = 0;
         }
-
         $updated = $reservationRepository->updateReservation($reservationId, $updatePayload);
-
         if (!$updated) {
             return self::buildReservationActionState(
                 $reservationId,
@@ -3855,7 +3336,6 @@ private static function isCurrentRequestPathUnder(string $configuredPath, bool $
                 [\__('Unable to save the updated stay dates.', 'must-hotel-booking')]
             );
         }
-
         $message = \sprintf(
             /* translators: 1: previous check-in, 2: previous check-out, 3: updated check-in, 4: updated check-out */
             \__('Stay updated from %1$s - %2$s to %3$s - %4$s.', 'must-hotel-booking'),
@@ -3864,11 +3344,9 @@ private static function isCurrentRequestPathUnder(string $configuredPath, bool $
             $form['checkin'],
             $form['checkout']
         );
-
         if ($assignedRoomWasCleared) {
             $message .= ' ' . \__('Assigned room cleared because the updated stay window no longer fits the current room assignment.', 'must-hotel-booking');
         }
-
         self::logReservationActivity(
             $reservationId,
             $reservation,
@@ -3876,13 +3354,11 @@ private static function isCurrentRequestPathUnder(string $configuredPath, bool $
             'info',
             $message
         );
-
         self::redirectToPortalReservationDetail(
             $reservationId,
             $assignedRoomWasCleared ? 'reservation_stay_updated_room_unassigned' : 'reservation_stay_updated'
         );
     }
-
     /**
      * @param array<string, mixed> $reservation
      * @return array<string, mixed>
@@ -3896,7 +3372,6 @@ private static function isCurrentRequestPathUnder(string $configuredPath, bool $
     ): array {
         $nonBlockingStatuses = \MustHotelBooking\Core\ReservationStatus::getInventoryNonBlockingStatuses();
         $reservationRepository = \MustHotelBooking\Engine\get_reservation_repository();
-
         if (!\MustHotelBooking\Engine\InventoryEngine::hasInventoryForRoomType($roomTypeId)) {
             if ($reservationRepository->hasReservationOverlapExcludingId($reservationId, $roomTypeId, $checkin, $checkout, $nonBlockingStatuses)) {
                 return [
@@ -3904,13 +3379,11 @@ private static function isCurrentRequestPathUnder(string $configuredPath, bool $
                     'errors' => [\__('The selected stay dates are not available for this accommodation.', 'must-hotel-booking')],
                 ];
             }
-
             return [
                 'clear_assigned_room' => false,
                 'errors' => [],
             ];
         }
-
         $inventoryRepository = \MustHotelBooking\Engine\get_inventory_repository();
         $availableRooms = $inventoryRepository->getAvailableRooms(
             $roomTypeId,
@@ -3920,15 +3393,12 @@ private static function isCurrentRequestPathUnder(string $configuredPath, bool $
             \current_time('mysql')
         );
         $availableRoomIds = [];
-
         foreach ($availableRooms as $availableRoom) {
             if (!\is_array($availableRoom) || !isset($availableRoom['id'])) {
                 continue;
             }
-
             $availableRoomIds[] = (int) $availableRoom['id'];
         }
-
         $assignedRoomId = isset($reservation['assigned_room_id']) ? (int) $reservation['assigned_room_id'] : 0;
         $selfOverlapsUpdatedWindow = self::reservationDatesOverlap(
             (string) ($reservation['checkin'] ?? ''),
@@ -3942,14 +3412,11 @@ private static function isCurrentRequestPathUnder(string $configuredPath, bool $
             $checkout,
             $nonBlockingStatuses
         );
-
         if ($selfOverlapsUpdatedWindow && $assignedRoomId <= 0) {
             $unassignedOverlapCount = \max(0, $unassignedOverlapCount - 1);
         }
-
         $availableCount = \max(0, \count($availableRoomIds) - $unassignedOverlapCount);
         $canKeepAssignedRoom = false;
-
         if ($assignedRoomId > 0) {
             if (\in_array($assignedRoomId, $availableRoomIds, true)) {
                 $canKeepAssignedRoom = true;
@@ -3960,57 +3427,45 @@ private static function isCurrentRequestPathUnder(string $configuredPath, bool $
                 $canKeepAssignedRoom = true;
             }
         }
-
         if (!$canKeepAssignedRoom && $availableCount <= 0) {
             return [
                 'clear_assigned_room' => false,
                 'errors' => [\__('The selected stay dates are not available for this accommodation.', 'must-hotel-booking')],
             ];
         }
-
         return [
             'clear_assigned_room' => $assignedRoomId > 0 && !$canKeepAssignedRoom,
             'errors' => [],
         ];
     }
-
     private static function reservationDatesOverlap(string $firstCheckin, string $firstCheckout, string $secondCheckin, string $secondCheckout): bool
     {
         if ($firstCheckin === '' || $firstCheckout === '' || $secondCheckin === '' || $secondCheckout === '') {
             return false;
         }
-
         return $firstCheckin < $secondCheckout && $firstCheckout > $secondCheckin;
     }
-
     // -------------------------------------------------------------------------
     // No-show
     // -------------------------------------------------------------------------
-
     private static function handleReservationMarkNoShow(): void
     {
         $reservationId = isset($_POST['reservation_id']) ? \absint(\wp_unslash($_POST['reservation_id'])) : 0;
         $nonce = isset($_POST['must_portal_reservation_nonce']) ? (string) \wp_unslash($_POST['must_portal_reservation_nonce']) : '';
-
         if ($reservationId <= 0 || !\wp_verify_nonce($nonce, 'must_portal_reservation_no_show_' . $reservationId)) {
             self::redirectToPortalReservationDetail($reservationId, 'invalid_nonce');
         }
-
         if (!\current_user_can(StaffAccess::CAP_RESERVATION_NO_SHOW) && !\current_user_can('manage_options')) {
             self::redirectToPortalReservationDetail($reservationId, 'access_denied');
         }
-
         $reservationRepository = \MustHotelBooking\Engine\get_reservation_repository();
         $reservation = $reservationRepository->getReservation($reservationId);
-
         if (!\is_array($reservation)) {
             self::redirectToPortalReservationDetail($reservationId, 'reservation_not_found');
         }
-
         if (!self::canReservationBeMarkedNoShow($reservation)) {
             self::redirectToPortalReservationDetail($reservationId, 'reservation_wrong_status');
         }
-
         BookingStatusEngine::updateReservationStatuses(
             [$reservationId],
             'cancelled',
@@ -4028,10 +3483,8 @@ private static function isCurrentRequestPathUnder(string $configuredPath, bool $
                 self::getCurrentPortalActorName()
             )
         );
-
         self::redirectToPortalReservationDetail($reservationId, 'reservation_marked_no_show');
     }
-
     /**
      * @param array<string, mixed> $reservation
      */
@@ -4042,53 +3495,40 @@ private static function isCurrentRequestPathUnder(string $configuredPath, bool $
         $checkedOutAt = \trim((string) ($reservation['checked_out_at'] ?? ''));
         $checkinDate = (string) ($reservation['checkin'] ?? '');
         $today = \current_time('Y-m-d');
-
         if (!\in_array($status, ['pending', 'pending_payment', 'confirmed'], true)) {
             return false;
         }
-
         if ($checkinDate === '' || $checkinDate > $today) {
             return false;
         }
-
         if ($checkedInAt !== '' && $checkedInAt !== '0000-00-00 00:00:00') {
             return false;
         }
-
         return $checkedOutAt === '' || $checkedOutAt === '0000-00-00 00:00:00';
     }
-
     // -------------------------------------------------------------------------
     // Add internal note
     // -------------------------------------------------------------------------
-
     private static function handleReservationAddNote(): void
     {
         $reservationId = isset($_POST['reservation_id']) ? \absint(\wp_unslash($_POST['reservation_id'])) : 0;
         $nonce = isset($_POST['must_portal_reservation_nonce']) ? (string) \wp_unslash($_POST['must_portal_reservation_nonce']) : '';
-
         if ($reservationId <= 0 || !\wp_verify_nonce($nonce, 'must_portal_reservation_add_note_' . $reservationId)) {
             self::redirectToPortalReservationDetail($reservationId, 'invalid_nonce');
         }
-
         if (!\current_user_can(StaffAccess::CAP_GUEST_ADD_NOTE) && !\current_user_can('manage_options')) {
             self::redirectToPortalReservationDetail($reservationId, 'access_denied');
         }
-
         $note = isset($_POST['internal_note']) ? \sanitize_textarea_field((string) \wp_unslash($_POST['internal_note'])) : '';
         $note = \trim($note);
-
         if ($note === '') {
             self::redirectToPortalReservationDetail($reservationId, 'portal_action_failed');
         }
-
         $reservationRepository = \MustHotelBooking\Engine\get_reservation_repository();
         $reservation = $reservationRepository->getReservation($reservationId);
-
         if (!\is_array($reservation)) {
             self::redirectToPortalReservationDetail($reservationId, 'reservation_not_found');
         }
-
         $currentUser = \wp_get_current_user();
         $authorName = $currentUser instanceof \WP_User && $currentUser->display_name !== '' ? (string) $currentUser->display_name : \__('Staff', 'must-hotel-booking');
         $timestamp = \date_i18n('d M Y H:i', \current_time('timestamp'));
@@ -4096,9 +3536,7 @@ private static function isCurrentRequestPathUnder(string $configuredPath, bool $
         $existing = \trim((string) ($reservation['notes'] ?? ''));
         $noteEntry = '[' . $timestamp . ' - ' . $authorName . '] ' . $note;
         $updatedNotes = $existing !== '' ? $existing . "\n\n" . $noteEntry : $noteEntry;
-
         $reservationRepository->updateReservation($reservationId, ['notes' => $updatedNotes]);
-
         self::logReservationActivity(
             $reservationId,
             $reservation,
@@ -4110,54 +3548,41 @@ private static function isCurrentRequestPathUnder(string $configuredPath, bool $
                 $authorName
             )
         );
-
         self::redirectToPortalReservationDetail($reservationId, 'reservation_note_added');
     }
-
     // -------------------------------------------------------------------------
     // Cancellation request (Front Desk → approval queue)
     // -------------------------------------------------------------------------
-
     private static function currentUserCanRequestReservationCancellation(): bool
     {
         if (\current_user_can('manage_options')) {
             return true;
         }
-
         return \current_user_can(StaffAccess::CAP_RESERVATION_EDIT_BASIC)
             && !\current_user_can(StaffAccess::CAP_RESERVATION_CANCEL);
     }
-
     private static function handleReservationRequestCancel(): void
     {
         $reservationId = isset($_POST['reservation_id']) ? \absint(\wp_unslash($_POST['reservation_id'])) : 0;
         $nonce = isset($_POST['must_portal_reservation_nonce']) ? (string) \wp_unslash($_POST['must_portal_reservation_nonce']) : '';
-
         if ($reservationId <= 0 || !\wp_verify_nonce($nonce, 'must_portal_reservation_request_cancel_' . $reservationId)) {
             self::redirectToPortalReservationDetail($reservationId, 'invalid_nonce');
         }
-
         if (!self::currentUserCanRequestReservationCancellation()) {
             self::redirectToPortalReservationDetail($reservationId, 'access_denied');
         }
-
         $reservationRepository = \MustHotelBooking\Engine\get_reservation_repository();
         $reservation = $reservationRepository->getReservation($reservationId);
-
         if (!\is_array($reservation)) {
             self::redirectToPortalReservationDetail($reservationId, 'reservation_not_found');
         }
-
         $status = \sanitize_key((string) ($reservation['status'] ?? ''));
-
         if (\in_array($status, ['cancelled', 'completed', 'blocked'], true)) {
             self::redirectToPortalReservationDetail($reservationId, 'reservation_wrong_status');
         }
-
         if (!empty($reservation['cancellation_requested'])) {
             self::redirectToPortalReservationDetail($reservationId, 'reservation_wrong_status');
         }
-
         $reservationRepository->updateReservation(
             $reservationId,
             [
@@ -4166,7 +3591,6 @@ private static function isCurrentRequestPathUnder(string $configuredPath, bool $
                 'cancellation_requested_by' => \get_current_user_id(),
             ]
         );
-
         self::logReservationActivity(
             $reservationId,
             $reservation,
@@ -4178,40 +3602,30 @@ private static function isCurrentRequestPathUnder(string $configuredPath, bool $
                 self::getCurrentPortalActorName()
             )
         );
-
         self::redirectToPortalReservationDetail($reservationId, 'cancellation_request_submitted');
     }
-
     // -------------------------------------------------------------------------
     // Reject cancellation request (Supervisor)
     // -------------------------------------------------------------------------
-
     private static function handleReservationRejectCancel(): void
     {
         $reservationId = isset($_POST['reservation_id']) ? \absint(\wp_unslash($_POST['reservation_id'])) : 0;
         $nonce = isset($_POST['must_portal_reservation_nonce']) ? (string) \wp_unslash($_POST['must_portal_reservation_nonce']) : '';
-
         if ($reservationId <= 0 || !\wp_verify_nonce($nonce, 'must_portal_reservation_reject_cancel_' . $reservationId)) {
             self::redirectToPortalReservationDetail($reservationId, 'invalid_nonce');
         }
-
         if (!\current_user_can(StaffAccess::CAP_RESERVATION_CANCEL) && !\current_user_can('manage_options')) {
             self::redirectToPortalReservationDetail($reservationId, 'access_denied');
         }
-
         $reservationRepository = \MustHotelBooking\Engine\get_reservation_repository();
         $reservation = $reservationRepository->getReservation($reservationId);
-
         if (!\is_array($reservation)) {
             self::redirectToPortalReservationDetail($reservationId, 'reservation_not_found');
         }
-
         if (empty($reservation['cancellation_requested'])) {
             self::redirectToPortalReservationDetail($reservationId, 'reservation_wrong_status');
         }
-
         self::clearReservationCancellationRequest($reservationId);
-
         self::logReservationActivity(
             $reservationId,
             $reservation,
@@ -4223,50 +3637,38 @@ private static function isCurrentRequestPathUnder(string $configuredPath, bool $
                 self::getCurrentPortalActorName()
             )
         );
-
         self::redirectToPortalReservationDetail($reservationId, 'cancellation_request_rejected');
     }
-
     private static function handleReservationApproveCancel(): void
     {
         $reservationId = isset($_POST['reservation_id']) ? \absint(\wp_unslash($_POST['reservation_id'])) : 0;
         $nonce = isset($_POST['must_portal_reservation_nonce']) ? (string) \wp_unslash($_POST['must_portal_reservation_nonce']) : '';
-
         if ($reservationId <= 0 || !\wp_verify_nonce($nonce, 'must_portal_reservation_approve_cancel_' . $reservationId)) {
             self::redirectToPortalReservationDetail($reservationId, 'invalid_nonce');
         }
-
         if (!\current_user_can(StaffAccess::CAP_RESERVATION_CANCEL) && !\current_user_can('manage_options')) {
             self::redirectToPortalReservationDetail($reservationId, 'access_denied');
         }
-
         $reservationRepository = \MustHotelBooking\Engine\get_reservation_repository();
         $reservation = $reservationRepository->getReservation($reservationId);
-
         if (!\is_array($reservation)) {
             self::redirectToPortalReservationDetail($reservationId, 'reservation_not_found');
         }
-
         if (!self::approveReservationCancellationRequest($reservationId, $reservation)) {
             self::redirectToPortalReservationDetail($reservationId, 'reservation_wrong_status');
         }
-
         self::redirectToPortalReservationDetail($reservationId, 'cancellation_request_approved');
     }
-
     /**
      * @param array<string, mixed> $reservation
      */
     private static function approveReservationCancellationRequest(int $reservationId, array $reservation): bool
     {
         $status = \sanitize_key((string) ($reservation['status'] ?? ''));
-
         if (empty($reservation['cancellation_requested']) || \in_array($status, ['cancelled', 'blocked', 'completed'], true)) {
             return false;
         }
-
         $paymentStatus = \sanitize_key((string) ($reservation['payment_status'] ?? ''));
-
         BookingStatusEngine::updateReservationStatuses([$reservationId], 'cancelled', $paymentStatus);
         self::clearReservationCancellationRequest($reservationId);
         self::logReservationActivity(
@@ -4280,10 +3682,8 @@ private static function isCurrentRequestPathUnder(string $configuredPath, bool $
                 self::getCurrentPortalActorName()
             )
         );
-
         return true;
     }
-
     private static function clearReservationCancellationRequest(int $reservationId): void
     {
         \MustHotelBooking\Engine\get_reservation_repository()->updateReservation(
@@ -4295,27 +3695,22 @@ private static function isCurrentRequestPathUnder(string $configuredPath, bool $
             ]
         );
     }
-
     private static function getCurrentPortalActorName(): string
     {
         $currentUser = \wp_get_current_user();
-
         return $currentUser instanceof \WP_User && $currentUser->display_name !== ''
             ? (string) $currentUser->display_name
             : \__('Staff', 'must-hotel-booking');
     }
-
     /**
      * @return array<string, scalar>
      */
     private static function getPortalReservationRedirectArgs(int $reservationId): array
     {
         $args = [];
-
         if ($reservationId > 0) {
             $args['reservation_id'] = $reservationId;
         }
-
         $queryKeys = [
             'search' => 'text',
             'status' => 'key',
@@ -4329,18 +3724,14 @@ private static function isCurrentRequestPathUnder(string $configuredPath, bool $
             'per_page' => 'int',
             'paged' => 'int',
         ];
-
         foreach ($queryKeys as $key => $type) {
             if (!isset($_GET[$key])) {
                 continue;
             }
-
             $rawValue = \wp_unslash($_GET[$key]);
-
             if (\is_array($rawValue)) {
                 continue;
             }
-
             if (
                 !self::currentUserCanViewFinanceContext()
                 && (
@@ -4351,7 +3742,6 @@ private static function isCurrentRequestPathUnder(string $configuredPath, bool $
             ) {
                 continue;
             }
-
             if ($type === 'absint') {
                 $value = \absint($rawValue);
             } elseif ($type === 'int') {
@@ -4361,25 +3751,19 @@ private static function isCurrentRequestPathUnder(string $configuredPath, bool $
             } else {
                 $value = \sanitize_text_field((string) $rawValue);
             }
-
             if ($value === '' || $value === 0) {
                 continue;
             }
-
             $args[$key] = $value;
         }
-
         $mode = isset($_POST['portal_return_mode'])
             ? \sanitize_key((string) \wp_unslash($_POST['portal_return_mode']))
             : (isset($_GET['mode']) ? \sanitize_key((string) \wp_unslash($_GET['mode'])) : '');
-
         if ($mode === 'edit') {
             $args['mode'] = 'edit';
         }
-
         return $args;
     }
-
     /**
      * @param array<string, mixed> $overrides
      * @return array<string, mixed>
@@ -4389,43 +3773,34 @@ private static function isCurrentRequestPathUnder(string $configuredPath, bool $
         /** @var array<string, mixed> $request */
         $request = \is_array($_GET) ? \wp_unslash($_GET) : [];
         $query = CalendarViewQuery::fromRequest($request);
-
         return $query->buildUrlArgs($overrides);
     }
-
     /**
      * @param array<string, mixed> $overrides
      */
     private static function redirectToPortalCalendar(array $overrides = [], string $notice = ''): void
     {
         $args = self::getPortalCalendarRedirectArgs($overrides);
-
         if ($notice !== '') {
             $args['portal_notice'] = $notice;
         }
-
         \wp_safe_redirect(PortalRouter::getModuleUrl('calendar', $args));
         exit;
     }
-
     private static function redirectToPortalReservationDetail(int $reservationId, string $notice): void
     {
         $args = self::getPortalReservationRedirectArgs($reservationId);
-
         if ($notice !== '') {
             $args['portal_notice'] = $notice;
         }
-
         \wp_safe_redirect(PortalRouter::getModuleUrl('reservations', $args));
         exit;
     }
-
     private static function redirectAfterReservationAssignRoom(int $reservationId, string $notice): void
     {
         self::maybeRedirectToRequestedFrontDeskTab(['room-move'], $notice);
         self::redirectToPortalReservationDetail($reservationId, $notice);
     }
-
     private static function currentUserCanViewFinanceContext(): bool
     {
         return \current_user_can(StaffAccess::CAP_PAYMENT_VIEW)
@@ -4433,7 +3808,6 @@ private static function isCurrentRequestPathUnder(string $configuredPath, bool $
             || \current_user_can(StaffAccess::CAP_REPORT_VIEW_MANAGEMENT)
             || \current_user_can('manage_options');
     }
-
     /**
      * @param array<string, mixed> $data
      * @return array<string, mixed>
@@ -4442,11 +3816,9 @@ private static function isCurrentRequestPathUnder(string $configuredPath, bool $
     {
         $canViewFinance = self::currentUserCanViewFinanceContext();
         $data['show_finance_details'] = $canViewFinance;
-
         if ($canViewFinance) {
             return $data;
         }
-
         $data['kpis'] = \array_values(
             \array_filter(
                 isset($data['kpis']) && \is_array($data['kpis']) ? $data['kpis'] : [],
@@ -4454,7 +3826,6 @@ private static function isCurrentRequestPathUnder(string $configuredPath, bool $
                     if (!\is_array($card)) {
                         return false;
                     }
-
                     return !\in_array(
                         \sanitize_key((string) ($card['key'] ?? '')),
                         ['unpaid_reservations', 'revenue_today'],
@@ -4463,7 +3834,6 @@ private static function isCurrentRequestPathUnder(string $configuredPath, bool $
                 }
             )
         );
-
         $data['attention_items'] = \array_values(
             \array_filter(
                 isset($data['attention_items']) && \is_array($data['attention_items']) ? $data['attention_items'] : [],
@@ -4471,23 +3841,18 @@ private static function isCurrentRequestPathUnder(string $configuredPath, bool $
                     if (!\is_array($item)) {
                         return false;
                     }
-
                     return !self::isPaymentDashboardActionUrl((string) ($item['action_url'] ?? ''));
                 }
             )
         );
-
         $recentReservations = [];
-
         foreach ((array) ($data['recent_reservations'] ?? []) as $row) {
             if (!\is_array($row)) {
                 continue;
             }
-
             unset($row['payment'], $row['total']);
             $recentReservations[] = $row;
         }
-
         $data['recent_reservations'] = $recentReservations;
         $data['recent_activity'] = \array_values(
             \array_filter(
@@ -4496,49 +3861,36 @@ private static function isCurrentRequestPathUnder(string $configuredPath, bool $
                     if (!\is_array($row)) {
                         return false;
                     }
-
                     $eventType = \sanitize_key((string) ($row['event_type'] ?? ''));
-
                     return !\str_starts_with($eventType, 'payment_');
                 }
             )
         );
-
         return $data;
     }
-
     private static function isPaymentDashboardActionUrl(string $url): bool
     {
         if ($url === '') {
             return false;
         }
-
         $paymentsUrl = PortalRouter::getModuleUrl('payments');
-
         if ($paymentsUrl !== '' && \strpos($url, $paymentsUrl) === 0) {
             return true;
         }
-
         $parts = \wp_parse_url($url);
-
         if (!\is_array($parts) || empty($parts['query'])) {
             return false;
         }
-
         $queryArgs = [];
         \parse_str((string) $parts['query'], $queryArgs);
-
         return isset($queryArgs['page']) && \sanitize_key((string) $queryArgs['page']) === 'must-hotel-booking-payments';
     }
-
     private static function isFrontDeskRoomMoveRequest(): bool
     {
         $returnModule = isset($_POST['portal_return_module']) ? \sanitize_key((string) \wp_unslash($_POST['portal_return_module'])) : '';
         $returnTab = isset($_POST['portal_return_tab']) ? \sanitize_key((string) \wp_unslash($_POST['portal_return_tab'])) : '';
-
         return $returnModule === 'front_desk' && $returnTab === 'room-move';
     }
-
     /**
      * @param array<int, string> $allowedTabs
      */
@@ -4546,25 +3898,19 @@ private static function isCurrentRequestPathUnder(string $configuredPath, bool $
     {
         $returnModule = isset($_POST['portal_return_module']) ? \sanitize_key((string) \wp_unslash($_POST['portal_return_module'])) : '';
         $returnTab = isset($_POST['portal_return_tab']) ? \sanitize_key((string) \wp_unslash($_POST['portal_return_tab'])) : '';
-
         if ($returnModule !== 'front_desk' || !\in_array($returnTab, $allowedTabs, true)) {
             return;
         }
-
         if (!StaffAccess::userCanAccessPortalModule('front_desk')) {
             return;
         }
-
         $args = ['tab' => $returnTab];
-
         if ($notice !== '') {
             $args['portal_notice'] = $notice;
         }
-
         \wp_safe_redirect(PortalRouter::getModuleUrl('front_desk', $args));
         exit;
     }
-
     /**
      * @param array<string, mixed> $forms
      * @param array<int, string> $errors
@@ -4579,7 +3925,6 @@ private static function isCurrentRequestPathUnder(string $configuredPath, bool $
             'selected_reservation_id' => $reservationId,
         ];
     }
-
     /**
      * @param array<string, mixed> $forms
      * @param array<int, string> $errors
@@ -4594,18 +3939,15 @@ private static function isCurrentRequestPathUnder(string $configuredPath, bool $
             'selected_reservation_id' => $reservationId,
         ];
     }
-
     /**
      * @return array<string, scalar>
      */
     private static function getPortalPaymentRedirectArgs(int $reservationId): array
     {
         $args = [];
-
         if ($reservationId > 0) {
             $args['reservation_id'] = $reservationId;
         }
-
         $queryKeys = [
             'status' => 'key',
             'method' => 'key',
@@ -4618,12 +3960,10 @@ private static function isCurrentRequestPathUnder(string $configuredPath, bool $
             'per_page' => 'int',
             'paged' => 'int',
         ];
-
         foreach ($queryKeys as $key => $type) {
             if (!isset($_GET[$key])) {
                 continue;
             }
-
             if (
                 !self::currentUserCanViewFinanceContext()
                 && (
@@ -4634,13 +3974,10 @@ private static function isCurrentRequestPathUnder(string $configuredPath, bool $
             ) {
                 continue;
             }
-
             $rawValue = \wp_unslash($_GET[$key]);
-
             if (\is_array($rawValue)) {
                 continue;
             }
-
             if ($type === 'int') {
                 $value = (int) $rawValue;
             } elseif ($type === 'key') {
@@ -4648,29 +3985,22 @@ private static function isCurrentRequestPathUnder(string $configuredPath, bool $
             } else {
                 $value = \sanitize_text_field((string) $rawValue);
             }
-
             if ($value === '' || $value === 0) {
                 continue;
             }
-
             $args[$key] = $value;
         }
-
         return $args;
     }
-
     private static function redirectToPortalPaymentDetail(int $reservationId, string $notice): void
     {
         $args = self::getPortalPaymentRedirectArgs($reservationId);
-
         if ($notice !== '') {
             $args['portal_notice'] = $notice;
         }
-
         \wp_safe_redirect(PortalRouter::getModuleUrl('payments', $args));
         exit;
     }
-
     /**
      * @param array<string, mixed> $form
      * @param array<int, string> $errors
@@ -4685,7 +4015,6 @@ private static function isCurrentRequestPathUnder(string $configuredPath, bool $
             'selected_guest_id' => $guestId,
         ];
     }
-
     /**
      * @param array<string, mixed> $guest
      * @param array<string, mixed> $overrides
@@ -4704,15 +4033,12 @@ private static function isCurrentRequestPathUnder(string $configuredPath, bool $
             'problem_flag' => isset($overrides['problem_flag']) ? (int) $overrides['problem_flag'] : (int) ($guest['problem_flag'] ?? 0),
         ];
     }
-
     private static function getPortalGuestRedirectArgs(int $guestId): array
     {
         $args = [];
-
         if ($guestId > 0) {
             $args['guest_id'] = $guestId;
         }
-
         $queryKeys = [
             'search' => 'text',
             'country' => 'text',
@@ -4723,18 +4049,14 @@ private static function isCurrentRequestPathUnder(string $configuredPath, bool $
             'per_page' => 'int',
             'paged' => 'int',
         ];
-
         foreach ($queryKeys as $key => $type) {
             if (!isset($_GET[$key])) {
                 continue;
             }
-
             $rawValue = \wp_unslash($_GET[$key]);
-
             if (\is_array($rawValue)) {
                 continue;
             }
-
             if ($type === 'int') {
                 $value = (int) $rawValue;
             } elseif ($type === 'key') {
@@ -4742,76 +4064,57 @@ private static function isCurrentRequestPathUnder(string $configuredPath, bool $
             } else {
                 $value = \sanitize_text_field((string) $rawValue);
             }
-
             if ($value === '' || $value === 0) {
                 continue;
             }
-
             $args[$key] = $value;
         }
-
         return $args;
     }
-
     private static function redirectToPortalGuestDetail(int $guestId, string $notice): void
     {
         $args = self::getPortalGuestRedirectArgs($guestId);
-
         if ($notice !== '') {
             $args['portal_notice'] = $notice;
         }
-
         \wp_safe_redirect(PortalRouter::getModuleUrl('guests', $args));
         exit;
     }
-
     private static function handleHousekeepingStatusUpdate(string $status, string $capability, string $successNotice): void
     {
         $roomId = isset($_POST['room_id']) ? \absint(\wp_unslash($_POST['room_id'])) : 0;
         $nonce = isset($_POST['must_portal_housekeeping_nonce']) ? (string) \wp_unslash($_POST['must_portal_housekeeping_nonce']) : '';
         $status = HousekeepingRepository::normalizeStatus($status);
-
         if ($roomId <= 0 || !\wp_verify_nonce($nonce, 'must_portal_housekeeping_action_' . $status . '_' . $roomId)) {
             self::redirectToPortalHousekeeping('invalid_nonce');
         }
-
         if (!\current_user_can($capability) && !\current_user_can('manage_options')) {
             self::redirectToPortalHousekeeping('access_denied');
         }
-
         $roomBoardRow = (new HousekeepingAdminDataProvider())->getRoomBoardRoom($roomId);
-
         if (!\is_array($roomBoardRow)) {
             self::redirectToPortalHousekeeping('housekeeping_room_not_found');
         }
-
         $currentStatus = \sanitize_key((string) ($roomBoardRow['housekeeping_status_key'] ?? ''));
         $currentReservations = isset($roomBoardRow['current_reservations']) ? (int) $roomBoardRow['current_reservations'] : 0;
-
         if ($currentStatus === HousekeepingRepository::STATUS_OUT_OF_ORDER || $currentStatus === $status) {
             self::redirectToPortalHousekeeping('housekeeping_status_invalid');
         }
-
         if ($status === HousekeepingRepository::STATUS_INSPECTED && ($currentStatus !== HousekeepingRepository::STATUS_CLEAN || $currentReservations > 0)) {
             self::redirectToPortalHousekeeping('housekeeping_status_invalid');
         }
-
         $inventoryRepository = \MustHotelBooking\Engine\get_inventory_repository();
         $housekeepingRepository = \MustHotelBooking\Engine\get_housekeeping_repository();
         $room = $inventoryRepository->getInventoryRoomById($roomId);
-
         if (!\is_array($room)) {
             self::redirectToPortalHousekeeping('housekeeping_room_not_found');
         }
-
         if (!$housekeepingRepository->updateRoomStatus($roomId, $status, \get_current_user_id())) {
             self::redirectToPortalHousekeeping('portal_action_failed');
         }
-
         self::logHousekeepingActivity($roomId, $room, $status);
         self::redirectToPortalHousekeeping($successNotice);
     }
-
     /**
      * @return array<string, mixed>
      */
@@ -4820,55 +4123,41 @@ private static function isCurrentRequestPathUnder(string $configuredPath, bool $
         $roomId = isset($_POST['room_id']) ? \absint(\wp_unslash($_POST['room_id'])) : 0;
         $assigneeId = isset($_POST['assigned_to_user_id']) ? \absint(\wp_unslash($_POST['assigned_to_user_id'])) : 0;
         $nonce = isset($_POST['must_portal_housekeeping_nonce']) ? (string) \wp_unslash($_POST['must_portal_housekeeping_nonce']) : '';
-
         if ($roomId <= 0 || !\wp_verify_nonce($nonce, 'must_portal_housekeeping_assign_' . $roomId)) {
             self::redirectToPortalHousekeeping('invalid_nonce');
         }
-
         if (!\current_user_can(StaffAccess::CAP_HOUSEKEEPING_ASSIGN_STAFF) && !\current_user_can('manage_options')) {
             self::redirectToPortalHousekeeping('access_denied');
         }
-
         $provider = new HousekeepingAdminDataProvider();
         $roomBoardRow = $provider->getRoomBoardRoom($roomId);
-
         if (!\is_array($roomBoardRow)) {
             self::redirectToPortalHousekeeping('housekeeping_room_not_found');
         }
-
         $validAssigneeIds = [0];
-
         foreach ($provider->getAssignableStaffOptions() as $option) {
             if (!\is_array($option)) {
                 continue;
             }
-
             $optionId = isset($option['id']) ? (int) $option['id'] : 0;
-
             if ($optionId > 0) {
                 $validAssigneeIds[] = $optionId;
             }
         }
-
         if (!\in_array($assigneeId, $validAssigneeIds, true)) {
             self::redirectToPortalHousekeeping('housekeeping_assignment_invalid');
         }
-
         $inventoryRepository = \MustHotelBooking\Engine\get_inventory_repository();
         $room = $inventoryRepository->getInventoryRoomById($roomId);
-
         if (!\is_array($room)) {
             self::redirectToPortalHousekeeping('housekeeping_room_not_found');
         }
-
         if (!\MustHotelBooking\Engine\get_housekeeping_repository()->assignRoom($roomId, $assigneeId, \get_current_user_id())) {
             self::redirectToPortalHousekeeping('portal_action_failed');
         }
-
         self::logHousekeepingAssignmentActivity($roomId, $room, $assigneeId);
         self::redirectToPortalHousekeeping('housekeeping_assignment_updated');
     }
-
     /**
      * @return array<string, mixed>
      */
@@ -4878,32 +4167,24 @@ private static function isCurrentRequestPathUnder(string $configuredPath, bool $
         $roomId = isset($_POST['issue_room_id']) ? \absint(\wp_unslash($_POST['issue_room_id'])) : 0;
         $title = isset($_POST['issue_title']) ? \sanitize_text_field((string) \wp_unslash($_POST['issue_title'])) : '';
         $details = isset($_POST['issue_details']) ? \sanitize_textarea_field((string) \wp_unslash($_POST['issue_details'])) : '';
-
         if (!\wp_verify_nonce($nonce, 'must_portal_housekeeping_create_issue')) {
             self::redirectToPortalHousekeeping('invalid_nonce');
         }
-
         if (!\current_user_can(StaffAccess::CAP_HOUSEKEEPING_CREATE_ISSUE) && !\current_user_can('manage_options')) {
             self::redirectToPortalHousekeeping('access_denied');
         }
-
         $errors = [];
-
         if ($roomId <= 0) {
             $errors[] = \__('Select a room before creating a maintenance issue.', 'must-hotel-booking');
         }
-
         if ($title === '') {
             $errors[] = \__('Enter a short maintenance issue title.', 'must-hotel-booking');
         }
-
         $provider = new HousekeepingAdminDataProvider();
         $roomBoardRow = $provider->getRoomBoardRoom($roomId);
-
         if ($roomId > 0 && !\is_array($roomBoardRow)) {
             $errors[] = \__('Room record not found.', 'must-hotel-booking');
         }
-
         if (!empty($errors)) {
             return [
                 'module_key' => 'housekeeping',
@@ -4916,59 +4197,44 @@ private static function isCurrentRequestPathUnder(string $configuredPath, bool $
                 ],
             ];
         }
-
         $issueId = \MustHotelBooking\Engine\get_housekeeping_repository()->createIssue($roomId, $title, $details, \get_current_user_id());
-
         if ($issueId <= 0) {
             self::redirectToPortalHousekeeping('portal_action_failed');
         }
-
         $inventoryRepository = \MustHotelBooking\Engine\get_inventory_repository();
         $room = $inventoryRepository->getInventoryRoomById($roomId);
-
         if (\is_array($room)) {
             self::logHousekeepingIssueActivity($issueId, $roomId, $room, $title, HousekeepingRepository::ISSUE_STATUS_OPEN);
         }
-
         self::redirectToPortalHousekeeping('housekeeping_issue_created');
     }
-
     private static function handleHousekeepingUpdateIssueStatus(): void
     {
         $issueId = isset($_POST['issue_id']) ? \absint(\wp_unslash($_POST['issue_id'])) : 0;
         $rawStatus = isset($_POST['issue_status']) ? \sanitize_key((string) \wp_unslash($_POST['issue_status'])) : '';
         $status = HousekeepingRepository::normalizeIssueStatus($rawStatus);
         $nonce = isset($_POST['must_portal_housekeeping_nonce']) ? (string) \wp_unslash($_POST['must_portal_housekeeping_nonce']) : '';
-
         if ($issueId <= 0 || !\wp_verify_nonce($nonce, 'must_portal_housekeeping_issue_status_' . $issueId)) {
             self::redirectToPortalHousekeeping('invalid_nonce');
         }
-
         if ($rawStatus === '' || !\in_array($rawStatus, HousekeepingRepository::getAllowedIssueStatuses(), true)) {
             self::redirectToPortalHousekeeping('portal_action_failed');
         }
-
         if (!\current_user_can(StaffAccess::CAP_HOUSEKEEPING_CREATE_ISSUE) && !\current_user_can('manage_options')) {
             self::redirectToPortalHousekeeping('access_denied');
         }
-
         $issue = \MustHotelBooking\Engine\get_housekeeping_repository()->getIssue($issueId);
-
         if (!\is_array($issue)) {
             self::redirectToPortalHousekeeping('housekeeping_issue_not_found');
         }
-
         $roomId = isset($issue['inventory_room_id']) ? (int) $issue['inventory_room_id'] : 0;
         $room = \MustHotelBooking\Engine\get_inventory_repository()->getInventoryRoomById($roomId);
-
         if ($roomId <= 0 || !\is_array($room)) {
             self::redirectToPortalHousekeeping('housekeeping_room_not_found');
         }
-
         if (!\MustHotelBooking\Engine\get_housekeeping_repository()->updateIssueStatus($issueId, $status, \get_current_user_id())) {
             self::redirectToPortalHousekeeping('portal_action_failed');
         }
-
         self::logHousekeepingIssueActivity(
             $issueId,
             $roomId,
@@ -4976,10 +4242,8 @@ private static function isCurrentRequestPathUnder(string $configuredPath, bool $
             (string) ($issue['issue_title'] ?? ''),
             $status
         );
-
         self::redirectToPortalHousekeeping('housekeeping_issue_updated');
     }
-
     /**
      * @return array<string, mixed>
      */
@@ -4988,11 +4252,9 @@ private static function isCurrentRequestPathUnder(string $configuredPath, bool $
         $nonce = isset($_POST['must_portal_housekeeping_nonce']) ? (string) \wp_unslash($_POST['must_portal_housekeeping_nonce']) : '';
         $shiftLabel = isset($_POST['handoff_shift_label']) ? \sanitize_text_field((string) \wp_unslash($_POST['handoff_shift_label'])) : '';
         $notes = isset($_POST['handoff_notes']) ? \sanitize_textarea_field((string) \wp_unslash($_POST['handoff_notes'])) : '';
-
         if (!\wp_verify_nonce($nonce, 'must_portal_housekeeping_create_handoff')) {
             self::redirectToPortalHousekeeping('invalid_nonce');
         }
-
         if (
             !\current_user_can(StaffAccess::CAP_HOUSEKEEPING_UPDATE_STATUS)
             && !\current_user_can(StaffAccess::CAP_HOUSEKEEPING_INSPECT)
@@ -5000,7 +4262,6 @@ private static function isCurrentRequestPathUnder(string $configuredPath, bool $
         ) {
             self::redirectToPortalHousekeeping('access_denied');
         }
-
         if ($shiftLabel === '') {
             $shiftLabel = \sprintf(
                 /* translators: %s: current date and time */
@@ -5008,7 +4269,6 @@ private static function isCurrentRequestPathUnder(string $configuredPath, bool $
                 \wp_date(\get_option('date_format') . ' ' . \get_option('time_format'))
             );
         }
-
         $provider = new HousekeepingAdminDataProvider();
         $snapshot = $provider->getCurrentHandoffSnapshot();
         $handoffId = \MustHotelBooking\Engine\get_housekeeping_repository()->createHandoff(
@@ -5017,15 +4277,12 @@ private static function isCurrentRequestPathUnder(string $configuredPath, bool $
             $snapshot,
             \get_current_user_id()
         );
-
         if ($handoffId <= 0) {
             self::redirectToPortalHousekeeping('portal_action_failed');
         }
-
         self::logHousekeepingHandoffActivity($handoffId, $shiftLabel, $snapshot);
         self::redirectToPortalHousekeeping('housekeeping_handoff_created');
     }
-
     /**
      * @param array<string, mixed> $room
      */
@@ -5037,7 +4294,6 @@ private static function isCurrentRequestPathUnder(string $configuredPath, bool $
         $reference = self::buildHousekeepingRoomReference($roomId, $room);
         $statusLabels = HousekeepingRepository::getStatusLabels();
         $statusLabel = isset($statusLabels[$status]) ? (string) $statusLabels[$status] : \ucwords(\str_replace('_', ' ', $status));
-
         \MustHotelBooking\Engine\get_activity_repository()->createActivity(
             [
                 'event_type' => 'housekeeping_status_updated',
@@ -5066,7 +4322,6 @@ private static function isCurrentRequestPathUnder(string $configuredPath, bool $
             ]
         );
     }
-
     /**
      * @param array<string, mixed> $room
      */
@@ -5075,7 +4330,6 @@ private static function isCurrentRequestPathUnder(string $configuredPath, bool $
         $actor = self::getCurrentPortalActorContext();
         $reference = self::buildHousekeepingRoomReference($roomId, $room);
         $assigneeLabel = $assigneeId > 0 ? self::formatAuditActorLabel(['actor_user_id' => $assigneeId]) : \__('Unassigned', 'must-hotel-booking');
-
         \MustHotelBooking\Engine\get_activity_repository()->createActivity(
             [
                 'event_type' => 'housekeeping_assignment_updated',
@@ -5104,7 +4358,6 @@ private static function isCurrentRequestPathUnder(string $configuredPath, bool $
             ]
         );
     }
-
     /**
      * @param array<string, mixed> $room
      */
@@ -5115,7 +4368,6 @@ private static function isCurrentRequestPathUnder(string $configuredPath, bool $
         $statusLabels = HousekeepingRepository::getIssueStatusLabels();
         $statusLabel = isset($statusLabels[$status]) ? (string) $statusLabels[$status] : \ucwords(\str_replace('_', ' ', $status));
         $eventType = $status === HousekeepingRepository::ISSUE_STATUS_OPEN ? 'housekeeping_issue_created' : 'housekeeping_issue_updated';
-
         \MustHotelBooking\Engine\get_activity_repository()->createActivity(
             [
                 'event_type' => $eventType,
@@ -5147,14 +4399,12 @@ private static function isCurrentRequestPathUnder(string $configuredPath, bool $
             ]
         );
     }
-
     /**
      * @param array<string, int> $snapshot
      */
     private static function logHousekeepingHandoffActivity(int $handoffId, string $shiftLabel, array $snapshot): void
     {
         $actor = self::getCurrentPortalActorContext();
-
         \MustHotelBooking\Engine\get_activity_repository()->createActivity(
             [
                 'event_type' => 'housekeeping_handoff_created',
@@ -5181,7 +4431,6 @@ private static function isCurrentRequestPathUnder(string $configuredPath, bool $
             ]
         );
     }
-
     /**
      * @return array<string, mixed>
      */
@@ -5190,26 +4439,21 @@ private static function isCurrentRequestPathUnder(string $configuredPath, bool $
         $actorUserId = \get_current_user_id();
         $actorRole = '';
         $actorIp = '';
-
         if ($actorUserId > 0) {
             $actorUser = \wp_get_current_user();
-
             if ($actorUser instanceof \WP_User && !empty($actorUser->roles)) {
                 $actorRole = (string) \reset($actorUser->roles);
             }
         }
-
         if (isset($_SERVER['REMOTE_ADDR'])) {
             $actorIp = \sanitize_text_field(\wp_unslash((string) $_SERVER['REMOTE_ADDR']));
         }
-
         return [
             'user_id' => $actorUserId,
             'role' => $actorRole,
             'ip' => $actorIp,
         ];
     }
-
     /**
      * @param array<string, mixed> $room
      */
@@ -5217,10 +4461,8 @@ private static function isCurrentRequestPathUnder(string $configuredPath, bool $
     {
         $roomNumber = \trim((string) ($room['room_number'] ?? ''));
         $roomTitle = \trim((string) ($room['title'] ?? ''));
-
         return $roomNumber !== '' ? $roomNumber : ($roomTitle !== '' ? $roomTitle : ('ROOM-' . $roomId));
     }
-
     /**
      * @return array<string, scalar>
      */
@@ -5231,30 +4473,23 @@ private static function isCurrentRequestPathUnder(string $configuredPath, bool $
         $tab = isset($_POST['portal_housekeeping_tab'])
             ? \sanitize_key((string) \wp_unslash($_POST['portal_housekeeping_tab']))
             : (isset($_GET['tab']) ? \sanitize_key((string) \wp_unslash($_GET['tab'])) : 'room-board');
-
         if (!\in_array($tab, $allowedTabs, true)) {
             $tab = 'room-board';
         }
-
         if ($tab !== 'room-board') {
             $args['tab'] = $tab;
         }
-
         return $args;
     }
-
     private static function redirectToPortalHousekeeping(string $notice): void
     {
         $args = self::getPortalHousekeepingRedirectArgs();
-
         if ($notice !== '') {
             $args['portal_notice'] = $notice;
         }
-
         \wp_safe_redirect(PortalRouter::getModuleUrl('housekeeping', $args));
         exit;
     }
-
     /**
      * @return array<string, mixed>
      */
@@ -5267,9 +4502,7 @@ private static function isCurrentRequestPathUnder(string $configuredPath, bool $
         $query = ReportAdminQuery::fromRequest($request);
         $reportData = (new ReportAdminDataProvider())->getPageData($query);
         $auditRows = self::canViewAuditReports() ? self::buildReportAuditRows($query) : [];
-
         self::maybeHandleReportExport($request, $activeTab, $query, $reportData, $auditRows);
-
         return $reportData + [
             'active_tab' => $activeTab,
             'tabs' => $tabs,
@@ -5284,30 +4517,24 @@ private static function isCurrentRequestPathUnder(string $configuredPath, bool $
             'audit_rows' => $auditRows,
         ];
     }
-
     /**
      * @return array<string, string>
      */
     private static function getAvailableReportTabs(): array
     {
         $tabs = [];
-
         if (self::canViewOpsReports()) {
             $tabs['daily-operations'] = \__('Daily Operations', 'must-hotel-booking');
             $tabs['occupancy'] = \__('Occupancy', 'must-hotel-booking');
         }
-
         if (self::canViewFinanceReports()) {
             $tabs['payments-finance'] = \__('Payments / Finance', 'must-hotel-booking');
         }
-
         if (self::canViewAuditReports()) {
             $tabs['audit-log'] = \__('Audit Log', 'must-hotel-booking');
         }
-
         return $tabs;
     }
-
     /**
      * @param array<string, mixed> $request
      * @param array<string, string> $tabs
@@ -5316,43 +4543,36 @@ private static function isCurrentRequestPathUnder(string $configuredPath, bool $
     {
         $defaultTab = !empty($tabs) ? (string) \array_key_first($tabs) : 'daily-operations';
         $tab = isset($request['tab']) ? \sanitize_key((string) $request['tab']) : $defaultTab;
-
         return isset($tabs[$tab]) ? $tab : $defaultTab;
     }
-
     private static function canViewOpsReports(): bool
     {
         return \current_user_can(StaffAccess::CAP_REPORT_VIEW_OPS)
             || \current_user_can(StaffAccess::CAP_REPORT_VIEW_MANAGEMENT)
             || \current_user_can('manage_options');
     }
-
     private static function canViewFinanceReports(): bool
     {
         return \current_user_can(StaffAccess::CAP_REPORT_VIEW_FINANCE)
             || \current_user_can(StaffAccess::CAP_REPORT_VIEW_MANAGEMENT)
             || \current_user_can('manage_options');
     }
-
     private static function canViewAuditReports(): bool
     {
         return \current_user_can(StaffAccess::CAP_AUDIT_VIEW)
             || \current_user_can('manage_options');
     }
-
     private static function canExportReports(): bool
     {
         return \current_user_can(StaffAccess::CAP_REPORT_EXPORT)
             || \current_user_can('manage_options');
     }
-
     /**
      * @return array<int, array<string, string>>
      */
     private static function buildOpsReportCards(array $reportData): array
     {
         $stay = isset($reportData['stay']) && \is_array($reportData['stay']) ? $reportData['stay'] : [];
-
         return [
             [
                 'label' => \__('Reservations', 'must-hotel-booking'),
@@ -5381,14 +4601,12 @@ private static function isCurrentRequestPathUnder(string $configuredPath, bool $
             ],
         ];
     }
-
     /**
      * @return array<int, array<string, string>>
      */
     private static function buildFinanceReportCards(array $reportData): array
     {
         $revenue = isset($reportData['revenue']) && \is_array($reportData['revenue']) ? $reportData['revenue'] : [];
-
         return [
             [
                 'label' => \__('Booked Revenue', 'must-hotel-booking'),
@@ -5412,14 +4630,12 @@ private static function isCurrentRequestPathUnder(string $configuredPath, bool $
             ],
         ];
     }
-
     /**
      * @return array<int, array<string, string>>
      */
     private static function buildOccupancyReportCards(array $reportData): array
     {
         $stay = isset($reportData['stay']) && \is_array($reportData['stay']) ? $reportData['stay'] : [];
-
         return [
             [
                 'label' => \__('Occupancy', 'must-hotel-booking'),
@@ -5443,7 +4659,6 @@ private static function isCurrentRequestPathUnder(string $configuredPath, bool $
             ],
         ];
     }
-
     /**
      * @return array<int, array<string, string>>
      */
@@ -5454,55 +4669,43 @@ private static function isCurrentRequestPathUnder(string $configuredPath, bool $
             $query->getDateTo(),
             100
         );
-
         // Batch-load provider info for reservation-type entities so audit rows can show provider context.
         $reservationEntityIds = [];
-
         foreach ($activityRows as $activityRow) {
             if (!\is_array($activityRow)) {
                 continue;
             }
-
             if (\sanitize_key((string) ($activityRow['entity_type'] ?? '')) === 'reservation') {
                 $eid = isset($activityRow['entity_id']) ? (int) $activityRow['entity_id'] : 0;
-
                 if ($eid > 0) {
                     $reservationEntityIds[$eid] = $eid;
                 }
             }
         }
-
         $providerInfoByReservation = [];
-
         if (!empty($reservationEntityIds)) {
             $reservationRepo = \MustHotelBooking\Engine\get_reservation_repository();
-
             foreach ($reservationRepo->getProviderReservationRowsByIds(\array_values($reservationEntityIds)) as $provRow) {
                 if (\is_array($provRow) && isset($provRow['id'])) {
                     $providerInfoByReservation[(int) $provRow['id']] = $provRow;
                 }
             }
         }
-
         $rows = [];
-
         foreach ($activityRows as $activityRow) {
             if (!\is_array($activityRow)) {
                 continue;
             }
-
             $context = self::decodeActivityContext((string) ($activityRow['context_json'] ?? ''));
             $entityType = \sanitize_key((string) ($activityRow['entity_type'] ?? ''));
             $entityId = isset($activityRow['entity_id']) ? (int) $activityRow['entity_id'] : 0;
             $providerKey = '';
             $isProviderBacked = false;
-
             if ($entityType === 'reservation' && isset($providerInfoByReservation[$entityId])) {
                 $provRow = $providerInfoByReservation[$entityId];
                 $providerKey = \sanitize_key((string) ($provRow['provider'] ?? ''));
                 $isProviderBacked = $providerKey !== '' && $providerKey !== 'local';
             }
-
             $rows[] = [
                 'created_at' => self::formatPortalDateTime((string) ($activityRow['created_at'] ?? '')),
                 'severity' => (string) ($activityRow['severity'] ?? 'info'),
@@ -5519,10 +4722,8 @@ private static function isCurrentRequestPathUnder(string $configuredPath, bool $
                 'is_provider_backed' => $isProviderBacked,
             ];
         }
-
         return $rows;
     }
-
     /**
      * @param array<string, mixed> $request
      * @param array<string, mixed> $reportData
@@ -5531,24 +4732,18 @@ private static function isCurrentRequestPathUnder(string $configuredPath, bool $
     private static function maybeHandleReportExport(array $request, string $activeTab, ReportAdminQuery $query, array $reportData, array $auditRows): void
     {
         $export = isset($request['export']) ? \sanitize_key((string) $request['export']) : '';
-
         if ($export !== 'csv') {
             return;
         }
-
         if (!self::canExportReports()) {
             self::redirectToPortalReports($query, ['tab' => $activeTab], 'access_denied');
         }
-
         $nonce = isset($request['_wpnonce']) ? (string) $request['_wpnonce'] : '';
-
         if (!\wp_verify_nonce($nonce, 'must_portal_report_export_' . $activeTab)) {
             self::redirectToPortalReports($query, ['tab' => $activeTab], 'invalid_nonce');
         }
-
         self::streamReportCsvExport($activeTab, $query, $reportData, $auditRows);
     }
-
     private static function buildReportExportUrl(ReportAdminQuery $query, string $activeTab): string
     {
         return PortalRouter::getModuleUrl(
@@ -5562,7 +4757,6 @@ private static function isCurrentRequestPathUnder(string $configuredPath, bool $
             )
         );
     }
-
     /**
      * @param array<string, mixed> $reportData
      * @param array<int, array<string, string>> $auditRows
@@ -5571,24 +4765,18 @@ private static function isCurrentRequestPathUnder(string $configuredPath, bool $
     {
         $rows = self::buildReportExportRows($activeTab, $reportData, $auditRows);
         $filename = 'staff-report-' . $activeTab . '-' . $query->getDateFrom() . '-to-' . $query->getDateTo() . '.csv';
-
         \nocache_headers();
         \header('Content-Type: text/csv; charset=utf-8');
         \header('Content-Disposition: attachment; filename="' . \sanitize_file_name($filename) . '"');
-
         $output = \fopen('php://output', 'w');
-
         if (\is_resource($output)) {
             foreach ($rows as $row) {
                 \fputcsv($output, $row);
             }
-
             \fclose($output);
         }
-
         exit;
     }
-
     /**
      * @param array<string, mixed> $reportData
      * @param array<int, array<string, string>> $auditRows
@@ -5610,7 +4798,6 @@ private static function isCurrentRequestPathUnder(string $configuredPath, bool $
                     'Action URL',
                 ]
             ];
-
             foreach ($auditRows as $row) {
                 $rows[] = [
                     (string) ($row['created_at'] ?? ''),
@@ -5624,30 +4811,23 @@ private static function isCurrentRequestPathUnder(string $configuredPath, bool $
                     (string) ($row['action_url'] ?? ''),
                 ];
             }
-
             return $rows;
         }
-
         $rows = [['Section', 'Label', 'Value', 'Meta']];
-
         if ($activeTab === 'daily-operations') {
             foreach (self::buildOpsReportCards($reportData) as $card) {
                 $rows[] = ['summary', (string) ($card['label'] ?? ''), (string) ($card['value'] ?? ''), (string) ($card['meta'] ?? '')];
             }
-
             foreach ((array) ($reportData['breakdowns']['reservation_status'] ?? []) as $row) {
                 if (!\is_array($row)) {
                     continue;
                 }
-
                 $rows[] = ['reservation_status', (string) ($row['label'] ?? ''), (string) ($row['value'] ?? ''), ''];
             }
-
             foreach ((array) ($reportData['trend']['rows'] ?? []) as $row) {
                 if (!\is_array($row)) {
                     continue;
                 }
-
                 $rows[] = [
                     'trend',
                     (string) ($row['label'] ?? ''),
@@ -5655,52 +4835,40 @@ private static function isCurrentRequestPathUnder(string $configuredPath, bool $
                     (string) ($row['revenue'] ?? ''),
                 ];
             }
-
             foreach ((array) ($reportData['issues'] ?? []) as $row) {
                 if (!\is_array($row)) {
                     continue;
                 }
-
                 $rows[] = ['issues', (string) ($row['label'] ?? ''), (string) ($row['value'] ?? ''), ''];
             }
-
             foreach ((array) ($reportData['provider_breakdown'] ?? []) as $row) {
                 if (!\is_array($row)) {
                     continue;
                 }
-
                 $rows[] = ['provider_source', (string) ($row['label'] ?? ''), (string) ($row['value'] ?? ''), ''];
             }
-
             return $rows;
         }
-
         if ($activeTab === 'payments-finance') {
             foreach (self::buildFinanceReportCards($reportData) as $card) {
                 $rows[] = ['summary', (string) ($card['label'] ?? ''), (string) ($card['value'] ?? ''), (string) ($card['meta'] ?? '')];
             }
-
             foreach ((array) ($reportData['breakdowns']['payment_status'] ?? []) as $row) {
                 if (!\is_array($row)) {
                     continue;
                 }
-
                 $rows[] = ['payment_status', (string) ($row['label'] ?? ''), (string) ($row['value'] ?? ''), ''];
             }
-
             foreach ((array) ($reportData['breakdowns']['payment_method'] ?? []) as $row) {
                 if (!\is_array($row)) {
                     continue;
                 }
-
                 $rows[] = ['payment_method', (string) ($row['label'] ?? ''), (string) ($row['value'] ?? ''), ''];
             }
-
             foreach ((array) ($reportData['coupons'] ?? []) as $row) {
                 if (!\is_array($row)) {
                     continue;
                 }
-
                 $rows[] = [
                     'coupons',
                     (string) ($row['coupon_code'] ?? ''),
@@ -5708,35 +4876,27 @@ private static function isCurrentRequestPathUnder(string $configuredPath, bool $
                     (string) ($row['discount_total'] ?? ''),
                 ];
             }
-
             foreach ((array) ($reportData['issues'] ?? []) as $row) {
                 if (!\is_array($row)) {
                     continue;
                 }
-
                 $rows[] = ['issues', (string) ($row['label'] ?? ''), (string) ($row['value'] ?? ''), ''];
             }
-
             foreach ((array) ($reportData['provider_breakdown'] ?? []) as $row) {
                 if (!\is_array($row)) {
                     continue;
                 }
-
                 $rows[] = ['provider_source', (string) ($row['label'] ?? ''), (string) ($row['value'] ?? ''), ''];
             }
-
             return $rows;
         }
-
         foreach (self::buildOccupancyReportCards($reportData) as $card) {
             $rows[] = ['summary', (string) ($card['label'] ?? ''), (string) ($card['value'] ?? ''), (string) ($card['meta'] ?? '')];
         }
-
         foreach ((array) ($reportData['top_accommodations'] ?? []) as $row) {
             if (!\is_array($row)) {
                 continue;
             }
-
             $rows[] = [
                 'top_accommodations',
                 (string) ($row['room_name'] ?? ''),
@@ -5744,10 +4904,8 @@ private static function isCurrentRequestPathUnder(string $configuredPath, bool $
                 (string) ($row['revenue'] ?? ''),
             ];
         }
-
         return $rows;
     }
-
     /**
      * @param array<string, mixed> $activityRow
      * @param array<string, mixed> $context
@@ -5757,105 +4915,80 @@ private static function isCurrentRequestPathUnder(string $configuredPath, bool $
         $entityType = \sanitize_key((string) ($activityRow['entity_type'] ?? ''));
         $eventType = \sanitize_key((string) ($activityRow['event_type'] ?? ''));
         $entityId = isset($activityRow['entity_id']) ? (int) $activityRow['entity_id'] : 0;
-
         if ($eventType === 'calendar_block_created' && StaffAccess::userCanAccessPortalModule('rooms_availability')) {
             $roomId = isset($context['room_id']) ? (int) $context['room_id'] : 0;
             $checkin = isset($context['checkin']) ? (string) $context['checkin'] : '';
-
             if ($roomId > 0) {
                 $args = [
                     'tab' => 'blocks',
                     'room_id' => $roomId,
                 ];
-
                 if ($checkin !== '') {
                     $args['start_date'] = $checkin;
                     $args['end_date'] = $checkin;
                 }
-
                 return PortalRouter::getModuleUrl('rooms_availability', $args);
             }
         }
-
         if ($entityType === 'reservation' && StaffAccess::userCanAccessPortalModule('reservations')) {
             $reservationId = isset($context['reservation_id']) ? (int) $context['reservation_id'] : $entityId;
-
             if ($reservationId > 0) {
                 return PortalRouter::getModuleUrl('reservations', ['reservation_id' => $reservationId]);
             }
         }
-
         if ($entityType === 'payment' && StaffAccess::userCanAccessPortalModule('payments')) {
             $reservationId = isset($context['reservation_id']) ? (int) $context['reservation_id'] : 0;
-
             if ($reservationId > 0) {
                 return PortalRouter::getModuleUrl('payments', ['reservation_id' => $reservationId]);
             }
         }
-
         if ($entityType === 'guest' && StaffAccess::userCanAccessPortalModule('guests')) {
             $guestId = isset($context['guest_id']) ? (int) $context['guest_id'] : $entityId;
-
             if ($guestId > 0) {
                 return PortalRouter::getModuleUrl('guests', ['guest_id' => $guestId]);
             }
         }
-
         if ($entityType === 'inventory_room') {
             if (StaffAccess::userCanAccessPortalModule('housekeeping')) {
                 $tab = $eventType === 'housekeeping_assignment_updated' ? 'assignments' : 'room-board';
-
                 return PortalRouter::getModuleUrl('housekeeping', ['tab' => $tab]);
             }
-
             if (StaffAccess::userCanAccessPortalModule('rooms_availability')) {
                 return PortalRouter::getModuleUrl('rooms_availability', ['tab' => 'statuses']);
             }
         }
-
         if ($entityType === 'availability_block' && StaffAccess::userCanAccessPortalModule('rooms_availability')) {
             $roomId = isset($context['room_id']) ? (int) $context['room_id'] : 0;
             $args = ['tab' => 'blocks'];
-
             if ($roomId > 0) {
                 $args['room_id'] = $roomId;
             }
-
             if ($eventType !== 'availability_block_deleted' && $entityId > 0) {
                 $args['action'] = 'edit_block';
                 $args['block_id'] = $entityId;
             }
-
             return PortalRouter::getModuleUrl('rooms_availability', $args);
         }
-
         if ($entityType === 'availability_rule' && StaffAccess::userCanAccessPortalModule('rooms_availability')) {
             $roomId = isset($context['room_id']) ? (int) $context['room_id'] : 0;
             $args = ['tab' => 'rules'];
-
             if ($roomId > 0) {
                 $args['room_id'] = $roomId;
             }
-
             if ($eventType !== 'availability_rule_deleted' && $entityId > 0) {
                 $args['action'] = 'edit_rule';
                 $args['rule_id'] = $entityId;
             }
-
             return PortalRouter::getModuleUrl('rooms_availability', $args);
         }
-
         if ($entityType === 'housekeeping_issue' && StaffAccess::userCanAccessPortalModule('housekeeping')) {
             return PortalRouter::getModuleUrl('housekeeping', ['tab' => 'maintenance']);
         }
-
         if ($entityType === 'housekeeping_handoff' && StaffAccess::userCanAccessPortalModule('housekeeping')) {
             return PortalRouter::getModuleUrl('housekeeping', ['tab' => 'handoff']);
         }
-
         return '';
     }
-
     /**
      * @param array<string, mixed> $activityRow
      */
@@ -5863,46 +4996,34 @@ private static function isCurrentRequestPathUnder(string $configuredPath, bool $
     {
         $actorUserId = isset($activityRow['actor_user_id']) ? (int) $activityRow['actor_user_id'] : 0;
         $actorRole = \sanitize_key((string) ($activityRow['actor_role'] ?? ''));
-
         if ($actorUserId > 0) {
             $user = \get_userdata($actorUserId);
-
             if ($user instanceof \WP_User && $user->display_name !== '') {
                 return $user->display_name;
             }
         }
-
         if ($actorRole !== '') {
             $label = \preg_replace('/^mhb_/', '', $actorRole);
-
             return \ucwords(\str_replace('_', ' ', (string) $label));
         }
-
         return \__('System', 'must-hotel-booking');
     }
-
     private static function formatAuditEventLabel(string $eventType): string
     {
         $eventType = \sanitize_key($eventType);
-
         if ($eventType === '') {
             return \__('Activity', 'must-hotel-booking');
         }
-
         return \ucwords(\str_replace('_', ' ', $eventType));
     }
-
     private static function formatAuditEntityLabel(string $entityType): string
     {
         $entityType = \sanitize_key($entityType);
-
         if ($entityType === '') {
             return \__('General', 'must-hotel-booking');
         }
-
         return \ucwords(\str_replace('_', ' ', $entityType));
     }
-
     /**
      * @return array<string, mixed>
      */
@@ -5911,27 +5032,20 @@ private static function isCurrentRequestPathUnder(string $configuredPath, bool $
         if ($json === '') {
             return [];
         }
-
         $decoded = \json_decode($json, true);
-
         return \is_array($decoded) ? $decoded : [];
     }
-
     private static function formatPortalDateTime(string $datetime): string
     {
         if ($datetime === '') {
             return '';
         }
-
         $timestamp = \strtotime($datetime);
-
         if ($timestamp === false) {
             return $datetime;
         }
-
         return \wp_date(\get_option('date_format') . ' ' . \get_option('time_format'), $timestamp);
     }
-
     /**
      * @param array<string, mixed> $overrides
      * @return array<string, mixed>
@@ -5940,22 +5054,18 @@ private static function isCurrentRequestPathUnder(string $configuredPath, bool $
     {
         return $query->buildUrlArgs($overrides);
     }
-
     /**
      * @param array<string, mixed> $overrides
      */
     private static function redirectToPortalReports(ReportAdminQuery $query, array $overrides = [], string $notice = ''): void
     {
         $args = self::getPortalReportRedirectArgs($query, $overrides);
-
         if ($notice !== '') {
             $args['portal_notice'] = $notice;
         }
-
         \wp_safe_redirect(PortalRouter::getModuleUrl('reports', $args));
         exit;
     }
-
     /**
      * Front Desk workspace data.
      *
@@ -5966,15 +5076,12 @@ private static function isCurrentRequestPathUnder(string $configuredPath, bool $
     {
         $allowedTabs = ['new-booking', 'walk-in', 'checkin', 'checkout', 'room-move', 'log'];
         $activeTab = isset($_GET['tab']) ? \sanitize_key((string) \wp_unslash($_GET['tab'])) : 'new-booking';
-
         if (!\in_array($activeTab, $allowedTabs, true)) {
             $activeTab = 'new-booking';
         }
-
         $data = [
             'active_tab' => $activeTab,
         ];
-
         if ($activeTab === 'new-booking') {
             $data = \array_merge($data, self::prepareQuickBookingData($actionState));
         } elseif (\in_array($activeTab, ['checkin', 'checkout'], true)) {
@@ -5984,10 +5091,8 @@ private static function isCurrentRequestPathUnder(string $configuredPath, bool $
         } elseif ($activeTab === 'log') {
             $data['log_data'] = self::prepareFrontDeskLogData();
         }
-
         return $data;
     }
-
     /**
      * Housekeeping workspace data.
      *
@@ -5999,28 +5104,21 @@ private static function isCurrentRequestPathUnder(string $configuredPath, bool $
         $activeTab = isset($actionState['active_tab'])
             ? \sanitize_key((string) $actionState['active_tab'])
             : (isset($_GET['tab']) ? \sanitize_key((string) \wp_unslash($_GET['tab'])) : 'room-board');
-
         if (!\in_array($activeTab, $allowedTabs, true)) {
             $activeTab = 'room-board';
         }
-
         $data = (new HousekeepingAdminDataProvider())->getPageData($activeTab);
-
         if (isset($actionState['errors']) && \is_array($actionState['errors']) && !empty($actionState['errors'])) {
             $data['errors'] = $actionState['errors'];
         }
-
         if (isset($actionState['issue_form']) && \is_array($actionState['issue_form'])) {
             $data['issue_form'] = $actionState['issue_form'];
         }
-
         if (isset($actionState['handoff_form']) && \is_array($actionState['handoff_form'])) {
             $data['handoff_form'] = $actionState['handoff_form'];
         }
-
         return $data;
     }
-
     /**
      * @return array<string, scalar>
      */
@@ -6028,7 +5126,6 @@ private static function isCurrentRequestPathUnder(string $configuredPath, bool $
     {
         /** @var array<string, mixed> $source */
         $source = \is_array($_POST) ? $_POST : [];
-
         return [
             'tab' => isset($source['portal_rooms_availability_tab']) ? \sanitize_key((string) \wp_unslash($source['portal_rooms_availability_tab'])) : '',
             'action' => isset($source['portal_rooms_availability_action']) ? \sanitize_key((string) \wp_unslash($source['portal_rooms_availability_action'])) : '',
@@ -6043,7 +5140,6 @@ private static function isCurrentRequestPathUnder(string $configuredPath, bool $
             'end_date' => isset($source['portal_rooms_availability_filter_end_date']) ? \sanitize_text_field((string) \wp_unslash($source['portal_rooms_availability_filter_end_date'])) : '',
         ];
     }
-
     /**
      * @param array<string, scalar> $overrides
      * @return array<string, scalar>
@@ -6052,57 +5148,44 @@ private static function isCurrentRequestPathUnder(string $configuredPath, bool $
     {
         $request = self::getPortalRoomsAvailabilityRequestFromPost();
         $tab = isset($request['tab']) ? (string) $request['tab'] : '';
-
         if ($tab === '') {
             $tab = $fallbackTab;
         }
-
         $allowedTabs = ['rooms', 'room-types', 'statuses', 'blocks', 'rules', 'maintenance'];
-
         if (!\in_array($tab, $allowedTabs, true)) {
             $tab = $fallbackTab;
         }
-
         $query = AvailabilityAdminQuery::fromRequest($request);
         $args = \array_merge(['tab' => $tab], $query->buildUrlArgs());
-
         foreach ($overrides as $key => $value) {
             if ($value === '' || $value === 0 || $value === null || $value === 'all') {
                 unset($args[$key]);
                 continue;
             }
-
             $args[$key] = $value;
         }
-
         return $args;
     }
-
     /**
      * @param array<string, scalar> $overrides
      */
     private static function redirectToPortalRoomsAvailability(string $fallbackTab, array $overrides = [], string $notice = ''): void
     {
         $args = self::getPortalRoomsAvailabilityRedirectArgs($overrides, $fallbackTab);
-
         if ($notice !== '') {
             $args['portal_notice'] = $notice;
         }
-
         \wp_safe_redirect(PortalRouter::getModuleUrl('rooms_availability', $args));
         exit;
     }
-
     private static function canManageRoomsAvailabilityBlocks(): bool
     {
         return \current_user_can(StaffAccess::CAP_ROOM_BLOCK_MANAGE) || \current_user_can('manage_options');
     }
-
     private static function canEditRoomsAvailabilityRulesGlobally(): bool
     {
         return \current_user_can(StaffAccess::CAP_AVAILABILITY_RULES_EDIT) || \current_user_can('manage_options');
     }
-
     /**
      * @param array<string, mixed> $rule
      */
@@ -6111,10 +5194,8 @@ private static function isCurrentRequestPathUnder(string $configuredPath, bool $
         if (self::canEditRoomsAvailabilityRulesGlobally()) {
             return true;
         }
-
         return self::canManageRoomsAvailabilityBlocks() && (int) ($rule['room_id'] ?? 0) > 0;
     }
-
     /**
      * @param array<string, mixed> $request
      * @param array<int, string> $errors
@@ -6124,7 +5205,6 @@ private static function isCurrentRequestPathUnder(string $configuredPath, bool $
     private static function buildRoomsAvailabilityActionState(string $tab, array $request, array $errors, array $forms = []): array
     {
         $request['tab'] = $tab;
-
         return \array_merge(
             [
                 'module_key' => 'rooms_availability',
@@ -6135,7 +5215,6 @@ private static function isCurrentRequestPathUnder(string $configuredPath, bool $
             $forms
         );
     }
-
     /**
      * @param array<string, mixed> $source
      * @return array<string, mixed>
@@ -6156,15 +5235,12 @@ private static function isCurrentRequestPathUnder(string $configuredPath, bool $
             'reason' => isset($source['reason']) ? \sanitize_text_field((string) \wp_unslash($source['reason'])) : '',
             'errors' => [],
         ];
-
         if ($values['name'] === '') {
             $values['errors'][] = \__('Rule name is required.', 'must-hotel-booking');
         }
-
         if (!\in_array($values['rule_type'], ['maintenance_block', 'minimum_stay', 'maximum_stay', 'closed_arrival', 'closed_departure'], true)) {
             $values['errors'][] = \__('Select a valid availability rule type.', 'must-hotel-booking');
         }
-
         if (
             !\preg_match('/^\d{4}-\d{2}-\d{2}$/', (string) $values['availability_date']) ||
             !\preg_match('/^\d{4}-\d{2}-\d{2}$/', (string) $values['end_date'])
@@ -6173,26 +5249,20 @@ private static function isCurrentRequestPathUnder(string $configuredPath, bool $
         } elseif ((string) $values['availability_date'] > (string) $values['end_date']) {
             $values['errors'][] = \__('End date must be on or after start date.', 'must-hotel-booking');
         }
-
         if ((int) $values['room_id'] > 0 && !$roomRepository->getRoomById((int) $values['room_id'])) {
             $values['errors'][] = \__('Selected room listing could not be found.', 'must-hotel-booking');
         }
-
         if (\in_array($values['rule_type'], ['minimum_stay', 'maximum_stay'], true) && (int) $values['rule_value'] < 1) {
             $values['errors'][] = \__('Stay rules require a value of at least 1 night.', 'must-hotel-booking');
         }
-
         if (!\in_array($values['rule_type'], ['minimum_stay', 'maximum_stay'], true)) {
             $values['rule_value'] = 0;
         }
-
         if ($values['reason'] === '') {
             $values['reason'] = $values['name'];
         }
-
         return $values;
     }
-
     /**
      * @param array<string, mixed> $source
      * @return array<string, mixed>
@@ -6208,11 +5278,9 @@ private static function isCurrentRequestPathUnder(string $configuredPath, bool $
             'notes' => isset($source['notes']) ? \sanitize_textarea_field((string) \wp_unslash($source['notes'])) : '',
             'errors' => [],
         ];
-
         if ((int) $values['room_id'] <= 0 || !$roomRepository->getRoomById((int) $values['room_id'])) {
             $values['errors'][] = \__('Select a valid room listing for the manual block.', 'must-hotel-booking');
         }
-
         if (
             !\preg_match('/^\d{4}-\d{2}-\d{2}$/', (string) $values['checkin']) ||
             !\preg_match('/^\d{4}-\d{2}-\d{2}$/', (string) $values['checkout'])
@@ -6221,10 +5289,8 @@ private static function isCurrentRequestPathUnder(string $configuredPath, bool $
         } elseif ((string) $values['checkin'] >= (string) $values['checkout']) {
             $values['errors'][] = \__('The manual block end date must be after the start date.', 'must-hotel-booking');
         }
-
         return $values;
     }
-
     /**
      * @param array<string, mixed> $request
      * @return array<string, mixed>
@@ -6232,38 +5298,29 @@ private static function isCurrentRequestPathUnder(string $configuredPath, bool $
     private static function sanitizeRoomsAvailabilityEditRequest(array $request, string $mode): array
     {
         $action = isset($request['action']) ? \sanitize_key((string) $request['action']) : '';
-
         if ($mode === 'blocked') {
             if ($action !== 'edit_block') {
                 unset($request['action'], $request['block_id']);
                 return $request;
             }
-
             $blockId = isset($request['block_id']) ? (int) $request['block_id'] : 0;
             $block = $blockId > 0 ? \MustHotelBooking\Engine\get_reservation_repository()->getReservation($blockId) : null;
-
             if (!self::canManageRoomsAvailabilityBlocks() || !\is_array($block) || (string) ($block['status'] ?? '') !== 'blocked') {
                 unset($request['action'], $request['block_id']);
             }
-
             return $request;
         }
-
         if ($action !== 'edit_rule') {
             unset($request['action'], $request['rule_id']);
             return $request;
         }
-
         $ruleId = isset($request['rule_id']) ? (int) $request['rule_id'] : 0;
         $rule = $ruleId > 0 ? \MustHotelBooking\Engine\get_availability_repository()->getRuleById($ruleId) : null;
-
         if (!\is_array($rule) || !self::canEditRoomsAvailabilityRule($rule)) {
             unset($request['action'], $request['rule_id']);
         }
-
         return $request;
     }
-
     /**
      * @return array<string, mixed>
      */
@@ -6277,24 +5334,18 @@ private static function isCurrentRequestPathUnder(string $configuredPath, bool $
         $blockId = isset($rawPost['block_id']) ? \absint(\wp_unslash($rawPost['block_id'])) : 0;
         $request['block_id'] = $blockId;
         $nonce = isset($rawPost['must_availability_block_nonce']) ? (string) \wp_unslash($rawPost['must_availability_block_nonce']) : '';
-
         if (!\wp_verify_nonce($nonce, 'must_availability_save_block')) {
             self::redirectToPortalRoomsAvailability('blocks', ['action' => 'edit_block', 'block_id' => $blockId], 'invalid_nonce');
         }
-
         if (!self::canManageRoomsAvailabilityBlocks()) {
             self::redirectToPortalRoomsAvailability('blocks', ['action' => 'edit_block', 'block_id' => $blockId], 'access_denied');
         }
-
         $reservationRepository = \MustHotelBooking\Engine\get_reservation_repository();
         $current = $blockId > 0 ? $reservationRepository->getReservation($blockId) : null;
-
         if (!\is_array($current) || (string) ($current['status'] ?? '') !== 'blocked') {
             self::redirectToPortalRoomsAvailability('blocks', [], 'portal_action_failed');
         }
-
         $values = self::sanitizeRoomsAvailabilityBlockValues($rawPost);
-
         if (!empty($values['errors'])) {
             return self::buildRoomsAvailabilityActionState(
                 'blocks',
@@ -6306,7 +5357,6 @@ private static function isCurrentRequestPathUnder(string $configuredPath, bool $
                 ]
             );
         }
-
         $conflicts = $reservationRepository->getBlockedReservationConflicts(
             (int) $values['room_id'],
             (string) $values['checkin'],
@@ -6322,7 +5372,6 @@ private static function isCurrentRequestPathUnder(string $configuredPath, bool $
                 'notes' => (string) ($values['notes'] ?? ''),
             ]
         );
-
         if (!$saved) {
             return self::buildRoomsAvailabilityActionState(
                 'blocks',
@@ -6334,13 +5383,10 @@ private static function isCurrentRequestPathUnder(string $configuredPath, bool $
                 ]
             );
         }
-
         $updatedBlock = $reservationRepository->getReservation($blockId);
-
         if (\is_array($updatedBlock)) {
             self::logRoomsAvailabilityBlockActivity($blockId, $updatedBlock, 'availability_block_updated');
         }
-
         self::redirectToPortalRoomsAvailability(
             'blocks',
             [
@@ -6351,44 +5397,33 @@ private static function isCurrentRequestPathUnder(string $configuredPath, bool $
             !empty($conflicts) ? 'block_saved_with_conflict' : 'block_updated'
         );
     }
-
     private static function handleRoomsAvailabilityDeleteBlock(): void
     {
         $request = self::getPortalRoomsAvailabilityRequestFromPost();
         $blockId = isset($_POST['block_id']) ? \absint(\wp_unslash($_POST['block_id'])) : 0;
         $nonce = isset($_POST['must_availability_block_delete_nonce']) ? (string) \wp_unslash($_POST['must_availability_block_delete_nonce']) : '';
-
         if ($blockId <= 0 || !\wp_verify_nonce($nonce, 'must_availability_delete_block_' . $blockId)) {
             self::redirectToPortalRoomsAvailability('blocks', [], 'invalid_nonce');
         }
-
         if (!self::canManageRoomsAvailabilityBlocks()) {
             self::redirectToPortalRoomsAvailability('blocks', [], 'access_denied');
         }
-
         $reservationRepository = \MustHotelBooking\Engine\get_reservation_repository();
         $block = $reservationRepository->getReservation($blockId);
-
         if (!\is_array($block) || (string) ($block['status'] ?? '') !== 'blocked') {
             self::redirectToPortalRoomsAvailability('blocks', [], 'portal_action_failed');
         }
-
         $deleted = $reservationRepository->deleteReservation($blockId, 'blocked');
-
         if ($deleted) {
             self::logRoomsAvailabilityBlockActivity($blockId, $block, 'availability_block_deleted');
         }
-
         $overrides = [];
-
         if (!empty($request['action']) && (string) $request['action'] === 'edit_block' && (int) ($request['block_id'] ?? 0) === $blockId) {
             $overrides['action'] = '';
             $overrides['block_id'] = 0;
         }
-
         self::redirectToPortalRoomsAvailability('blocks', $overrides, $deleted ? 'block_deleted' : 'block_delete_failed');
     }
-
     /**
      * @return array<string, mixed>
      */
@@ -6402,28 +5437,21 @@ private static function isCurrentRequestPathUnder(string $configuredPath, bool $
         $ruleId = isset($rawPost['rule_id']) ? \absint(\wp_unslash($rawPost['rule_id'])) : 0;
         $request['rule_id'] = $ruleId;
         $nonce = isset($rawPost['must_availability_rule_nonce']) ? (string) \wp_unslash($rawPost['must_availability_rule_nonce']) : '';
-
         if (!\wp_verify_nonce($nonce, 'must_availability_save_rule')) {
             self::redirectToPortalRoomsAvailability('rules', ['action' => 'edit_rule', 'rule_id' => $ruleId], 'invalid_nonce');
         }
-
         $availabilityRepository = \MustHotelBooking\Engine\get_availability_repository();
         $currentRule = $ruleId > 0 ? $availabilityRepository->getRuleById($ruleId) : null;
-
         if (!\is_array($currentRule)) {
             self::redirectToPortalRoomsAvailability('rules', [], 'portal_action_failed');
         }
-
         if (!self::canEditRoomsAvailabilityRule($currentRule)) {
             self::redirectToPortalRoomsAvailability('rules', ['action' => 'edit_rule', 'rule_id' => $ruleId], 'access_denied');
         }
-
         $values = self::sanitizeRoomsAvailabilityRuleValues($rawPost);
-
         if (!self::canEditRoomsAvailabilityRulesGlobally() && (int) ($values['room_id'] ?? 0) <= 0) {
             $values['errors'][] = \__('Your role can only edit room-specific availability rules in the portal.', 'must-hotel-booking');
         }
-
         if (!empty($values['errors'])) {
             return self::buildRoomsAvailabilityActionState(
                 'rules',
@@ -6435,9 +5463,7 @@ private static function isCurrentRequestPathUnder(string $configuredPath, bool $
                 ]
             );
         }
-
         $conflicts = [];
-
         if ((int) ($values['room_id'] ?? 0) > 0 && (string) ($values['availability_date'] ?? '') !== '' && (string) ($values['end_date'] ?? '') !== '') {
             $conflicts = $availabilityRepository->getOverlappingReservationRows(
                 (int) $values['room_id'],
@@ -6446,9 +5472,7 @@ private static function isCurrentRequestPathUnder(string $configuredPath, bool $
                 0
             );
         }
-
         $savedId = $availabilityRepository->saveRule($values);
-
         if ($savedId <= 0) {
             return self::buildRoomsAvailabilityActionState(
                 'rules',
@@ -6460,13 +5484,10 @@ private static function isCurrentRequestPathUnder(string $configuredPath, bool $
                 ]
             );
         }
-
         $updatedRule = $availabilityRepository->getRuleById($savedId);
-
         if (\is_array($updatedRule)) {
             self::logRoomsAvailabilityRuleActivity($savedId, $updatedRule, 'availability_rule_updated');
         }
-
         self::redirectToPortalRoomsAvailability(
             'rules',
             [
@@ -6477,71 +5498,53 @@ private static function isCurrentRequestPathUnder(string $configuredPath, bool $
             !empty($conflicts) ? 'rule_saved_with_conflict' : 'rule_updated'
         );
     }
-
     private static function handleRoomsAvailabilityDeleteRule(): void
     {
         $request = self::getPortalRoomsAvailabilityRequestFromPost();
         $ruleId = isset($_POST['rule_id']) ? \absint(\wp_unslash($_POST['rule_id'])) : 0;
         $nonce = isset($_POST['must_availability_rule_delete_nonce']) ? (string) \wp_unslash($_POST['must_availability_rule_delete_nonce']) : '';
-
         if ($ruleId <= 0 || !\wp_verify_nonce($nonce, 'must_availability_delete_rule_' . $ruleId)) {
             self::redirectToPortalRoomsAvailability('rules', [], 'invalid_nonce');
         }
-
         $availabilityRepository = \MustHotelBooking\Engine\get_availability_repository();
         $rule = $availabilityRepository->getRuleById($ruleId);
-
         if (!\is_array($rule)) {
             self::redirectToPortalRoomsAvailability('rules', [], 'portal_action_failed');
         }
-
         if (!self::canEditRoomsAvailabilityRule($rule)) {
             self::redirectToPortalRoomsAvailability('rules', [], 'access_denied');
         }
-
         $deleted = $availabilityRepository->deleteAvailabilityRule($ruleId);
-
         if ($deleted) {
             self::logRoomsAvailabilityRuleActivity($ruleId, $rule, 'availability_rule_deleted');
         }
-
         $overrides = [];
-
         if (!empty($request['action']) && (string) $request['action'] === 'edit_rule' && (int) ($request['rule_id'] ?? 0) === $ruleId) {
             $overrides['action'] = '';
             $overrides['rule_id'] = 0;
         }
-
         self::redirectToPortalRoomsAvailability('rules', $overrides, $deleted ? 'rule_deleted' : 'rule_delete_failed');
     }
-
     private static function handleRoomsAvailabilityToggleRuleStatus(): void
     {
         $ruleId = isset($_POST['rule_id']) ? \absint(\wp_unslash($_POST['rule_id'])) : 0;
         $target = isset($_POST['target']) ? \sanitize_key((string) \wp_unslash($_POST['target'])) : '';
         $nonce = isset($_POST['must_availability_rule_toggle_nonce']) ? (string) \wp_unslash($_POST['must_availability_rule_toggle_nonce']) : '';
-
         if ($ruleId <= 0 || !\wp_verify_nonce($nonce, 'must_availability_toggle_rule_' . $ruleId)) {
             self::redirectToPortalRoomsAvailability('rules', [], 'invalid_nonce');
         }
-
         if (!\in_array($target, ['active', 'inactive'], true)) {
             self::redirectToPortalRoomsAvailability('rules', [], 'portal_action_failed');
         }
-
         $availabilityRepository = \MustHotelBooking\Engine\get_availability_repository();
         $rule = $availabilityRepository->getRuleById($ruleId);
-
         if (!\is_array($rule)) {
             self::redirectToPortalRoomsAvailability('rules', [], 'portal_action_failed');
         }
-
         if (!self::canEditRoomsAvailabilityRule($rule)) {
             self::redirectToPortalRoomsAvailability('rules', [], 'access_denied');
         }
-
         $updated = $availabilityRepository->toggleRuleStatus($ruleId, $target === 'active');
-
         if ($updated) {
             $rule['is_active'] = $target === 'active' ? 1 : 0;
             self::logRoomsAvailabilityRuleActivity(
@@ -6550,14 +5553,12 @@ private static function isCurrentRequestPathUnder(string $configuredPath, bool $
                 $target === 'active' ? 'availability_rule_activated' : 'availability_rule_deactivated'
             );
         }
-
         self::redirectToPortalRoomsAvailability(
             'rules',
             [],
             $updated ? ($target === 'active' ? 'rule_activated' : 'rule_deactivated') : 'rule_update_failed'
         );
     }
-
     /**
      * @param array<string, mixed> $block
      */
@@ -6585,7 +5586,6 @@ private static function isCurrentRequestPathUnder(string $configuredPath, bool $
                 $checkin,
                 $checkout
             );
-
         \MustHotelBooking\Engine\get_activity_repository()->createActivity(
             [
                 'event_type' => $eventType,
@@ -6610,7 +5610,6 @@ private static function isCurrentRequestPathUnder(string $configuredPath, bool $
             ]
         );
     }
-
     /**
      * @param array<string, mixed> $rule
      */
@@ -6652,7 +5651,6 @@ private static function isCurrentRequestPathUnder(string $configuredPath, bool $
                 $scopeLabel
             ),
         ];
-
         \MustHotelBooking\Engine\get_activity_repository()->createActivity(
             [
                 'event_type' => $eventType,
@@ -6678,7 +5676,6 @@ private static function isCurrentRequestPathUnder(string $configuredPath, bool $
             ]
         );
     }
-
     /**
      * Rooms & Availability workspace data.
      *
@@ -6689,23 +5686,18 @@ private static function isCurrentRequestPathUnder(string $configuredPath, bool $
         $allowedTabs = ['rooms', 'room-types', 'statuses', 'blocks', 'rules', 'maintenance'];
         /** @var array<string, mixed> $request */
         $request = \is_array($_GET) ? \wp_unslash($_GET) : [];
-
         if (isset($actionState['rooms_availability_request']) && \is_array($actionState['rooms_availability_request'])) {
             $request = \array_merge($request, $actionState['rooms_availability_request']);
         }
-
         $activeTab = isset($actionState['active_tab'])
             ? \sanitize_key((string) $actionState['active_tab'])
             : (isset($request['tab']) ? \sanitize_key((string) $request['tab']) : 'rooms');
-
         if (!\in_array($activeTab, $allowedTabs, true)) {
             $activeTab = 'rooms';
         }
-
         $data = [
             'active_tab' => $activeTab,
         ];
-
         if (\in_array($activeTab, ['rooms', 'statuses'], true)) {
             $roomsData = self::prepareRoomsAvailabilityInventoryData($request);
             $housekeepingData = (new HousekeepingAdminDataProvider())->getPageData('room-board');
@@ -6713,7 +5705,6 @@ private static function isCurrentRequestPathUnder(string $configuredPath, bool $
                 isset($roomsData['unit_rows']) && \is_array($roomsData['unit_rows']) ? $roomsData['unit_rows'] : [],
                 isset($housekeepingData['board_rows']) && \is_array($housekeepingData['board_rows']) ? $housekeepingData['board_rows'] : []
             );
-
             if ($activeTab === 'rooms') {
                 $roomsData['unit_rows'] = $mergedUnitRows;
                 $data['rooms_data'] = $roomsData;
@@ -6727,18 +5718,14 @@ private static function isCurrentRequestPathUnder(string $configuredPath, bool $
                 ];
             }
         }
-
         if ($activeTab === 'blocks') {
             $data['blocks_data'] = self::prepareRoomsAvailabilityRulesData($request, 'blocked', $actionState);
         }
-
         if ($activeTab === 'rules') {
             $data['rules_data'] = self::prepareRoomsAvailabilityRulesData($request, 'restriction', $actionState);
         }
-
         return $data;
     }
-
     /**
      * @param array<string, mixed> $request
      * @return array<string, mixed>
@@ -6747,10 +5734,8 @@ private static function isCurrentRequestPathUnder(string $configuredPath, bool $
     {
         $request['tab'] = 'units';
         $query = AccommodationAdminQuery::fromRequest($request);
-
         return (new AccommodationAdminDataProvider())->getPageData($query, []);
     }
-
     /**
      * @param array<string, mixed> $request
      * @return array<string, mixed>
@@ -6761,12 +5746,10 @@ private static function isCurrentRequestPathUnder(string $configuredPath, bool $
         $request = self::sanitizeRoomsAvailabilityEditRequest($request, $mode);
         $query = AvailabilityAdminQuery::fromRequest($request);
         $state = [];
-
         if ($mode === 'blocked') {
             if (isset($actionState['block_form']) && \is_array($actionState['block_form'])) {
                 $state['block_form'] = $actionState['block_form'];
             }
-
             if (isset($actionState['block_errors']) && \is_array($actionState['block_errors'])) {
                 $state['block_errors'] = $actionState['block_errors'];
             }
@@ -6774,20 +5757,16 @@ private static function isCurrentRequestPathUnder(string $configuredPath, bool $
             if (isset($actionState['rule_form']) && \is_array($actionState['rule_form'])) {
                 $state['rule_form'] = $actionState['rule_form'];
             }
-
             if (isset($actionState['rule_errors']) && \is_array($actionState['rule_errors'])) {
                 $state['rule_errors'] = $actionState['rule_errors'];
             }
         }
-
         $data = (new AvailabilityAdminDataProvider())->getPageData($query, $state);
         $data['current_action'] = $query->getAction();
         $data['editing_id'] = $mode === 'blocked' ? $query->getBlockId() : $query->getRuleId();
         $data['request'] = $request;
-
         return $data;
     }
-
     /**
      * @param array<int, array<string, mixed>> $unitRows
      * @param array<int, array<string, mixed>> $boardRows
@@ -6796,34 +5775,25 @@ private static function isCurrentRequestPathUnder(string $configuredPath, bool $
     private static function mergeRoomsAvailabilityUnitRows(array $unitRows, array $boardRows): array
     {
         $boardMap = [];
-
         foreach ($boardRows as $boardRow) {
             if (!\is_array($boardRow)) {
                 continue;
             }
-
             $roomId = isset($boardRow['id']) ? (int) $boardRow['id'] : 0;
-
             if ($roomId <= 0) {
                 continue;
             }
-
             $boardMap[$roomId] = $boardRow;
         }
-
         $mergedRows = [];
-
         foreach ($unitRows as $unitRow) {
             if (!\is_array($unitRow)) {
                 continue;
             }
-
             $roomId = isset($unitRow['id']) ? (int) $unitRow['id'] : 0;
-
             if ($roomId <= 0) {
                 continue;
             }
-
             $boardRow = isset($boardMap[$roomId]) && \is_array($boardMap[$roomId]) ? $boardMap[$roomId] : [];
             $inventoryStatus = \sanitize_key((string) ($unitRow['status'] ?? 'available'));
             $isActive = !empty($unitRow['is_active']);
@@ -6852,7 +5822,6 @@ private static function isCurrentRequestPathUnder(string $configuredPath, bool $
                     )
                     : \__('No assigned reservation context is attached to this unit right now.', 'must-hotel-booking')
                 );
-
             $mergedRows[] = $unitRow + [
                 'inventory_status_key' => $inventoryStatus !== '' ? $inventoryStatus : 'available',
                 'inventory_status_label' => (string) ($unitRow['status_label'] ?? ''),
@@ -6864,10 +5833,8 @@ private static function isCurrentRequestPathUnder(string $configuredPath, bool $
                 'inventory_constraint' => $inventoryStatus !== '' && $inventoryStatus !== 'available',
             ];
         }
-
         return $mergedRows;
     }
-
     /**
      * @param array<int, array<string, mixed>> $rows
      * @return array<int, array<string, string>>
@@ -6879,18 +5846,14 @@ private static function isCurrentRequestPathUnder(string $configuredPath, bool $
         $cleanCount = 0;
         $inspectedCount = 0;
         $inHouseCount = 0;
-
         foreach ($rows as $row) {
             if (!\is_array($row)) {
                 continue;
             }
-
             if (!empty($row['inventory_constraint'])) {
                 $inventoryConstraints++;
             }
-
             $statusKey = \sanitize_key((string) ($row['housekeeping_status_key'] ?? ''));
-
             if ($statusKey === HousekeepingRepository::STATUS_DIRTY) {
                 $dirtyCount++;
             } elseif ($statusKey === HousekeepingRepository::STATUS_CLEAN) {
@@ -6898,12 +5861,10 @@ private static function isCurrentRequestPathUnder(string $configuredPath, bool $
             } elseif ($statusKey === HousekeepingRepository::STATUS_INSPECTED) {
                 $inspectedCount++;
             }
-
             if ((int) ($row['current_reservations'] ?? 0) > 0) {
                 $inHouseCount++;
             }
         }
-
         return [
             [
                 'label' => \__('Units in scope', 'must-hotel-booking'),
@@ -6937,7 +5898,6 @@ private static function isCurrentRequestPathUnder(string $configuredPath, bool $
             ],
         ];
     }
-
     /**
      * Issues a 301 redirect when the requested route is a deprecated URL that
      * has been superseded by a new module. Exits after redirecting.
@@ -6946,30 +5906,23 @@ private static function isCurrentRequestPathUnder(string $configuredPath, bool $
     {
         $route = (string) \get_query_var('must_hotel_booking_portal_route', '');
         $route = \trim(\sanitize_text_field($route), '/');
-
         if ($route === '') {
             return;
         }
-
         $deprecated = PortalRegistry::getDeprecatedRoutes();
-
         if (!isset($deprecated[$route])) {
             return;
         }
-
         $entry = $deprecated[$route];
         $moduleKey = (string) ($entry['module'] ?? '');
         $args = isset($entry['args']) && \is_array($entry['args']) ? $entry['args'] : [];
         $targetUrl = PortalRouter::getModuleUrl($moduleKey, $args);
-
         if ($targetUrl === '') {
             return;
         }
-
         \wp_redirect($targetUrl, 301);
         exit;
     }
-
     /**
      * @return array<int, array<string, string|bool>>
      */
@@ -6977,7 +5930,6 @@ private static function isCurrentRequestPathUnder(string $configuredPath, bool $
     {
         $items = [];
         $currentModule = PortalRouter::getRequestedModuleKey();
-
         foreach (PortalRegistry::getVisibleDefinitionsForCurrentUser() as $key => $definition) {
             $items[] = [
                 'key' => $key,
@@ -6987,10 +5939,8 @@ private static function isCurrentRequestPathUnder(string $configuredPath, bool $
                 'current' => $key === $currentModule,
             ];
         }
-
         return $items;
     }
-
     /**
      * @return array<string, string>
      */
@@ -7000,16 +5950,13 @@ private static function isCurrentRequestPathUnder(string $configuredPath, bool $
         $roleLabels = StaffAccess::getRoleLabels();
         $roles = $user instanceof \WP_User && \is_array($user->roles) ? $user->roles : [];
         $roleLabel = \__('Administrator', 'must-hotel-booking');
-
         foreach ($roles as $role) {
             $normalized = \sanitize_key((string) $role);
-
             if (isset($roleLabels[$normalized])) {
                 $roleLabel = $roleLabels[$normalized];
                 break;
             }
         }
-
         return [
             'display_name' => $user instanceof \WP_User ? (string) $user->display_name : '',
             'email' => $user instanceof \WP_User ? (string) $user->user_email : '',
@@ -7017,7 +5964,6 @@ private static function isCurrentRequestPathUnder(string $configuredPath, bool $
             'hotel_name' => MustBookingConfig::get_hotel_name(),
         ];
     }
-
     /**
      * @return array<string, string>
      */
@@ -7029,7 +5975,6 @@ private static function isCurrentRequestPathUnder(string $configuredPath, bool $
         $secondaryColor = (string) MustBookingConfig::get_setting('secondary_color', '#155e75');
         $accentColor = (string) MustBookingConfig::get_setting('accent_color', '#f59e0b');
         $textColor = (string) MustBookingConfig::get_setting('text_color', '#16212b');
-
         return [
             'hotel_name' => MustBookingConfig::get_hotel_name(),
             'logo_url' => $portalLogo !== '' ? $portalLogo : $hotelLogo,
@@ -7044,7 +5989,6 @@ private static function isCurrentRequestPathUnder(string $configuredPath, bool $
             'portal_page_url' => ManagedPages::getPortalPageUrl(),
         ];
     }
-
     /**
      * @param array<string, mixed> $actionState
      * @return array<int, string>
@@ -7134,11 +6078,9 @@ private static function isCurrentRequestPathUnder(string $configuredPath, bool $
             'portal_action_failed' => \__('The requested portal action could not be completed.', 'must-hotel-booking'),
             'clock_folio_payment_manual_done' => \__('Manual Clock folio payment accounting was marked done.', 'must-hotel-booking'),
         ];
-
         if ($noticeKey !== '' && isset($messages[$noticeKey])) {
             $notices[] = $messages[$noticeKey];
         }
-
         return $notices;
     }
 }

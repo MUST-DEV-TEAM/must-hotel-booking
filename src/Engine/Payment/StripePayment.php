@@ -34,7 +34,8 @@ final class StripePayment implements PaymentInterface
             $this->extractGuestForm($context),
             $amount,
             $currency,
-            $this->extractCouponIds($context)
+            $this->extractCouponIds($context),
+            $this->extractStripeSessionOptions($context)
         );
 
         if (empty($result['success'])) {
@@ -59,6 +60,24 @@ final class StripePayment implements PaymentInterface
         ];
     }
 
+    /**
+     * @param array<string, mixed> $context
+     * @return array<string, string>
+     */
+    private function extractStripeSessionOptions(array $context): array
+    {
+        $options = [];
+
+        if (!empty($context['success_url']) && \is_scalar($context['success_url'])) {
+            $options['success_url'] = \esc_url_raw((string) $context['success_url']);
+        }
+
+        if (!empty($context['cancel_url']) && \is_scalar($context['cancel_url'])) {
+            $options['cancel_url'] = \esc_url_raw((string) $context['cancel_url']);
+        }
+
+        return $options;
+    }
     public function refundPayment(array $reservation, float $amount, array $context = []): array
     {
         $transactionId = isset($context['transaction_id'])

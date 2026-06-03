@@ -18,11 +18,28 @@ $tomorrow = \current_datetime()->modify('+1 day')->format('Y-m-d');
 $defaultCheckin = isset($form['checkin']) && (string) $form['checkin'] !== '' ? (string) $form['checkin'] : $today;
 $defaultCheckout = isset($form['checkout']) && (string) $form['checkout'] !== '' ? (string) $form['checkout'] : $tomorrow;
 $defaultGuests = isset($form['guests']) ? \max(1, (int) $form['guests']) : 1;
+$portalPayment = isset($_GET['portal_payment']) ? \sanitize_key((string) \wp_unslash($_GET['portal_payment'])) : '';
+$portalReservationIds = isset($_GET['reservation_ids'])
+    ? \array_values(\array_filter(\array_map('absint', \explode(',', (string) \wp_unslash($_GET['reservation_ids'])))))
+    : [];
+$firstPortalReservationId = isset($portalReservationIds[0]) ? (int) $portalReservationIds[0] : 0;
 
 echo '<section class="must-portal-panel must-portal-quick-booking-app" data-must-portal-quick-booking-app data-available-nonce="' . \esc_attr(\wp_create_nonce('must_portal_quick_booking_available_rooms')) . '">';
 
 echo '<div class="must-portal-panel-header"><div><h2>' . \esc_html($formTitle) . '</h2><p>' . \esc_html($formDescription) . '</p></div></div>';
+if ($portalPayment === 'success' && $firstPortalReservationId > 0) {
+    $viewUrl = PortalRouter::getModuleUrl('reservations', ['reservation_id' => $firstPortalReservationId]);
 
+    echo '<div class="must-portal-notice must-portal-notice-success">';
+    echo '<strong>' . \esc_html__('Booking successful.', 'must-hotel-booking') . '</strong> ';
+    echo '<span>' . \esc_html__('The Stripe payment was completed and the reservation is being finalized.', 'must-hotel-booking') . '</span> ';
+    echo '<a class="must-portal-secondary-button" href="' . \esc_url($viewUrl) . '">' . \esc_html__('View booking', 'must-hotel-booking') . '</a>';
+    echo '</div>';
+} elseif ($portalPayment === 'cancel') {
+    echo '<div class="must-portal-notice must-portal-notice-warning">';
+    echo \esc_html__('Stripe payment was canceled. You can search again or start another booking.', 'must-hotel-booking');
+    echo '</div>';
+}
 echo '<div class="must-portal-booking-search">';
 echo '<label><span>' . \esc_html__('Room type', 'must-hotel-booking') . '</span><select data-must-portal-room-type-filter>';
 echo '<option value="0">' . \esc_html__('All room types', 'must-hotel-booking') . '</option>';
@@ -75,6 +92,7 @@ echo '<button type="button" class="must-portal-modal-close" data-must-portal-mod
 echo '</div>';
 
 echo '<form method="post" action="' . \esc_url($formAction) . '" class="must-portal-form-grid must-portal-quick-booking-form">';
+
 \wp_nonce_field('must_portal_quick_booking', 'must_portal_quick_booking_nonce');
 echo '<input type="hidden" name="must_portal_action" value="quick_booking_create" />';
 echo '<input type="hidden" name="room_id" value="0" data-must-portal-modal-room-id />';
@@ -85,7 +103,21 @@ echo '<input type="hidden" name="guests" value="' . \esc_attr((string) $defaultG
 echo '<label><span>' . \esc_html__('Guest name', 'must-hotel-booking') . '</span><input type="text" name="guest_name" value="' . \esc_attr((string) ($form['guest_name'] ?? '')) . '" required /></label>';
 echo '<label><span>' . \esc_html__('Email', 'must-hotel-booking') . '</span><input type="email" name="email" value="' . \esc_attr((string) ($form['email'] ?? '')) . '" required /></label>';
 echo '<label><span>' . \esc_html__('Phone', 'must-hotel-booking') . '</span><input type="text" name="phone" value="' . \esc_attr((string) ($form['phone'] ?? '')) . '" required /></label>';
-echo '<label><span>' . \esc_html__('Country', 'must-hotel-booking') . '</span><input type="text" name="country" value="' . \esc_attr((string) ($form['country'] ?? 'AL')) . '" required /></label>';
+$countryOptions = \function_exists('\MustHotelBooking\Frontend\get_checkout_country_options')
+    ? \MustHotelBooking\Frontend\get_checkout_country_options()
+    : ['AL' => \__('Albania', 'must-hotel-booking')];
+
+$currentCountry = isset($form['country']) && (string) $form['country'] !== ''
+    ? (string) $form['country']
+    : 'AL';
+
+echo '<label><span>' . \esc_html__('Country', 'must-hotel-booking') . '</span><select name="country" required>';
+
+foreach ($countryOptions as $countryCode => $countryLabel) {
+    echo '<option value="' . \esc_attr((string) $countryCode) . '"' . \selected($currentCountry, (string) $countryCode, false) . '>' . \esc_html((string) $countryLabel) . '</option>';
+}
+
+echo '</select></label>';
 echo '<label><span>' . \esc_html__('Address', 'must-hotel-booking') . '</span><input type="text" name="street_address" value="' . \esc_attr((string) ($form['street_address'] ?? '')) . '" required /></label>';
 echo '<label><span>' . \esc_html__('City', 'must-hotel-booking') . '</span><input type="text" name="city" value="' . \esc_attr((string) ($form['city'] ?? '')) . '" required /></label>';
 echo '<label><span>' . \esc_html__('Postcode / ZIP', 'must-hotel-booking') . '</span><input type="text" name="postcode" value="' . \esc_attr((string) ($form['postcode'] ?? '')) . '" required /></label>';
