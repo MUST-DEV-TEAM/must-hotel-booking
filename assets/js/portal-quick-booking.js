@@ -8,6 +8,23 @@
         return /^\d{4}-\d{2}-\d{2}$/.test(String(value || ''));
     }
 
+    function normalizeDateValue(value) {
+        var raw = String(value || '').trim();
+        var match;
+
+        if (isValidDateString(raw)) {
+            return raw;
+        }
+
+        match = raw.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+
+        if (match) {
+            return match[3] + '-' + String(match[1]).padStart(2, '0') + '-' + String(match[2]).padStart(2, '0');
+        }
+
+        return '';
+    }
+
     function formatDate(date) {
         var year = String(date.getFullYear());
         var month = String(date.getMonth() + 1).padStart(2, '0');
@@ -81,6 +98,7 @@
         var checkinCalendar = form.querySelector('[data-must-portal-checkin-calendar]');
         var checkoutCalendar = form.querySelector('[data-must-portal-checkout-calendar]');
         var statusEl = form.querySelector('[data-must-portal-date-status]');
+        var estimateEl = form.querySelector('[data-must-portal-estimate-total]');
 
         if (!roomSelect || !checkinInput || !checkoutInput || !checkinCalendar || !checkoutCalendar || typeof window.flatpickr !== 'function') {
             return;
@@ -91,6 +109,7 @@
             disabledCheckoutDates: [],
             loading: false
         };
+        var previewTimer = 0;
 
         function isDisabledCheckin(date) {
             return state.disabledCheckinDates.indexOf(formatDate(date)) !== -1;
@@ -131,6 +150,93 @@
             }
 
             setStatus(statusEl, strings.datesReady || 'Unavailable dates are marked on the calendars.', 'ready');
+            schedulePreview();
+        }
+
+        function formatMoney(amount, currency) {
+            var numeric = Number(amount || 0);
+            var formatted;
+
+            try {
+                formatted = numeric.toLocaleString(undefined, {
+                    minimumFractionDigits: 2,
+                    maximumFractionDigits: 2
+                });
+            } catch (error) {
+                formatted = numeric.toFixed(2);
+            }
+
+            return formatted + ' ' + String(currency || config.currency || '');
+        }
+
+        function updateEstimateText(text) {
+            if (estimateEl) {
+                estimateEl.textContent = String(text || '');
+            }
+        }
+
+        function previewBooking() {
+            var roomId = parseInt(roomSelect.value || '0', 10);
+            var checkin = normalizeDateValue(checkinInput.value);
+            var checkout = normalizeDateValue(checkoutInput.value);
+            var guests = guestsInput ? String(Math.max(1, parseInt(guestsInput.value || '1', 10) || 1)) : '1';
+            var body;
+
+            checkinInput.value = checkin;
+            checkoutInput.value = checkout;
+
+            if (!roomId || !isValidDateString(checkin) || !isValidDateString(checkout) || checkout <= checkin) {
+                updateEstimateText(formatMoney(0, config.currency || ''));
+                setStatus(statusEl, strings.invalidDates || 'Please provide valid check-in and check-out dates.', 'error');
+                return Promise.resolve();
+            }
+
+            body = new URLSearchParams();
+            body.set('action', String(config.previewAction || 'must_portal_quick_booking_preview'));
+            body.set('nonce', String(config.previewNonce || ''));
+            body.set('room_id', String(roomId));
+            body.set('checkin', checkin);
+            body.set('checkout', checkout);
+            body.set('guests', guests);
+            body.set('guest_name', String((form.querySelector('[name="guest_name"]') || {}).value || 'Guest'));
+            body.set('email', String((form.querySelector('[name="email"]') || {}).value || 'guest@example.com'));
+            body.set('phone', String((form.querySelector('[name="phone"]') || {}).value || ''));
+            body.set('booking_source', String((form.querySelector('[name="booking_source"]') || {}).value || 'walk_in'));
+
+            setStatus(statusEl, strings.loadingPreview || 'Checking availability and price...', 'loading');
+
+            return window.fetch(String(config.ajaxUrl || ''), {
+                method: 'POST',
+                credentials: 'same-origin',
+                headers: {
+                    'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8'
+                },
+                body: body.toString()
+            }).then(function (response) {
+                if (!response.ok) {
+                    throw new Error('preview-request-failed');
+                }
+
+                return response.json();
+            }).then(function (json) {
+                var total;
+
+                if (!json || !json.success || !json.data) {
+                    throw new Error('preview-response-invalid');
+                }
+
+                total = json.data.formatted_total || formatMoney(json.data.total_price, json.data.currency);
+                updateEstimateText(total);
+                setStatus(statusEl, (strings.available || 'Room available. Total: %s').replace('%s', total), 'ready');
+            }).catch(function () {
+                updateEstimateText(formatMoney(0, config.currency || ''));
+                setStatus(statusEl, strings.unavailable || 'This room is not available for the selected dates.', 'error');
+            });
+        }
+
+        function schedulePreview() {
+            window.clearTimeout(previewTimer);
+            previewTimer = window.setTimeout(previewBooking, 250);
         }
 
         function fetchDisabledDates(checkin) {
@@ -195,6 +301,7 @@
             disable: [isDisabledCheckout],
             onChange: function (selectedDates, dateStr) {
                 checkoutInput.value = dateStr || '';
+                schedulePreview();
             }
         }));
         var checkinPicker = window.flatpickr(checkinInput, Object.assign({}, commonOptions, {
@@ -215,6 +322,7 @@
                 }
 
                 fetchDisabledDates(dateStr);
+                schedulePreview();
             }
         }));
 
@@ -224,15 +332,31 @@
 
         roomSelect.addEventListener('change', function () {
             fetchDisabledDates(checkinInput.value);
+            schedulePreview();
         });
 
         if (guestsInput) {
             guestsInput.addEventListener('change', function () {
                 fetchDisabledDates(checkinInput.value);
+                schedulePreview();
             });
         }
 
+        form.addEventListener('submit', function (event) {
+            var checkin = normalizeDateValue(checkinInput.value);
+            var checkout = normalizeDateValue(checkoutInput.value);
+
+            checkinInput.value = checkin;
+            checkoutInput.value = checkout;
+
+            if (!isValidDateString(checkin) || !isValidDateString(checkout) || checkout <= checkin) {
+                event.preventDefault();
+                setStatus(statusEl, strings.invalidDates || 'Please provide valid check-in and check-out dates.', 'error');
+            }
+        });
+
         fetchDisabledDates(checkinInput.value);
+        schedulePreview();
     }
 
     document.addEventListener('DOMContentLoaded', function () {

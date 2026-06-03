@@ -37,6 +37,11 @@ echo '<label><span>' . \esc_html__('Guests', 'must-hotel-booking') . '</span><in
 echo '<label><span>' . \esc_html__('Guest name', 'must-hotel-booking') . '</span><input type="text" name="guest_name" value="' . \esc_attr((string) ($form['guest_name'] ?? '')) . '" required /></label>';
 echo '<label><span>' . \esc_html__('Phone', 'must-hotel-booking') . '</span><input type="text" name="phone" value="' . \esc_attr((string) ($form['phone'] ?? '')) . '" /></label>';
 echo '<label><span>' . \esc_html__('Email', 'must-hotel-booking') . '</span><input type="email" name="email" value="' . \esc_attr((string) ($form['email'] ?? '')) . '" required /></label>';
+echo '<label><span>' . \esc_html__('Street address', 'must-hotel-booking') . '</span><input type="text" name="street_address" value="' . \esc_attr((string) ($form['street_address'] ?? '')) . '" required /></label>';
+echo '<label><span>' . \esc_html__('Address line 2', 'must-hotel-booking') . '</span><input type="text" name="address_line_2" value="' . \esc_attr((string) ($form['address_line_2'] ?? '')) . '" /></label>';
+echo '<label><span>' . \esc_html__('Town / City', 'must-hotel-booking') . '</span><input type="text" name="city" value="' . \esc_attr((string) ($form['city'] ?? '')) . '" required /></label>';
+echo '<label><span>' . \esc_html__('County', 'must-hotel-booking') . '</span><input type="text" name="county" value="' . \esc_attr((string) ($form['county'] ?? '')) . '" required /></label>';
+echo '<label><span>' . \esc_html__('Postcode / ZIP', 'must-hotel-booking') . '</span><input type="text" name="postcode" value="' . \esc_attr((string) ($form['postcode'] ?? '')) . '" required /></label>';
 echo '<label><span>' . \esc_html__('Booking source', 'must-hotel-booking') . '</span><select name="booking_source">';
 
 foreach ($sourceOptions as $value => $label) {
@@ -45,5 +50,5 @@ foreach ($sourceOptions as $value => $label) {
 
 echo '</select></label>';
 echo '<label class="must-portal-form-full"><span>' . \esc_html__('Notes', 'must-hotel-booking') . '</span><textarea name="notes" rows="4">' . \esc_textarea((string) ($form['notes'] ?? '')) . '</textarea></label>';
-echo '<div class="must-portal-form-full must-portal-inline-actions"><div class="must-portal-estimate"><strong>' . \esc_html__('Estimated total', 'must-hotel-booking') . '</strong><span>' . \esc_html(\number_format_i18n($estimate, 2) . ' ' . $currency) . '</span></div><button type="submit" class="must-portal-primary-button">' . \esc_html($submitLabel) . '</button></div>';
+echo '<div class="must-portal-form-full must-portal-inline-actions"><div class="must-portal-estimate"><strong>' . \esc_html__('Estimated total', 'must-hotel-booking') . '</strong><span data-must-portal-estimate-total>' . \esc_html(\number_format_i18n($estimate, 2) . ' ' . $currency) . '</span></div><button type="submit" class="must-portal-primary-button">' . \esc_html($submitLabel) . '</button></div>';
 echo '</form></section>';

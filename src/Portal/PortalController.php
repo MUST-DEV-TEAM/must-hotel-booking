@@ -26,7 +26,9 @@ use MustHotelBooking\Core\StaffAccess;
 use MustHotelBooking\Engine\AvailabilityAjaxController;
 use MustHotelBooking\Engine\AvailabilityEngine;
 use MustHotelBooking\Engine\BookingStatusEngine;
+use MustHotelBooking\Engine\PaymentEngine;
 use MustHotelBooking\Provider\Dto\DisabledDatesRequest;
+use MustHotelBooking\Provider\Dto\QuoteRequest;
 use MustHotelBooking\Provider\Clock\ClockPaymentReconciliationService;
 use MustHotelBooking\Provider\ProviderManager;
 use MustHotelBooking\Provider\ProviderReservationActionPolicy;
@@ -117,12 +119,19 @@ final class PortalController
             'ajaxUrl' => \admin_url('admin-ajax.php'),
             'disabledDatesAction' => 'must_portal_quick_booking_disabled_dates',
             'disabledDatesNonce' => \wp_create_nonce('must_portal_quick_booking_disabled_dates'),
+            'previewAction' => 'must_portal_quick_booking_preview',
+            'previewNonce' => \wp_create_nonce('must_portal_quick_booking_preview'),
             'today' => \current_time('Y-m-d'),
+            'currency' => MustBookingConfig::get_currency(),
             'strings' => [
                 'loadingDates' => \__('Loading room availability...', 'must-hotel-booking'),
+                'loadingPreview' => \__('Checking availability and price...', 'must-hotel-booking'),
                 'datesReady' => \__('Unavailable dates are marked on the calendars.', 'must-hotel-booking'),
                 'datesError' => \__('Unable to load unavailable dates for this room.', 'must-hotel-booking'),
                 'selectRoom' => \__('Select a room to load unavailable dates.', 'must-hotel-booking'),
+                'available' => \__('Room available. Total: %s', 'must-hotel-booking'),
+                'unavailable' => \__('This room is not available for the selected dates.', 'must-hotel-booking'),
+                'invalidDates' => \__('Please provide valid check-in and check-out dates.', 'must-hotel-booking'),
             ],
         ]);
     }
@@ -184,6 +193,68 @@ final class PortalController
             'disabled_dates_source' => (string) ($disabledDates['disabled_dates_source'] ?? ''),
             'disabled_dates_status' => (string) ($disabledDates['disabled_dates_status'] ?? ''),
             'disabled_dates_message' => (string) ($disabledDates['disabled_dates_message'] ?? ''),
+        ]);
+    }
+
+    public static function ajaxQuickBookingPreview(): void
+    {
+        if (!\current_user_can(StaffAccess::CAP_RESERVATION_CREATE)) {
+            \wp_send_json_error(['message' => \__('You do not have permission to create reservations.', 'must-hotel-booking')], 403);
+        }
+
+        $nonce = isset($_REQUEST['nonce']) ? (string) \wp_unslash($_REQUEST['nonce']) : '';
+
+        if (!\wp_verify_nonce($nonce, 'must_portal_quick_booking_preview')) {
+            \wp_send_json_error(['message' => \__('Security check failed.', 'must-hotel-booking')], 403);
+        }
+
+        $roomId = isset($_REQUEST['room_id']) ? \absint(\wp_unslash($_REQUEST['room_id'])) : 0;
+        $checkin = isset($_REQUEST['checkin']) ? \sanitize_text_field((string) \wp_unslash($_REQUEST['checkin'])) : '';
+        $checkout = isset($_REQUEST['checkout']) ? \sanitize_text_field((string) \wp_unslash($_REQUEST['checkout'])) : '';
+        $guests = isset($_REQUEST['guests']) ? \max(1, \absint(\wp_unslash($_REQUEST['guests']))) : 1;
+        $errors = [];
+
+        if ($roomId <= 0 || !\MustHotelBooking\Admin\does_admin_quick_booking_room_exist($roomId)) {
+            $errors[] = \__('Please select a valid room.', 'must-hotel-booking');
+        }
+
+        if (!AvailabilityEngine::isValidBookingDate($checkin) || !AvailabilityEngine::isValidBookingDate($checkout) || $checkin >= $checkout) {
+            $errors[] = \__('Please provide valid check-in and check-out dates.', 'must-hotel-booking');
+        }
+
+        if (empty($errors) && !\MustHotelBooking\Admin\is_admin_quick_booking_room_available($roomId, $checkin, $checkout)) {
+            $errors[] = \__('This room is not available for the selected dates.', 'must-hotel-booking');
+        }
+
+        if (!empty($errors)) {
+            \wp_send_json_error([
+                'message' => isset($errors[0]) ? $errors[0] : \__('Unable to preview this booking.', 'must-hotel-booking'),
+                'errors' => $errors,
+            ], 400);
+        }
+
+        $pricing = self::getQuickBookingPricingPreview([
+            'room_id' => $roomId,
+            'checkin' => $checkin,
+            'checkout' => $checkout,
+            'guests' => $guests,
+        ]);
+
+        if (empty($pricing['success'])) {
+            \wp_send_json_error([
+                'message' => (string) ($pricing['message'] ?? \__('Unable to calculate the room price for these dates.', 'must-hotel-booking')),
+            ], 400);
+        }
+
+        $total = isset($pricing['total_price']) ? (float) $pricing['total_price'] : 0.0;
+        $currency = MustBookingConfig::get_currency();
+
+        \wp_send_json_success([
+            'available' => true,
+            'total_price' => $total,
+            'currency' => $currency,
+            'formatted_total' => \number_format_i18n($total, 2) . ' ' . $currency,
+            'nights' => isset($pricing['nights']) ? (int) $pricing['nights'] : 0,
         ]);
     }
 
@@ -576,6 +647,7 @@ if (self::shouldBlockProviderBackedPortalAction($action)) {
         /** @var array<string, mixed> $rawPost */
         $rawPost = \is_array($_POST) ? $_POST : [];
         $form = \MustHotelBooking\Admin\sanitize_admin_quick_booking_form_values($rawPost);
+        $form = self::mergeQuickBookingBillingFields($form, $rawPost);
         $errors = isset($form['errors']) && \is_array($form['errors']) ? $form['errors'] : [];
 
         if (!empty($errors)) {
@@ -586,26 +658,247 @@ if (self::shouldBlockProviderBackedPortalAction($action)) {
             ];
         }
 
-        $reservationId = \MustHotelBooking\Admin\create_admin_quick_booking_reservation($form);
+        $checkoutResult = self::prepareQuickBookingCheckoutFlow($form, $rawPost);
 
-        if ($reservationId <= 0) {
+        if (empty($checkoutResult['success'])) {
+            $checkoutErrors = isset($checkoutResult['errors']) && \is_array($checkoutResult['errors'])
+                ? \array_values(\array_map('strval', $checkoutResult['errors']))
+                : [\__('Unable to prepare this booking for payment.', 'must-hotel-booking')];
+
             return [
                 'module_key' => 'front_desk',
-                'errors' => [\__('Unable to create the reservation from the submitted booking.', 'must-hotel-booking')],
+                'errors' => $checkoutErrors,
                 'form' => $form,
             ];
         }
 
-        \wp_safe_redirect(
-            PortalRouter::getModuleUrl(
-                'reservations',
-                [
-                    'reservation_id' => $reservationId,
-                    'portal_notice' => 'quick_booking_created',
-                ]
-            )
-        );
+        $redirectUrl = isset($checkoutResult['redirect_url']) ? (string) $checkoutResult['redirect_url'] : '';
+
+        \wp_safe_redirect($redirectUrl !== '' ? $redirectUrl : ManagedPages::getBookingConfirmationPageUrl());
         exit;
+    }
+
+    /**
+     * @param array<string, mixed> $form
+     * @param array<string, mixed> $source
+     * @return array{success: bool, errors?: array<int, string>, redirect_url?: string}
+     */
+    private static function prepareQuickBookingCheckoutFlow(array $form, array $source): array
+    {
+        foreach (['clear_booking_selection', 'add_room_to_booking_selection', 'update_booking_selection_flow_data'] as $function) {
+            if (!\function_exists('MustHotelBooking\\Frontend\\' . $function)) {
+                return [
+                    'success' => false,
+                    'errors' => [\__('Booking selection services are not loaded.', 'must-hotel-booking')],
+                ];
+            }
+        }
+
+        $roomId = isset($form['room_id']) ? (int) $form['room_id'] : 0;
+        $room = \MustHotelBooking\Admin\get_admin_quick_booking_room_row($roomId);
+
+        if ($roomId <= 0 || !\is_array($room)) {
+            return [
+                'success' => false,
+                'errors' => [\__('Please select a valid room.', 'must-hotel-booking')],
+            ];
+        }
+
+        $guestForm = self::buildQuickBookingGuestForm($form);
+        $billingForm = self::buildQuickBookingBillingForm($form, $source, $guestForm);
+        $context = BookingValidationEngine::parseRequestContext(
+            [
+                'checkin' => (string) ($form['checkin'] ?? ''),
+                'checkout' => (string) ($form['checkout'] ?? ''),
+                'guests' => \max(1, (int) ($form['guests'] ?? 1)),
+                'room_count' => 1,
+                'accommodation_type' => (string) ($room['category'] ?? 'standard-rooms'),
+            ],
+            true
+        );
+        $context = BookingValidationEngine::applyFixedRoomContext($context, $room);
+
+        if (empty($context['is_valid'])) {
+            $contextErrors = isset($context['errors']) && \is_array($context['errors']) ? \array_values(\array_map('strval', $context['errors'])) : [];
+
+            return [
+                'success' => false,
+                'errors' => !empty($contextErrors) ? $contextErrors : [\__('Please provide valid check-in and check-out dates.', 'must-hotel-booking')],
+            ];
+        }
+
+        $provider = ProviderManager::configured();
+
+        if ($provider === null) {
+            $provider = ProviderManager::active();
+        }
+
+        \MustHotelBooking\Frontend\clear_booking_selection(true);
+
+        if (!$provider->reservations()->ensureRoomLock($roomId, (string) $context['checkin'], (string) $context['checkout'])) {
+            return [
+                'success' => false,
+                'errors' => [\__('This room is no longer available for the selected dates.', 'must-hotel-booking')],
+            ];
+        }
+
+        if (!\MustHotelBooking\Frontend\add_room_to_booking_selection($roomId, $context, 0)) {
+            return [
+                'success' => false,
+                'errors' => [\__('Unable to store the selected room before payment.', 'must-hotel-booking')],
+            ];
+        }
+
+        \MustHotelBooking\Frontend\update_booking_selection_flow_data([
+            'booking_mode' => 'fixed-room',
+            'fixed_room_id' => $roomId,
+            'guest_form' => $guestForm,
+            'billing_form' => $billingForm,
+            'coupon_code' => '',
+            'payment_method' => PaymentEngine::isStripeCheckoutConfigured() ? 'stripe' : PaymentEngine::getSelectedCheckoutPaymentMethod([], []),
+        ]);
+
+        return [
+            'success' => true,
+            'redirect_url' => ManagedPages::getBookingConfirmationPageUrl(),
+        ];
+    }
+
+    /**
+     * @param array<string, mixed> $form
+     * @return array<string, mixed>
+     */
+    private static function buildQuickBookingGuestForm(array $form): array
+    {
+        $guestName = isset($form['guest_name']) ? \trim((string) $form['guest_name']) : '';
+        $nameParts = \preg_split('/\s+/', $guestName);
+        $nameParts = \is_array($nameParts) ? \array_values(\array_filter($nameParts)) : [];
+        $firstName = isset($nameParts[0]) ? (string) $nameParts[0] : $guestName;
+        $lastName = \trim(\implode(' ', \array_slice($nameParts, 1)));
+
+        if ($lastName === '') {
+            $lastName = '-';
+        }
+
+        $phone = isset($form['phone']) ? (string) $form['phone'] : '';
+        $phoneParts = \function_exists('MustHotelBooking\\Frontend\\split_checkout_phone_value')
+            ? \MustHotelBooking\Frontend\split_checkout_phone_value($phone)
+            : ['phone_country_code' => '', 'phone_number' => $phone];
+        $roomId = isset($form['room_id']) ? (int) $form['room_id'] : 0;
+
+        return [
+            'first_name' => $firstName,
+            'last_name' => $lastName,
+            'email' => isset($form['email']) ? (string) $form['email'] : '',
+            'phone' => $phone,
+            'phone_country_code' => (string) ($phoneParts['phone_country_code'] ?? ''),
+            'phone_number' => (string) ($phoneParts['phone_number'] ?? $phone),
+            'country' => isset($form['country']) ? (string) $form['country'] : 'AL',
+            'special_requests' => isset($form['notes']) ? (string) $form['notes'] : '',
+            'marketing_opt_in' => '',
+            'room_guests' => [
+                $roomId => [
+                    'guest_count' => (string) \max(1, (int) ($form['guests'] ?? 1)),
+                    'first_name' => $firstName,
+                    'last_name' => $lastName,
+                ],
+            ],
+        ];
+    }
+
+    /**
+     * @param array<string, mixed> $form
+     * @param array<string, mixed> $source
+     * @param array<string, mixed> $guestForm
+     * @return array<string, string>
+     */
+    private static function buildQuickBookingBillingForm(array $form, array $source, array $guestForm): array
+    {
+        $country = isset($form['country']) ? (string) $form['country'] : 'AL';
+
+        return [
+            'first_name' => (string) ($guestForm['first_name'] ?? ''),
+            'last_name' => (string) ($guestForm['last_name'] ?? ''),
+            'company' => '',
+            'country' => $country,
+            'street_address' => isset($source['street_address']) ? \sanitize_text_field((string) \wp_unslash($source['street_address'])) : '',
+            'address_line_2' => isset($source['address_line_2']) ? \sanitize_text_field((string) \wp_unslash($source['address_line_2'])) : '',
+            'city' => isset($source['city']) ? \sanitize_text_field((string) \wp_unslash($source['city'])) : '',
+            'county' => isset($source['county']) ? \sanitize_text_field((string) \wp_unslash($source['county'])) : '',
+            'postcode' => isset($source['postcode']) ? \sanitize_text_field((string) \wp_unslash($source['postcode'])) : '',
+            'phone_country_code' => (string) ($guestForm['phone_country_code'] ?? ''),
+            'phone_number' => (string) ($guestForm['phone_number'] ?? ''),
+            'email' => isset($form['email']) ? (string) $form['email'] : '',
+            'billing_country' => $country,
+            'special_requests' => isset($form['notes']) ? (string) $form['notes'] : '',
+        ];
+    }
+
+    /**
+     * @param array<string, mixed> $form
+     * @param array<string, mixed> $source
+     * @return array<string, mixed>
+     */
+    private static function mergeQuickBookingBillingFields(array $form, array $source): array
+    {
+        foreach (['street_address', 'address_line_2', 'city', 'county', 'postcode'] as $key) {
+            $form[$key] = isset($source[$key]) ? \sanitize_text_field((string) \wp_unslash($source[$key])) : '';
+        }
+
+        return $form;
+    }
+
+    /**
+     * @param array<string, mixed> $form
+     * @return array<string, mixed>
+     */
+    private static function getQuickBookingPricingPreview(array $form): array
+    {
+        $provider = ProviderManager::configured();
+
+        if ($provider === null) {
+            $provider = ProviderManager::active();
+        }
+
+        $pricing = $provider->quote()->calculateTotal(
+            (int) ($form['room_id'] ?? 0),
+            (string) ($form['checkin'] ?? ''),
+            (string) ($form['checkout'] ?? ''),
+            \max(1, (int) ($form['guests'] ?? 1))
+        );
+
+        if (\is_array($pricing) && !empty($pricing['success'])) {
+            return $pricing;
+        }
+
+        $fallbackTotal = \MustHotelBooking\Admin\get_admin_quick_booking_total_price(
+            (int) ($form['room_id'] ?? 0),
+            (string) ($form['checkin'] ?? ''),
+            (string) ($form['checkout'] ?? ''),
+            \max(1, (int) ($form['guests'] ?? 1))
+        );
+
+        if ($fallbackTotal > 0) {
+            return [
+                'success' => true,
+                'total_price' => $fallbackTotal,
+                'nights' => self::calculateQuickBookingNights((string) ($form['checkin'] ?? ''), (string) ($form['checkout'] ?? '')),
+            ];
+        }
+
+        return \is_array($pricing) ? $pricing : [
+            'success' => false,
+            'message' => \__('Unable to calculate the room price for these dates.', 'must-hotel-booking'),
+        ];
+    }
+
+    private static function calculateQuickBookingNights(string $checkin, string $checkout): int
+    {
+        try {
+            return \max(0, (int) (new \DateTimeImmutable($checkin))->diff(new \DateTimeImmutable($checkout))->format('%a'));
+        } catch (\Exception $exception) {
+            return 0;
+        }
     }
 
     private static function handleReservationTransition(string $transition, string $capability): void
@@ -2296,18 +2589,21 @@ private static function handlePaymentRefund(): array
     private static function prepareQuickBookingData(array $actionState, array $defaultOverrides = [], array $presentation = []): array
     {
         $defaults = \MustHotelBooking\Admin\get_admin_quick_booking_form_defaults();
+        $defaults = \array_merge($defaults, [
+            'street_address' => '',
+            'address_line_2' => '',
+            'city' => '',
+            'county' => '',
+            'postcode' => '',
+        ]);
         $sourceOptions = \MustHotelBooking\Admin\get_admin_quick_booking_source_options();
         $resolvedDefaults = \array_replace($defaults, $defaultOverrides);
         $form = isset($actionState['form']) && \is_array($actionState['form']) ? $actionState['form'] : $resolvedDefaults;
         $estimate = 0.0;
 
         if (!empty($form['room_id']) && !empty($form['checkin']) && !empty($form['checkout']) && !empty($form['guests'])) {
-            $estimate = \MustHotelBooking\Admin\get_admin_quick_booking_total_price(
-                (int) $form['room_id'],
-                (string) $form['checkin'],
-                (string) $form['checkout'],
-                (int) $form['guests']
-            );
+            $pricingPreview = self::getQuickBookingPricingPreview($form);
+            $estimate = !empty($pricingPreview['success']) && isset($pricingPreview['total_price']) ? (float) $pricingPreview['total_price'] : 0.0;
         }
 
         return [
@@ -2317,7 +2613,7 @@ private static function handlePaymentRefund(): array
             'estimate' => $estimate,
             'currency' => MustBookingConfig::get_currency(),
             'form_title' => (string) ($presentation['form_title'] ?? \__('New Booking', 'must-hotel-booking')),
-            'form_description' => (string) ($presentation['form_description'] ?? \__('Create a confirmed reservation from the Front Desk workspace without leaving the portal.', 'must-hotel-booking')),
+            'form_description' => (string) ($presentation['form_description'] ?? \__('Create a walk-in booking, review the total, then send the guest to the normal Stripe payment flow.', 'must-hotel-booking')),
             'submit_label' => (string) ($presentation['submit_label'] ?? \__('Create reservation', 'must-hotel-booking')),
         ];
     }
