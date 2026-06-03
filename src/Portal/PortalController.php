@@ -192,29 +192,37 @@ final class PortalController
         }
     }
 
-    public static function ajaxQuickBookingAvailableRooms(): void
-    {
-        if (!\current_user_can(StaffAccess::CAP_RESERVATION_CREATE)) {
-            \wp_send_json_error(['message' => \__('You do not have permission to create reservations.', 'must-hotel-booking')], 403);
-        }
+public static function ajaxQuickBookingAvailableRooms(): void
+{
+    if (!\current_user_can(StaffAccess::CAP_RESERVATION_CREATE)) {
+        \wp_send_json_error(['message' => \__('You do not have permission to create reservations.', 'must-hotel-booking')], 403);
+    }
 
-        $nonce = isset($_REQUEST['nonce']) ? (string) \wp_unslash($_REQUEST['nonce']) : '';
+    $nonce = isset($_REQUEST['nonce']) ? (string) \wp_unslash($_REQUEST['nonce']) : '';
 
-        if (!\wp_verify_nonce($nonce, 'must_portal_quick_booking_available_rooms')) {
-            \wp_send_json_error(['message' => \__('Security check failed.', 'must-hotel-booking')], 403);
-        }
+    if (!\wp_verify_nonce($nonce, 'must_portal_quick_booking_available_rooms')) {
+        \wp_send_json_error(['message' => \__('Security check failed.', 'must-hotel-booking')], 403);
+    }
 
-        try {
+    try {
         $checkin = self::normalizeQuickBookingDate($_REQUEST['checkin'] ?? '');
         $checkout = self::normalizeQuickBookingDate($_REQUEST['checkout'] ?? '');
         $guests = isset($_REQUEST['guests']) ? \max(1, \absint(\wp_unslash($_REQUEST['guests']))) : 1;
+        $roomTypeId = isset($_REQUEST['room_type_id']) ? \absint(\wp_unslash($_REQUEST['room_type_id'])) : 0;
+
+        $accommodationType = 'all';
+
+        if ($roomTypeId > 0 && RoomCatalog::isClockBackendMode()) {
+            $accommodationType = RoomCatalog::roomTypeBookingValue($roomTypeId);
+        }
+
         $context = BookingValidationEngine::parseRequestContext(
             [
                 'checkin' => $checkin,
                 'checkout' => $checkout,
                 'guests' => $guests,
                 'room_count' => 1,
-                'accommodation_type' => 'all',
+                'accommodation_type' => $accommodationType,
             ],
             true
         );
@@ -229,33 +237,61 @@ final class PortalController
         $provider = self::getBookingProvider();
         $rooms = $provider->availability()->getAvailableRooms(AvailabilitySearchRequest::fromContext($context));
         $items = [];
+        $pricingCache = [];
 
         foreach ($rooms as $room) {
             if (!\is_array($room)) {
                 continue;
             }
 
-            $roomId = isset($room['id']) ? (int) $room['id'] : 0;
+            $physicalRoomId = isset($room['id']) ? (int) $room['id'] : 0;
 
-            if ($roomId <= 0) {
+            if ($physicalRoomId <= 0) {
                 continue;
             }
 
-            $pricing = $provider->quote()->calculateTotal($roomId, $checkin, $checkout, $guests);
+            $parentRoomTypeId = isset($room['room_type_id']) ? (int) $room['room_type_id'] : 0;
+
+            if ($roomTypeId > 0 && $parentRoomTypeId > 0 && $parentRoomTypeId !== $roomTypeId) {
+                continue;
+            }
+
+            $quoteRoomId = $parentRoomTypeId > 0 ? $parentRoomTypeId : $physicalRoomId;
+            $cacheKey = $quoteRoomId . '|' . $checkin . '|' . $checkout . '|' . $guests;
+
+            if (!isset($pricingCache[$cacheKey])) {
+                $pricingCache[$cacheKey] = $provider->quote()->calculateTotal($quoteRoomId, $checkin, $checkout, $guests);
+            }
+
+            $pricing = \is_array($pricingCache[$cacheKey]) ? $pricingCache[$cacheKey] : [];
 
             if (empty($pricing['success'])) {
                 continue;
             }
 
             $total = isset($pricing['total_price']) ? (float) $pricing['total_price'] : 0.0;
+            $currency = MustBookingConfig::get_currency();
+
+            $roomTypeName = '';
+
+            if ($parentRoomTypeId > 0) {
+                $parentRoom = \MustHotelBooking\Engine\get_room_repository()->getRoomById($parentRoomTypeId);
+                $roomTypeName = \is_array($parentRoom) ? (string) ($parentRoom['name'] ?? '') : '';
+            }
+
+            if ($roomTypeName === '') {
+                $roomTypeName = (string) ($room['category_label'] ?? $room['category'] ?? '');
+            }
 
             $items[] = [
-                'id' => $roomId,
-                'name' => (string) ($room['public_title'] ?? $room['name'] ?? ('#' . $roomId)),
+                'id' => $physicalRoomId,
+                'room_type_id' => $parentRoomTypeId,
+                'name' => (string) ($room['public_title'] ?? $room['name'] ?? ('#' . $physicalRoomId)),
+                'room_type_name' => $roomTypeName,
                 'max_guests' => isset($room['max_guests']) ? (int) $room['max_guests'] : 0,
                 'total_price' => $total,
-                'currency' => MustBookingConfig::get_currency(),
-                'formatted_total' => \number_format_i18n($total, 2) . ' ' . MustBookingConfig::get_currency(),
+                'currency' => $currency,
+                'formatted_total' => \number_format_i18n($total, 2) . ' ' . $currency,
             ];
         }
 
@@ -263,13 +299,17 @@ final class PortalController
             'checkin' => $checkin,
             'checkout' => $checkout,
             'guests' => $guests,
+            'room_type_id' => $roomTypeId,
             'rooms' => $items,
         ]);
-        } catch (\Throwable $throwable) {
-            \wp_send_json_error(['message' => \__('Unable to load available rooms for these dates.', 'must-hotel-booking')], 500);
-        }
+    } catch (\Throwable $throwable) {
+        \wp_send_json_error([
+            'message' => self::isClockRateLimitThrowable($throwable)
+                ? \__('Clock PMS is rate limiting requests. Please wait a few seconds and try again.', 'must-hotel-booking')
+                : \__('Unable to load available rooms for these dates.', 'must-hotel-booking'),
+        ], 500);
     }
-
+}
     public static function ajaxQuickBookingPreview(): void
     {
         if (!\current_user_can(StaffAccess::CAP_RESERVATION_CREATE)) {

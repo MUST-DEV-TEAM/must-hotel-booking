@@ -2338,3 +2338,145 @@ body.must-portal-page .must-portal-action-callout .must-portal-reservation-actio
         flex-basis: 24px;
     }
 }
+
+.must-portal-booking-search {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 14px;
+  align-items: end;
+  margin-bottom: 18px;
+}
+
+.must-portal-booking-search label {
+  display: grid;
+  gap: 6px;
+}
+
+.must-portal-booking-search span,
+.must-portal-booking-modal label span {
+  font-size: 12px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.must-portal-room-results-wrap {
+  overflow-x: auto;
+}
+
+.must-portal-room-results-table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.must-portal-room-results-table th,
+.must-portal-room-results-table td {
+  padding: 12px 14px;
+  border-bottom: 1px solid rgba(15, 23, 42, 0.1);
+  text-align: left;
+  vertical-align: middle;
+}
+
+.must-portal-room-results-table th {
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: rgba(15, 23, 42, 0.72);
+  background: rgba(15, 23, 42, 0.035);
+}
+
+.must-portal-booking-modal[hidden] {
+  display: none;
+}
+
+.must-portal-booking-modal {
+  position: fixed;
+  inset: 0;
+  z-index: 99999;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+}
+
+.must-portal-booking-modal-backdrop {
+  position: absolute;
+  inset: 0;
+  background: rgba(15, 23, 42, 0.56);
+}
+
+.must-portal-booking-modal-card {
+  position: relative;
+  z-index: 1;
+  width: min(860px, 100%);
+  max-height: calc(100vh - 48px);
+  overflow: auto;
+  background: #fff;
+  border-radius: 18px;
+  padding: 24px;
+  box-shadow: 0 24px 80px rgba(15, 23, 42, 0.28);
+}
+
+.must-portal-booking-modal-header {
+  display: flex;
+  justify-content: space-between;
+  gap: 18px;
+  align-items: flex-start;
+  margin-bottom: 18px;
+}
+
+.must-portal-booking-modal-header h3 {
+  margin: 0;
+}
+
+.must-portal-booking-modal-header p {
+  margin: 6px 0 0;
+  color: rgba(15, 23, 42, 0.66);
+}
+
+.must-portal-modal-close {
+  border: 0;
+  background: transparent;
+  font-size: 28px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+html.must-portal-modal-open {
+  overflow: hidden;
+}
+
+.must-portal-date-status[data-state="error"] {
+  color: #b91c1c;
+}
+
+.must-portal-date-status[data-state="success"] {
+  color: #166534;
+}
+
+.must-portal-date-status[data-state="loading"] {
+  color: #1d4ed8;
+}
+
+@media (max-width: 960px) {
+  .must-portal-booking-search {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .must-portal-booking-search button {
+    grid-column: 1 / -1;
+  }
+}
+
+@media (max-width: 640px) {
+  .must-portal-booking-search {
+    grid-template-columns: 1fr;
+  }
+
+  .must-portal-booking-modal {
+    padding: 12px;
+  }
+
+  .must-portal-booking-modal-card {
+    padding: 18px;
+  }
+}
