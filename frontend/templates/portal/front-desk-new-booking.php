@@ -29,11 +29,25 @@ echo '<section class="must-portal-panel must-portal-quick-booking-app" data-must
 echo '<div class="must-portal-panel-header"><div><h2>' . \esc_html($formTitle) . '</h2><p>' . \esc_html($formDescription) . '</p></div></div>';
 if ($portalPayment === 'success' && $firstPortalReservationId > 0) {
     $viewUrl = PortalRouter::getModuleUrl('reservations', ['reservation_id' => $firstPortalReservationId]);
+    $cleanUrl = PortalRouter::getModuleUrl('front_desk', ['tab' => 'new-booking']);
 
-    echo '<div class="must-portal-notice must-portal-notice-success">';
-    echo '<strong>' . \esc_html__('Booking successful.', 'must-hotel-booking') . '</strong> ';
-    echo '<span>' . \esc_html__('The Stripe payment was completed and the reservation is being finalized.', 'must-hotel-booking') . '</span> ';
-    echo '<a class="must-portal-secondary-button" href="' . \esc_url($viewUrl) . '">' . \esc_html__('View booking', 'must-hotel-booking') . '</a>';
+    echo '<div class="must-portal-booking-modal" data-must-portal-success-modal>';
+    echo '<div class="must-portal-booking-modal-backdrop" data-must-portal-success-close data-clean-url="' . \esc_url($cleanUrl) . '"></div>';
+    echo '<div class="must-portal-booking-modal-card">';
+    echo '<div class="must-portal-booking-modal-header">';
+    echo '<div>';
+    echo '<h3>' . \esc_html__('Booking successful', 'must-hotel-booking') . '</h3>';
+    echo '<p>' . \esc_html__('Stripe payment was completed and the reservation was created successfully.', 'must-hotel-booking') . '</p>';
+    echo '</div>';
+    echo '<button type="button" class="must-portal-modal-close" data-must-portal-success-close data-clean-url="' . \esc_url($cleanUrl) . '">&times;</button>';
+    echo '</div>';
+
+    echo '<div class="must-portal-inline-actions">';
+    echo '<a class="must-portal-primary-button" href="' . \esc_url($viewUrl) . '">' . \esc_html__('View booking', 'must-hotel-booking') . '</a>';
+    echo '<button type="button" class="must-portal-secondary-button" data-must-portal-success-close data-clean-url="' . \esc_url($cleanUrl) . '">' . \esc_html__("That's all", 'must-hotel-booking') . '</button>';
+    echo '</div>';
+
+    echo '</div>';
     echo '</div>';
 } elseif ($portalPayment === 'cancel') {
     echo '<div class="must-portal-notice must-portal-notice-warning">';
@@ -103,7 +117,7 @@ echo '<input type="hidden" name="guests" value="' . \esc_attr((string) $defaultG
 echo '<label><span>' . \esc_html__('Guest name', 'must-hotel-booking') . '</span><input type="text" name="guest_name" value="' . \esc_attr((string) ($form['guest_name'] ?? '')) . '" required /></label>';
 echo '<label><span>' . \esc_html__('Email', 'must-hotel-booking') . '</span><input type="email" name="email" value="' . \esc_attr((string) ($form['email'] ?? '')) . '" required /></label>';
 echo '<label><span>' . \esc_html__('Phone', 'must-hotel-booking') . '</span><input type="text" name="phone" value="' . \esc_attr((string) ($form['phone'] ?? '')) . '" required /></label>';
-$countryOptions = \function_exists('\MustHotelBooking\Frontend\get_checkout_country_options')
+$countryOptions = \function_exists('MustHotelBooking\\Frontend\\get_checkout_country_options')
     ? \MustHotelBooking\Frontend\get_checkout_country_options()
     : ['AL' => \__('Albania', 'must-hotel-booking')];
 
@@ -113,8 +127,31 @@ $currentCountry = isset($form['country']) && (string) $form['country'] !== ''
 
 echo '<label><span>' . \esc_html__('Country', 'must-hotel-booking') . '</span><select name="country" required>';
 
-foreach ($countryOptions as $countryCode => $countryLabel) {
-    echo '<option value="' . \esc_attr((string) $countryCode) . '"' . \selected($currentCountry, (string) $countryCode, false) . '>' . \esc_html((string) $countryLabel) . '</option>';
+foreach ($countryOptions as $countryKey => $countryOption) {
+    if (\is_array($countryOption)) {
+        $countryCode = (string) (
+            $countryOption['code']
+            ?? $countryOption['value']
+            ?? $countryOption['country_code']
+            ?? $countryKey
+        );
+
+        $countryLabel = (string) (
+            $countryOption['label']
+            ?? $countryOption['name']
+            ?? $countryOption['country']
+            ?? $countryCode
+        );
+    } else {
+        $countryCode = (string) $countryKey;
+        $countryLabel = (string) $countryOption;
+    }
+
+    if ($countryCode === '') {
+        continue;
+    }
+
+    echo '<option value="' . \esc_attr($countryCode) . '"' . \selected($currentCountry, $countryCode, false) . '>' . \esc_html($countryLabel) . '</option>';
 }
 
 echo '</select></label>';

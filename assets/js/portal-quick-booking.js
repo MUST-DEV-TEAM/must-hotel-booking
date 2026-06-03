@@ -305,7 +305,28 @@
     }
 
     document.addEventListener('DOMContentLoaded', function () {
-        document.querySelectorAll('[data-must-portal-quick-booking-app]').forEach(initQuickBookingApp);
-        document.querySelectorAll('.must-portal-quick-booking-form').forEach(initQuickBookingSubmitForm);
+    document.querySelectorAll('[data-must-portal-quick-booking-app]').forEach(initQuickBookingApp);
+    document.querySelectorAll('.must-portal-quick-booking-form').forEach(initQuickBookingSubmitForm);
+
+    if (document.querySelector('[data-must-portal-success-modal]')) {
+        document.documentElement.classList.add('must-portal-modal-open');
+    }
+
+    document.querySelectorAll('[data-must-portal-success-close]').forEach(function (button) {
+        button.addEventListener('click', function () {
+            var modal = button.closest('[data-must-portal-success-modal]');
+            var cleanUrl = button.getAttribute('data-clean-url') || '';
+
+            if (modal) {
+                modal.hidden = true;
+            }
+
+            document.documentElement.classList.remove('must-portal-modal-open');
+
+            if (cleanUrl && window.history && window.history.replaceState) {
+                window.history.replaceState({}, document.title, cleanUrl);
+            }
+        });
     });
+});
 })();
