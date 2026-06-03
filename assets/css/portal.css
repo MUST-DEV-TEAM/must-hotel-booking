@@ -833,32 +833,6 @@ body.must-portal-page .must-portal-danger-button:focus-visible {
     color: #b42318;
 }
 
-.must-portal-room-options {
-    display: grid;
-    gap: 8px;
-}
-
-.must-portal-room-option {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 12px;
-    width: 100%;
-    padding: 10px 12px;
-    border: 1px solid rgba(15, 23, 42, 0.12);
-    border-radius: 8px;
-    background: #fff;
-    color: inherit;
-    text-align: left;
-    cursor: pointer;
-}
-
-.must-portal-room-option:hover,
-.must-portal-room-option:focus {
-    border-color: rgba(15, 118, 110, 0.45);
-    outline: none;
-}
-
 .must-portal-form-full {
     grid-column: 1 / -1;
 }
