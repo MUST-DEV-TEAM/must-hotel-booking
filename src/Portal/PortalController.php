@@ -23,8 +23,12 @@ use MustHotelBooking\Database\HousekeepingRepository;
 use MustHotelBooking\Core\ManagedPages;
 use MustHotelBooking\Core\MustBookingConfig;
 use MustHotelBooking\Core\StaffAccess;
+use MustHotelBooking\Engine\AvailabilityAjaxController;
+use MustHotelBooking\Engine\AvailabilityEngine;
 use MustHotelBooking\Engine\BookingStatusEngine;
+use MustHotelBooking\Provider\Dto\DisabledDatesRequest;
 use MustHotelBooking\Provider\Clock\ClockPaymentReconciliationService;
+use MustHotelBooking\Provider\ProviderManager;
 use MustHotelBooking\Provider\ProviderReservationActionPolicy;
 use MustHotelBooking\Provider\ProviderReservationView;
 
@@ -64,12 +68,123 @@ final class PortalController
         }
 
         \wp_enqueue_style('dashicons');
+
+        $portalCssPath = \defined('MUST_HOTEL_BOOKING_PATH') ? MUST_HOTEL_BOOKING_PATH . 'assets/css/portal.css' : '';
+        $portalCssVersion = $portalCssPath !== '' && \file_exists($portalCssPath)
+            ? (string) \filemtime($portalCssPath)
+            : MUST_HOTEL_BOOKING_VERSION;
+
         \wp_enqueue_style(
             'must-hotel-booking-portal',
             MUST_HOTEL_BOOKING_URL . 'assets/css/portal.css',
             ['dashicons'],
-            MUST_HOTEL_BOOKING_VERSION
+            $portalCssVersion
         );
+
+        if (!PortalRouter::isPortalRequest()) {
+            return;
+        }
+
+        \wp_enqueue_style(
+            'must-hotel-booking-flatpickr',
+            'https://cdn.jsdelivr.net/npm/flatpickr/dist/flatpickr.min.css',
+            [],
+            '4.6.13'
+        );
+
+        \wp_enqueue_script(
+            'must-hotel-booking-flatpickr',
+            'https://cdn.jsdelivr.net/npm/flatpickr',
+            [],
+            '4.6.13',
+            true
+        );
+
+        $quickBookingScriptPath = \defined('MUST_HOTEL_BOOKING_PATH') ? MUST_HOTEL_BOOKING_PATH . 'assets/js/portal-quick-booking.js' : '';
+        $quickBookingScriptVersion = $quickBookingScriptPath !== '' && \file_exists($quickBookingScriptPath)
+            ? (string) \filemtime($quickBookingScriptPath)
+            : MUST_HOTEL_BOOKING_VERSION;
+
+        \wp_enqueue_script(
+            'must-hotel-booking-portal-quick-booking',
+            MUST_HOTEL_BOOKING_URL . 'assets/js/portal-quick-booking.js',
+            ['must-hotel-booking-flatpickr'],
+            $quickBookingScriptVersion,
+            true
+        );
+
+        \wp_localize_script('must-hotel-booking-portal-quick-booking', 'MustPortalQuickBooking', [
+            'ajaxUrl' => \admin_url('admin-ajax.php'),
+            'disabledDatesAction' => 'must_portal_quick_booking_disabled_dates',
+            'disabledDatesNonce' => \wp_create_nonce('must_portal_quick_booking_disabled_dates'),
+            'today' => \current_time('Y-m-d'),
+            'strings' => [
+                'loadingDates' => \__('Loading room availability...', 'must-hotel-booking'),
+                'datesReady' => \__('Unavailable dates are marked on the calendars.', 'must-hotel-booking'),
+                'datesError' => \__('Unable to load unavailable dates for this room.', 'must-hotel-booking'),
+                'selectRoom' => \__('Select a room to load unavailable dates.', 'must-hotel-booking'),
+            ],
+        ]);
+    }
+
+    public static function ajaxQuickBookingDisabledDates(): void
+    {
+        if (!\current_user_can(StaffAccess::CAP_RESERVATION_CREATE)) {
+            \wp_send_json_error(['message' => \__('You do not have permission to create reservations.', 'must-hotel-booking')], 403);
+        }
+
+        $nonce = isset($_REQUEST['nonce']) ? (string) \wp_unslash($_REQUEST['nonce']) : '';
+
+        if (!\wp_verify_nonce($nonce, 'must_portal_quick_booking_disabled_dates')) {
+            \wp_send_json_error(['message' => \__('Security check failed.', 'must-hotel-booking')], 403);
+        }
+
+        $roomId = isset($_REQUEST['room_id']) ? \absint(\wp_unslash($_REQUEST['room_id'])) : 0;
+        $checkin = isset($_REQUEST['checkin']) ? \sanitize_text_field((string) \wp_unslash($_REQUEST['checkin'])) : '';
+        $guests = isset($_REQUEST['guests']) ? \max(1, \absint(\wp_unslash($_REQUEST['guests']))) : 1;
+        $windowDays = isset($_REQUEST['window_days']) ? \absint(\wp_unslash($_REQUEST['window_days'])) : 180;
+        $windowDays = AvailabilityAjaxController::normalize_disabled_dates_window_days($windowDays);
+
+        if ($roomId <= 0 || !\MustHotelBooking\Admin\does_admin_quick_booking_room_exist($roomId)) {
+            \wp_send_json_error(['message' => \__('Please select a valid room.', 'must-hotel-booking')], 400);
+        }
+
+        if ($checkin !== '' && !AvailabilityEngine::isValidBookingDate($checkin)) {
+            \wp_send_json_error(['message' => \__('Invalid check-in date.', 'must-hotel-booking')], 400);
+        }
+
+        $roomRow = \MustHotelBooking\Admin\get_admin_quick_booking_room_row($roomId);
+        $category = isset($roomRow['category']) ? (string) $roomRow['category'] : 'standard-rooms';
+        $provider = ProviderManager::configured();
+
+        if ($provider === null) {
+            $provider = ProviderManager::active();
+        }
+
+        try {
+            $disabledDates = $provider->availability()->getDisabledDates(
+                new DisabledDatesRequest($checkin, $guests, 1, $roomId, $category, $windowDays)
+            );
+        } catch (\Throwable $throwable) {
+            \wp_send_json_error(['message' => \__('Unable to load unavailable dates for this room.', 'must-hotel-booking')], 500);
+        }
+
+        \wp_send_json_success([
+            'room_id' => $roomId,
+            'checkin' => $checkin,
+            'guests' => $guests,
+            'room_count' => 1,
+            'window_days' => $windowDays,
+            'disabled_checkin_dates' => isset($disabledDates['disabled_checkin_dates']) && \is_array($disabledDates['disabled_checkin_dates'])
+                ? \array_values(\array_map('strval', $disabledDates['disabled_checkin_dates']))
+                : [],
+            'disabled_checkout_dates' => isset($disabledDates['disabled_checkout_dates']) && \is_array($disabledDates['disabled_checkout_dates'])
+                ? \array_values(\array_map('strval', $disabledDates['disabled_checkout_dates']))
+                : [],
+            'disabled_dates_source' => (string) ($disabledDates['disabled_dates_source'] ?? ''),
+            'disabled_dates_status' => (string) ($disabledDates['disabled_dates_status'] ?? ''),
+            'disabled_dates_message' => (string) ($disabledDates['disabled_dates_message'] ?? ''),
+        ]);
     }
 
     /**

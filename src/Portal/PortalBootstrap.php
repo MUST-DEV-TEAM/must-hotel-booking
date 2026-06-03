@@ -9,6 +9,7 @@ final class PortalBootstrap
         PortalRouter::registerHooks();
         PortalAccessGuard::registerHooks();
         \add_action('wp_enqueue_scripts', [PortalController::class, 'enqueueAssets']);
+        \add_action('wp_ajax_must_portal_quick_booking_disabled_dates', [PortalController::class, 'ajaxQuickBookingDisabledDates']);
     }
 
     public static function registerRewriteRules(): void

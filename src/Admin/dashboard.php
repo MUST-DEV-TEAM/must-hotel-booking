@@ -856,11 +856,16 @@ function enqueue_admin_ui_assets(): void
         return;
     }
 
+    $adminUiPath = \defined('MUST_HOTEL_BOOKING_PATH') ? MUST_HOTEL_BOOKING_PATH . 'assets/css/admin-ui.css' : '';
+    $adminUiVersion = $adminUiPath !== '' && \file_exists($adminUiPath)
+        ? (string) \filemtime($adminUiPath)
+        : MUST_HOTEL_BOOKING_VERSION;
+
     \wp_enqueue_style(
         'must-hotel-booking-admin-ui',
         MUST_HOTEL_BOOKING_URL . 'assets/css/admin-ui.css',
         [],
-        MUST_HOTEL_BOOKING_VERSION
+        $adminUiVersion
     );
 }
 

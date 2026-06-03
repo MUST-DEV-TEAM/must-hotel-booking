@@ -79,13 +79,8 @@ function get_admin_quick_booking_rooms(): array
                 $room_type_id = isset($unit['room_type_id']) ? (int) $unit['room_type_id'] : 0;
                 $room_type = $room_type_id > 0 ? \MustHotelBooking\Engine\get_room_repository()->getRoomById($room_type_id) : null;
                 $room_name = \is_array($room_type) ? (string) ($room_type['name'] ?? '') : '';
-                $unit_label = \trim((string) ($unit['room_number'] ?? ''));
 
-                if ($unit_label === '') {
-                    $unit_label = \trim((string) ($unit['title'] ?? ''));
-                }
-
-                if ($unit_id <= 0 || $unit_label === '') {
+                if ($unit_id <= 0) {
                     continue;
                 }
 
@@ -96,10 +91,34 @@ function get_admin_quick_booking_rooms(): array
                 }
 
                 $selection_room = isset($selection['room']) && \is_array($selection['room']) ? $selection['room'] : [];
+                $unit_label = \trim((string) ($selection_room['public_title'] ?? ''));
+
+                if ($unit_label === '') {
+                    $unit_label = \trim((string) ($selection_room['name'] ?? ''));
+                }
+
+                if ($unit_label === '') {
+                    $unit_label = \trim((string) ($unit['title'] ?? ''));
+                }
+
+                if ($unit_label === '') {
+                    $room_number = \trim((string) ($unit['room_number'] ?? ''));
+                    $unit_label = $room_number !== '' ? \sprintf(\__('Room %s', 'must-hotel-booking'), $room_number) : '';
+                }
+
+                if ($unit_label === '') {
+                    continue;
+                }
+
+                $display_name = $unit_label;
+
+                if ($room_name !== '' && \strcasecmp($unit_label, $room_name) !== 0) {
+                    $display_name = $unit_label . ' - ' . $room_name;
+                }
 
                 $rows[] = [
                     'id' => $unit_id,
-                    'name' => $room_name !== '' ? $unit_label . ' - ' . $room_name : $unit_label,
+                    'name' => $display_name,
                     'max_guests' => isset($selection_room['max_guests']) ? (int) $selection_room['max_guests'] : 1,
                     'room_type_id' => $room_type_id,
                 ];

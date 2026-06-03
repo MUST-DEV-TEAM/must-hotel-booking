@@ -774,6 +774,65 @@ body.must-portal-page .must-portal-danger-button:focus-visible {
     gap: 8px;
 }
 
+.must-portal-quick-booking-calendars {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(280px, 1fr));
+    gap: 18px;
+    align-items: start;
+    margin-top: -4px;
+}
+
+.must-portal-quick-booking-calendar {
+    display: grid;
+    gap: 10px;
+    min-width: 0;
+}
+
+.must-portal-quick-booking-calendar > strong {
+    color: #111827;
+    font-size: 13px;
+    font-weight: 700;
+}
+
+.must-portal-quick-booking-calendar .flatpickr-calendar.inline {
+    width: 100%;
+    max-width: 360px;
+    border: 1px solid #dbe3ec;
+    border-radius: 12px;
+    box-shadow: none;
+}
+
+.must-portal-quick-booking-calendar .flatpickr-rContainer,
+.must-portal-quick-booking-calendar .flatpickr-days,
+.must-portal-quick-booking-calendar .dayContainer {
+    width: 100%;
+    min-width: 100%;
+    max-width: 100%;
+}
+
+.must-portal-quick-booking-calendar .flatpickr-day {
+    border-radius: 8px;
+}
+
+.must-portal-quick-booking-calendar .flatpickr-day.flatpickr-disabled,
+.must-portal-quick-booking-calendar .flatpickr-day.notAllowed {
+    color: #b91c1c;
+    background: #fee2e2;
+    text-decoration: line-through;
+}
+
+.must-portal-date-status {
+    grid-column: 1 / -1;
+    min-height: 20px;
+    margin: 0;
+    color: #5b6b7f;
+    font-size: 13px;
+}
+
+.must-portal-date-status[data-state="error"] {
+    color: #b42318;
+}
+
 .must-portal-form-full {
     grid-column: 1 / -1;
 }
@@ -1910,6 +1969,10 @@ body.must-portal-login-page {
         grid-template-columns: 1fr;
     }
 
+    .must-portal-quick-booking-calendars {
+        grid-template-columns: 1fr;
+    }
+
     .must-portal-header {
         flex-direction: column;
         align-items: start;
@@ -2167,13 +2230,13 @@ body.must-portal-page .must-portal-reservation-action-button .dashicons {
 body.must-portal-page .must-portal-reservation-action-button.is-primary {
     border-color: #0f766e;
     background: linear-gradient(180deg, #0f766e 0%, #0b5f5a 100%);
-    color: #ffffff;
+    color: #000000;
     box-shadow: 0 14px 28px rgba(15, 118, 110, 0.20);
 }
 
 body.must-portal-page .must-portal-reservation-action-button.is-primary .dashicons {
     background: rgba(255, 255, 255, 0.16);
-    color: #ffffff;
+    color: #000000;
 }
 
 body.must-portal-page .must-portal-reservation-action-button.is-danger {

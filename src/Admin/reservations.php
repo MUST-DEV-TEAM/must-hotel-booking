@@ -1541,7 +1541,7 @@ function render_admin_reservations_page(): void
         ? get_admin_calendar_page_url(['start_date' => \current_time('Y-m-d'), 'weeks' => 2])
         : '';
 
-    echo '<div class="wrap must-reservations-page">';
+    echo '<div class="wrap must-reservations-page must-reservation-detail-page">';
     echo '<div class="must-reservations-header must-reservations-hero">';
     echo '<div class="must-reservations-header-copy">';
     echo '<span class="must-reservations-eyebrow">' . \esc_html__('Front Desk Workspace', 'must-hotel-booking') . '</span>';
