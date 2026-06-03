@@ -66,9 +66,58 @@ final class PortalController
         ];
     }
 
+    private static function isPortalPathRequest(): bool
+{
+    return self::isCurrentRequestPathUnder(PortalRouter::getPortalBasePath(), true);
+}
+
+private static function isPortalLoginPathRequest(): bool
+{
+    return self::isCurrentRequestPathUnder(PortalRouter::getPortalLoginPath(), false);
+}
+
+private static function isCurrentRequestPathUnder(string $configuredPath, bool $allowChildren): bool
+{
+    if (\is_admin()) {
+        return false;
+    }
+
+    $configuredPath = \trim($configuredPath, '/');
+
+    if ($configuredPath === '') {
+        return false;
+    }
+
+    $requestUri = isset($_SERVER['REQUEST_URI']) ? (string) \wp_unslash($_SERVER['REQUEST_URI']) : '';
+    $requestPath = \wp_parse_url($requestUri, \PHP_URL_PATH);
+
+    if (!\is_string($requestPath) || $requestPath === '') {
+        return false;
+    }
+
+    $sitePath = \wp_parse_url(\home_url('/'), \PHP_URL_PATH);
+    $sitePath = \is_string($sitePath) ? \trim($sitePath, '/') : '';
+    $requestPath = \trim($requestPath, '/');
+
+    if ($sitePath !== '' && \strpos($requestPath, $sitePath . '/') === 0) {
+        $requestPath = \substr($requestPath, \strlen($sitePath) + 1);
+    } elseif ($sitePath !== '' && $requestPath === $sitePath) {
+        $requestPath = '';
+    }
+
+    if ($requestPath === $configuredPath) {
+        return true;
+    }
+
+    return $allowChildren && \strpos($requestPath, $configuredPath . '/') === 0;
+}
+
     public static function enqueueAssets(): void
     {
-        if (!PortalRouter::isPortalRequest() && !PortalRouter::isLoginRequest()) {
+        $isPortalRequest = PortalRouter::isPortalRequest() || self::isPortalPathRequest();
+        $isLoginRequest = PortalRouter::isLoginRequest() || self::isPortalLoginPathRequest();
+
+        if (!$isPortalRequest && !$isLoginRequest) {
             return;
         }
 
@@ -86,9 +135,9 @@ final class PortalController
             $portalCssVersion
         );
 
-        if (!PortalRouter::isPortalRequest()) {
-            return;
-        }
+        if (!$isPortalRequest) {
+    return;
+}
 
         \wp_enqueue_style(
             'must-hotel-booking-flatpickr',
@@ -141,175 +190,175 @@ final class PortalController
         }
 
         try {
-        $roomId = isset($_REQUEST['room_id']) ? \absint(\wp_unslash($_REQUEST['room_id'])) : 0;
-        $checkin = self::normalizeQuickBookingDate($_REQUEST['checkin'] ?? '');
-        $guests = isset($_REQUEST['guests']) ? \max(1, \absint(\wp_unslash($_REQUEST['guests']))) : 1;
-        $windowDays = isset($_REQUEST['window_days']) ? \absint(\wp_unslash($_REQUEST['window_days'])) : 180;
-        $windowDays = AvailabilityAjaxController::normalize_disabled_dates_window_days($windowDays);
+            $roomId = isset($_REQUEST['room_id']) ? \absint(\wp_unslash($_REQUEST['room_id'])) : 0;
+            $checkin = self::normalizeQuickBookingDate($_REQUEST['checkin'] ?? '');
+            $guests = isset($_REQUEST['guests']) ? \max(1, \absint(\wp_unslash($_REQUEST['guests']))) : 1;
+            $windowDays = isset($_REQUEST['window_days']) ? \absint(\wp_unslash($_REQUEST['window_days'])) : 180;
+            $windowDays = AvailabilityAjaxController::normalize_disabled_dates_window_days($windowDays);
 
-        if ($roomId <= 0 || !self::doesQuickBookingRoomExist($roomId)) {
-            \wp_send_json_error(['message' => \__('Please select a valid room.', 'must-hotel-booking')], 400);
+            if ($roomId <= 0 || !self::doesQuickBookingRoomExist($roomId)) {
+                \wp_send_json_error(['message' => \__('Please select a valid room.', 'must-hotel-booking')], 400);
+            }
+
+            if ($checkin !== '' && !AvailabilityEngine::isValidBookingDate($checkin)) {
+                \wp_send_json_error(['message' => \__('Invalid check-in date.', 'must-hotel-booking')], 400);
+            }
+
+            $roomRow = self::getQuickBookingRoomRow($roomId);
+            $category = isset($roomRow['category']) ? (string) $roomRow['category'] : 'standard-rooms';
+            $provider = ProviderManager::configured();
+
+            if ($provider === null) {
+                $provider = ProviderManager::active();
+            }
+
+            try {
+                $disabledDates = $provider->availability()->getDisabledDates(
+                    new DisabledDatesRequest($checkin, $guests, 1, $roomId, $category, $windowDays)
+                );
+            } catch (\Throwable $throwable) {
+                \wp_send_json_error(['message' => \__('Unable to load unavailable dates for this room.', 'must-hotel-booking')], 500);
+            }
+
+            \wp_send_json_success([
+                'room_id' => $roomId,
+                'checkin' => $checkin,
+                'guests' => $guests,
+                'room_count' => 1,
+                'window_days' => $windowDays,
+                'disabled_checkin_dates' => isset($disabledDates['disabled_checkin_dates']) && \is_array($disabledDates['disabled_checkin_dates'])
+                    ? \array_values(\array_map('strval', $disabledDates['disabled_checkin_dates']))
+                    : [],
+                'disabled_checkout_dates' => isset($disabledDates['disabled_checkout_dates']) && \is_array($disabledDates['disabled_checkout_dates'])
+                    ? \array_values(\array_map('strval', $disabledDates['disabled_checkout_dates']))
+                    : [],
+                'disabled_dates_source' => (string) ($disabledDates['disabled_dates_source'] ?? ''),
+                'disabled_dates_status' => (string) ($disabledDates['disabled_dates_status'] ?? ''),
+                'disabled_dates_message' => (string) ($disabledDates['disabled_dates_message'] ?? ''),
+            ]);
+        } catch (\Throwable $throwable) {
+            \wp_send_json_error(['message' => \__('Unable to load unavailable dates for this room.', 'must-hotel-booking')], 500);
+        }
+    }
+
+    public static function ajaxQuickBookingAvailableRooms(): void
+    {
+        if (!\current_user_can(StaffAccess::CAP_RESERVATION_CREATE)) {
+            \wp_send_json_error(['message' => \__('You do not have permission to create reservations.', 'must-hotel-booking')], 403);
         }
 
-        if ($checkin !== '' && !AvailabilityEngine::isValidBookingDate($checkin)) {
-            \wp_send_json_error(['message' => \__('Invalid check-in date.', 'must-hotel-booking')], 400);
-        }
+        $nonce = isset($_REQUEST['nonce']) ? (string) \wp_unslash($_REQUEST['nonce']) : '';
 
-        $roomRow = self::getQuickBookingRoomRow($roomId);
-        $category = isset($roomRow['category']) ? (string) $roomRow['category'] : 'standard-rooms';
-        $provider = ProviderManager::configured();
-
-        if ($provider === null) {
-            $provider = ProviderManager::active();
+        if (!\wp_verify_nonce($nonce, 'must_portal_quick_booking_available_rooms')) {
+            \wp_send_json_error(['message' => \__('Security check failed.', 'must-hotel-booking')], 403);
         }
 
         try {
-            $disabledDates = $provider->availability()->getDisabledDates(
-                new DisabledDatesRequest($checkin, $guests, 1, $roomId, $category, $windowDays)
+            $checkin = self::normalizeQuickBookingDate($_REQUEST['checkin'] ?? '');
+            $checkout = self::normalizeQuickBookingDate($_REQUEST['checkout'] ?? '');
+            $guests = isset($_REQUEST['guests']) ? \max(1, \absint(\wp_unslash($_REQUEST['guests']))) : 1;
+            $roomTypeId = isset($_REQUEST['room_type_id']) ? \absint(\wp_unslash($_REQUEST['room_type_id'])) : 0;
+
+            $accommodationType = 'all';
+
+            if ($roomTypeId > 0 && RoomCatalog::isClockBackendMode()) {
+                $accommodationType = RoomCatalog::roomTypeBookingValue($roomTypeId);
+            }
+
+            $context = BookingValidationEngine::parseRequestContext(
+                [
+                    'checkin' => $checkin,
+                    'checkout' => $checkout,
+                    'guests' => $guests,
+                    'room_count' => 1,
+                    'accommodation_type' => $accommodationType,
+                ],
+                true
             );
-        } catch (\Throwable $throwable) {
-            \wp_send_json_error(['message' => \__('Unable to load unavailable dates for this room.', 'must-hotel-booking')], 500);
-        }
 
-        \wp_send_json_success([
-            'room_id' => $roomId,
-            'checkin' => $checkin,
-            'guests' => $guests,
-            'room_count' => 1,
-            'window_days' => $windowDays,
-            'disabled_checkin_dates' => isset($disabledDates['disabled_checkin_dates']) && \is_array($disabledDates['disabled_checkin_dates'])
-                ? \array_values(\array_map('strval', $disabledDates['disabled_checkin_dates']))
-                : [],
-            'disabled_checkout_dates' => isset($disabledDates['disabled_checkout_dates']) && \is_array($disabledDates['disabled_checkout_dates'])
-                ? \array_values(\array_map('strval', $disabledDates['disabled_checkout_dates']))
-                : [],
-            'disabled_dates_source' => (string) ($disabledDates['disabled_dates_source'] ?? ''),
-            'disabled_dates_status' => (string) ($disabledDates['disabled_dates_status'] ?? ''),
-            'disabled_dates_message' => (string) ($disabledDates['disabled_dates_message'] ?? ''),
-        ]);
-        } catch (\Throwable $throwable) {
-            \wp_send_json_error(['message' => \__('Unable to load unavailable dates for this room.', 'must-hotel-booking')], 500);
-        }
-    }
+            if (empty($context['is_valid'])) {
+                \wp_send_json_error([
+                    'message' => \__('Please provide valid check-in and check-out dates.', 'must-hotel-booking'),
+                    'errors' => (array) ($context['errors'] ?? []),
+                ], 400);
+            }
 
-public static function ajaxQuickBookingAvailableRooms(): void
-{
-    if (!\current_user_can(StaffAccess::CAP_RESERVATION_CREATE)) {
-        \wp_send_json_error(['message' => \__('You do not have permission to create reservations.', 'must-hotel-booking')], 403);
-    }
+            $provider = self::getBookingProvider();
+            $rooms = $provider->availability()->getAvailableRooms(AvailabilitySearchRequest::fromContext($context));
+            $items = [];
+            $pricingCache = [];
 
-    $nonce = isset($_REQUEST['nonce']) ? (string) \wp_unslash($_REQUEST['nonce']) : '';
+            foreach ($rooms as $room) {
+                if (!\is_array($room)) {
+                    continue;
+                }
 
-    if (!\wp_verify_nonce($nonce, 'must_portal_quick_booking_available_rooms')) {
-        \wp_send_json_error(['message' => \__('Security check failed.', 'must-hotel-booking')], 403);
-    }
+                $physicalRoomId = isset($room['id']) ? (int) $room['id'] : 0;
 
-    try {
-        $checkin = self::normalizeQuickBookingDate($_REQUEST['checkin'] ?? '');
-        $checkout = self::normalizeQuickBookingDate($_REQUEST['checkout'] ?? '');
-        $guests = isset($_REQUEST['guests']) ? \max(1, \absint(\wp_unslash($_REQUEST['guests']))) : 1;
-        $roomTypeId = isset($_REQUEST['room_type_id']) ? \absint(\wp_unslash($_REQUEST['room_type_id'])) : 0;
+                if ($physicalRoomId <= 0) {
+                    continue;
+                }
 
-        $accommodationType = 'all';
+                $parentRoomTypeId = isset($room['room_type_id']) ? (int) $room['room_type_id'] : 0;
 
-        if ($roomTypeId > 0 && RoomCatalog::isClockBackendMode()) {
-            $accommodationType = RoomCatalog::roomTypeBookingValue($roomTypeId);
-        }
+                if ($roomTypeId > 0 && $parentRoomTypeId > 0 && $parentRoomTypeId !== $roomTypeId) {
+                    continue;
+                }
 
-        $context = BookingValidationEngine::parseRequestContext(
-            [
+                $quoteRoomId = $parentRoomTypeId > 0 ? $parentRoomTypeId : $physicalRoomId;
+                $cacheKey = $quoteRoomId . '|' . $checkin . '|' . $checkout . '|' . $guests;
+
+                if (!isset($pricingCache[$cacheKey])) {
+                    $pricingCache[$cacheKey] = $provider->quote()->calculateTotal($quoteRoomId, $checkin, $checkout, $guests);
+                }
+
+                $pricing = \is_array($pricingCache[$cacheKey]) ? $pricingCache[$cacheKey] : [];
+
+                if (empty($pricing['success'])) {
+                    continue;
+                }
+
+                $total = isset($pricing['total_price']) ? (float) $pricing['total_price'] : 0.0;
+                $currency = MustBookingConfig::get_currency();
+
+                $roomTypeName = '';
+
+                if ($parentRoomTypeId > 0) {
+                    $parentRoom = \MustHotelBooking\Engine\get_room_repository()->getRoomById($parentRoomTypeId);
+                    $roomTypeName = \is_array($parentRoom) ? (string) ($parentRoom['name'] ?? '') : '';
+                }
+
+                if ($roomTypeName === '') {
+                    $roomTypeName = (string) ($room['category_label'] ?? $room['category'] ?? '');
+                }
+
+                $items[] = [
+                    'id' => $physicalRoomId,
+                    'room_type_id' => $parentRoomTypeId,
+                    'name' => (string) ($room['public_title'] ?? $room['name'] ?? ('#' . $physicalRoomId)),
+                    'room_type_name' => $roomTypeName,
+                    'max_guests' => isset($room['max_guests']) ? (int) $room['max_guests'] : 0,
+                    'total_price' => $total,
+                    'currency' => $currency,
+                    'formatted_total' => \number_format_i18n($total, 2) . ' ' . $currency,
+                ];
+            }
+
+            \wp_send_json_success([
                 'checkin' => $checkin,
                 'checkout' => $checkout,
                 'guests' => $guests,
-                'room_count' => 1,
-                'accommodation_type' => $accommodationType,
-            ],
-            true
-        );
-
-        if (empty($context['is_valid'])) {
+                'room_type_id' => $roomTypeId,
+                'rooms' => $items,
+            ]);
+        } catch (\Throwable $throwable) {
             \wp_send_json_error([
-                'message' => \__('Please provide valid check-in and check-out dates.', 'must-hotel-booking'),
-                'errors' => (array) ($context['errors'] ?? []),
-            ], 400);
+                'message' => self::isClockRateLimitThrowable($throwable)
+                    ? \__('Clock PMS is rate limiting requests. Please wait a few seconds and try again.', 'must-hotel-booking')
+                    : \__('Unable to load available rooms for these dates.', 'must-hotel-booking'),
+            ], 500);
         }
-
-        $provider = self::getBookingProvider();
-        $rooms = $provider->availability()->getAvailableRooms(AvailabilitySearchRequest::fromContext($context));
-        $items = [];
-        $pricingCache = [];
-
-        foreach ($rooms as $room) {
-            if (!\is_array($room)) {
-                continue;
-            }
-
-            $physicalRoomId = isset($room['id']) ? (int) $room['id'] : 0;
-
-            if ($physicalRoomId <= 0) {
-                continue;
-            }
-
-            $parentRoomTypeId = isset($room['room_type_id']) ? (int) $room['room_type_id'] : 0;
-
-            if ($roomTypeId > 0 && $parentRoomTypeId > 0 && $parentRoomTypeId !== $roomTypeId) {
-                continue;
-            }
-
-            $quoteRoomId = $parentRoomTypeId > 0 ? $parentRoomTypeId : $physicalRoomId;
-            $cacheKey = $quoteRoomId . '|' . $checkin . '|' . $checkout . '|' . $guests;
-
-            if (!isset($pricingCache[$cacheKey])) {
-                $pricingCache[$cacheKey] = $provider->quote()->calculateTotal($quoteRoomId, $checkin, $checkout, $guests);
-            }
-
-            $pricing = \is_array($pricingCache[$cacheKey]) ? $pricingCache[$cacheKey] : [];
-
-            if (empty($pricing['success'])) {
-                continue;
-            }
-
-            $total = isset($pricing['total_price']) ? (float) $pricing['total_price'] : 0.0;
-            $currency = MustBookingConfig::get_currency();
-
-            $roomTypeName = '';
-
-            if ($parentRoomTypeId > 0) {
-                $parentRoom = \MustHotelBooking\Engine\get_room_repository()->getRoomById($parentRoomTypeId);
-                $roomTypeName = \is_array($parentRoom) ? (string) ($parentRoom['name'] ?? '') : '';
-            }
-
-            if ($roomTypeName === '') {
-                $roomTypeName = (string) ($room['category_label'] ?? $room['category'] ?? '');
-            }
-
-            $items[] = [
-                'id' => $physicalRoomId,
-                'room_type_id' => $parentRoomTypeId,
-                'name' => (string) ($room['public_title'] ?? $room['name'] ?? ('#' . $physicalRoomId)),
-                'room_type_name' => $roomTypeName,
-                'max_guests' => isset($room['max_guests']) ? (int) $room['max_guests'] : 0,
-                'total_price' => $total,
-                'currency' => $currency,
-                'formatted_total' => \number_format_i18n($total, 2) . ' ' . $currency,
-            ];
-        }
-
-        \wp_send_json_success([
-            'checkin' => $checkin,
-            'checkout' => $checkout,
-            'guests' => $guests,
-            'room_type_id' => $roomTypeId,
-            'rooms' => $items,
-        ]);
-    } catch (\Throwable $throwable) {
-        \wp_send_json_error([
-            'message' => self::isClockRateLimitThrowable($throwable)
-                ? \__('Clock PMS is rate limiting requests. Please wait a few seconds and try again.', 'must-hotel-booking')
-                : \__('Unable to load available rooms for these dates.', 'must-hotel-booking'),
-        ], 500);
     }
-}
     public static function ajaxQuickBookingPreview(): void
     {
         if (!\current_user_can(StaffAccess::CAP_RESERVATION_CREATE)) {
@@ -323,54 +372,54 @@ public static function ajaxQuickBookingAvailableRooms(): void
         }
 
         try {
-        $roomId = isset($_REQUEST['room_id']) ? \absint(\wp_unslash($_REQUEST['room_id'])) : 0;
-        $checkin = self::normalizeQuickBookingDate($_REQUEST['checkin'] ?? '');
-        $checkout = self::normalizeQuickBookingDate($_REQUEST['checkout'] ?? '');
-        $guests = isset($_REQUEST['guests']) ? \max(1, \absint(\wp_unslash($_REQUEST['guests']))) : 1;
-        $errors = [];
+            $roomId = isset($_REQUEST['room_id']) ? \absint(\wp_unslash($_REQUEST['room_id'])) : 0;
+            $checkin = self::normalizeQuickBookingDate($_REQUEST['checkin'] ?? '');
+            $checkout = self::normalizeQuickBookingDate($_REQUEST['checkout'] ?? '');
+            $guests = isset($_REQUEST['guests']) ? \max(1, \absint(\wp_unslash($_REQUEST['guests']))) : 1;
+            $errors = [];
 
-        if ($roomId <= 0 || !self::doesQuickBookingRoomExist($roomId)) {
-            $errors[] = \__('Please select a valid room.', 'must-hotel-booking');
-        }
+            if ($roomId <= 0 || !self::doesQuickBookingRoomExist($roomId)) {
+                $errors[] = \__('Please select a valid room.', 'must-hotel-booking');
+            }
 
-        if (!AvailabilityEngine::isValidBookingDate($checkin) || !AvailabilityEngine::isValidBookingDate($checkout) || $checkin >= $checkout) {
-            $errors[] = \__('Please provide valid check-in and check-out dates.', 'must-hotel-booking');
-        }
+            if (!AvailabilityEngine::isValidBookingDate($checkin) || !AvailabilityEngine::isValidBookingDate($checkout) || $checkin >= $checkout) {
+                $errors[] = \__('Please provide valid check-in and check-out dates.', 'must-hotel-booking');
+            }
 
-        if (empty($errors) && !self::getBookingProvider()->availability()->checkAvailability($roomId, $checkin, $checkout)) {
-            $errors[] = \__('This room is not available for the selected dates.', 'must-hotel-booking');
-        }
+            if (empty($errors) && !self::getBookingProvider()->availability()->checkAvailability($roomId, $checkin, $checkout)) {
+                $errors[] = \__('This room is not available for the selected dates.', 'must-hotel-booking');
+            }
 
-        if (!empty($errors)) {
-            \wp_send_json_error([
-                'message' => isset($errors[0]) ? $errors[0] : \__('Unable to preview this booking.', 'must-hotel-booking'),
-                'errors' => $errors,
-            ], 400);
-        }
+            if (!empty($errors)) {
+                \wp_send_json_error([
+                    'message' => isset($errors[0]) ? $errors[0] : \__('Unable to preview this booking.', 'must-hotel-booking'),
+                    'errors' => $errors,
+                ], 400);
+            }
 
-        $pricing = self::getQuickBookingPricingPreview([
-            'room_id' => $roomId,
-            'checkin' => $checkin,
-            'checkout' => $checkout,
-            'guests' => $guests,
-        ]);
+            $pricing = self::getQuickBookingPricingPreview([
+                'room_id' => $roomId,
+                'checkin' => $checkin,
+                'checkout' => $checkout,
+                'guests' => $guests,
+            ]);
 
-        if (empty($pricing['success'])) {
-            \wp_send_json_error([
-                'message' => (string) ($pricing['message'] ?? \__('Unable to calculate the room price for these dates.', 'must-hotel-booking')),
-            ], 400);
-        }
+            if (empty($pricing['success'])) {
+                \wp_send_json_error([
+                    'message' => (string) ($pricing['message'] ?? \__('Unable to calculate the room price for these dates.', 'must-hotel-booking')),
+                ], 400);
+            }
 
-        $total = isset($pricing['total_price']) ? (float) $pricing['total_price'] : 0.0;
-        $currency = MustBookingConfig::get_currency();
+            $total = isset($pricing['total_price']) ? (float) $pricing['total_price'] : 0.0;
+            $currency = MustBookingConfig::get_currency();
 
-        \wp_send_json_success([
-            'available' => true,
-            'total_price' => $total,
-            'currency' => $currency,
-            'formatted_total' => \number_format_i18n($total, 2) . ' ' . $currency,
-            'nights' => isset($pricing['nights']) ? (int) $pricing['nights'] : 0,
-        ]);
+            \wp_send_json_success([
+                'available' => true,
+                'total_price' => $total,
+                'currency' => $currency,
+                'formatted_total' => \number_format_i18n($total, 2) . ' ' . $currency,
+                'nights' => isset($pricing['nights']) ? (int) $pricing['nights'] : 0,
+            ]);
         } catch (\Throwable $throwable) {
             \wp_send_json_error(['message' => \__('Unable to preview this booking.', 'must-hotel-booking')], 500);
         }
@@ -389,19 +438,19 @@ public static function ajaxQuickBookingAvailableRooms(): void
 
         $action = isset($_POST['must_portal_action']) ? \sanitize_key((string) \wp_unslash($_POST['must_portal_action'])) : '';
 
-if ($action === '') {
-    return [];
-}
+        if ($action === '') {
+            return [];
+        }
 
-if ($action === 'reservation_manual_clock_folio_payment_done') {
-    self::handleReservationManualClockFolioPaymentDone();
-    return [];
-}
+        if ($action === 'reservation_manual_clock_folio_payment_done') {
+            self::handleReservationManualClockFolioPaymentDone();
+            return [];
+        }
 
-if (self::shouldBlockProviderBackedPortalAction($action)) {
-    self::redirectToPortalReservationDetail(self::getPostedReservationId(), 'provider_backed_read_only');
-    return [];
-}
+        if (self::shouldBlockProviderBackedPortalAction($action)) {
+            self::redirectToPortalReservationDetail(self::getPostedReservationId(), 'provider_backed_read_only');
+            return [];
+        }
         if ($action === 'quick_booking_create') {
             return self::handleQuickBookingAction();
         }
@@ -661,85 +710,85 @@ if (self::shouldBlockProviderBackedPortalAction($action)) {
     }
 
     private static function handleReservationManualClockFolioPaymentDone(): void
-{
-    $reservationId = isset($_POST['reservation_id']) ? \absint(\wp_unslash($_POST['reservation_id'])) : 0;
-    $nonce = isset($_POST['must_portal_reservation_nonce']) ? (string) \wp_unslash($_POST['must_portal_reservation_nonce']) : '';
+    {
+        $reservationId = isset($_POST['reservation_id']) ? \absint(\wp_unslash($_POST['reservation_id'])) : 0;
+        $nonce = isset($_POST['must_portal_reservation_nonce']) ? (string) \wp_unslash($_POST['must_portal_reservation_nonce']) : '';
 
-    if ($reservationId <= 0 || !\wp_verify_nonce($nonce, 'must_portal_reservation_manual_clock_folio_payment_done_' . $reservationId)) {
-        self::redirectToPortalReservationDetail($reservationId, 'invalid_nonce');
+        if ($reservationId <= 0 || !\wp_verify_nonce($nonce, 'must_portal_reservation_manual_clock_folio_payment_done_' . $reservationId)) {
+            self::redirectToPortalReservationDetail($reservationId, 'invalid_nonce');
+        }
+
+        if (!\current_user_can(StaffAccess::CAP_PAYMENT_MARK_PAID) && !\current_user_can('manage_options')) {
+            self::redirectToPortalReservationDetail($reservationId, 'access_denied');
+        }
+
+        $reservationRepository = \MustHotelBooking\Engine\get_reservation_repository();
+        $reservation = $reservationRepository->getReservation($reservationId);
+
+        if (!\is_array($reservation)) {
+            self::redirectToPortalReservationDetail($reservationId, 'reservation_not_found');
+        }
+
+        $provider = \sanitize_key((string) ($reservation['provider'] ?? ''));
+
+        if ($provider !== \MustHotelBooking\Provider\ProviderManager::CLOCK_MODE) {
+            self::redirectToPortalReservationDetail($reservationId, 'portal_action_failed');
+        }
+
+        $metadata = [];
+
+        if (isset($reservation['provider_metadata']) && \is_array($reservation['provider_metadata'])) {
+            $metadata = $reservation['provider_metadata'];
+        } elseif (isset($reservation['provider_metadata']) && \is_string($reservation['provider_metadata']) && \trim($reservation['provider_metadata']) !== '') {
+            $decoded = \json_decode((string) $reservation['provider_metadata'], true);
+            $metadata = \is_array($decoded) ? $decoded : [];
+        }
+
+        $existing = isset($metadata['clock_folio_payment_sync']) && \is_array($metadata['clock_folio_payment_sync'])
+            ? $metadata['clock_folio_payment_sync']
+            : [];
+
+        $metadata['clock_folio_payment_sync'] = \array_merge(
+            $existing,
+            [
+                'success' => true,
+                'sync_status' => 'manual_done',
+                'sync_error' => '',
+                'manual_done_at' => \current_time('mysql'),
+                'manual_done_by' => \get_current_user_id(),
+                'manual_done_by_name' => self::getCurrentPortalActorName(),
+                'source' => 'portal_manual_clock_folio_payment_done',
+            ]
+        );
+
+        $updatePayload = [
+            'provider_metadata' => $metadata,
+        ];
+
+        $providerSyncError = \strtolower((string) ($reservation['provider_sync_error'] ?? ''));
+
+        if (\strpos($providerSyncError, 'pms_api_booking_folios_default') !== false) {
+            $updatePayload['provider_sync_status'] = 'synced';
+            $updatePayload['provider_synced_at'] = \current_time('mysql');
+            $updatePayload['provider_sync_error'] = '';
+        }
+
+        $updated = $reservationRepository->updateProviderMetadata($reservationId, $updatePayload);
+
+        if (!$updated) {
+            self::redirectToPortalReservationDetail($reservationId, 'portal_action_failed');
+        }
+
+        self::logReservationActivity(
+            $reservationId,
+            $reservation,
+            'clock_folio_payment_manual_done',
+            'info',
+            \__('Manual Clock folio payment accounting marked done by staff.', 'must-hotel-booking')
+        );
+
+        self::redirectToPortalReservationDetail($reservationId, 'clock_folio_payment_manual_done');
     }
-
-    if (!\current_user_can(StaffAccess::CAP_PAYMENT_MARK_PAID) && !\current_user_can('manage_options')) {
-        self::redirectToPortalReservationDetail($reservationId, 'access_denied');
-    }
-
-    $reservationRepository = \MustHotelBooking\Engine\get_reservation_repository();
-    $reservation = $reservationRepository->getReservation($reservationId);
-
-    if (!\is_array($reservation)) {
-        self::redirectToPortalReservationDetail($reservationId, 'reservation_not_found');
-    }
-
-    $provider = \sanitize_key((string) ($reservation['provider'] ?? ''));
-
-    if ($provider !== \MustHotelBooking\Provider\ProviderManager::CLOCK_MODE) {
-        self::redirectToPortalReservationDetail($reservationId, 'portal_action_failed');
-    }
-
-    $metadata = [];
-
-    if (isset($reservation['provider_metadata']) && \is_array($reservation['provider_metadata'])) {
-        $metadata = $reservation['provider_metadata'];
-    } elseif (isset($reservation['provider_metadata']) && \is_string($reservation['provider_metadata']) && \trim($reservation['provider_metadata']) !== '') {
-        $decoded = \json_decode((string) $reservation['provider_metadata'], true);
-        $metadata = \is_array($decoded) ? $decoded : [];
-    }
-
-    $existing = isset($metadata['clock_folio_payment_sync']) && \is_array($metadata['clock_folio_payment_sync'])
-        ? $metadata['clock_folio_payment_sync']
-        : [];
-
-    $metadata['clock_folio_payment_sync'] = \array_merge(
-        $existing,
-        [
-            'success' => true,
-            'sync_status' => 'manual_done',
-            'sync_error' => '',
-            'manual_done_at' => \current_time('mysql'),
-            'manual_done_by' => \get_current_user_id(),
-            'manual_done_by_name' => self::getCurrentPortalActorName(),
-            'source' => 'portal_manual_clock_folio_payment_done',
-        ]
-    );
-
-    $updatePayload = [
-        'provider_metadata' => $metadata,
-    ];
-
-    $providerSyncError = \strtolower((string) ($reservation['provider_sync_error'] ?? ''));
-
-    if (\strpos($providerSyncError, 'pms_api_booking_folios_default') !== false) {
-        $updatePayload['provider_sync_status'] = 'synced';
-        $updatePayload['provider_synced_at'] = \current_time('mysql');
-        $updatePayload['provider_sync_error'] = '';
-    }
-
-    $updated = $reservationRepository->updateProviderMetadata($reservationId, $updatePayload);
-
-    if (!$updated) {
-        self::redirectToPortalReservationDetail($reservationId, 'portal_action_failed');
-    }
-
-    self::logReservationActivity(
-        $reservationId,
-        $reservation,
-        'clock_folio_payment_manual_done',
-        'info',
-        \__('Manual Clock folio payment accounting marked done by staff.', 'must-hotel-booking')
-    );
-
-    self::redirectToPortalReservationDetail($reservationId, 'clock_folio_payment_manual_done');
-}
 
     /**
      * @return array<string, mixed>
@@ -763,45 +812,45 @@ if (self::shouldBlockProviderBackedPortalAction($action)) {
         }
 
         try {
-        /** @var array<string, mixed> $rawPost */
-        $rawPost = \is_array($_POST) ? $_POST : [];
-        $form = self::sanitizeQuickBookingFormValues($rawPost);
-        $form = self::mergeQuickBookingBillingFields($form, $rawPost);
-        $errors = isset($form['errors']) && \is_array($form['errors']) ? $form['errors'] : [];
+            /** @var array<string, mixed> $rawPost */
+            $rawPost = \is_array($_POST) ? $_POST : [];
+            $form = self::sanitizeQuickBookingFormValues($rawPost);
+            $form = self::mergeQuickBookingBillingFields($form, $rawPost);
+            $errors = isset($form['errors']) && \is_array($form['errors']) ? $form['errors'] : [];
 
-        if (!empty($errors)) {
-            return [
-                'module_key' => 'front_desk',
-                'errors' => $errors,
-                'form' => $form,
-            ];
-        }
+            if (!empty($errors)) {
+                return [
+                    'module_key' => 'front_desk',
+                    'errors' => $errors,
+                    'form' => $form,
+                ];
+            }
 
-        $checkoutResult = self::prepareQuickBookingCheckoutFlow($form, $rawPost);
+            $checkoutResult = self::prepareQuickBookingCheckoutFlow($form, $rawPost);
 
-        if (empty($checkoutResult['success'])) {
-            $checkoutErrors = isset($checkoutResult['errors']) && \is_array($checkoutResult['errors'])
-                ? \array_values(\array_map('strval', $checkoutResult['errors']))
-                : [\__('Unable to prepare this booking for payment.', 'must-hotel-booking')];
+            if (empty($checkoutResult['success'])) {
+                $checkoutErrors = isset($checkoutResult['errors']) && \is_array($checkoutResult['errors'])
+                    ? \array_values(\array_map('strval', $checkoutResult['errors']))
+                    : [\__('Unable to prepare this booking for payment.', 'must-hotel-booking')];
 
-            return [
-                'module_key' => 'front_desk',
-                'errors' => $checkoutErrors,
-                'form' => $form,
-            ];
-        }
+                return [
+                    'module_key' => 'front_desk',
+                    'errors' => $checkoutErrors,
+                    'form' => $form,
+                ];
+            }
 
-        $redirectUrl = isset($checkoutResult['redirect_url']) ? (string) $checkoutResult['redirect_url'] : '';
+            $redirectUrl = isset($checkoutResult['redirect_url']) ? (string) $checkoutResult['redirect_url'] : '';
 
-        \wp_safe_redirect($redirectUrl !== '' ? $redirectUrl : ManagedPages::getBookingConfirmationPageUrl());
-        exit;
+            \wp_safe_redirect($redirectUrl !== '' ? $redirectUrl : ManagedPages::getBookingConfirmationPageUrl());
+            exit;
         } catch (\Throwable $throwable) {
             return [
                 'module_key' => 'front_desk',
                 'errors' => [
                     self::isClockRateLimitThrowable($throwable)
-                        ? \__('Clock PMS is rate limiting requests. Please wait a few seconds and try again.', 'must-hotel-booking')
-                        : \__('Unable to prepare this booking. Please review the details and try again.', 'must-hotel-booking'),
+                    ? \__('Clock PMS is rate limiting requests. Please wait a few seconds and try again.', 'must-hotel-booking')
+                    : \__('Unable to prepare this booking. Please review the details and try again.', 'must-hotel-booking'),
                 ],
                 'form' => isset($form) && \is_array($form) ? $form : null,
             ];
@@ -1843,133 +1892,133 @@ if (self::shouldBlockProviderBackedPortalAction($action)) {
         self::redirectToPortalPaymentDetail($reservationId, (string) ($result['notice'] ?? 'payment_posted'));
     }
 
-/**
- * @return array<string, mixed>
- */
-private static function handlePaymentRefund(): array
-{
-    $reservationId = isset($_POST['reservation_id']) ? \absint(\wp_unslash($_POST['reservation_id'])) : 0;
-    $nonce = isset($_POST['must_portal_payment_nonce']) ? (string) \wp_unslash($_POST['must_portal_payment_nonce']) : '';
+    /**
+     * @return array<string, mixed>
+     */
+    private static function handlePaymentRefund(): array
+    {
+        $reservationId = isset($_POST['reservation_id']) ? \absint(\wp_unslash($_POST['reservation_id'])) : 0;
+        $nonce = isset($_POST['must_portal_payment_nonce']) ? (string) \wp_unslash($_POST['must_portal_payment_nonce']) : '';
 
-    $rawAmount = isset($_POST['amount']) && !\is_array($_POST['amount']) ? (string) \wp_unslash($_POST['amount']) : '';
-    $amount = (float) $rawAmount;
+        $rawAmount = isset($_POST['amount']) && !\is_array($_POST['amount']) ? (string) \wp_unslash($_POST['amount']) : '';
+        $amount = (float) $rawAmount;
 
-    $reason = isset($_POST['reason']) && !\is_array($_POST['reason'])
-        ? \sanitize_text_field((string) \wp_unslash($_POST['reason']))
-        : '';
+        $reason = isset($_POST['reason']) && !\is_array($_POST['reason'])
+            ? \sanitize_text_field((string) \wp_unslash($_POST['reason']))
+            : '';
 
-    $refundType = isset($_POST['refund_type']) && !\is_array($_POST['refund_type'])
-        ? \sanitize_key((string) \wp_unslash($_POST['refund_type']))
-        : 'refund_only';
+        $refundType = isset($_POST['refund_type']) && !\is_array($_POST['refund_type'])
+            ? \sanitize_key((string) \wp_unslash($_POST['refund_type']))
+            : 'refund_only';
 
-    $refundAmountMode = isset($_POST['refund_amount_mode']) && !\is_array($_POST['refund_amount_mode'])
-        ? \sanitize_key((string) \wp_unslash($_POST['refund_amount_mode']))
-        : 'fixed';
+        $refundAmountMode = isset($_POST['refund_amount_mode']) && !\is_array($_POST['refund_amount_mode'])
+            ? \sanitize_key((string) \wp_unslash($_POST['refund_amount_mode']))
+            : 'fixed';
 
-    $refundPercent = isset($_POST['refund_percent']) && !\is_array($_POST['refund_percent'])
-        ? (float) \wp_unslash($_POST['refund_percent'])
-        : 0.0;
+        $refundPercent = isset($_POST['refund_percent']) && !\is_array($_POST['refund_percent'])
+            ? (float) \wp_unslash($_POST['refund_percent'])
+            : 0.0;
 
-    if (!\in_array($refundType, ['refund_only', 'full_refund_cancel', 'partial_refund', 'partial_refund_cancel'], true)) {
-        $refundType = 'refund_only';
-    }
+        if (!\in_array($refundType, ['refund_only', 'full_refund_cancel', 'partial_refund', 'partial_refund_cancel'], true)) {
+            $refundType = 'refund_only';
+        }
 
-    if (!\in_array($refundAmountMode, ['fixed', 'percent'], true)) {
-        $refundAmountMode = 'fixed';
-    }
+        if (!\in_array($refundAmountMode, ['fixed', 'percent'], true)) {
+            $refundAmountMode = 'fixed';
+        }
 
-    $cancelReservation = \in_array($refundType, ['full_refund_cancel', 'partial_refund_cancel'], true);
-    $isPartialRefund = \in_array($refundType, ['partial_refund', 'partial_refund_cancel'], true);
+        $cancelReservation = \in_array($refundType, ['full_refund_cancel', 'partial_refund_cancel'], true);
+        $isPartialRefund = \in_array($refundType, ['partial_refund', 'partial_refund_cancel'], true);
 
-    $form = [
-        'amount' => $amount > 0 ? \number_format($amount, 2, '.', '') : '',
-        'reason' => $reason,
-        'refund_type' => $refundType,
-        'refund_amount_mode' => $refundAmountMode,
-        'refund_percent' => $refundPercent > 0 ? (string) $refundPercent : '',
-    ];
+        $form = [
+            'amount' => $amount > 0 ? \number_format($amount, 2, '.', '') : '',
+            'reason' => $reason,
+            'refund_type' => $refundType,
+            'refund_amount_mode' => $refundAmountMode,
+            'refund_percent' => $refundPercent > 0 ? (string) $refundPercent : '',
+        ];
 
-    if ($reservationId <= 0 || !\wp_verify_nonce($nonce, 'must_portal_payment_action_payment_refund_' . $reservationId)) {
-        return self::buildPaymentActionState(
-            $reservationId,
-            ['refund' => $form],
-            [\__('Security check failed. Please try again.', 'must-hotel-booking')]
-        );
-    }
-
-    if (!\current_user_can(StaffAccess::CAP_PAYMENT_REFUND) && !\current_user_can('manage_options')) {
-        return self::buildPaymentActionState(
-            $reservationId,
-            ['refund' => $form],
-            [\__('You do not have permission to issue refunds from the portal.', 'must-hotel-booking')]
-        );
-    }
-
-    $detail = (new PaymentAdminDataProvider())->getDetailDataForReservation($reservationId);
-    $state = \is_array($detail) && isset($detail['state']) && \is_array($detail['state']) ? $detail['state'] : [];
-    $amountPaid = (float) ($state['amount_paid'] ?? 0.0);
-
-    if (!$isPartialRefund && $amountPaid > 0.0) {
-        $amount = $amountPaid;
-    }
-
-    if ($isPartialRefund && $refundAmountMode === 'percent') {
-        $amount = \round($amountPaid * ($refundPercent / 100), 2);
-    }
-
-    $form['amount'] = $amount > 0 ? \number_format($amount, 2, '.', '') : '';
-
-    if ($isPartialRefund) {
-        if ($amountPaid <= 0.0) {
+        if ($reservationId <= 0 || !\wp_verify_nonce($nonce, 'must_portal_payment_action_payment_refund_' . $reservationId)) {
             return self::buildPaymentActionState(
                 $reservationId,
                 ['refund' => $form],
-                [\__('There is no recorded paid balance available to refund.', 'must-hotel-booking')]
+                [\__('Security check failed. Please try again.', 'must-hotel-booking')]
             );
         }
 
-        if ($amount <= 0.0) {
+        if (!\current_user_can(StaffAccess::CAP_PAYMENT_REFUND) && !\current_user_can('manage_options')) {
             return self::buildPaymentActionState(
                 $reservationId,
                 ['refund' => $form],
-                [\__('Partial refund amount must be greater than zero.', 'must-hotel-booking')]
+                [\__('You do not have permission to issue refunds from the portal.', 'must-hotel-booking')]
             );
         }
 
-        if ($amount >= $amountPaid) {
+        $detail = (new PaymentAdminDataProvider())->getDetailDataForReservation($reservationId);
+        $state = \is_array($detail) && isset($detail['state']) && \is_array($detail['state']) ? $detail['state'] : [];
+        $amountPaid = (float) ($state['amount_paid'] ?? 0.0);
+
+        if (!$isPartialRefund && $amountPaid > 0.0) {
+            $amount = $amountPaid;
+        }
+
+        if ($isPartialRefund && $refundAmountMode === 'percent') {
+            $amount = \round($amountPaid * ($refundPercent / 100), 2);
+        }
+
+        $form['amount'] = $amount > 0 ? \number_format($amount, 2, '.', '') : '';
+
+        if ($isPartialRefund) {
+            if ($amountPaid <= 0.0) {
+                return self::buildPaymentActionState(
+                    $reservationId,
+                    ['refund' => $form],
+                    [\__('There is no recorded paid balance available to refund.', 'must-hotel-booking')]
+                );
+            }
+
+            if ($amount <= 0.0) {
+                return self::buildPaymentActionState(
+                    $reservationId,
+                    ['refund' => $form],
+                    [\__('Partial refund amount must be greater than zero.', 'must-hotel-booking')]
+                );
+            }
+
+            if ($amount >= $amountPaid) {
+                return self::buildPaymentActionState(
+                    $reservationId,
+                    ['refund' => $form],
+                    [\__('Partial refund amount must be lower than the total paid amount. Use full refund instead.', 'must-hotel-booking')]
+                );
+            }
+
+            if ($refundAmountMode === 'percent' && ($refundPercent <= 0.0 || $refundPercent >= 100.0)) {
+                return self::buildPaymentActionState(
+                    $reservationId,
+                    ['refund' => $form],
+                    [\__('Partial refund percentage must be greater than 0 and lower than 100.', 'must-hotel-booking')]
+                );
+            }
+        }
+
+        $result = (new PaymentAdminActions())->refundRecordedPayment($reservationId, $amount, [
+            'reason' => $reason,
+            'refund_type' => $refundType,
+            'cancel_reservation' => $cancelReservation,
+            'source' => 'portal',
+        ]);
+
+        if (empty($result['success'])) {
             return self::buildPaymentActionState(
                 $reservationId,
                 ['refund' => $form],
-                [\__('Partial refund amount must be lower than the total paid amount. Use full refund instead.', 'must-hotel-booking')]
+                [isset($result['message']) ? (string) $result['message'] : \__('Unable to issue the refund.', 'must-hotel-booking')]
             );
         }
 
-        if ($refundAmountMode === 'percent' && ($refundPercent <= 0.0 || $refundPercent >= 100.0)) {
-            return self::buildPaymentActionState(
-                $reservationId,
-                ['refund' => $form],
-                [\__('Partial refund percentage must be greater than 0 and lower than 100.', 'must-hotel-booking')]
-            );
-        }
+        self::redirectToPortalPaymentDetail($reservationId, (string) ($result['notice'] ?? 'payment_refunded'));
     }
-
-    $result = (new PaymentAdminActions())->refundRecordedPayment($reservationId, $amount, [
-        'reason' => $reason,
-        'refund_type' => $refundType,
-        'cancel_reservation' => $cancelReservation,
-        'source' => 'portal',
-    ]);
-
-    if (empty($result['success'])) {
-        return self::buildPaymentActionState(
-            $reservationId,
-            ['refund' => $form],
-            [isset($result['message']) ? (string) $result['message'] : \__('Unable to issue the refund.', 'must-hotel-booking')]
-        );
-    }
-
-    self::redirectToPortalPaymentDetail($reservationId, (string) ($result['notice'] ?? 'payment_refunded'));
-}
     /**
      * @return array<string, mixed>
      */
