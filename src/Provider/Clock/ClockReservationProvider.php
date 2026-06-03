@@ -406,7 +406,24 @@ final class ClockReservationProvider implements ReservationProviderInterface
                 'success' => true,
                 'messages' => [],
                 'context' => $context,
-                'redirect_url' => \MustHotelBooking\Frontend\get_checkout_context_url($context),
+                'redirect_url' => \add_query_arg(
+                    \array_filter(
+                        [
+                            'room_id' => !empty($selection['is_physical']) ? (int) ($selection['room_type_id'] ?? $roomId) : $roomId,
+                            'inventory_room_id' => !empty($selection['is_physical']) ? (int) ($selection['physical_room_id'] ?? 0) : 0,
+                            'checkin' => (string) $context['checkin'],
+                            'checkout' => (string) $context['checkout'],
+                            'guests' => (int) $context['guests'],
+                            'room_count' => (int) ($context['room_count'] ?? 1),
+                            'accommodation_type' => (string) $context['accommodation_type'],
+                            'rate_plan_id' => $ratePlanId,
+                        ],
+                        static function ($value): bool {
+                            return $value !== 0 && $value !== '';
+                        }
+                    ),
+                    \MustHotelBooking\Frontend\get_checkout_page_url()
+                ),
                 'should_redirect' => true,
             ];
         }

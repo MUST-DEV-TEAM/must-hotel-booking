@@ -63,10 +63,11 @@ final class BookingValidationEngine
             ? RoomCatalog::normalizeCategory((string) $room['category'])
             : 'standard-rooms';
         $roomId = isset($room['id']) ? \absint($room['id']) : 0;
+        $roomTypeId = isset($room['room_type_id']) ? \absint($room['room_type_id']) : $roomId;
         $roomMaxGuests = isset($room['max_guests']) ? \max(1, (int) $room['max_guests']) : 1;
 
-        $context['accommodation_type'] = $roomId > 0 && RoomCatalog::isClockBackendMode()
-            ? RoomCatalog::roomTypeBookingValue($roomId)
+        $context['accommodation_type'] = $roomTypeId > 0 && RoomCatalog::isClockBackendMode()
+            ? RoomCatalog::roomTypeBookingValue($roomTypeId)
             : $roomCategory;
         $context['guests'] = \max(1, \min($roomMaxGuests, (int) ($context['guests'] ?? 1)));
         $context['room_count'] = 1;

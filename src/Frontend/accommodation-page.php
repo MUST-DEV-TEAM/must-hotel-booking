@@ -151,6 +151,40 @@ function get_provider_accommodation_room_rate_plans(int $room_id, string $checki
 }
 
 /**
+ * Resolve the room/rate quote context for a result card.
+ *
+ * Physical inventory rooms are the sellable units, but provider pricing and
+ * rate-plan products are grouped by the parent room type.
+ *
+ * @param array<string, mixed> $room
+ */
+function get_accommodation_room_quote_context_id(array $room): int
+{
+    $room_type_id = isset($room['room_type_id']) ? (int) $room['room_type_id'] : 0;
+
+    if ($room_type_id > 0) {
+        return $room_type_id;
+    }
+
+    return isset($room['id']) ? (int) $room['id'] : 0;
+}
+
+function get_accommodation_provider_rate_limit_message(): string
+{
+    return \__('Clock PMS is rate limiting requests. Please wait a few seconds and try again.', 'must-hotel-booking');
+}
+
+function is_accommodation_provider_rate_limit_message(string $message): bool
+{
+    $normalized = \strtolower($message);
+
+    return \strpos($normalized, '429') !== false
+        || \strpos($normalized, 'too many requests') !== false
+        || \strpos($normalized, 'rate limit') !== false
+        || \strpos($normalized, 'rate limiting') !== false;
+}
+
+/**
  * Process a room-selection request and return a reusable result payload.
  *
  * @param array<string, mixed> $request_source
@@ -296,6 +330,9 @@ function get_accommodation_page_view_data(): array
     $single_room_mode = $resolved_room_count <= 1;
     $rooms = [];
     $no_rooms_message = \__('No rooms are available for the selected dates.', 'must-hotel-booking');
+    $provider_messages = [];
+    $pricing_cache = [];
+    $rate_plans_cache = [];
 
     if ($has_context && !empty($context['is_valid'])) {
         $room_results = get_provider_available_accommodation_rooms(
@@ -317,16 +354,30 @@ function get_accommodation_page_view_data(): array
                     continue;
                 }
 
+                $quote_room_id = get_accommodation_room_quote_context_id($room);
+
+                if ($quote_room_id <= 0) {
+                    continue;
+                }
+
                 if ($single_room_mode) {
-                    $pricing = get_provider_accommodation_room_pricing(
-                        $room_id,
-                        (string) $context['checkin'],
-                        (string) $context['checkout'],
-                        (int) $context['guests']
-                    );
+                    $pricing_cache_key = $quote_room_id . ':g' . (int) $context['guests'];
+
+                    if (!\array_key_exists($pricing_cache_key, $pricing_cache)) {
+                        $pricing_cache[$pricing_cache_key] = get_provider_accommodation_room_pricing(
+                            $quote_room_id,
+                            (string) $context['checkin'],
+                            (string) $context['checkout'],
+                            (int) $context['guests']
+                        );
+                    }
+
+                    $pricing = \is_array($pricing_cache[$pricing_cache_key]) ? $pricing_cache[$pricing_cache_key] : [];
 
                     if (\is_array($pricing) && !empty($pricing['success']) && isset($pricing['total_price'])) {
                         $room['price_preview_total'] = (float) $pricing['total_price'];
+                    } elseif (!empty($pricing['message'])) {
+                        $provider_messages[] = (string) $pricing['message'];
                     }
                 }
 
@@ -336,12 +387,18 @@ function get_accommodation_page_view_data(): array
 
                 if ($room_view !== null && \is_array($room_view)) {
                     $display_guests = $single_room_mode ? (int) ($context['guests'] ?? 1) : 1;
-                    $rate_plans = get_provider_accommodation_room_rate_plans(
-                        $room_id,
-                        (string) $context['checkin'],
-                        (string) $context['checkout'],
-                        $display_guests
-                    );
+                    $rate_plans_cache_key = $quote_room_id . ':g' . $display_guests;
+
+                    if (!\array_key_exists($rate_plans_cache_key, $rate_plans_cache)) {
+                        $rate_plans_cache[$rate_plans_cache_key] = get_provider_accommodation_room_rate_plans(
+                            $quote_room_id,
+                            (string) $context['checkin'],
+                            (string) $context['checkout'],
+                            $display_guests
+                        );
+                    }
+
+                    $rate_plans = \is_array($rate_plans_cache[$rate_plans_cache_key]) ? $rate_plans_cache[$rate_plans_cache_key] : [];
                     $selected_rate_plan_id = isset($selected_rate_plan_map[$room_id]) ? (int) $selected_rate_plan_map[$room_id] : 0;
 
                     $room_view['rate_plans'] = \array_map(
@@ -367,6 +424,13 @@ function get_accommodation_page_view_data(): array
 
         if (empty($rooms)) {
             $no_rooms_message = AvailabilityEngine::getAccommodationEmptyResultsMessage($context, $resolved_room_count);
+
+            foreach ($provider_messages as $provider_message) {
+                if (is_accommodation_provider_rate_limit_message((string) $provider_message)) {
+                    $no_rooms_message = get_accommodation_provider_rate_limit_message();
+                    break;
+                }
+            }
         }
     }
 
