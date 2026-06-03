@@ -751,7 +751,14 @@ final class PaymentEngine
             );
         }
 
-        $successUrl = \str_replace('%7BCHECKOUT_SESSION_ID%7D', '{CHECKOUT_SESSION_ID}', $successUrl);
+        $successUrl = \str_replace(
+            [
+                '%7BCHECKOUT_SESSION_ID%7D',
+                '__STRIPE_CHECKOUT_SESSION_ID__',
+            ],
+            '{CHECKOUT_SESSION_ID}',
+            $successUrl
+        );
         $expiresAt = \time() + (self::getStripeCheckoutExpiryMinutes() * 60);
         $payload = [
             'mode' => 'payment',

@@ -68,19 +68,52 @@ final class PortalController
         $portalPayment = isset($_GET['portal_payment'])
             ? \sanitize_key((string) \wp_unslash($_GET['portal_payment']))
             : '';
+
         if ($portalPayment !== 'success') {
             return;
         }
+
         $sessionId = isset($_GET['session_id'])
             ? \sanitize_text_field((string) \wp_unslash($_GET['session_id']))
             : '';
+
         $reservationIds = isset($_GET['reservation_ids'])
             ? \array_values(\array_filter(\array_map('intval', \explode(',', (string) \wp_unslash($_GET['reservation_ids'])))))
             : [];
+
         if ($sessionId === '' || empty($reservationIds)) {
             return;
         }
-        PaymentEngine::syncReturnSession('stripe', $sessionId, $reservationIds);
+
+        $lastResult = [];
+
+        for ($attempt = 1; $attempt <= 3; $attempt++) {
+            try {
+                $lastResult = PaymentEngine::syncReturnSession('stripe', $sessionId, $reservationIds);
+            } catch (\Throwable $throwable) {
+                \error_log('[MHB Portal Stripe Return] Sync failed: ' . $throwable->getMessage());
+                return;
+            }
+
+            $state = isset($lastResult['state']) ? (string) $lastResult['state'] : '';
+
+            if (!empty($lastResult['success']) && $state === 'paid') {
+                return;
+            }
+
+            if ($attempt < 3) {
+                \usleep(500000);
+            }
+        }
+
+        \error_log(
+            '[MHB Portal Stripe Return] Payment not confirmed after return sync. Session: '
+            . $sessionId
+            . ' Reservations: '
+            . \implode(',', $reservationIds)
+            . ' Result: '
+            . \wp_json_encode($lastResult)
+        );
     }
     private static function isPortalPathRequest(): bool
     {
@@ -842,11 +875,10 @@ final class PortalController
                 'portal_payment' => 'success',
                 'reservation_ids' => \implode(',', $reservationIds),
                 'payment_method' => 'stripe',
-                'session_id' => '{CHECKOUT_SESSION_ID}',
+                'session_id' => '__STRIPE_CHECKOUT_SESSION_ID__',
             ],
             PortalRouter::getModuleUrl('front_desk')
         );
-        $successUrl = \str_replace('%7BCHECKOUT_SESSION_ID%7D', '{CHECKOUT_SESSION_ID}', $successUrl);
         $cancelUrl = \add_query_arg(
             [
                 'tab' => 'new-booking',
