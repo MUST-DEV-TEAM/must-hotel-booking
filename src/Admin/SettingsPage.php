@@ -161,11 +161,9 @@ final class SettingsPage
         self::renderOverviewCards($diagnostics);
         self::renderTabNavigation($activeTab);
         self::renderActiveTab($activeTab, $forms, $diagnostics);
-
         if ($activeTab === 'maintenance') {
             \MustHotelBooking\Core\SupportDiagnosticsEndpoint::renderSettingsCard();
         }
-
         echo '</div>';
     }
     /**
@@ -1120,6 +1118,7 @@ final class SettingsPage
             'hotel_name' => (string) MustBookingConfig::get_setting('hotel_name', MustBookingConfig::get_hotel_name()),
             'hotel_legal_name' => (string) MustBookingConfig::get_setting('hotel_legal_name', ''),
             'hotel_address' => (string) MustBookingConfig::get_setting('hotel_address', ''),
+            'google_maps_url' => (string) MustBookingConfig::get_setting('google_maps_url', ''),
             'hotel_phone' => (string) MustBookingConfig::get_setting('hotel_phone', ''),
             'hotel_email' => (string) MustBookingConfig::get_setting('hotel_email', ''),
             'booking_notification_email' => MustBookingConfig::get_booking_notification_email(),
@@ -1267,7 +1266,10 @@ final class SettingsPage
             'email_from_name' => MustBookingConfig::get_email_from_name(),
             'email_from_email' => MustBookingConfig::get_email_from_email(),
             'email_reply_to' => MustBookingConfig::get_email_reply_to(),
-            'email_logo_url' => MustBookingConfig::get_email_logo_url(),
+            // Important: show the saved email-logo value only.
+            // Do not use MustBookingConfig::get_email_logo_url() here,
+            // because that method now includes fallback logic.
+            'email_logo_url' => (string) MustBookingConfig::get_setting('email_logo_url', ''),
             'email_button_color' => MustBookingConfig::get_email_button_color(),
             'email_footer_text' => MustBookingConfig::get_email_footer_text(),
             'email_layout_type' => MustBookingConfig::get_email_layout_type(),
@@ -1306,6 +1308,7 @@ final class SettingsPage
             'hotel_name' => \sanitize_text_field((string) \wp_unslash($source['hotel_name'] ?? '')),
             'hotel_legal_name' => \sanitize_text_field((string) \wp_unslash($source['hotel_legal_name'] ?? '')),
             'hotel_address' => \sanitize_textarea_field((string) \wp_unslash($source['hotel_address'] ?? '')),
+            'google_maps_url' => \esc_url_raw((string) \wp_unslash($source['google_maps_url'] ?? '')),
             'hotel_phone' => \sanitize_text_field((string) \wp_unslash($source['hotel_phone'] ?? '')),
             'hotel_email' => \sanitize_email((string) \wp_unslash($source['hotel_email'] ?? '')),
             'booking_notification_email' => \sanitize_email((string) \wp_unslash($source['booking_notification_email'] ?? '')),
@@ -1342,6 +1345,7 @@ final class SettingsPage
                     'hotel_name' => $form['hotel_name'],
                     'hotel_legal_name' => $form['hotel_legal_name'],
                     'hotel_address' => $form['hotel_address'],
+                    'google_maps_url' => $form['google_maps_url'],
                     'hotel_phone' => $form['hotel_phone'],
                     'hotel_email' => $form['hotel_email'],
                     'default_country' => $form['default_country'],
@@ -2424,6 +2428,13 @@ final class SettingsPage
         self::renderField(['label' => __('Hotel email', 'must-hotel-booking'), 'name' => 'hotel_email', 'type' => 'email', 'value' => $form['hotel_email'] ?? '']);
         self::renderField(['label' => __('Booking notification email', 'must-hotel-booking'), 'name' => 'booking_notification_email', 'type' => 'email', 'value' => $form['booking_notification_email'] ?? '', 'description' => __('Primary recipient for booking alerts and operational notifications.', 'must-hotel-booking')]);
         self::renderField(['label' => __('Address', 'must-hotel-booking'), 'name' => 'hotel_address', 'type' => 'textarea', 'rows' => 4, 'value' => $form['hotel_address'] ?? '']);
+        self::renderField([
+            'label' => __('Google Maps URL', 'must-hotel-booking'),
+            'name' => 'google_maps_url',
+            'type' => 'url',
+            'value' => $form['google_maps_url'] ?? '',
+            'description' => __('Used to make the hotel address clickable in guest emails. If empty, the plugin will generate a Google Maps search link from the address.', 'must-hotel-booking'),
+        ]);
         echo '</div>';
         echo '<div class="must-settings-grid must-settings-grid--2">';
         self::renderSectionIntro(\__('Localization', 'must-hotel-booking'), \__('Operational defaults for dates, times, currency, and geography.', 'must-hotel-booking'));

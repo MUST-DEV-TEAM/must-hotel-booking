@@ -97,6 +97,10 @@ class MustBookingConfig
     {
         return \trim((string) self::get_setting('hotel_address', ''));
     }
+    public static function get_google_maps_url(): string
+    {
+        return \esc_url_raw((string) self::get_setting('google_maps_url', ''));
+    }
     public static function get_hotel_phone(): string
     {
         return \trim((string) self::get_setting('hotel_phone', ''));
@@ -222,7 +226,22 @@ class MustBookingConfig
     }
     public static function get_email_logo_url(): string
     {
-        return \esc_url_raw((string) self::get_setting('email_logo_url', ''));
+        $emailLogoUrl = \esc_url_raw((string) self::get_setting('email_logo_url', ''));
+        if ($emailLogoUrl !== '') {
+            return $emailLogoUrl;
+        }
+        $hotelLogoUrl = \esc_url_raw((string) self::get_setting('hotel_logo_url', ''));
+        if ($hotelLogoUrl !== '') {
+            return $hotelLogoUrl;
+        }
+        $customLogoId = (int) \get_theme_mod('custom_logo');
+        if ($customLogoId > 0) {
+            $customLogoUrl = \wp_get_attachment_image_url($customLogoId, 'full');
+            if (\is_string($customLogoUrl) && $customLogoUrl !== '') {
+                return \esc_url_raw($customLogoUrl);
+            }
+        }
+        return '';
     }
     public static function get_email_footer_text(): string
     {
@@ -322,7 +341,23 @@ class MustBookingConfig
     {
         return [
             self::VERSION_KEY => self::VERSION,
-            'general' => ['hotel_name' => self::site_name(), 'hotel_legal_name' => '', 'hotel_address' => '', 'hotel_phone' => '', 'hotel_email' => self::admin_email(), 'default_country' => self::country_fallback(), 'timezone' => self::wp_timezone(), 'currency' => 'USD', 'currency_display' => 'symbol_code', 'date_format' => (string) self::get_wp_option('date_format', 'F j, Y'), 'time_format' => (string) self::get_wp_option('time_format', 'H:i'), 'hotel_logo_url' => '', 'portal_logo_url' => '', 'site_environment' => ''],
+            'general' => [
+                'hotel_name' => self::site_name(),
+                'hotel_legal_name' => '',
+                'hotel_address' => '',
+                'google_maps_url' => '',
+                'hotel_phone' => '',
+                'hotel_email' => self::admin_email(),
+                'default_country' => self::country_fallback(),
+                'timezone' => self::wp_timezone(),
+                'currency' => 'USD',
+                'currency_display' => 'symbol_code',
+                'date_format' => (string) self::get_wp_option('date_format', 'F j, Y'),
+                'time_format' => (string) self::get_wp_option('time_format', 'H:i'),
+                'hotel_logo_url' => '',
+                'portal_logo_url' => '',
+                'site_environment' => '',
+            ],
             'booking_rules' => ['booking_window' => 365, 'same_day_booking_allowed' => true, 'same_day_booking_cutoff_time' => '18:00', 'minimum_nights' => 1, 'maximum_nights' => 30, 'max_booking_guests' => 12, 'max_booking_rooms' => 3, 'allow_multi_room_booking' => true, 'default_reservation_source' => 'website', 'pending_reservation_expiration_minutes' => 35, 'require_phone' => true, 'require_country' => true, 'enable_special_requests' => true, 'require_terms_acceptance' => true, 'default_reservation_status' => 'confirmed', 'default_payment_mode' => 'guest_choice', 'cancellation_allowed' => true, 'cancellation_notice_hours' => 48, 'anti_abuse_enabled' => false, 'anti_abuse_honeypot_enabled' => false, 'anti_abuse_min_submit_enabled' => false, 'anti_abuse_min_submit_seconds' => 5, 'anti_abuse_throttle_enabled' => false, 'anti_abuse_max_attempts' => 5, 'anti_abuse_window_minutes' => 10, 'anti_abuse_block_duration_minutes' => 30, 'anti_abuse_logging_enabled' => false],
             'checkin_checkout' => ['checkin_time' => '14:00', 'checkout_time' => '11:00', 'allow_early_checkin_request' => true, 'allow_late_checkout_request' => true, 'arrival_instructions' => '', 'departure_instructions' => '', 'guest_checkin_label' => \__('Check-in', 'must-hotel-booking'), 'guest_checkout_label' => \__('Check-out', 'must-hotel-booking')],
             'payments_summary' => ['payment_methods' => ['pay_at_hotel' => true, 'stripe' => false, 'pokpay' => false], 'deposit_required' => false, 'deposit_type' => 'percentage', 'deposit_value' => 0.0, 'tax_rate' => 0.0, 'stripe_publishable_key' => '', 'stripe_secret_key' => '', 'stripe_webhook_secret' => '', 'stripe_local_publishable_key' => '', 'stripe_local_secret_key' => '', 'stripe_local_webhook_secret' => '', 'stripe_staging_publishable_key' => '', 'stripe_staging_secret_key' => '', 'stripe_staging_webhook_secret' => '', 'stripe_production_publishable_key' => '', 'stripe_production_secret_key' => '', 'stripe_production_webhook_secret' => '', 'pokpay_local_merchant_id' => '', 'pokpay_local_key_id' => '', 'pokpay_local_key_secret' => '', 'pokpay_staging_merchant_id' => '', 'pokpay_staging_key_id' => '', 'pokpay_staging_key_secret' => '', 'pokpay_production_merchant_id' => '', 'pokpay_production_key_id' => '', 'pokpay_production_key_secret' => ''],
@@ -383,7 +418,23 @@ class MustBookingConfig
     {
         $d = self::group_defaults()['general'];
         $email = \sanitize_email((string) ($v['hotel_email'] ?? $d['hotel_email']));
-        return ['hotel_name' => \trim(\sanitize_text_field((string) ($v['hotel_name'] ?? $d['hotel_name']))) ?: (string) $d['hotel_name'], 'hotel_legal_name' => \sanitize_text_field((string) ($v['hotel_legal_name'] ?? $d['hotel_legal_name'])), 'hotel_address' => \sanitize_textarea_field((string) ($v['hotel_address'] ?? $d['hotel_address'])), 'hotel_phone' => \sanitize_text_field((string) ($v['hotel_phone'] ?? $d['hotel_phone'])), 'hotel_email' => \is_email($email) ? $email : (string) $d['hotel_email'], 'default_country' => self::country((string) ($v['default_country'] ?? $d['default_country'])), 'timezone' => self::timezone((string) ($v['timezone'] ?? $d['timezone']), (string) $d['timezone']), 'currency' => self::currency((string) ($v['currency'] ?? $d['currency'])), 'currency_display' => self::choice((string) ($v['currency_display'] ?? $d['currency_display']), ['symbol', 'symbol_code', 'code'], (string) $d['currency_display']), 'date_format' => \trim((string) ($v['date_format'] ?? $d['date_format'])) ?: (string) $d['date_format'], 'time_format' => \trim((string) ($v['time_format'] ?? $d['time_format'])) ?: (string) $d['time_format'], 'hotel_logo_url' => \esc_url_raw((string) ($v['hotel_logo_url'] ?? $d['hotel_logo_url'])), 'portal_logo_url' => \esc_url_raw((string) ($v['portal_logo_url'] ?? $d['portal_logo_url'])), 'site_environment' => \sanitize_key((string) ($v['site_environment'] ?? $d['site_environment']))];
+        return [
+            'hotel_name' => \trim(\sanitize_text_field((string) ($v['hotel_name'] ?? $d['hotel_name']))) ?: (string) $d['hotel_name'],
+            'hotel_legal_name' => \sanitize_text_field((string) ($v['hotel_legal_name'] ?? $d['hotel_legal_name'])),
+            'hotel_address' => \sanitize_textarea_field((string) ($v['hotel_address'] ?? $d['hotel_address'])),
+            'google_maps_url' => \esc_url_raw((string) ($v['google_maps_url'] ?? $d['google_maps_url'])),
+            'hotel_phone' => \sanitize_text_field((string) ($v['hotel_phone'] ?? $d['hotel_phone'])),
+            'hotel_email' => \is_email($email) ? $email : (string) $d['hotel_email'],
+            'default_country' => self::country((string) ($v['default_country'] ?? $d['default_country'])),
+            'timezone' => self::timezone((string) ($v['timezone'] ?? $d['timezone']), (string) $d['timezone']),
+            'currency' => self::currency((string) ($v['currency'] ?? $d['currency'])),
+            'currency_display' => self::choice((string) ($v['currency_display'] ?? $d['currency_display']), ['symbol', 'symbol_code', 'code'], (string) $d['currency_display']),
+            'date_format' => \trim((string) ($v['date_format'] ?? $d['date_format'])) ?: (string) $d['date_format'],
+            'time_format' => \trim((string) ($v['time_format'] ?? $d['time_format'])) ?: (string) $d['time_format'],
+            'hotel_logo_url' => \esc_url_raw((string) ($v['hotel_logo_url'] ?? $d['hotel_logo_url'])),
+            'portal_logo_url' => \esc_url_raw((string) ($v['portal_logo_url'] ?? $d['portal_logo_url'])),
+            'site_environment' => \sanitize_key((string) ($v['site_environment'] ?? $d['site_environment'])),
+        ];
     }
     /** @param array<string, mixed> $v @return array<string, mixed> */
     private static function normalize_booking_rules(array $v): array
