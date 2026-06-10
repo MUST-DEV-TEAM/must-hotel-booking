@@ -1983,8 +1983,7 @@ final class SettingsPage
             'clock_reservation_refresh_queued' => \__('Clock reservation refresh queued.', 'must-hotel-booking'),
             'managed_page_repaired' => \__('Managed page action completed.', 'must-hotel-booking'),
             'maintenance_action_completed' => \__('Maintenance action completed.', 'must-hotel-booking'),
-            'hotel_operational_reset_completed' => \__('Hotel operational data reset completed.', 'must-hotel-booking'),
-            'plugin_factory_reset_completed' => \__('Full plugin factory reset completed.', 'must-hotel-booking'),
+            'hotel_operational_reset_completed' => \__('Demo/test hotel data reset completed.', 'must-hotel-booking'),
             'provider_mapping_saved' => \__('Clock mapping saved.', 'must-hotel-booking'),
             'provider_mapping_deleted' => \__('Clock mapping deleted.', 'must-hotel-booking'),
         ];
@@ -4142,20 +4141,12 @@ final class SettingsPage
     {
         $values = isset($form['values'][$target]) && \is_array($form['values'][$target]) ? $form['values'][$target] : [];
         $isOpen = (string) ($form['active_target'] ?? '') === $target;
-        $isFactory = $target === DangerousResetService::TARGET_FACTORY;
-        $toneClass = $isFactory
-            ? 'must-danger-zone-card--factory'
-            : 'must-danger-zone-card--operational';
-        $submitClass = $isFactory
-            ? 'button must-danger-zone-submit must-danger-zone-submit--factory'
-            : 'button must-danger-zone-submit must-danger-zone-submit--operational';
+        $toneClass = 'must-danger-zone-card--operational';
+        $submitClass = 'button must-danger-zone-submit must-danger-zone-submit--operational';
         echo '<details class="must-danger-zone-card ' . \esc_attr($toneClass) . '"' . ($isOpen ? ' open' : '') . '>';
         echo '<summary class="must-danger-zone-summary">';
         echo '<div class="must-danger-zone-summary-copy">';
         echo '<strong>' . \esc_html((string) ($definition['label'] ?? $target)) . '</strong>';
-        if ($isFactory) {
-            echo '<span class="must-danger-zone-risk">' . \esc_html__('Highest risk', 'must-hotel-booking') . '</span>';
-        }
         echo '<span>' . \esc_html((string) ($definition['summary'] ?? '')) . '</span>';
         echo '</div>';
         echo '<span class="must-danger-zone-summary-toggle">' . \esc_html__('Review confirmation', 'must-hotel-booking') . '</span>';
