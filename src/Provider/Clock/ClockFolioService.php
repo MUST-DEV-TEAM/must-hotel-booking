@@ -28,7 +28,18 @@ final class ClockFolioService
             ];
         }
 
-        $folios = $this->postableFolios((array) ($foliosResult['folios'] ?? []));
+        $resolvedFolios = $this->resolveListedFolios((array) ($foliosResult['folios'] ?? []), $reservationId);
+
+        if (empty($resolvedFolios['success'])) {
+            return [
+                'success' => false,
+                'folio' => [],
+                'folio_id' => '',
+                'message' => (string) ($resolvedFolios['message'] ?? \__('Unable to resolve Clock booking folios.', 'must-hotel-booking')),
+            ];
+        }
+
+        $folios = $this->postableFolios((array) ($resolvedFolios['folios'] ?? []));
 
         if (empty($folios)) {
             return [
@@ -111,6 +122,21 @@ final class ClockFolioService
                 continue;
             }
 
+            if ($this->isScalarFolioReference($folio)) {
+                $viewResult = $this->viewFolio($folioId, $reservationId);
+
+                if (empty($viewResult['success'])) {
+                    return [
+                        'success' => false,
+                        'folio' => [],
+                        'folio_id' => '',
+                        'message' => (string) ($viewResult['message'] ?? \__('Unable to verify the original Clock payment folio.', 'must-hotel-booking')),
+                    ];
+                }
+
+                $folio = (array) ($viewResult['folio'] ?? []);
+            }
+
             if (!$this->isPostableFolio($folio)) {
                 return [
                     'success' => false,
@@ -173,6 +199,54 @@ final class ClockFolioService
         return [
             'success' => true,
             'folios' => $this->extractFolios($response->getData()),
+            'message' => '',
+        ];
+    }
+
+    /** @return array{success: bool, folio: array<string, mixed>, message: string} */
+    private function viewFolio(string $folioId, int $reservationId = 0): array
+    {
+        $folioId = \sanitize_text_field($folioId);
+
+        if ($folioId === '') {
+            return [
+                'success' => false,
+                'folio' => [],
+                'message' => \__('Clock folio ID is missing.', 'must-hotel-booking'),
+            ];
+        }
+
+        $response = $this->client->request(
+            'GET',
+            '/folios/' . \rawurlencode($folioId),
+            [
+                'api_type' => 'base_api',
+                'reservation_id' => $reservationId,
+                'external_id' => $folioId,
+            ],
+            'clock.folio_view'
+        );
+
+        if (!$response->isSuccess()) {
+            return [
+                'success' => false,
+                'folio' => [],
+                'message' => $response->getErrorMessage() !== ''
+                    ? $response->getErrorMessage()
+                    : \__('Clock folio detail request failed.', 'must-hotel-booking'),
+            ];
+        }
+
+        $folio = $this->extractFolio($response->getData());
+        $folioIdFromResponse = $this->folioId($folio);
+
+        if ($folioIdFromResponse === '') {
+            $folio['id'] = $folioId;
+        }
+
+        return [
+            'success' => true,
+            'folio' => $folio,
             'message' => '',
         ];
     }
@@ -280,27 +354,16 @@ final class ClockFolioService
             ];
         }
 
-        $response = $this->client->request(
-            'GET',
-            '/folios/' . \rawurlencode($folioId),
-            [
-                'api_type' => 'base_api',
-                'external_id' => $folioId,
-            ],
-            'clock.folio_view'
-        );
+        $viewResult = $this->viewFolio($folioId);
 
-        if (!$response->isSuccess()) {
+        if (empty($viewResult['success'])) {
             return [
                 'verification_status' => 'unknown',
-                'message' => $response->getErrorMessage() !== ''
-                    ? $response->getErrorMessage()
-                    : \__('Clock folio verification failed.', 'must-hotel-booking'),
+                'message' => (string) ($viewResult['message'] ?? \__('Clock folio verification failed.', 'must-hotel-booking')),
             ];
         }
 
-        $data = $response->getData();
-        $folio = \is_array($data) ? $this->extractFolio($data) : [];
+        $folio = (array) ($viewResult['folio'] ?? []);
         $balance = $this->firstMoneyValue($folio, ['balance', 'balance_due', 'due', 'open_balance', 'outstanding_balance']);
 
         if ($balance === null) {
@@ -319,7 +382,42 @@ final class ClockFolioService
     /** @param mixed $data @return array<int, array<string, mixed>> */
     private function extractFolios($data): array
     {
-        return $this->extractList($data);
+        if (!\is_array($data)) {
+            return [];
+        }
+
+        if ($this->isList($data)) {
+            $folios = [];
+
+            foreach ($data as $item) {
+                if (\is_array($item)) {
+                    $folio = $this->extractFolio($item);
+
+                    if ($this->folioId($folio) !== '') {
+                        $folios[] = $folio;
+                    }
+
+                    continue;
+                }
+
+                if (\is_scalar($item) && \trim((string) $item) !== '') {
+                    $folios[] = [
+                        'id' => \sanitize_text_field((string) $item),
+                        '_scalar_id' => true,
+                    ];
+                }
+            }
+
+            return $folios;
+        }
+
+        foreach (['folios', 'booking_folios', 'data', 'items', 'records'] as $key) {
+            if (isset($data[$key]) && \is_array($data[$key])) {
+                return $this->extractFolios($data[$key]);
+            }
+        }
+
+        return $this->folioId($data) !== '' ? [$data] : [];
     }
 
     /** @param mixed $data @return array<int, array<string, mixed>> */
@@ -356,6 +454,86 @@ final class ClockFolioService
         }
 
         return $folios;
+    }
+
+    /** @param array<int, array<string, mixed>> $source @return array{success: bool, folios: array<int, array<string, mixed>>, message: string} */
+    private function resolveListedFolios(array $source, int $reservationId): array
+    {
+        $scalarReferences = [];
+        $objectFolios = [];
+
+        foreach ($source as $folio) {
+            if (!\is_array($folio)) {
+                continue;
+            }
+
+            if ($this->isScalarFolioReference($folio)) {
+                $folioId = $this->folioId($folio);
+
+                if ($folioId !== '') {
+                    $scalarReferences[] = $folio;
+                }
+
+                continue;
+            }
+
+            $objectFolios[] = $folio;
+        }
+
+        if (\count($scalarReferences) === 0) {
+            return [
+                'success' => true,
+                'folios' => $objectFolios,
+                'message' => '',
+            ];
+        }
+
+        if (\count($scalarReferences) === 1 && \count($objectFolios) === 0) {
+            return [
+                'success' => true,
+                'folios' => $scalarReferences,
+                'message' => '',
+            ];
+        }
+
+        $resolved = $objectFolios;
+        $errors = [];
+
+        foreach ($scalarReferences as $reference) {
+            $folioId = $this->folioId($reference);
+            $viewResult = $this->viewFolio($folioId, $reservationId);
+
+            if (empty($viewResult['success'])) {
+                $errors[] = (string) ($viewResult['message'] ?? '');
+                continue;
+            }
+
+            $folio = (array) ($viewResult['folio'] ?? []);
+
+            if ($this->folioId($folio) !== '') {
+                $resolved[] = $folio;
+            }
+        }
+
+        if (\count($resolved) === \count($objectFolios)) {
+            return [
+                'success' => false,
+                'folios' => [],
+                'message' => \__('Clock returned multiple folio IDs, but folio detail lookup did not return a usable payment folio.', 'must-hotel-booking') . ($errors ? ' ' . \implode(' ', \array_filter($errors)) : ''),
+            ];
+        }
+
+        return [
+            'success' => true,
+            'folios' => $resolved,
+            'message' => '',
+        ];
+    }
+
+    /** @param array<string, mixed> $folio */
+    private function isScalarFolioReference(array $folio): bool
+    {
+        return !empty($folio['_scalar_id']);
     }
 
     /** @param array<string, mixed> $folio */
@@ -422,7 +600,29 @@ final class ClockFolioService
     private function firstMoneyValue(array $source, array $keys): ?float
     {
         foreach ($keys as $key) {
-            if (!isset($source[$key]) || !\is_scalar($source[$key])) {
+            if (!isset($source[$key])) {
+                continue;
+            }
+
+            if (\is_array($source[$key])) {
+                foreach (['amount', 'value', 'cents'] as $moneyKey) {
+                    if (!isset($source[$key][$moneyKey]) || !\is_scalar($source[$key][$moneyKey])) {
+                        continue;
+                    }
+
+                    $normalized = \str_replace(',', '', (string) $source[$key][$moneyKey]);
+
+                    if (\is_numeric($normalized)) {
+                        $value = (float) $normalized;
+
+                        return $moneyKey === 'cents' ? \round($value / 100, 2) : \round($value, 2);
+                    }
+                }
+
+                continue;
+            }
+
+            if (!\is_scalar($source[$key])) {
                 continue;
             }
 

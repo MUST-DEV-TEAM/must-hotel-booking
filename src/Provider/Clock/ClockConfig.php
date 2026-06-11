@@ -290,7 +290,7 @@ final class ClockConfig
         $settings = self::settings();
         return [
             'reservation_status_update' => self::normalizeOptionalPath((string) ($settings['clock_reservation_status_update_path'] ?? '')),
-            'reservation_cancel' => self::normalizeOptionalPath((string) ($settings['clock_reservation_cancel_path'] ?? '')),
+            'reservation_cancel' => self::methodPathOrDefault((string) ($settings['clock_reservation_cancel_path'] ?? ''), 'PUT /bookings/{booking_id}'),
             'reservation_room_update' => self::normalizeOptionalPath((string) ($settings['clock_reservation_room_update_path'] ?? '')),
             'reservation_stay_update' => self::normalizeOptionalPath((string) ($settings['clock_reservation_stay_update_path'] ?? '')),
             'reservation_guest_update' => self::normalizeOptionalPath((string) ($settings['clock_reservation_guest_update_path'] ?? '')),
@@ -488,6 +488,20 @@ final class ClockConfig
     {
         $path = self::normalizeOptionalPath($path);
         return $path !== '' ? $path : self::normalizePath($default);
+    }
+    private static function methodPathOrDefault(string $path, string $default): string
+    {
+        $path = \trim($path);
+        $value = $path !== '' ? $path : \trim($default);
+
+        if (\preg_match('/^\/?\s*(GET|POST|PUT|PATCH|DELETE)\s+(.+)$/i', $value, $matches) === 1) {
+            $method = \strtoupper($matches[1]);
+            $endpointPath = self::normalizePath((string) $matches[2]);
+
+            return $method . ' ' . $endpointPath;
+        }
+
+        return self::normalizeOptionalPath($value);
     }
     private static function normalizeBaseUrl(string $url): string
     {

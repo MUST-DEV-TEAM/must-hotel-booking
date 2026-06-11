@@ -100,6 +100,15 @@ final class BookingStatusEngine
             }
 
             if ($existingPaymentId > 0) {
+                $existingPayment = $paymentRepository->getPayment($existingPaymentId);
+
+                if (
+                    \is_array($existingPayment)
+                    && self::paymentRecordAlreadyMatches($existingPayment, $paymentData, $transactionId)
+                ) {
+                    continue;
+                }
+
                 if ($transactionId === '') {
                     unset($paymentData['transaction_id']);
                 }
@@ -147,6 +156,33 @@ final class BookingStatusEngine
                 );
             }
         }
+    }
+
+    /**
+     * @param array<string, mixed> $existingPayment
+     * @param array<string, mixed> $paymentData
+     */
+    private static function paymentRecordAlreadyMatches(array $existingPayment, array $paymentData, string $transactionId): bool
+    {
+        $existingStatus = isset($existingPayment['status']) ? \sanitize_key((string) $existingPayment['status']) : '';
+        $targetStatus = isset($paymentData['status']) ? \sanitize_key((string) $paymentData['status']) : '';
+
+        if ($existingStatus !== $targetStatus) {
+            return false;
+        }
+
+        $existingTransactionId = isset($existingPayment['transaction_id']) ? \trim((string) $existingPayment['transaction_id']) : '';
+        $targetTransactionId = \trim($transactionId);
+
+        if ($targetTransactionId !== '' && $existingTransactionId !== $targetTransactionId) {
+            return false;
+        }
+
+        if ($targetStatus === 'paid') {
+            return \trim((string) ($existingPayment['paid_at'] ?? '')) !== '';
+        }
+
+        return true;
     }
 
     /**

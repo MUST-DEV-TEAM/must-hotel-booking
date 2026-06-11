@@ -860,14 +860,9 @@ final class PaymentEngine
         $payload = [
             'amount' => $amountMinor,
             'currencyCode' => \strtoupper($currency),
-            'currency' => \strtoupper($currency),
             'autoCapture' => true,
             'description' => $description . ' #' . \implode(',', $reservationIds),
         ];
-
-        if (!empty($guestForm['email'])) {
-            $payload['email'] = (string) $guestForm['email'];
-        }
 
         $response = self::performPokPayApiRequest(
             'POST',

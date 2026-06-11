@@ -441,7 +441,7 @@ class MustBookingConfig
                 'clock_quote_path' => '',
                 'clock_reservation_create_path' => '/bookings/',
                 'clock_reservation_status_update_path' => '',
-                'clock_reservation_cancel_path' => '',
+                'clock_reservation_cancel_path' => 'PUT /bookings/{booking_id}',
                 'clock_reservation_room_update_path' => '',
                 'clock_reservation_stay_update_path' => '',
                 'clock_reservation_guest_update_path' => '',

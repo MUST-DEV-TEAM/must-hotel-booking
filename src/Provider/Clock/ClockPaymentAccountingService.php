@@ -303,12 +303,15 @@ final class ClockPaymentAccountingService
         string $idempotencyKey,
         int $reservationId
     ): array {
-        $this->accounting->update($accountingId, [
-            'status' => 'retrying',
-            'clock_folio_id' => $folioId,
-            'attempts' => $this->nextAttempt($accountingId),
-            'updated_at' => $this->now(),
-        ]);
+        if (!$this->accounting->claimPostingAttempt($accountingId, $folioId)) {
+            $current = $this->accounting->get($accountingId);
+
+            if (\is_array($current) && (string) ($current['status'] ?? '') === 'posted') {
+                return $this->result(true, false, 'already_posted', ['accounting_id' => $accountingId]);
+            }
+
+            return $this->result(true, false, 'already_in_progress', ['accounting_id' => $accountingId]);
+        }
 
         $postResult = $this->folios->postCreditItem(
             $folioId,
@@ -518,13 +521,6 @@ final class ClockPaymentAccountingService
         $currency = \strtoupper(\sanitize_text_field($currency));
 
         return $currency !== '' ? $currency : \strtoupper(MustBookingConfig::get_currency());
-    }
-
-    private function nextAttempt(int $accountingId): int
-    {
-        $row = $this->accounting->get($accountingId);
-
-        return \max(0, \is_array($row) ? (int) ($row['attempts'] ?? 0) : 0) + 1;
     }
 
     /** @return array<string, mixed> */

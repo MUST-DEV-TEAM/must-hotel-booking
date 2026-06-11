@@ -782,16 +782,21 @@ final class ClockReservationProvider implements ReservationProviderInterface
             return;
         }
 
+        $method = 'POST';
+        if (\preg_match('/^\/?\s*(GET|POST|PUT|PATCH|DELETE)\s+(.+)$/i', \trim($cancelPath), $matches)) {
+            $method = \strtoupper((string) $matches[1]);
+            $cancelPath = \trim((string) $matches[2]);
+        }
+
         $path = \str_replace(['{booking_id}', '{reservation_id}', ':booking_id', ':reservation_id'], $providerId, $cancelPath);
         $this->client->request(
-            'POST',
+            $method,
             $path,
             [
                 'body' => [
-                    'booking_id' => $providerId,
-                    'reservation_id' => $providerId,
-                    'status' => 'cancelled',
-                    'reason' => 'exact_room_assignment_failed',
+                    'booking' => [
+                        'status' => 'canceled',
+                    ],
                 ],
             ],
             'clock.reservation_cancel'

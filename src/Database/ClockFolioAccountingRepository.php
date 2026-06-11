@@ -45,6 +45,35 @@ final class ClockFolioAccountingRepository extends AbstractRepository
         return \is_int($updated);
     }
 
+    public function claimPostingAttempt(int $id, string $folioId): bool
+    {
+        if ($id <= 0 || !$this->accountingTableExists()) {
+            return false;
+        }
+
+        $updated = $this->wpdb->query(
+            $this->wpdb->prepare(
+                'UPDATE ' . $this->table('clock_folio_accounting') . '
+                SET status = %s,
+                    clock_folio_id = %s,
+                    attempts = attempts + 1,
+                    updated_at = %s
+                WHERE id = %d
+                    AND status IN (%s, %s)
+                    AND clock_credit_item_id = %s',
+                'retrying',
+                \sanitize_text_field($folioId),
+                $this->now(),
+                $id,
+                'pending',
+                'failed',
+                ''
+            )
+        );
+
+        return $updated === 1;
+    }
+
     /** @return array<string, mixed>|null */
     public function get(int $id): ?array
     {
