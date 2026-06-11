@@ -9,7 +9,7 @@ $currency = isset($moduleData['currency']) ? (string) $moduleData['currency'] : 
 $formTitle = isset($moduleData['form_title']) ? (string) $moduleData['form_title'] : \__('New Booking', 'must-hotel-booking');
 $formDescription = isset($moduleData['form_description'])
     ? (string) $moduleData['form_description']
-    : \__('Search available physical rooms, choose one, then send the guest to Stripe payment.', 'must-hotel-booking');
+    : \__('Search available physical rooms, choose one, then send the guest to online payment.', 'must-hotel-booking');
 
 $formAction = PortalRouter::getModuleUrl('front_desk', ['tab' => isset($activeTab) ? (string) $activeTab : 'new-booking']);
 $today = \current_datetime()->format('Y-m-d');
@@ -37,7 +37,7 @@ if ($portalPayment === 'success' && $firstPortalReservationId > 0) {
     echo '<div class="must-portal-booking-modal-header">';
     echo '<div>';
     echo '<h3>' . \esc_html__('Booking successful', 'must-hotel-booking') . '</h3>';
-    echo '<p>' . \esc_html__('Stripe payment was completed and the reservation was created successfully.', 'must-hotel-booking') . '</p>';
+    echo '<p>' . \esc_html__('Online payment was completed and the reservation was created successfully.', 'must-hotel-booking') . '</p>';
     echo '</div>';
     echo '<button type="button" class="must-portal-modal-close" data-must-portal-success-close data-clean-url="' . \esc_url($cleanUrl) . '">&times;</button>';
     echo '</div>';
@@ -51,7 +51,7 @@ if ($portalPayment === 'success' && $firstPortalReservationId > 0) {
     echo '</div>';
 } elseif ($portalPayment === 'cancel') {
     echo '<div class="must-portal-notice must-portal-notice-warning">';
-    echo \esc_html__('Stripe payment was canceled. You can search again or start another booking.', 'must-hotel-booking');
+    echo \esc_html__('Online payment was canceled. You can search again or start another booking.', 'must-hotel-booking');
     echo '</div>';
 }
 echo '<div class="must-portal-booking-search">';
@@ -169,7 +169,7 @@ echo '<label class="must-portal-form-full"><span>' . \esc_html__('Notes', 'must-
 
 echo '<p class="must-portal-date-status must-portal-form-full" data-must-portal-modal-status></p>';
 echo '<div class="must-portal-form-full must-portal-inline-actions">';
-echo '<button type="submit" class="must-portal-primary-button">' . \esc_html__('Continue to Stripe payment', 'must-hotel-booking') . '</button>';
+echo '<button type="submit" class="must-portal-primary-button">' . \esc_html__('Continue to online payment', 'must-hotel-booking') . '</button>';
 echo '<button type="button" class="must-portal-secondary-button" data-must-portal-modal-close>' . \esc_html__('Cancel', 'must-hotel-booking') . '</button>';
 echo '</div>';
 

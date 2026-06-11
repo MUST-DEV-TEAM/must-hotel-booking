@@ -12,6 +12,7 @@ final class PaymentAdminDataProvider
 {
     private \MustHotelBooking\Database\PaymentRepository $paymentRepository;
     private \MustHotelBooking\Database\RefundRepository $refundRepository;
+    private \MustHotelBooking\Database\ClockFolioAccountingRepository $clockFolioAccountingRepository;
     private \MustHotelBooking\Database\ReservationRepository $reservationRepository;
     private \MustHotelBooking\Database\ActivityRepository $activityRepository;
 
@@ -19,6 +20,7 @@ final class PaymentAdminDataProvider
     {
         $this->paymentRepository = \MustHotelBooking\Engine\get_payment_repository();
         $this->refundRepository = \MustHotelBooking\Engine\get_refund_repository();
+        $this->clockFolioAccountingRepository = \MustHotelBooking\Engine\get_clock_folio_accounting_repository();
         $this->reservationRepository = \MustHotelBooking\Engine\get_reservation_repository();
         $this->activityRepository = \MustHotelBooking\Engine\get_activity_repository();
     }
@@ -305,6 +307,7 @@ final class PaymentAdminDataProvider
 
         $paymentRows = $this->paymentRepository->getPaymentsForReservation($reservationId);
         $refundRows = $this->refundRepository->getRefundsForReservation($reservationId);
+        $clockAccountingRows = $this->clockFolioAccountingRepository->getForReservation($reservationId);
         $state = PaymentStatusService::buildReservationPaymentState($reservation, $paymentRows);
         $providerContext = ProviderReservationView::metadata($reservation);
         $providerPayment = ProviderReservationView::paymentContext($reservation, $state);
@@ -328,7 +331,22 @@ final class PaymentAdminDataProvider
         foreach ($refundRows as $refundRow) {
             $clockSyncStatus = \sanitize_key((string) ($refundRow['clock_sync_status'] ?? ''));
             if (\in_array($clockSyncStatus, ['failed', 'manual_review', 'retrying'], true)) {
-                $state['warnings'][] = \__('Refund succeeded in Stripe but failed to sync to Clock. Retry sync or mark for manual review.', 'must-hotel-booking');
+                $state['warnings'][] = \__('Gateway refund succeeded but failed to sync to Clock. Retry sync or mark for manual review.', 'must-hotel-booking');
+                break;
+            }
+        }
+
+        foreach ($clockAccountingRows as $clockAccountingRow) {
+            $clockAccountingStatus = \sanitize_key((string) ($clockAccountingRow['status'] ?? ''));
+            $verificationStatus = \sanitize_key((string) ($clockAccountingRow['verification_status'] ?? ''));
+
+            if (\in_array($clockAccountingStatus, ['failed', 'manual_review'], true)) {
+                $state['warnings'][] = \__('Clock folio accounting needs admin review.', 'must-hotel-booking');
+                break;
+            }
+
+            if ($clockAccountingStatus === 'posted' && \in_array($verificationStatus, ['unknown', 'balance_remaining'], true)) {
+                $state['warnings'][] = \__('Clock folio accounting was posted, but balance verification needs review.', 'must-hotel-booking');
                 break;
             }
         }
@@ -363,6 +381,7 @@ final class PaymentAdminDataProvider
                 : \__('Unassigned', 'must-hotel-booking'),
             'payments' => $paymentRows,
             'refunds' => $refundRows,
+            'clock_accounting' => $clockAccountingRows,
             'timeline' => $timeline,
             'provider' => $providerContext,
             'provider_payment' => $providerPayment,

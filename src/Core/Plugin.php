@@ -69,6 +69,7 @@ final class Plugin
         \MustHotelBooking\Provider\Clock\ClockReservationAutoSyncScheduler::scheduleCron();
 
         \MustHotelBooking\Engine\PaymentEngine::registerHooks();
+        \MustHotelBooking\Provider\Clock\ClockPaymentAccountingService::registerHooks();
         \MustHotelBooking\Provider\Clock\ClockInboundSyncController::registerHooks();
         \MustHotelBooking\Engine\AvailabilityAjaxController::registerHooks();
         \MustHotelBooking\Engine\EmailEngine::registerHooks();

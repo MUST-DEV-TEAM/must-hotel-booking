@@ -538,6 +538,9 @@ final class PortalController
         if ($action === 'payment_refund') {
             return self::handlePaymentRefund();
         }
+        if ($action === 'payment_refund_manual_done') {
+            return self::handlePaymentRefundManualDone();
+        }
         if ($action === 'payment_issue_receipt') {
             self::handlePaymentDocumentRequest('receipt');
             return [];
@@ -1830,6 +1833,39 @@ final class PortalController
             );
         }
         self::redirectToPortalPaymentDetail($reservationId, (string) ($result['notice'] ?? 'payment_refunded'));
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private static function handlePaymentRefundManualDone(): array
+    {
+        $reservationId = isset($_POST['reservation_id']) ? \absint(\wp_unslash($_POST['reservation_id'])) : 0;
+        $refundId = isset($_POST['refund_id']) ? \absint(\wp_unslash($_POST['refund_id'])) : 0;
+        $nonce = isset($_POST['must_portal_payment_nonce']) ? (string) \wp_unslash($_POST['must_portal_payment_nonce']) : '';
+        $manualNote = isset($_POST['manual_note']) && !\is_array($_POST['manual_note'])
+            ? \sanitize_textarea_field((string) \wp_unslash($_POST['manual_note']))
+            : '';
+
+        if ($reservationId <= 0 || $refundId <= 0 || !\wp_verify_nonce($nonce, 'must_portal_payment_action_payment_refund_manual_done_' . $refundId)) {
+            return self::buildPaymentActionState($reservationId, [], [\__('Security check failed. Please try again.', 'must-hotel-booking')]);
+        }
+
+        if (!\current_user_can(StaffAccess::CAP_PAYMENT_REFUND) && !\current_user_can('manage_options')) {
+            return self::buildPaymentActionState($reservationId, [], [\__('You do not have permission to complete manual refunds from the portal.', 'must-hotel-booking')]);
+        }
+
+        $result = (new \MustHotelBooking\Engine\PaymentRefundService())->completeManualRefund($refundId, $manualNote);
+
+        if (empty($result['success'])) {
+            return self::buildPaymentActionState(
+                $reservationId,
+                [],
+                [isset($result['message']) ? (string) $result['message'] : \__('Unable to complete the manual refund.', 'must-hotel-booking')]
+            );
+        }
+
+        self::redirectToPortalPaymentDetail($reservationId, (string) ($result['notice'] ?? 'refund_manual_completed'));
     }
     /**
      * @return array<string, mixed>
@@ -6076,6 +6112,8 @@ final class PortalController
             'payment_marked_pay_at_hotel' => \__('Payment collection mode set to pay at hotel.', 'must-hotel-booking'),
             'payment_marked_failed' => \__('Payment marked as failed.', 'must-hotel-booking'),
             'payment_refunded' => \__('Refund issued successfully.', 'must-hotel-booking'),
+            'pokpay_refund_manual_pending' => \__('PokPay refund could not be completed automatically. Refund from the POK dashboard, then mark it completed in the plugin.', 'must-hotel-booking'),
+            'refund_manual_completed' => \__('Manual refund marked completed and recorded in the local ledger.', 'must-hotel-booking'),
             'calendar_block_created' => \__('Manual block created from the calendar.', 'must-hotel-booking'),
             'block_updated' => \__('Manual block updated.', 'must-hotel-booking'),
             'block_saved_with_conflict' => \__('Manual block updated, but it still overlaps existing reservation activity.', 'must-hotel-booking'),

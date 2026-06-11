@@ -130,9 +130,40 @@ final class PaymentAdminActions
                 ]));
             }
 
-            $result = (new PaymentRefundService())->markClockSyncHandledManually($refundId);
+            $manualNote = isset($_POST['manual_note']) && !\is_array($_POST['manual_note'])
+                ? \sanitize_textarea_field((string) \wp_unslash($_POST['manual_note']))
+                : '';
+            $refund = \MustHotelBooking\Engine\get_refund_repository()->getRefund($refundId);
+            $refundStatus = \is_array($refund) ? \sanitize_key((string) ($refund['status'] ?? '')) : '';
+            $result = $refundStatus === 'manual_pending'
+                ? (new PaymentRefundService())->completeManualRefund($refundId, $manualNote)
+                : (new PaymentRefundService())->markClockSyncHandledManually($refundId);
             $this->redirectToPaymentsPage($query->buildUrlArgs([
-                'notice' => !empty($result['success']) ? 'refund_manual_done' : 'action_failed',
+                'notice' => !empty($result['success']) ? (string) ($result['notice'] ?? 'refund_manual_done') : 'action_failed',
+                'action' => 'view',
+                'reservation_id' => $reservationId,
+            ]));
+        }
+
+        if ($action === 'retry_clock_accounting') {
+            $reservationId = isset($_POST['reservation_id']) ? \absint(\wp_unslash($_POST['reservation_id'])) : 0;
+            $accountingId = isset($_POST['accounting_id']) ? \absint(\wp_unslash($_POST['accounting_id'])) : 0;
+            $nonce = isset($_POST['must_payments_nonce']) ? (string) \wp_unslash($_POST['must_payments_nonce']) : '';
+
+            if ($reservationId <= 0 || $accountingId <= 0 || !\wp_verify_nonce($nonce, 'must_payment_retry_clock_accounting_' . $accountingId)) {
+                $this->redirectToPaymentsPage($query->buildUrlArgs([
+                    'notice' => 'invalid_nonce',
+                    'action' => 'view',
+                    'reservation_id' => $reservationId,
+                ]));
+            }
+
+            $result = \class_exists(\MustHotelBooking\Provider\Clock\ClockPaymentAccountingService::class)
+                ? (new \MustHotelBooking\Provider\Clock\ClockPaymentAccountingService())->retryAccounting($accountingId)
+                : ['success' => false];
+
+            $this->redirectToPaymentsPage($query->buildUrlArgs([
+                'notice' => !empty($result['success']) ? 'clock_accounting_retry_success' : 'clock_accounting_retry_failed',
                 'action' => 'view',
                 'reservation_id' => $reservationId,
             ]));
@@ -315,7 +346,7 @@ final class PaymentAdminActions
             ];
         }
 
-        if ($method !== 'stripe') {
+        if (!\in_array($method, ['stripe', 'pokpay'], true)) {
             return [
                 'success' => false,
                 'message' => \__('Refunds for this payment method must be handled outside the plugin.', 'must-hotel-booking'),
@@ -325,7 +356,7 @@ final class PaymentAdminActions
         if ($transactionId === '') {
             return [
                 'success' => false,
-                'message' => \__('This Stripe payment is missing its transaction reference and cannot be refunded from the portal.', 'must-hotel-booking'),
+                'message' => \__('This online payment is missing its transaction reference and cannot be refunded from the plugin.', 'must-hotel-booking'),
             ];
         }
 
@@ -345,7 +376,7 @@ final class PaymentAdminActions
 
         return [
             'success' => true,
-            'notice' => 'payment_refunded',
+            'notice' => (string) ($refundResult['notice'] ?? 'payment_refunded'),
             'refund_id' => (int) ($refundResult['refund_id'] ?? 0),
             'status' => (string) ($refundResult['status'] ?? ''),
         ];

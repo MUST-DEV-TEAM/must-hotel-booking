@@ -5,6 +5,7 @@ namespace MustHotelBooking\Engine;
 use MustHotelBooking\Database\AvailabilityRepository;
 use MustHotelBooking\Database\ActivityRepository;
 use MustHotelBooking\Database\CancellationPolicyRepository;
+use MustHotelBooking\Database\ClockFolioAccountingRepository;
 use MustHotelBooking\Database\CouponRepository;
 use MustHotelBooking\Database\GuestRepository;
 use MustHotelBooking\Database\HousekeepingRepository;
@@ -144,6 +145,17 @@ function get_refund_repository(): RefundRepository
 
     if (!$repository instanceof RefundRepository) {
         $repository = new RefundRepository();
+    }
+
+    return $repository;
+}
+
+function get_clock_folio_accounting_repository(): ClockFolioAccountingRepository
+{
+    static $repository = null;
+
+    if (!$repository instanceof ClockFolioAccountingRepository) {
+        $repository = new ClockFolioAccountingRepository();
     }
 
     return $repository;

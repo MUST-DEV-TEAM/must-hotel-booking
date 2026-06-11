@@ -33,7 +33,7 @@ final class PaymentMethodRegistry
         return [
             'pay_at_hotel' => true,
             'stripe' => false,
-            'pokpay' => false,
+            'pokpay' => true,
         ];
     }
 

@@ -188,6 +188,7 @@ final class SupportDiagnosticsEndpoint
             'refund_summary' => self::getRefundSummary(),
             'future_refund_readiness' => self::getFutureRefundReadiness(),
             'refund_manual_accounting_notice' => self::getRefundManualAccountingNotice(),
+            'clock_folio_accounting_summary' => self::getClockFolioAccountingSummary(),
             'clock_folio_payment_accounting_notice' => self::getClockFolioPaymentAccountingNotice($clockRequestSummary),
             'clock_request_summary' => $clockRequestSummary,
             'phase1_trial_summary' => $phase1TrialSummary,
@@ -265,7 +266,7 @@ final class SupportDiagnosticsEndpoint
                 && (string) ($phase1TrialSummary['clock_payment_sync_mode'] ?? '') === 'local_only'
                 && empty($phase1TrialSummary['new_clock_payment_update_failure_detected']);
             $isKnownClockFolioPaymentManualAccounting =
-                $lastOperation === 'clock.default_booking_folio_fetch'
+                \in_array($lastOperation, ['clock.default_booking_folio_fetch', 'clock.booking_folios_list', 'clock.payment_sub_types_view', 'clock.folio_payment_create', 'clock.refund_credit_item_create'], true)
                 && self::isKnownClockFolioPermissionMessage($lastError);
             if ($lastError !== '' && !$isKnownLocalOnlyPaymentNotice && !$isKnownClockFolioPaymentManualAccounting) {
                 $findings[] = $lastError;
@@ -389,11 +390,12 @@ final class SupportDiagnosticsEndpoint
         $lastOperation = (string) ($clockRequestSummary['last_error_operation'] ?? '');
         $missingPermissions = [];
         if (self::isKnownClockFolioPermissionMessage($lastError)) {
-            $missingPermissions[] = 'pms_api_booking_folios_default';
+            $missingPermissions[] = 'booking_folios_list_view';
+            $missingPermissions[] = 'credit_item_payment_create';
         }
         $manualOperations = [];
-        if (\in_array('pms_api_booking_folios_default', $missingPermissions, true)) {
-            $manualOperations[] = 'Staff must manually add website Stripe payments into Clock folio until Clock enables pms_api_booking_folios_default and folio credit item API rights.';
+        if (!empty($missingPermissions)) {
+            $manualOperations[] = 'Staff must manually review website payments in Clock until booking_folios LIST VIEW, payment_sub_types VIEW, and credit_item payment CREATE rights are available.';
         }
         $blockers = [];
         $warnings = [];
@@ -415,7 +417,7 @@ final class SupportDiagnosticsEndpoint
             }
         }
         if (!empty($missingPermissions)) {
-            $warnings[] = 'Clock API user is missing pms_api_booking_folios_default; automatic folio payment posting remains manual.';
+            $warnings[] = 'Clock API user appears to be missing folio accounting rights: booking_folios LIST VIEW, payment_sub_types VIEW, or credit_item payment CREATE.';
         }
         return [
             'clock_enabled' => $clockEnabled,
@@ -808,24 +810,48 @@ final class SupportDiagnosticsEndpoint
         ];
     }
     /**
+     * @return array<string, mixed>
+     */
+    private static function getClockFolioAccountingSummary(): array
+    {
+        if (!\function_exists('MustHotelBooking\\Engine\\get_clock_folio_accounting_repository')) {
+            return [
+                'table_exists' => false,
+                'total' => 0,
+            ];
+        }
+
+        return \MustHotelBooking\Engine\get_clock_folio_accounting_repository()->getSummary();
+    }
+    /**
      * @param array<string, mixed> $clockRequestSummary
      * @return array<string, mixed>
      */
     private static function getClockFolioPaymentAccountingNotice(array $clockRequestSummary): array
     {
+        $accountingSummary = self::getClockFolioAccountingSummary();
+        $manualReviewCount = (int) ($accountingSummary['manual_review'] ?? 0);
+        $failedCount = (int) ($accountingSummary['failed'] ?? 0);
+        $latestError = (string) ($accountingSummary['latest_error'] ?? '');
         $lastOperation = (string) ($clockRequestSummary['last_error_operation'] ?? '');
         $lastError = (string) ($clockRequestSummary['last_error'] ?? '');
         $lastHttpStatus = (int) ($clockRequestSummary['last_error_http_status'] ?? 0);
         $isKnownManualAccounting =
-            $lastOperation === 'clock.default_booking_folio_fetch'
-            && self::isKnownClockFolioPermissionMessage($lastError);
+            $manualReviewCount > 0
+            || $failedCount > 0
+            || (
+                \in_array($lastOperation, ['clock.booking_folios_list', 'clock.payment_sub_types_view', 'clock.folio_payment_create', 'clock.refund_credit_item_create'], true)
+                && self::isKnownClockFolioPermissionMessage($lastError)
+            );
         return [
             'enabled' => $isKnownManualAccounting,
-            'status' => $isKnownManualAccounting ? 'manual_clock_folio_payment_required' : 'not_applicable',
+            'status' => $isKnownManualAccounting ? 'clock_folio_accounting_review_required' : 'not_applicable',
+            'manual_review_count' => $manualReviewCount,
+            'failed_count' => $failedCount,
             'last_error_operation' => $lastOperation,
             'last_error_http_status' => $lastHttpStatus,
             'message' => $isKnownManualAccounting
-                ? 'Clock blocked automatic folio payment posting because the API user is missing pms_api_booking_folios_default. Staff must manually post the website Stripe payment in Clock until Clock enables this API right.'
+                ? ($latestError !== '' ? $latestError : 'Clock folio accounting needs review. Confirm booking_folios LIST VIEW, payment_sub_types VIEW, and credit_item payment CREATE rights, then retry eligible rows from the Payments detail page.')
                 : '',
         ];
     }
@@ -1176,6 +1202,9 @@ final class SupportDiagnosticsEndpoint
     {
         $message = \strtolower($message);
         return \strpos($message, 'pms_api_booking_folios_default') !== false
+            || \strpos($message, 'booking_folios') !== false
+            || \strpos($message, 'payment_sub_types') !== false
+            || \strpos($message, 'credit_item') !== false
             || (
                 \strpos($message, 'booking_folios_default') !== false
                 && \strpos($message, 'right') !== false

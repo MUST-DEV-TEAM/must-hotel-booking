@@ -33,11 +33,7 @@ final class ClockPaymentReconciliationService
     {
         $paymentMethod = \sanitize_key($paymentMethod);
         $transactionId = \sanitize_text_field($transactionId);
-        $folioPaymentSync = new ClockFolioPaymentSyncService($this->client);
         foreach ($this->clockReservationRows($reservationIds) as $row) {
-            if ($paymentMethod === 'stripe') {
-                $folioPaymentSync->syncStripePaymentForReservation($row, $transactionId);
-            }
             $this->reconcileRow($row, [
                 'operation' => 'payment_succeeded',
                 'target_provider_status' => 'confirmed',

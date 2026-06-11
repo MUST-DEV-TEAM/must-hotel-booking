@@ -3,6 +3,7 @@
 namespace MustHotelBooking\Provider\Sync;
 
 use MustHotelBooking\Engine\PaymentRefundService;
+use MustHotelBooking\Provider\Clock\ClockPaymentAccountingService;
 use MustHotelBooking\Provider\Clock\ClockPaymentReconciliationService;
 use MustHotelBooking\Provider\Clock\ClockInboundSyncService;
 use MustHotelBooking\Provider\ProviderManager;
@@ -162,9 +163,13 @@ final class ProviderSyncJobRunner
 
                 return [
                     'success' => !empty($result['success']),
-                    'retry' => empty($result['success']),
+                    'retry' => !empty($result['retry']),
                     'message' => isset($result['message']) ? (string) $result['message'] : '',
                 ];
+            }
+
+            if ($operation === 'clock_folio_accounting_sync') {
+                return (new ClockPaymentAccountingService())->executeSyncJob($job);
             }
 
             return (new ClockPaymentReconciliationService())->executeSyncJob($job);

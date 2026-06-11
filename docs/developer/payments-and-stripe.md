@@ -1,6 +1,6 @@
-# Payments and Stripe
+# Payments, PokPay, and Stripe
 
-Developer reference for the payment architecture, Stripe integration, payment status lifecycle, and deposit logic.
+Developer reference for the payment architecture, PokPay/Stripe integrations, payment status lifecycle, and deposit logic.
 
 ---
 
@@ -22,13 +22,24 @@ The payment layer is built around three collaborating components:
 
 | Method slug | Gateway class | Internal gateway key | Description |
 |---|---|---|---|
-| `stripe` | `StripePayment` | `stripe` | Card payment via Stripe Checkout hosted page; redirects the guest off-site |
+| `pokpay` | `PokPayPayment` | `pokpay` | Primary online card payment via embedded PokPay checkout; the server creates and verifies SDK orders |
+| `stripe` | `StripePayment` | `stripe` | Fallback card payment via Stripe Checkout hosted page; redirects the guest off-site |
 | `pay_at_hotel` | `CashPayment` | `cash` | Guest pays in cash or at the property; no redirection; reservation confirmed immediately |
 | `cash` | `CashPayment` | `cash` | Alias for `pay_at_hotel`; normalised to the same gateway |
 
-`PaymentFactory::normalizeMethod()` maps `pay_at_hotel` and `cash` to the string `'cash'`, and `stripe` to `'stripe'`. Any other value returns `''`.
+`PaymentFactory::normalizeMethod()` maps `pay_at_hotel` and `cash` to the string `'cash'`, `pokpay` to `'pokpay'`, and `stripe` to `'stripe'`. Any other value returns `''`.
 
-The set of enabled methods is stored in the `payment_methods` key of the `payments_summary` settings group and managed by `PaymentMethodRegistry`. At checkout, `PaymentEngine::getCheckoutPaymentMethods()` filters that list by gateway availability (i.e. Stripe is excluded if keys are not configured) and returns display labels. If no method passes validation, `pay_at_hotel` is returned as a hard fallback.
+The set of enabled methods is stored in the `payment_methods` key of the `payments_summary` settings group and managed by `PaymentMethodRegistry`. PokPay is the primary online method and Stripe is the fallback. At checkout, `PaymentEngine::getCheckoutPaymentMethods()` filters gateways by configuration, so PokPay or Stripe are excluded if their active environment credentials are missing. If no method passes validation, `pay_at_hotel` is returned as a hard fallback.
+
+## PokPay refunds
+
+PokPay automatic refunds are supported server-side through the POK endpoint:
+
+`POST /merchants/:merchantId/sdk-orders/:sdkOrderId/refund`
+
+The request uses the existing PokPay bearer token flow from `POST /auth/sdk/login`. Full refunds omit `refundAmount`; partial refunds send `refundAmount` in the same minor-unit format used when creating SDK orders. The plugin creates a local refund record before calling PokPay, blocks duplicate in-progress/completed refunds for the same reservation/payment/amount, and records a refunded payment ledger row only after the API succeeds.
+
+If PokPay credentials are missing, refund permission is unavailable, or the API call fails, the plugin creates a `manual_pending` refund record. Staff can refund from the POK dashboard and then mark the refund completed in the plugin.
 
 ---
 

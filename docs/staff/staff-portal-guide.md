@@ -608,10 +608,11 @@ The **Mark paid** button appears when the payment state allows this transition (
 
 Refund behaviour differs by payment method:
 
-**Stripe payments:** A refund form appears when `amount_paid > 0` and a transaction ID exists.
+**Gateway payments:** A refund form appears for supported online payments when `amount_paid > 0` and a transaction ID exists.
 1. Enter the refund amount (pre-filled with the amount paid; adjust for partial refunds).
 2. Click **Issue refund**.
-3. The refund is submitted to Stripe via the API.
+3. Stripe refunds are submitted to Stripe via the API. PokPay refunds are submitted to POK via `POST /merchants/:merchantId/sdk-orders/:sdkOrderId/refund`.
+4. If PokPay cannot refund automatically because credentials, API access, or merchant permissions are unavailable, the plugin creates a manual-pending refund record. Refund from the POK dashboard, then mark the refund completed in the plugin.
 
 **Pay at hotel:** The portal displays "Pay-at-hotel refunds still need to be handled manually outside the plugin." No automated refund button is shown; the staff member must process the refund outside the system and update the payment state manually.
 

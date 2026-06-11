@@ -94,7 +94,7 @@ final class PaymentStatusService
         }
 
         if ($target === 'mark_unpaid') {
-            return !\in_array($derivedStatus, ['refunded'], true) && !($method === 'stripe' && $amountPaid > 0.0);
+            return !\in_array($derivedStatus, ['refunded'], true) && !(\in_array($method, ['stripe', 'pokpay'], true) && $amountPaid > 0.0);
         }
 
         if ($target === 'mark_pending') {

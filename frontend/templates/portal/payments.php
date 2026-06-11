@@ -207,7 +207,7 @@ if (\is_array($detail)) {
     }
 
     if ($isProviderBacked) {
-        echo '<div class="must-portal-feed-item"><div><strong>' . \esc_html__('Provider-backed local payment edits are read-only here.', 'must-hotel-booking') . '</strong><span>' . \esc_html__('Stripe refunds use provider-aware Clock sync; other local payment-state edits remain disabled.', 'must-hotel-booking') . '</span></div>';
+        echo '<div class="must-portal-feed-item"><div><strong>' . \esc_html__('Provider-backed local payment edits are read-only here.', 'must-hotel-booking') . '</strong><span>' . \esc_html__('Gateway refunds use provider-aware Clock sync; other local payment-state edits remain disabled.', 'must-hotel-booking') . '</span></div>';
         PortalRenderer::renderBadge('warning', \__('Read-only', 'must-hotel-booking'));
         echo '</div>';
 
@@ -248,10 +248,17 @@ if (\is_array($detail)) {
         $renderStateAction('payment_mark_paid', \__('Mark paid', 'must-hotel-booking'), 'must_portal_payment_action_mark_paid_' . $reservationId, $detailUrl, $reservationId, 'must-portal-secondary-button');
     }
 
-    if ($canRefund && $amountPaid > 0.0 && $paymentMethodKey === 'stripe' && $transactionId !== '') {
+    if ($canRefund && $amountPaid > 0.0 && \in_array($paymentMethodKey, ['stripe', 'pokpay'], true) && $transactionId !== '') {
         $refundTypeValue = (string) ($refundForm['refund_type'] ?? 'refund_only');
         $refundModeValue = (string) ($refundForm['refund_amount_mode'] ?? 'fixed');
         $refundPercentValue = (string) ($refundForm['refund_percent'] ?? '');
+        $refundProviderLabel = $paymentMethodKey === 'pokpay' ? \__('PokPay refund', 'must-hotel-booking') : \__('Stripe refund', 'must-hotel-booking');
+
+        if ($paymentMethodKey === 'pokpay') {
+            echo '<div class="must-portal-feed-item"><div><strong>' . \esc_html__('PokPay automatic refund', 'must-hotel-booking') . '</strong><span>' . \esc_html__('Refunds are submitted server-side to POK. If the API is unavailable, a manual fallback record is created for dashboard follow-up.', 'must-hotel-booking') . '</span></div>';
+            PortalRenderer::renderBadge('info', \__('Gateway', 'must-hotel-booking'));
+            echo '</div>';
+        }
 
         echo '<form method="post" action="' . \esc_url($detailUrl) . '" class="must-portal-form-grid must-portal-refund-form">';
         \wp_nonce_field('must_portal_payment_action_payment_refund_' . $reservationId, 'must_portal_payment_nonce');
@@ -282,7 +289,7 @@ if (\is_array($detail)) {
         echo '<label class="must-refund-fixed-field"><span>' . \esc_html__('Refund amount', 'must-hotel-booking') . '</span><input type="number" min="0.01" max="' . \esc_attr(\number_format($amountPaid, 2, '.', '')) . '" step="0.01" name="amount" value="' . \esc_attr($refundAmountValue) . '" /></label>';
         echo '<label class="must-refund-percent-field"><span>' . \esc_html__('Refund percentage', 'must-hotel-booking') . '</span><input type="number" min="1" max="99.99" step="0.01" name="refund_percent" value="' . \esc_attr($refundPercentValue) . '" placeholder="50" /></label>';
         echo '<label class="must-portal-form-full"><span>' . \esc_html__('Reason', 'must-hotel-booking') . '</span><input type="text" name="reason" value="' . \esc_attr((string) ($refundForm['reason'] ?? '')) . '" /></label>';
-        echo '<div class="must-portal-form-full must-portal-inline-actions"><button type="submit" class="must-portal-secondary-button">' . \esc_html__('Issue refund', 'must-hotel-booking') . '</button></div>';
+        echo '<div class="must-portal-form-full must-portal-inline-actions"><button type="submit" class="must-portal-secondary-button">' . \esc_html($refundProviderLabel) . '</button></div>';
         echo '</form>';
 
         echo '<script>';
@@ -394,21 +401,49 @@ if (\is_array($detail)) {
     echo '</article>';
 
     if (!empty($refunds)) {
-        echo '<article class="must-portal-panel"><div class="must-portal-panel-header"><div><h2>' . \esc_html__('Refund records', 'must-hotel-booking') . '</h2><p>' . \esc_html__('Stripe refund IDs and Clock folio sync state.', 'must-hotel-booking') . '</p></div></div>';
-        echo '<div class="must-portal-table-wrap"><table class="must-portal-table"><thead><tr><th>' . \esc_html__('Amount', 'must-hotel-booking') . '</th><th>' . \esc_html__('Stripe', 'must-hotel-booking') . '</th><th>' . \esc_html__('Status', 'must-hotel-booking') . '</th><th>' . \esc_html__('Clock', 'must-hotel-booking') . '</th></tr></thead><tbody>';
+        echo '<article class="must-portal-panel"><div class="must-portal-panel-header"><div><h2>' . \esc_html__('Refund records', 'must-hotel-booking') . '</h2><p>' . \esc_html__('Gateway refund references and Clock folio sync state.', 'must-hotel-booking') . '</p></div></div>';
+        echo '<div class="must-portal-table-wrap"><table class="must-portal-table"><thead><tr><th>' . \esc_html__('Provider', 'must-hotel-booking') . '</th><th>' . \esc_html__('Amount', 'must-hotel-booking') . '</th><th>' . \esc_html__('Payment ref', 'must-hotel-booking') . '</th><th>' . \esc_html__('Refund ref', 'must-hotel-booking') . '</th><th>' . \esc_html__('Status', 'must-hotel-booking') . '</th><th>' . \esc_html__('Clock', 'must-hotel-booking') . '</th><th></th></tr></thead><tbody>';
 
         foreach ($refunds as $refundRow) {
             if (!\is_array($refundRow)) {
                 continue;
             }
+            $gateway = \sanitize_key((string) ($refundRow['gateway'] ?? ''));
+            if ($gateway === '') {
+                $gateway = (string) ($refundRow['stripe_refund_id'] ?? '') !== '' || (string) ($refundRow['stripe_payment_intent_id'] ?? '') !== '' ? 'stripe' : (string) ($refundRow['provider'] ?? '');
+            }
+            $providerPaymentReference = (string) ($refundRow['provider_payment_reference'] ?? '');
+            if ($providerPaymentReference === '') {
+                $providerPaymentReference = (string) ($refundRow['stripe_payment_intent_id'] ?? '');
+            }
+            $providerRefundReference = (string) ($refundRow['provider_refund_reference'] ?? '');
+            if ($providerRefundReference === '') {
+                $providerRefundReference = (string) ($refundRow['provider_refund_id'] ?? '');
+            }
+            if ($providerRefundReference === '') {
+                $providerRefundReference = (string) ($refundRow['stripe_refund_id'] ?? '');
+            }
 
             echo '<tr>';
+            echo '<td>' . \esc_html($gateway !== '' ? \ucfirst($gateway) : __('Gateway', 'must-hotel-booking')) . '</td>';
             echo '<td>' . \esc_html(\number_format_i18n((float) ($refundRow['amount'] ?? 0.0), 2) . ' ' . (string) ($refundRow['currency'] ?? $currency)) . '</td>';
-            echo '<td>' . \esc_html((string) ($refundRow['stripe_refund_id'] ?? '')) . '</td>';
+            echo '<td>' . \esc_html($providerPaymentReference) . '</td>';
+            echo '<td>' . \esc_html($providerRefundReference) . '</td>';
             echo '<td>';
             PortalRenderer::renderBadge((string) ($refundRow['status'] ?? 'info'), (string) ($refundRow['status'] ?? ''));
             echo '</td><td>';
             PortalRenderer::renderBadge((string) ($refundRow['clock_sync_status'] ?? 'info'), (string) ($refundRow['clock_sync_status'] ?? ''));
+            echo '</td><td>';
+            if (\sanitize_key((string) ($refundRow['status'] ?? '')) === 'manual_pending' && $canRefund) {
+                echo '<form method="post" action="' . \esc_url($detailUrl) . '" class="must-portal-inline-actions">';
+                \wp_nonce_field('must_portal_payment_action_payment_refund_manual_done_' . (int) ($refundRow['id'] ?? 0), 'must_portal_payment_nonce');
+                echo '<input type="hidden" name="must_portal_action" value="payment_refund_manual_done" />';
+                echo '<input type="hidden" name="reservation_id" value="' . \esc_attr((string) $reservationId) . '" />';
+                echo '<input type="hidden" name="refund_id" value="' . \esc_attr((string) ((int) ($refundRow['id'] ?? 0))) . '" />';
+                echo '<input type="text" name="manual_note" placeholder="' . \esc_attr__('Manual refund note', 'must-hotel-booking') . '" />';
+                echo '<button type="submit" class="must-portal-secondary-button">' . \esc_html__('Mark completed', 'must-hotel-booking') . '</button>';
+                echo '</form>';
+            }
             echo '</td></tr>';
         }
 

@@ -30,6 +30,38 @@ final class PaymentRepository extends AbstractRepository
     }
 
     /**
+     * @return array<string, mixed>|null
+     */
+    public function getPayment(int $paymentId): ?array
+    {
+        if ($paymentId <= 0 || !$this->paymentsTableExists()) {
+            return null;
+        }
+
+        $row = $this->wpdb->get_row(
+            $this->wpdb->prepare(
+                'SELECT
+                    id,
+                    reservation_id,
+                    amount,
+                    currency,
+                    method,
+                    status,
+                    transaction_id,
+                    paid_at,
+                    created_at
+                FROM ' . $this->table('payments') . '
+                WHERE id = %d
+                LIMIT 1',
+                $paymentId
+            ),
+            ARRAY_A
+        );
+
+        return \is_array($row) ? $row : null;
+    }
+
+    /**
      * @param array<string, mixed> $paymentData
      */
     public function createPayment(array $paymentData): int

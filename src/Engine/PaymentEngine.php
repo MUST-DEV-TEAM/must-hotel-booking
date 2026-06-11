@@ -859,7 +859,9 @@ final class PaymentEngine
             : \__('Hotel stay reservation', 'must-hotel-booking');
         $payload = [
             'amount' => $amountMinor,
+            'currencyCode' => \strtoupper($currency),
             'currency' => \strtoupper($currency),
+            'autoCapture' => true,
             'description' => $description . ' #' . \implode(',', $reservationIds),
         ];
 
@@ -930,6 +932,78 @@ final class PaymentEngine
             'success' => true,
             'order' => $data,
             'status' => self::getPokPayOrderStatus($data),
+        ];
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    public static function refundPokPaySdkOrder(string $orderId, float $amount, string $currency, string $reason = '', bool $fullRefund = true): array
+    {
+        $orderId = \sanitize_text_field($orderId);
+        $credentials = self::getPokPayEnvironmentCredentials();
+        $merchantId = \sanitize_text_field((string) ($credentials['merchant_id'] ?? ''));
+
+        if ($orderId === '') {
+            return [
+                'success' => false,
+                'message' => \__('PokPay order id is missing.', 'must-hotel-booking'),
+            ];
+        }
+
+        if ($merchantId === '' || (string) ($credentials['key_id'] ?? '') === '' || (string) ($credentials['key_secret'] ?? '') === '') {
+            return [
+                'success' => false,
+                'manual_fallback' => true,
+                'message' => \__('PokPay credentials are missing for the active environment.', 'must-hotel-booking'),
+            ];
+        }
+
+        $payload = [];
+        $reason = \sanitize_text_field($reason);
+
+        if ($reason !== '') {
+            $payload['refundReason'] = $reason;
+        }
+
+        if (!$fullRefund) {
+            $amountMinor = self::convertAmountToMinorUnits($amount, $currency);
+
+            if ($amountMinor <= 0) {
+                return [
+                    'success' => false,
+                    'message' => \__('PokPay refund amount must be greater than zero.', 'must-hotel-booking'),
+                ];
+            }
+
+            $payload['refundAmount'] = $amountMinor;
+        }
+
+        $response = self::performPokPayApiRequest(
+            'POST',
+            'merchants/' . \rawurlencode($merchantId) . '/sdk-orders/' . \rawurlencode($orderId) . '/refund',
+            $payload
+        );
+
+        if (empty($response['success'])) {
+            return [
+                'success' => false,
+                'manual_fallback' => true,
+                'status_code' => (int) ($response['status_code'] ?? 0),
+                'message' => isset($response['message']) && (string) $response['message'] !== ''
+                    ? (string) $response['message']
+                    : \__('Unable to create the PokPay refund.', 'must-hotel-booking'),
+                'body' => isset($response['body']) && \is_array($response['body']) ? $response['body'] : [],
+            ];
+        }
+
+        $data = self::extractPokPayResponseData(isset($response['body']) && \is_array($response['body']) ? $response['body'] : []);
+
+        return [
+            'success' => true,
+            'refund' => $data,
+            'provider_refund_id' => self::extractPokPayRefundReference($data),
+            'status' => self::getPokPayRefundStatus($data),
         ];
     }
 
@@ -1030,6 +1104,10 @@ final class PaymentEngine
      */
     private static function extractPokPayOrderId(array $data): string
     {
+        if (isset($data['sdkOrder']) && \is_array($data['sdkOrder'])) {
+            return self::extractPokPayOrderId($data['sdkOrder']);
+        }
+
         foreach (['id', 'orderId', 'sdkOrderId', 'sdk_order_id'] as $key) {
             if (isset($data[$key]) && \is_scalar($data[$key])) {
                 $value = \trim((string) $data[$key]);
@@ -1048,10 +1126,90 @@ final class PaymentEngine
      */
     public static function getPokPayOrderStatus(array $data): string
     {
+        if (isset($data['sdkOrder']) && \is_array($data['sdkOrder'])) {
+            return self::getPokPayOrderStatus($data['sdkOrder']);
+        }
+
         foreach (['status', 'paymentStatus', 'payment_status', 'state'] as $key) {
             if (isset($data[$key]) && \is_scalar($data[$key])) {
                 return \strtoupper(\sanitize_key((string) $data[$key]));
             }
+        }
+
+        if (!empty($data['isRefunded'])) {
+            return 'REFUNDED';
+        }
+
+        if (!empty($data['isCompleted'])) {
+            return 'CAPTURED';
+        }
+
+        return '';
+    }
+
+    /**
+     * @param array<string, mixed> $data
+     */
+    private static function extractPokPayRefundReference(array $data): string
+    {
+        if (isset($data['refund']) && \is_array($data['refund'])) {
+            $nested = self::extractPokPayRefundReference($data['refund']);
+
+            if ($nested !== '') {
+                return $nested;
+            }
+        }
+
+        if (isset($data['sdkOrder']) && \is_array($data['sdkOrder'])) {
+            $nested = self::extractPokPayRefundReference($data['sdkOrder']);
+
+            if ($nested !== '') {
+                return $nested;
+            }
+        }
+
+        foreach (['refundId', 'refund_id', 'providerRefundId', 'provider_refund_id', 'transactionId', 'id'] as $key) {
+            if (isset($data[$key]) && \is_scalar($data[$key])) {
+                $value = \trim((string) $data[$key]);
+
+                if ($value !== '') {
+                    return $value;
+                }
+            }
+        }
+
+        return '';
+    }
+
+    /**
+     * @param array<string, mixed> $data
+     */
+    private static function getPokPayRefundStatus(array $data): string
+    {
+        if (isset($data['refund']) && \is_array($data['refund'])) {
+            $nested = self::getPokPayRefundStatus($data['refund']);
+
+            if ($nested !== '') {
+                return $nested;
+            }
+        }
+
+        if (isset($data['sdkOrder']) && \is_array($data['sdkOrder'])) {
+            $nested = self::getPokPayRefundStatus($data['sdkOrder']);
+
+            if ($nested !== '') {
+                return $nested;
+            }
+        }
+
+        foreach (['status', 'refundStatus', 'refund_status', 'state'] as $key) {
+            if (isset($data[$key]) && \is_scalar($data[$key])) {
+                return \strtolower(\sanitize_key((string) $data[$key]));
+            }
+        }
+
+        if (!empty($data['isRefunded'])) {
+            return 'succeeded';
         }
 
         return '';

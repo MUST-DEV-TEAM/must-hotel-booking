@@ -121,6 +121,67 @@ final class RefundRepository extends AbstractRepository
         return \is_array($row) ? $row : null;
     }
 
+    /** @return array<string, mixed>|null */
+    public function findOpenManualByProviderReference(int $reservationId, string $gateway, string $providerPaymentReference): ?array
+    {
+        $gateway = \sanitize_key($gateway);
+        $providerPaymentReference = \trim($providerPaymentReference);
+
+        if ($reservationId <= 0 || $gateway === '' || $providerPaymentReference === '' || !$this->refundsTableExists()) {
+            return null;
+        }
+
+        $row = $this->wpdb->get_row(
+            $this->wpdb->prepare(
+                'SELECT * FROM ' . $this->table('refunds') . '
+                WHERE reservation_id = %d
+                    AND gateway = %s
+                    AND provider_payment_reference = %s
+                    AND status IN (\'manual_pending\', \'pending\', \'processing\')
+                ORDER BY id DESC
+                LIMIT 1',
+                $reservationId,
+                $gateway,
+                $providerPaymentReference
+            ),
+            ARRAY_A
+        );
+
+        return \is_array($row) ? $row : null;
+    }
+
+    /** @return array<string, mixed>|null */
+    public function findBlockingProviderRefund(int $reservationId, string $gateway, string $providerPaymentReference, float $amount): ?array
+    {
+        $gateway = \sanitize_key($gateway);
+        $providerPaymentReference = \trim($providerPaymentReference);
+        $amount = \round($amount, 2);
+
+        if ($reservationId <= 0 || $gateway === '' || $providerPaymentReference === '' || $amount <= 0.0 || !$this->refundsTableExists()) {
+            return null;
+        }
+
+        $row = $this->wpdb->get_row(
+            $this->wpdb->prepare(
+                'SELECT * FROM ' . $this->table('refunds') . '
+                WHERE reservation_id = %d
+                    AND gateway = %s
+                    AND provider_payment_reference = %s
+                    AND ABS(amount - %f) < 0.01
+                    AND status IN (\'pending\', \'processing\', \'succeeded\', \'completed\', \'manual_pending\', \'manual_completed\')
+                ORDER BY id DESC
+                LIMIT 1',
+                $reservationId,
+                $gateway,
+                $providerPaymentReference,
+                $amount
+            ),
+            ARRAY_A
+        );
+
+        return \is_array($row) ? $row : null;
+    }
+
     /** @return array<int, array<string, mixed>> */
     public function getRefundsForReservation(int $reservationId): array
     {

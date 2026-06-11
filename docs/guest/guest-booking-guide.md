@@ -126,7 +126,7 @@ Your confirmation email includes a **cancellation link**. Clicking that link tak
 **Important conditions:**
 
 - The cancellation link only works if your booking has not yet been completed, blocked, or already cancelled.
-- **If you paid by card (Stripe):** the online cancellation link cannot automatically cancel your booking. You will see a message asking you to contact the hotel directly to discuss refund and cancellation options. A cancellation policy may apply.
+- **If you paid online by card (PokPay or Stripe):** eligible online cancellations can start an automatic refund under the hotel's cancellation policy. If the refund cannot be completed automatically, contact the hotel to review cancellation and refund options.
 - **If you chose pay at hotel:** the cancellation link will cancel the booking immediately as long as it has not been marked completed.
 - A cancellation policy may apply depending on how close to your arrival date you cancel. If a policy is attached to your rate plan, the details are shown in any message you receive.
 

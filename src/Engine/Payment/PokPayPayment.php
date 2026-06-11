@@ -62,10 +62,36 @@ final class PokPayPayment implements PaymentInterface
 
     public function refundPayment(array $reservation, float $amount, array $context = []): array
     {
-        return [
-            'success' => false,
+        $orderId = isset($context['transaction_id'])
+            ? \sanitize_text_field((string) $context['transaction_id'])
+            : '';
+
+        if ($orderId === '') {
+            return [
+                'success' => false,
+                'method' => $this->method,
+                'message' => \__('PokPay refunds require a PokPay order reference.', 'must-hotel-booking'),
+            ];
+        }
+
+        $currency = $this->resolveCurrency($context);
+        $reason = isset($context['reason']) ? \sanitize_text_field((string) $context['reason']) : '';
+        $fullRefund = !isset($context['full_refund']) || !empty($context['full_refund']);
+        $response = PaymentEngine::refundPokPaySdkOrder($orderId, $amount, $currency, $reason, $fullRefund);
+
+        if (empty($response['success'])) {
+            return [
+                'success' => false,
+                'method' => $this->method,
+                'manual_fallback' => !empty($response['manual_fallback']),
+                'message' => isset($response['message']) && (string) $response['message'] !== ''
+                    ? (string) $response['message']
+                    : \__('Unable to create the PokPay refund.', 'must-hotel-booking'),
+            ];
+        }
+
+        return $response + [
             'method' => $this->method,
-            'message' => \__('PokPay refunds must be handled from the PokPay dashboard in this version.', 'must-hotel-booking'),
         ];
     }
 

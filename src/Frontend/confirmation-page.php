@@ -280,8 +280,8 @@ function handle_confirmation_cancellation_post_request(): array
             return $result;
         }
 
-        if ($paymentMethod !== 'stripe') {
-            $result['messages'][] = \__('This booking has a paid balance, but automatic online cancellation is only available for Stripe payments. Please contact the hotel to review the refund.', 'must-hotel-booking');
+        if (!\in_array($paymentMethod, ['stripe', 'pokpay'], true)) {
+            $result['messages'][] = \__('This booking has a paid balance, but automatic online cancellation is only available for supported online payments. Please contact the hotel to review the refund.', 'must-hotel-booking');
             return $result;
         }
 
@@ -302,6 +302,11 @@ function handle_confirmation_cancellation_post_request(): array
                 ? (string) $refundResult['message']
                 : \__('Unable to process the cancellation refund. Please contact the hotel.', 'must-hotel-booking');
 
+            return $result;
+        }
+
+        if ((string) ($refundResult['status'] ?? '') === 'manual_pending') {
+            $result['messages'][] = \__('The automatic refund could not be completed. Please contact the hotel to review the cancellation and refund.', 'must-hotel-booking');
             return $result;
         }
 

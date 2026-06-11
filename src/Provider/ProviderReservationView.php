@@ -69,17 +69,29 @@ final class ProviderReservationView
                     && (
                         $folioPaymentStatus === 'manual_review'
                         || \strpos(\strtolower($folioPaymentError), 'pms_api_booking_folios_default') !== false
+                        || \strpos(\strtolower($folioPaymentError), 'booking_folios') !== false
+                        || \strpos(\strtolower($folioPaymentError), 'payment_sub_types') !== false
+                        || \strpos(\strtolower($folioPaymentError), 'credit_item') !== false
                     )
                 )
                 || (
                     $directProviderSyncStatus === 'manual_review'
-                    && \strpos(\strtolower($directProviderSyncError), 'pms_api_booking_folios_default') !== false
+                    && (
+                        \strpos(\strtolower($directProviderSyncError), 'pms_api_booking_folios_default') !== false
+                        || \strpos(\strtolower($directProviderSyncError), 'booking_folios') !== false
+                        || \strpos(\strtolower($directProviderSyncError), 'payment_sub_types') !== false
+                        || \strpos(\strtolower($directProviderSyncError), 'credit_item') !== false
+                    )
                 )
                 || \strpos(\strtolower($directProviderSyncError), 'pms_api_booking_folios_default') !== false
+                || \strpos(\strtolower($directProviderSyncError), 'booking_folios') !== false
+                || \strpos(\strtolower($directProviderSyncError), 'payment_sub_types') !== false
+                || \strpos(\strtolower($directProviderSyncError), 'credit_item') !== false
                 || (
                     $localStatus === 'paid'
                     && (
                         \strpos($localPaymentMethod, 'stripe') !== false
+                        || \strpos($localPaymentMethod, 'pokpay') !== false
                         || $localPaymentMethod === ''
                     )
                 )
@@ -120,7 +132,7 @@ final class ProviderReservationView
                 'payment_sub_type' => $folioPaymentSubType !== '' ? $folioPaymentSubType : 'Stripe',
                 'synced_at' => $folioPaymentSyncedAt,
                 'message' => $folioPaymentNeedsManualAccounting
-                    ? \__('Website Stripe payment succeeded, but Clock folio payment posting is blocked by missing API permission. Staff must manually add this payment in Clock PMS.', 'must-hotel-booking')
+                    ? \__('Website payment succeeded, but Clock folio accounting needs review. Confirm booking_folios LIST VIEW, payment_sub_types VIEW, and credit_item payment CREATE rights, then retry from Payments.', 'must-hotel-booking')
                     : '',
             ],
         ];
