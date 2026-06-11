@@ -1,18 +1,14 @@
 <?php
-
 namespace MustHotelBooking\Frontend;
-
 use MustHotelBooking\Core\ManagedPages;
 use MustHotelBooking\Core\MustBookingConfig;
 use MustHotelBooking\Core\ReservationStatus;
 use MustHotelBooking\Engine\BookingAbuseProtection;
 use MustHotelBooking\Engine\BookingStatusEngine;
 use MustHotelBooking\Engine\BookingValidationEngine;
-use MustHotelBooking\Engine\CancellationEngine;
 use MustHotelBooking\Engine\EmailEngine;
 use MustHotelBooking\Engine\PaymentEngine;
 use MustHotelBooking\Engine\ReservationEngine;
-
 /**
  * Parse reservation ids from query string.
  *
@@ -22,7 +18,6 @@ function get_confirmation_reservation_ids_from_query(): array
 {
     return ReservationEngine::getReservationIdsFromSource(\is_array($_GET) ? $_GET : []);
 }
-
 /**
  * Resolve the primary country value used for guest persistence.
  */
@@ -30,7 +25,6 @@ function get_confirmation_primary_country_code(array $billing_form): string
 {
     return BookingValidationEngine::getConfirmationPrimaryCountryCode($billing_form);
 }
-
 /**
  * Build seeded billing values from stored guest progress.
  *
@@ -42,7 +36,6 @@ function get_confirmation_billing_form_seed(array $guest_form, array $stored_bil
 {
     return BookingValidationEngine::getConfirmationBillingFormSeed($guest_form, $stored_billing_form);
 }
-
 /**
  * Extract billing form values.
  *
@@ -54,7 +47,6 @@ function get_confirmation_billing_form_values(array $source, array $fallback = [
 {
     return BookingValidationEngine::getConfirmationBillingFormValues($source, $fallback);
 }
-
 /**
  * Validate billing information collected on confirmation.
  *
@@ -65,7 +57,6 @@ function validate_confirmation_billing_form_values(array $billing_form): array
 {
     return BookingValidationEngine::validateBillingForm($billing_form);
 }
-
 /**
  * Merge checkout guest values with confirmation billing values.
  *
@@ -77,7 +68,6 @@ function build_confirmation_guest_form(array $guest_form, array $billing_form): 
 {
     return BookingValidationEngine::buildConfirmationGuestForm($guest_form, $billing_form);
 }
-
 /**
  * Build status copy for confirmation result screens.
  *
@@ -89,8 +79,102 @@ function get_confirmation_result_copy(array $reservations, string $payment_metho
     return BookingStatusEngine::getConfirmationResultCopy($reservations, $payment_method_hint);
 }
 
+
 /**
- * @return array{messages: array<int, string>, booking_id: string, reservation_ids: array<int, int>, payment_method_hint: string}
+ * @param array<string, mixed> $reservation
+ */
+function get_confirmation_reservation_checkin_value(array $reservation): string
+{
+    foreach (['checkin', 'check_in', 'check_in_date', 'arrival', 'arrival_date', 'start_date'] as $key) {
+        $value = isset($reservation[$key]) ? \trim((string) $reservation[$key]) : '';
+
+        if ($value !== '') {
+            return \sanitize_text_field($value);
+        }
+    }
+
+    return '';
+}
+
+/**
+ * @param array<string, mixed> $reservation
+ * @return array<string, mixed>
+ */
+function build_confirmation_cancellation_policy_review(int $reservationId, array $reservation): array
+{
+    $policyDays = MustBookingConfig::get_cancellation_policy_days();
+    $refundPercent = MustBookingConfig::get_cancellation_refund_percent();
+    $checkinValue = get_confirmation_reservation_checkin_value($reservation);
+    $hotelContactMessage = build_confirmation_contact_hotel_message();
+
+    $base = [
+        'reservation_id' => $reservationId,
+        'eligible' => false,
+        'manual_only' => true,
+        'policy_days' => $policyDays,
+        'refund_percent' => $refundPercent,
+        'days_until_checkin' => null,
+        'checkin' => $checkinValue,
+        'message' => '',
+    ];
+
+    if ($checkinValue === '') {
+        $base['message'] = \__('We could not verify the check-in date for this reservation. Please contact the hotel to review cancellation options.', 'must-hotel-booking') . ' ' . $hotelContactMessage;
+        return $base;
+    }
+
+    $checkinTimestamp = \strtotime($checkinValue);
+
+    if ($checkinTimestamp === false) {
+        $base['message'] = \__('We could not verify the check-in date for this reservation. Please contact the hotel to review cancellation options.', 'must-hotel-booking') . ' ' . $hotelContactMessage;
+        return $base;
+    }
+
+    $nowTimestamp = (int) \current_time('timestamp');
+    $secondsUntilCheckin = $checkinTimestamp - $nowTimestamp;
+    $daysUntilCheckin = (int) \floor($secondsUntilCheckin / \DAY_IN_SECONDS);
+    $isEligible = $secondsUntilCheckin >= ($policyDays * \DAY_IN_SECONDS);
+
+    $base['days_until_checkin'] = $daysUntilCheckin;
+
+    if (!$isEligible) {
+        $base['message'] = $hotelContactMessage;
+        return $base;
+    }
+
+    $paymentStatus = \sanitize_key((string) ($reservation['payment_status'] ?? ''));
+    $refundDisplay = \number_format_i18n(
+        $refundPercent,
+        \abs($refundPercent - \round($refundPercent)) < 0.01 ? 0 : 2
+    );
+
+    $base['eligible'] = true;
+    $base['manual_only'] = false;
+
+    if (\in_array($paymentStatus, ['paid', 'partially_paid', 'partially_refunded'], true)) {
+        $base['message'] = \sprintf(
+            /* translators: 1: policy days, 2: refund percentage. */
+            \__('This reservation is eligible for online cancellation. The hotel policy allows online cancellation %1$d or more days before check-in. If you continue, the booking can be cancelled and up to %2$s%% of the paid amount can be refunded, depending on the payment status.', 'must-hotel-booking'),
+            $policyDays,
+            $refundDisplay
+        );
+
+        return $base;
+    }
+
+    $base['message'] = \sprintf(
+        /* translators: %d: policy days. */
+        \__('This reservation is eligible for online cancellation. The hotel policy allows online cancellation %d or more days before check-in. No online refund is needed because this booking does not appear to have a paid online payment.', 'must-hotel-booking'),
+        $policyDays
+    );
+
+    return $base;
+}
+
+
+
+/**
+ * @return array{messages: array<int, string>, booking_id: string, reservation_ids: array<int, int>, payment_method_hint: string, cancellation_review: array<string, mixed>}
  */
 function handle_confirmation_cancellation_request(): array
 {
@@ -99,29 +183,23 @@ function handle_confirmation_cancellation_request(): array
         'booking_id' => '',
         'reservation_ids' => [],
         'payment_method_hint' => '',
+        'cancellation_review' => [],
     ];
-
     $requestAction = isset($_GET['must_action']) ? \sanitize_key((string) \wp_unslash($_GET['must_action'])) : '';
-
-    if ($requestAction !== 'cancel_reservation') {
+    if (!\in_array($requestAction, ['review_cancellation', 'cancel_reservation'], true)) {
         return $result;
     }
-
     $reservationId = isset($_GET['reservation_id']) ? \absint($_GET['reservation_id']) : 0;
     $bookingId = isset($_GET['booking_id']) ? \sanitize_text_field((string) \wp_unslash($_GET['booking_id'])) : '';
     $token = isset($_GET['cancel_token']) ? \sanitize_text_field((string) \wp_unslash($_GET['cancel_token'])) : '';
     $reservation = $reservationId > 0 ? \MustHotelBooking\Engine\get_reservation_repository()->getReservationEmailData($reservationId) : null;
-
-    $result['booking_id'] = $bookingId;
-    $result['reservation_ids'] = $reservationId > 0 ? [$reservationId] : [];
-
+    $result['booking_id'] = '';
+    $result['reservation_ids'] = [];
     if (!\is_array($reservation)) {
         $result['messages'][] = \__('This cancellation link is no longer valid.', 'must-hotel-booking');
         return $result;
     }
-
     $result['payment_method_hint'] = (string) ($reservation['payment_method'] ?? '');
-
     if (
         (string) ($reservation['booking_id'] ?? '') !== $bookingId
         || !EmailEngine::isValidGuestCancellationToken($reservationId, $bookingId, (string) ($reservation['guest_email'] ?? ''), $token)
@@ -129,46 +207,101 @@ function handle_confirmation_cancellation_request(): array
         $result['messages'][] = \__('This cancellation link is invalid or has expired.', 'must-hotel-booking');
         return $result;
     }
-
+    $result['booking_id'] = $bookingId;
+    $result['reservation_ids'] = [$reservationId];
     $status = \sanitize_key((string) ($reservation['status'] ?? ''));
-
     if ($status === 'cancelled') {
         $result['messages'][] = \__('This reservation is already cancelled.', 'must-hotel-booking');
         return $result;
     }
-
     if (\in_array($status, ['completed', 'blocked'], true)) {
         $result['messages'][] = \__('This reservation can no longer be cancelled online.', 'must-hotel-booking');
         return $result;
     }
+    $review = build_confirmation_cancellation_policy_review($reservationId, $reservation);
 
-    if (!EmailEngine::canAutoCancelReservation($reservation)) {
-        $details = CancellationEngine::getPenaltyDetails($reservationId, \current_time('mysql'));
-        $message = \__('This reservation was paid online and cannot be auto-cancelled from the email link. Contact the hotel to review refund and cancellation options.', 'must-hotel-booking');
-
-        if (!empty($details['policy_name'])) {
-            $message .= ' ' . \sprintf(
-                /* translators: %s is policy name. */
-                \__('Cancellation policy: %s.', 'must-hotel-booking'),
-                (string) $details['policy_name']
-            );
-        }
-
-        $result['messages'][] = $message;
-        return $result;
+    $result['cancellation_review'] = $review;
+    $result['messages'][] = (string) ($review['message'] ?? '');
+    return $result;
+}
+/**
+ * @param array<string, mixed> $reservation
+ * @return array{success: bool, queued: bool, message: string}
+ */
+function cancel_confirmation_reservation_without_refund(int $reservationId, array $reservation): array
+{
+    if ($reservationId <= 0) {
+        return [
+            'success' => false,
+            'queued' => false,
+            'message' => \__('Reservation not found.', 'must-hotel-booking'),
+        ];
     }
-
+    $paymentStatus = \sanitize_key((string) ($reservation['payment_status'] ?? ''));
+    if (
+        (string) ($reservation['provider'] ?? '') === \MustHotelBooking\Provider\ProviderManager::CLOCK_MODE
+        && \class_exists(\MustHotelBooking\Provider\Clock\ClockPaymentReconciliationService::class)
+    ) {
+        $clockResult = (new \MustHotelBooking\Provider\Clock\ClockPaymentReconciliationService())->cancelReservation(
+            $reservationId,
+            'guest_cancelled',
+            'public'
+        );
+        if (empty($clockResult['success']) && empty($clockResult['queued'])) {
+            return [
+                'success' => false,
+                'queued' => false,
+                'message' => (string) ($clockResult['message'] ?? \__('Clock cancellation failed.', 'must-hotel-booking')),
+            ];
+        }
+        BookingStatusEngine::updateReservationStatuses(
+            [$reservationId],
+            'cancelled',
+            $paymentStatus
+        );
+        return [
+            'success' => !empty($clockResult['success']),
+            'queued' => !empty($clockResult['queued']),
+            'message' => (string) ($clockResult['message'] ?? ''),
+        ];
+    }
     BookingStatusEngine::updateReservationStatuses(
         [$reservationId],
         'cancelled',
-        \sanitize_key((string) ($reservation['payment_status'] ?? ''))
+        $paymentStatus
     );
-
-    $result['messages'][] = \__('Your reservation has been cancelled successfully.', 'must-hotel-booking');
-
-    return $result;
+    return [
+        'success' => true,
+        'queued' => false,
+        'message' => '',
+    ];
 }
-
+function build_confirmation_contact_hotel_message(): string
+{
+    $days = MustBookingConfig::get_cancellation_policy_days();
+    $hotelEmail = MustBookingConfig::get_booking_notification_email();
+    $hotelPhone = MustBookingConfig::get_hotel_phone();
+    $message = \sprintf(
+        /* translators: %d is number of days before check-in. */
+        \__('Online cancellation is available until %d days before check-in. This reservation is now inside the cancellation deadline. Please contact the hotel to review cancellation or refund options.', 'must-hotel-booking'),
+        $days
+    );
+    if ($hotelEmail !== '') {
+        $message .= ' ' . \sprintf(
+            /* translators: %s is hotel email. */
+            \__('Email: %s.', 'must-hotel-booking'),
+            $hotelEmail
+        );
+    }
+    if ($hotelPhone !== '') {
+        $message .= ' ' . \sprintf(
+            /* translators: %s is hotel phone. */
+            \__('Phone: %s.', 'must-hotel-booking'),
+            $hotelPhone
+        );
+    }
+    return $message;
+}
 /**
  * Build view data for the pre-submit confirmation step.
  *
@@ -179,11 +312,9 @@ function get_pending_confirmation_page_view_data(): array
     /** @var array<string, mixed> $request_source */
     $request_source = \is_array($_GET) ? $_GET : [];
     $request_method = isset($_SERVER['REQUEST_METHOD']) ? \strtoupper((string) $_SERVER['REQUEST_METHOD']) : 'GET';
-
     if ($request_method === 'POST' && \is_array($_POST)) {
         $request_source = $_POST;
     }
-
     $messages = [];
     $selection = get_booking_selection();
     $selection_context = normalize_booking_selection_context($selection['context'] ?? []);
@@ -215,7 +346,6 @@ function get_pending_confirmation_page_view_data(): array
     $stored_booking_source = isset($flow_data['booking_source']) ? \sanitize_key((string) $flow_data['booking_source']) : 'website';
     $stored_booking_notes = isset($flow_data['booking_notes']) ? \sanitize_textarea_field((string) $flow_data['booking_notes']) : '';
     $coupon_code = '';
-
     if ($request_action === 'preview_coupon') {
         $coupon_code = $submitted_coupon_code;
     } elseif ($submitted_coupon_code !== '') {
@@ -225,20 +355,16 @@ function get_pending_confirmation_page_view_data(): array
     } elseif ($stored_coupon_code !== '') {
         $coupon_code = $stored_coupon_code;
     }
-
     if (empty($selected_room_ids)) {
         $messages[] = \__('Please select at least one room before continuing to confirmation.', 'must-hotel-booking');
         $context['is_valid'] = false;
     }
-
     if (empty($stored_guest_form_source)) {
         $messages[] = \__('Please complete guest information before confirming your stay.', 'must-hotel-booking');
         $context['is_valid'] = false;
     }
-
     if (!empty($context['is_valid'])) {
         $lock_ok = ensure_checkout_room_locks($selected_room_ids, (string) $context['checkin'], (string) $context['checkout']);
-
         if (!$lock_ok) {
             $messages[] = \__('One or more selected room locks have expired. Please return to accommodation and confirm them again.', 'must-hotel-booking');
             $context['is_valid'] = false;
@@ -248,7 +374,6 @@ function get_pending_confirmation_page_view_data(): array
             $messages[] = (string) $error_message;
         }
     }
-
     $room_items = [
         'items' => [],
         'summary' => [
@@ -261,36 +386,28 @@ function get_pending_confirmation_page_view_data(): array
             'applied_coupon' => '',
         ],
     ];
-
     if (!empty($context['is_valid'])) {
         $room_items = get_checkout_selected_room_items($context, $coupon_code, $guest_form);
     }
-
     if (!empty($room_items['errors'])) {
         foreach ((array) $room_items['errors'] as $room_item_error) {
             $messages[] = (string) $room_item_error;
         }
     }
-
     if ($request_method === 'GET' && !empty($context['is_valid'])) {
         BookingAbuseProtection::markConfirmationStepStarted($context);
     }
-
     $summary = isset($room_items['summary']) && \is_array($room_items['summary']) ? $room_items['summary'] : [];
     $applied_coupon_code = isset($summary['applied_coupon']) ? \sanitize_text_field((string) $summary['applied_coupon']) : '';
     $coupon_input_value = $submitted_coupon_code;
-
     if ($applied_coupon_code !== '' && ((float) ($summary['discount_total'] ?? 0.0)) > 0.0) {
         $coupon_input_value = '';
     }
-
     if (isset($_GET['stripe_return']) && (string) \wp_unslash($_GET['stripe_return']) === 'cancel') {
         $messages[] = \__('Stripe checkout was canceled. You can review your booking and try again.', 'must-hotel-booking');
     }
-
     if ($request_method === 'POST' && $request_action === 'confirm_booking') {
         $nonce = isset($_POST['must_confirmation_nonce']) ? (string) \wp_unslash($_POST['must_confirmation_nonce']) : '';
-
         if (!\wp_verify_nonce($nonce, 'must_confirm_booking')) {
             $messages[] = \__('Security check failed. Please try again.', 'must-hotel-booking');
         } else {
@@ -302,44 +419,128 @@ function get_pending_confirmation_page_view_data(): array
                     'anti_abuse_surface' => BookingAbuseProtection::SURFACE_CONFIRMATION,
                 ]
             );
-
             if (empty($anti_abuse_result['allowed'])) {
                 $messages[] = isset($anti_abuse_result['message']) && (string) $anti_abuse_result['message'] !== ''
                     ? (string) $anti_abuse_result['message']
                     : BookingAbuseProtection::getGenericFailureMessage();
             } else {
                 $billing_errors = BookingValidationEngine::validateBillingForm($billing_form);
-
                 foreach ($billing_errors as $billing_error) {
                     $messages[] = $billing_error;
                 }
-
                 if (!isset($payment_methods[$payment_method])) {
                     $messages[] = \__('Please select a valid payment method.', 'must-hotel-booking');
                 }
-
                 if (empty($billing_errors) && isset($payment_methods[$payment_method]) && !empty($context['is_valid'])) {
-                $effective_coupon_code = $applied_coupon_code !== '' ? $applied_coupon_code : $coupon_code;
-                $payment_creation_options = PaymentEngine::getReservationCreationOptions($payment_method);
-                $total_amount = isset($summary['total_price']) ? (float) $summary['total_price'] : 0.0;
-                $currency = \class_exists(MustBookingConfig::class) ? MustBookingConfig::get_currency() : 'USD';
-                update_booking_selection_flow_data([
-                    'guest_form' => $confirmation_guest_form,
-                    'billing_form' => $billing_form,
-                    'coupon_code' => $effective_coupon_code,
-                    'payment_method' => $payment_method,
-                ]);
-
-                if (PaymentEngine::supportsReusablePendingReservations($payment_method)) {
-                    $reservation_ids = [];
-                    $created_new_draft = false;
-                    $stripe_coupon_ids = [];
-
-                    if (
-                        !empty($pending_payment['reservation_ids']) &&
-                        BookingStatusEngine::areReusablePendingPaymentReservations((array) $pending_payment['reservation_ids'])
-                    ) {
-                        $reservation_ids = \array_map('intval', (array) $pending_payment['reservation_ids']);
+                    $effective_coupon_code = $applied_coupon_code !== '' ? $applied_coupon_code : $coupon_code;
+                    $payment_creation_options = PaymentEngine::getReservationCreationOptions($payment_method);
+                    $total_amount = isset($summary['total_price']) ? (float) $summary['total_price'] : 0.0;
+                    $currency = \class_exists(MustBookingConfig::class) ? MustBookingConfig::get_currency() : 'USD';
+                    update_booking_selection_flow_data([
+                        'guest_form' => $confirmation_guest_form,
+                        'billing_form' => $billing_form,
+                        'coupon_code' => $effective_coupon_code,
+                        'payment_method' => $payment_method,
+                    ]);
+                    if (PaymentEngine::supportsReusablePendingReservations($payment_method)) {
+                        $reservation_ids = [];
+                        $created_new_draft = false;
+                        $stripe_coupon_ids = [];
+                        if (
+                            !empty($pending_payment['reservation_ids']) &&
+                            BookingStatusEngine::areReusablePendingPaymentReservations((array) $pending_payment['reservation_ids'])
+                        ) {
+                            $reservation_ids = \array_map('intval', (array) $pending_payment['reservation_ids']);
+                        } else {
+                            $result = create_checkout_reservations(
+                                $context,
+                                $confirmation_guest_form,
+                                $effective_coupon_code,
+                                [
+                                    'anti_abuse_surface' => BookingAbuseProtection::SURFACE_CONFIRMATION,
+                                    'anti_abuse_prechecked' => true,
+                                    'reservation_status' => (string) $payment_creation_options['reservation_status'],
+                                    'payment_status' => (string) $payment_creation_options['payment_status'],
+                                    'clear_selection' => (bool) $payment_creation_options['clear_selection'],
+                                    'increment_coupon_usage' => (bool) $payment_creation_options['increment_coupon_usage'],
+                                    'booking_source' => $stored_booking_source,
+                                    'notes' => $stored_booking_notes,
+                                ]
+                            );
+                            if (!empty($result['errors'])) {
+                                foreach ((array) $result['errors'] as $result_error) {
+                                    $messages[] = (string) $result_error;
+                                }
+                            } else {
+                                $reservation_ids = \array_map('intval', (array) ($result['reservation_ids'] ?? []));
+                                $created_new_draft = !empty($reservation_ids);
+                                $stripe_coupon_ids = \array_map('intval', (array) ($result['applied_coupon_ids'] ?? []));
+                            }
+                        }
+                        if (empty($stripe_coupon_ids) && $effective_coupon_code !== '') {
+                            $coupon_rule = PaymentEngine::getCouponRuleByCode($effective_coupon_code);
+                            if (\is_array($coupon_rule) && !empty($coupon_rule['id'])) {
+                                $stripe_coupon_ids[] = (int) $coupon_rule['id'];
+                            }
+                        }
+                        if (!empty($reservation_ids) && empty($messages)) {
+                            $payment_result = PaymentEngine::processPayment(
+                                $payment_method,
+                                $reservation_ids,
+                                $total_amount,
+                                [
+                                    'guest_form' => $confirmation_guest_form,
+                                    'currency' => $currency,
+                                    'coupon_ids' => $stripe_coupon_ids,
+                                ]
+                            );
+                            if (empty($payment_result['success'])) {
+                                if ($created_new_draft) {
+                                    BookingStatusEngine::failPendingPaymentReservations(
+                                        $reservation_ids,
+                                        PaymentEngine::normalizeMethod($payment_method) === 'pokpay' ? 'pokpay' : 'stripe',
+                                        'payment_failed'
+                                    );
+                                }
+                                $messages[] = isset($payment_result['message']) && (string) $payment_result['message'] !== ''
+                                    ? (string) $payment_result['message']
+                                    : \__('Unable to start online checkout right now.', 'must-hotel-booking');
+                            } else {
+                                $pending_payment = PaymentEngine::normalizePendingPaymentFlowData([
+                                    'method' => $payment_method,
+                                    'reservation_ids' => $reservation_ids,
+                                    'session_id' => (string) ($payment_result['session_id'] ?? $payment_result['transaction_id'] ?? ''),
+                                    'checkout_url' => (string) ($payment_result['checkout_url'] ?? $payment_result['redirect_url'] ?? ''),
+                                    'expires_at' => (string) ($payment_result['expires_at'] ?? ''),
+                                    'created_at' => \current_time('mysql'),
+                                ]);
+                                update_booking_selection_flow_data([
+                                    'pending_payment' => $pending_payment,
+                                ]);
+                                $stripe_checkout_url = (string) ($payment_result['redirect_url'] ?? '');
+                                $gateway = PaymentEngine::normalizeMethod($payment_method);
+                                if (
+                                    $gateway === 'stripe' &&
+                                    $stripe_checkout_url !== ''
+                                    && PaymentEngine::isStripeCheckoutUrl($stripe_checkout_url)
+                                ) {
+                                    \wp_redirect($stripe_checkout_url);
+                                    exit;
+                                }
+                                if ($gateway === 'pokpay' && !empty($payment_result['requires_embedded_checkout'])) {
+                                    $messages[] = \__('Complete your PokPay card payment below.', 'must-hotel-booking');
+                                } else {
+                                    if ($created_new_draft) {
+                                        BookingStatusEngine::failPendingPaymentReservations($reservation_ids, $gateway === 'pokpay' ? 'pokpay' : 'stripe', 'payment_failed');
+                                    }
+                                    update_booking_selection_flow_data([
+                                        'pending_payment' => PaymentEngine::getEmptyPendingPaymentFlowData(),
+                                    ]);
+                                    $pending_payment = PaymentEngine::getEmptyPendingPaymentFlowData();
+                                    $messages[] = \__('The online payment provider returned an invalid checkout response. Please try again.', 'must-hotel-booking');
+                                }
+                            }
+                        }
                     } else {
                         $result = create_checkout_reservations(
                             $context,
@@ -356,160 +557,52 @@ function get_pending_confirmation_page_view_data(): array
                                 'notes' => $stored_booking_notes,
                             ]
                         );
-
                         if (!empty($result['errors'])) {
                             foreach ((array) $result['errors'] as $result_error) {
                                 $messages[] = (string) $result_error;
                             }
                         } else {
                             $reservation_ids = \array_map('intval', (array) ($result['reservation_ids'] ?? []));
-                            $created_new_draft = !empty($reservation_ids);
-                            $stripe_coupon_ids = \array_map('intval', (array) ($result['applied_coupon_ids'] ?? []));
-                        }
-                    }
-
-                    if (empty($stripe_coupon_ids) && $effective_coupon_code !== '') {
-                        $coupon_rule = PaymentEngine::getCouponRuleByCode($effective_coupon_code);
-
-                        if (\is_array($coupon_rule) && !empty($coupon_rule['id'])) {
-                            $stripe_coupon_ids[] = (int) $coupon_rule['id'];
-                        }
-                    }
-
-                    if (!empty($reservation_ids) && empty($messages)) {
-                        $payment_result = PaymentEngine::processPayment(
-                            $payment_method,
-                            $reservation_ids,
-                            $total_amount,
-                            [
-                                'guest_form' => $confirmation_guest_form,
-                                'currency' => $currency,
-                                'coupon_ids' => $stripe_coupon_ids,
-                            ]
-                        );
-
-                        if (empty($payment_result['success'])) {
-                            if ($created_new_draft) {
-                                BookingStatusEngine::failPendingPaymentReservations(
-                                    $reservation_ids,
-                                    PaymentEngine::normalizeMethod($payment_method) === 'pokpay' ? 'pokpay' : 'stripe',
-                                    'payment_failed'
+                            $payment_result = PaymentEngine::processPayment(
+                                $payment_method,
+                                $reservation_ids,
+                                $total_amount,
+                                [
+                                    'guest_form' => $confirmation_guest_form,
+                                    'currency' => $currency,
+                                ]
+                            );
+                            if (empty($payment_result['success'])) {
+                                $messages[] = isset($payment_result['message']) && (string) $payment_result['message'] !== ''
+                                    ? (string) $payment_result['message']
+                                    : \__('Unable to process the selected payment method right now.', 'must-hotel-booking');
+                            } else {
+                                update_booking_selection_flow_data([
+                                    'pending_payment' => PaymentEngine::getEmptyPendingPaymentFlowData(),
+                                ]);
+                                $redirect_url = \add_query_arg(
+                                    [
+                                        'reservation_ids' => \implode(',', $reservation_ids),
+                                        'payment_method' => $payment_method,
+                                    ],
+                                    get_booking_confirmation_page_url()
                                 );
-                            }
-
-                            $messages[] = isset($payment_result['message']) && (string) $payment_result['message'] !== ''
-                                ? (string) $payment_result['message']
-                                : \__('Unable to start online checkout right now.', 'must-hotel-booking');
-                        } else {
-                            $pending_payment = PaymentEngine::normalizePendingPaymentFlowData([
-                                'method' => $payment_method,
-                                'reservation_ids' => $reservation_ids,
-                                'session_id' => (string) ($payment_result['session_id'] ?? $payment_result['transaction_id'] ?? ''),
-                                'checkout_url' => (string) ($payment_result['checkout_url'] ?? $payment_result['redirect_url'] ?? ''),
-                                'expires_at' => (string) ($payment_result['expires_at'] ?? ''),
-                                'created_at' => \current_time('mysql'),
-                            ]);
-                            update_booking_selection_flow_data([
-                                'pending_payment' => $pending_payment,
-                            ]);
-
-                            $stripe_checkout_url = (string) ($payment_result['redirect_url'] ?? '');
-                            $gateway = PaymentEngine::normalizeMethod($payment_method);
-
-                            if (
-                                $gateway === 'stripe' &&
-                                $stripe_checkout_url !== ''
-                                && PaymentEngine::isStripeCheckoutUrl($stripe_checkout_url)
-                            ) {
-                                \wp_redirect($stripe_checkout_url);
+                                \wp_safe_redirect($redirect_url);
                                 exit;
                             }
-
-                            if ($gateway === 'pokpay' && !empty($payment_result['requires_embedded_checkout'])) {
-                                $messages[] = \__('Complete your PokPay card payment below.', 'must-hotel-booking');
-                            } else {
-                            if ($created_new_draft) {
-                                    BookingStatusEngine::failPendingPaymentReservations($reservation_ids, $gateway === 'pokpay' ? 'pokpay' : 'stripe', 'payment_failed');
-                            }
-
-                            update_booking_selection_flow_data([
-                                'pending_payment' => PaymentEngine::getEmptyPendingPaymentFlowData(),
-                            ]);
-                                $pending_payment = PaymentEngine::getEmptyPendingPaymentFlowData();
-
-                                $messages[] = \__('The online payment provider returned an invalid checkout response. Please try again.', 'must-hotel-booking');
-                            }
                         }
-                    }
-                } else {
-                    $result = create_checkout_reservations(
-                        $context,
-                        $confirmation_guest_form,
-                        $effective_coupon_code,
-                        [
-                            'anti_abuse_surface' => BookingAbuseProtection::SURFACE_CONFIRMATION,
-                            'anti_abuse_prechecked' => true,
-                            'reservation_status' => (string) $payment_creation_options['reservation_status'],
-                            'payment_status' => (string) $payment_creation_options['payment_status'],
-                            'clear_selection' => (bool) $payment_creation_options['clear_selection'],
-                            'increment_coupon_usage' => (bool) $payment_creation_options['increment_coupon_usage'],
-                            'booking_source' => $stored_booking_source,
-                            'notes' => $stored_booking_notes,
-                        ]
-                    );
-
-                    if (!empty($result['errors'])) {
-                        foreach ((array) $result['errors'] as $result_error) {
-                            $messages[] = (string) $result_error;
-                        }
-                    } else {
-                        $reservation_ids = \array_map('intval', (array) ($result['reservation_ids'] ?? []));
-                        $payment_result = PaymentEngine::processPayment(
-                            $payment_method,
-                            $reservation_ids,
-                            $total_amount,
-                            [
-                                'guest_form' => $confirmation_guest_form,
-                                'currency' => $currency,
-                            ]
-                        );
-
-                        if (empty($payment_result['success'])) {
-                            $messages[] = isset($payment_result['message']) && (string) $payment_result['message'] !== ''
-                                ? (string) $payment_result['message']
-                                : \__('Unable to process the selected payment method right now.', 'must-hotel-booking');
-                        } else {
-                            update_booking_selection_flow_data([
-                                'pending_payment' => PaymentEngine::getEmptyPendingPaymentFlowData(),
-                            ]);
-
-                            $redirect_url = \add_query_arg(
-                                [
-                                    'reservation_ids' => \implode(',', $reservation_ids),
-                                    'payment_method' => $payment_method,
-                                ],
-                                get_booking_confirmation_page_url()
-                            );
-
-                            \wp_safe_redirect($redirect_url);
-                            exit;
-                        }
-                    }
                     }
                 }
             }
         }
     }
-
     $synced_guest_form = BookingValidationEngine::buildConfirmationGuestForm($guest_form, $billing_form);
-
     update_booking_selection_flow_data([
         'guest_form' => $synced_guest_form,
         'billing_form' => $billing_form,
         'coupon_code' => $applied_coupon_code !== '' ? $applied_coupon_code : $coupon_code,
         'payment_method' => $payment_method,
     ]);
-
     $messages = \array_values(
         \array_unique(
             \array_filter(
@@ -517,7 +610,6 @@ function get_pending_confirmation_page_view_data(): array
             )
         )
     );
-
     return [
         'success' => false,
         'is_form_mode' => true,
@@ -551,7 +643,6 @@ function get_pending_confirmation_page_view_data(): array
         'phone_country_code_options' => get_checkout_phone_code_options(),
     ];
 }
-
 /**
  * Build view data for booking confirmation template.
  *
@@ -568,15 +659,14 @@ function get_confirmation_page_view_data(): array
     $payment_method_hint = isset($_GET['payment_method']) ? \sanitize_key((string) \wp_unslash($_GET['payment_method'])) : '';
     $stripe_return = isset($_GET['stripe_return']) ? \sanitize_key((string) \wp_unslash($_GET['stripe_return'])) : '';
     $session_id = isset($_GET['session_id']) ? \sanitize_text_field((string) \wp_unslash($_GET['session_id'])) : '';
-
+    $requestAction = isset($_GET['must_action']) ? \sanitize_key((string) \wp_unslash($_GET['must_action'])) : '';
+    $isCancellationReviewRequest = \in_array($requestAction, ['review_cancellation', 'cancel_reservation'], true);
     if ($payment_method_hint === '' && !empty($cancellationResult['payment_method_hint'])) {
         $payment_method_hint = \sanitize_key((string) $cancellationResult['payment_method_hint']);
     }
-
     if (!empty($reservation_ids)) {
         if (PaymentEngine::normalizeMethod($payment_method_hint) === 'stripe' && $session_id !== '') {
             $sync_result = PaymentEngine::syncReturnSession($payment_method_hint, $session_id, $reservation_ids);
-
             if (!empty($sync_result['success']) && isset($sync_result['state'])) {
                 if ((string) $sync_result['state'] === 'pending') {
                     $messages[] = \__('Stripe has returned, but the payment is still being finalized. Please wait a moment and refresh if needed.', 'must-hotel-booking');
@@ -587,21 +677,20 @@ function get_confirmation_page_view_data(): array
                 $messages[] = (string) $sync_result['message'];
             }
         }
-
         $reservations = ReservationEngine::getConfirmationRowsByIds($reservation_ids);
     } else {
         $booking_id = !empty($cancellationResult['booking_id'])
             ? (string) $cancellationResult['booking_id']
-            : (isset($_GET['booking_id']) ? \sanitize_text_field((string) \wp_unslash($_GET['booking_id'])) : '');
+            : (!$isCancellationReviewRequest && isset($_GET['booking_id'])
+                ? \sanitize_text_field((string) \wp_unslash($_GET['booking_id']))
+                : '');
 
         if ($booking_id !== '') {
             $reservations = ReservationEngine::getConfirmationRowsByBookingId($booking_id);
         }
     }
-
     if (!empty($reservations)) {
         $status_copy = BookingStatusEngine::getConfirmationResultCopy($reservations, $payment_method_hint);
-
         if (
             (PaymentEngine::normalizeMethod($payment_method_hint) === 'stripe' || $stripe_return === 'success') &&
             !empty($reservations) &&
@@ -609,21 +698,17 @@ function get_confirmation_page_view_data(): array
         ) {
             foreach ($reservations as $reservation) {
                 $status = isset($reservation['status']) ? \sanitize_key((string) ($reservation['status'] ?? '')) : '';
-
                 if (ReservationStatus::isConfirmed($status)) {
                     clear_booking_selection(false);
                     break;
                 }
             }
         }
-
         $primary_guest = $reservations[0];
         $total_price = 0.0;
-
         foreach ($reservations as $reservation) {
             $total_price += isset($reservation['total_price']) ? (float) $reservation['total_price'] : 0.0;
         }
-
         return [
             'success' => true,
             'is_form_mode' => false,
@@ -650,21 +735,20 @@ function get_confirmation_page_view_data(): array
             'coupon_input_value' => '',
             'applied_coupon_code' => '',
             'selected_room_count' => \count($reservations),
+            'cancellation_review' => isset($cancellationResult['cancellation_review']) && \is_array($cancellationResult['cancellation_review'])
+                ? $cancellationResult['cancellation_review']
+                : [],
             'country_options' => [],
             'phone_country_code_options' => [],
         ];
     }
-
     $flow_data = get_booking_selection_flow_data();
     $has_guest_progress = isset($flow_data['guest_form']) && \is_array($flow_data['guest_form']) && !empty($flow_data['guest_form']);
-
     if (has_booking_selected_rooms() && $has_guest_progress) {
         return get_pending_confirmation_page_view_data();
     }
-
     return get_pending_confirmation_page_view_data();
 }
-
 /**
  * Enqueue shared booking-process styles for confirmation.
  */
@@ -673,7 +757,6 @@ function enqueue_confirmation_page_assets(): void
     if (!ManagedPages::isCurrentPage('page_booking_confirmation_id', 'booking-confirmation')) {
         return;
     }
-
     $booking_page_style_version = \defined('MUST_HOTEL_BOOKING_PATH') && \file_exists(MUST_HOTEL_BOOKING_PATH . 'assets/css/booking-page.css')
         ? (string) \filemtime(MUST_HOTEL_BOOKING_PATH . 'assets/css/booking-page.css')
         : MUST_HOTEL_BOOKING_VERSION;
@@ -686,14 +769,12 @@ function enqueue_confirmation_page_assets(): void
         && (string) ($pending_payment['session_id'] ?? '') !== ''
         && !empty($pending_payment['reservation_ids']);
     $confirmation_dependencies = [];
-
     \wp_enqueue_style(
         'must-hotel-booking-booking-page',
         MUST_HOTEL_BOOKING_URL . 'assets/css/booking-page.css',
         [],
         $booking_page_style_version
     );
-
     if ($is_pokpay_pending) {
         \wp_enqueue_script(
             'must-hotel-booking-pokpay-sdk',
@@ -704,7 +785,6 @@ function enqueue_confirmation_page_assets(): void
         );
         $confirmation_dependencies[] = 'must-hotel-booking-pokpay-sdk';
     }
-
     \wp_enqueue_script(
         'must-hotel-booking-booking-confirmation',
         MUST_HOTEL_BOOKING_URL . 'assets/js/booking-confirmation.js',
@@ -712,7 +792,6 @@ function enqueue_confirmation_page_assets(): void
         MUST_HOTEL_BOOKING_VERSION,
         true
     );
-
     if ($is_pokpay_pending) {
         $guest_form = isset($flow_data['guest_form']) && \is_array($flow_data['guest_form']) ? $flow_data['guest_form'] : [];
         $billing_form = isset($flow_data['billing_form']) && \is_array($flow_data['billing_form']) ? $flow_data['billing_form'] : [];
@@ -729,7 +808,6 @@ function enqueue_confirmation_page_assets(): void
             'postalCode' => (string) ($billing_form['postcode'] ?? ''),
             'phoneNumber' => (string) ($billing_form['phone_number'] ?? $guest_form['phone_number'] ?? ''),
         ];
-
         \wp_localize_script(
             'must-hotel-booking-booking-confirmation',
             'mustHotelBookingPokPay',
@@ -757,7 +835,6 @@ function enqueue_confirmation_page_assets(): void
             ]
         );
     }
-
     \wp_enqueue_script(
         'must-hotel-booking-phone-fields',
         MUST_HOTEL_BOOKING_URL . 'assets/js/booking-phone-fields.js',
@@ -766,5 +843,4 @@ function enqueue_confirmation_page_assets(): void
         true
     );
 }
-
 \add_action('wp_enqueue_scripts', __NAMESPACE__ . '\enqueue_confirmation_page_assets');

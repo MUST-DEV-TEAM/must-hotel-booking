@@ -121,6 +121,12 @@ class MustBookingConfig
     {
         return self::int((string) self::get_setting('booking_window', 365), 1, 3650, 365);
     }
+    public static function get_cancellation_policy_days(): int
+    {
+        return self::int(self::get_setting('cancellation_policy_days', 21), 0, 365, 21);
+    }
+
+
     public static function get_max_booking_guests(): int
     {
         return self::int((string) self::get_setting('max_booking_guests', 12), 1, 100, 12);
@@ -136,6 +142,15 @@ class MustBookingConfig
     public static function get_checkout_time(): string
     {
         return self::time((string) self::get_setting('checkout_time', '11:00'), '11:00');
+    }
+    public static function get_cancellation_notice_hours(): int
+    {
+        return self::get_cancellation_policy_days() * 24;
+    }
+
+    public static function get_cancellation_refund_percent(): float
+    {
+        return self::decimal(self::get_setting('cancellation_refund_percent', 97.0), 0.0, 100.0, 97.0);
     }
     public static function get_website_booking_flow_mode(): string
     {
@@ -358,7 +373,37 @@ class MustBookingConfig
                 'portal_logo_url' => '',
                 'site_environment' => '',
             ],
-            'booking_rules' => ['booking_window' => 365, 'same_day_booking_allowed' => true, 'same_day_booking_cutoff_time' => '18:00', 'minimum_nights' => 1, 'maximum_nights' => 30, 'max_booking_guests' => 12, 'max_booking_rooms' => 3, 'allow_multi_room_booking' => true, 'default_reservation_source' => 'website', 'pending_reservation_expiration_minutes' => 35, 'require_phone' => true, 'require_country' => true, 'enable_special_requests' => true, 'require_terms_acceptance' => true, 'default_reservation_status' => 'confirmed', 'default_payment_mode' => 'guest_choice', 'cancellation_allowed' => true, 'cancellation_notice_hours' => 48, 'anti_abuse_enabled' => false, 'anti_abuse_honeypot_enabled' => false, 'anti_abuse_min_submit_enabled' => false, 'anti_abuse_min_submit_seconds' => 5, 'anti_abuse_throttle_enabled' => false, 'anti_abuse_max_attempts' => 5, 'anti_abuse_window_minutes' => 10, 'anti_abuse_block_duration_minutes' => 30, 'anti_abuse_logging_enabled' => false],
+            'booking_rules' => [
+                'booking_window' => 365,
+                'same_day_booking_allowed' => true,
+                'same_day_booking_cutoff_time' => '18:00',
+                'minimum_nights' => 1,
+                'maximum_nights' => 30,
+                'max_booking_guests' => 12,
+                'max_booking_rooms' => 3,
+                'allow_multi_room_booking' => true,
+                'default_reservation_source' => 'website',
+                'pending_reservation_expiration_minutes' => 35,
+                'require_phone' => true,
+                'require_country' => true,
+                'enable_special_requests' => true,
+                'require_terms_acceptance' => true,
+                'default_reservation_status' => 'confirmed',
+                'default_payment_mode' => 'guest_choice',
+                'cancellation_allowed' => true,
+                'cancellation_policy_days' => 21,
+                'cancellation_notice_hours' => 504,
+                'cancellation_refund_percent' => 97.0,
+                'anti_abuse_enabled' => false,
+                'anti_abuse_honeypot_enabled' => false,
+                'anti_abuse_min_submit_enabled' => false,
+                'anti_abuse_min_submit_seconds' => 5,
+                'anti_abuse_throttle_enabled' => false,
+                'anti_abuse_max_attempts' => 5,
+                'anti_abuse_window_minutes' => 10,
+                'anti_abuse_block_duration_minutes' => 30,
+                'anti_abuse_logging_enabled' => false
+            ],
             'checkin_checkout' => ['checkin_time' => '14:00', 'checkout_time' => '11:00', 'allow_early_checkin_request' => true, 'allow_late_checkout_request' => true, 'arrival_instructions' => '', 'departure_instructions' => '', 'guest_checkin_label' => \__('Check-in', 'must-hotel-booking'), 'guest_checkout_label' => \__('Check-out', 'must-hotel-booking')],
             'payments_summary' => ['payment_methods' => ['pay_at_hotel' => true, 'stripe' => false, 'pokpay' => false], 'deposit_required' => false, 'deposit_type' => 'percentage', 'deposit_value' => 0.0, 'tax_rate' => 0.0, 'stripe_publishable_key' => '', 'stripe_secret_key' => '', 'stripe_webhook_secret' => '', 'stripe_local_publishable_key' => '', 'stripe_local_secret_key' => '', 'stripe_local_webhook_secret' => '', 'stripe_staging_publishable_key' => '', 'stripe_staging_secret_key' => '', 'stripe_staging_webhook_secret' => '', 'stripe_production_publishable_key' => '', 'stripe_production_secret_key' => '', 'stripe_production_webhook_secret' => '', 'pokpay_local_merchant_id' => '', 'pokpay_local_key_id' => '', 'pokpay_local_key_secret' => '', 'pokpay_staging_merchant_id' => '', 'pokpay_staging_key_id' => '', 'pokpay_staging_key_secret' => '', 'pokpay_production_merchant_id' => '', 'pokpay_production_key_id' => '', 'pokpay_production_key_secret' => ''],
             'staff_access' => ['enable_staff_portal' => false, 'redirect_worker_after_login' => 'dashboard', 'hide_wp_admin_for_workers' => true, 'portal_access_roles' => self::staff_access_role_defaults(), 'capability_matrix' => self::staff_matrix_defaults(), 'portal_module_visibility' => self::portal_module_visibility_defaults()],
@@ -440,7 +485,37 @@ class MustBookingConfig
     private static function normalize_booking_rules(array $v): array
     {
         $d = self::group_defaults()['booking_rules'];
-        return ['booking_window' => self::int($v['booking_window'] ?? $d['booking_window'], 1, 3650, (int) $d['booking_window']), 'same_day_booking_allowed' => self::bool($v['same_day_booking_allowed'] ?? $d['same_day_booking_allowed']), 'same_day_booking_cutoff_time' => self::time_or_blank((string) ($v['same_day_booking_cutoff_time'] ?? $d['same_day_booking_cutoff_time']), (string) $d['same_day_booking_cutoff_time']), 'minimum_nights' => self::int($v['minimum_nights'] ?? $d['minimum_nights'], 1, 365, (int) $d['minimum_nights']), 'maximum_nights' => self::int($v['maximum_nights'] ?? $d['maximum_nights'], 1, 365, (int) $d['maximum_nights']), 'max_booking_guests' => self::int($v['max_booking_guests'] ?? $d['max_booking_guests'], 1, 100, (int) $d['max_booking_guests']), 'max_booking_rooms' => self::int($v['max_booking_rooms'] ?? $d['max_booking_rooms'], 1, 25, (int) $d['max_booking_rooms']), 'allow_multi_room_booking' => self::bool($v['allow_multi_room_booking'] ?? $d['allow_multi_room_booking']), 'default_reservation_source' => self::choice(\sanitize_key((string) ($v['default_reservation_source'] ?? $d['default_reservation_source'])), ['website', 'phone', 'walk_in', 'email', 'portal', 'admin'], (string) $d['default_reservation_source']), 'pending_reservation_expiration_minutes' => self::int($v['pending_reservation_expiration_minutes'] ?? $d['pending_reservation_expiration_minutes'], 5, 1440, (int) $d['pending_reservation_expiration_minutes']), 'require_phone' => self::bool($v['require_phone'] ?? $d['require_phone']), 'require_country' => self::bool($v['require_country'] ?? $d['require_country']), 'enable_special_requests' => self::bool($v['enable_special_requests'] ?? $d['enable_special_requests']), 'require_terms_acceptance' => self::bool($v['require_terms_acceptance'] ?? $d['require_terms_acceptance']), 'default_reservation_status' => self::choice(\sanitize_key((string) ($v['default_reservation_status'] ?? $d['default_reservation_status'])), ['pending', 'pending_payment', 'confirmed', 'completed', 'cancelled'], (string) $d['default_reservation_status']), 'default_payment_mode' => self::choice(\sanitize_key((string) ($v['default_payment_mode'] ?? $d['default_payment_mode'])), ['guest_choice', 'pay_now', 'pay_at_hotel'], (string) $d['default_payment_mode']), 'cancellation_allowed' => self::bool($v['cancellation_allowed'] ?? $d['cancellation_allowed']), 'cancellation_notice_hours' => self::int($v['cancellation_notice_hours'] ?? $d['cancellation_notice_hours'], 0, 720, (int) $d['cancellation_notice_hours']), 'anti_abuse_enabled' => self::bool($v['anti_abuse_enabled'] ?? $d['anti_abuse_enabled']), 'anti_abuse_honeypot_enabled' => self::bool($v['anti_abuse_honeypot_enabled'] ?? $d['anti_abuse_honeypot_enabled']), 'anti_abuse_min_submit_enabled' => self::bool($v['anti_abuse_min_submit_enabled'] ?? $d['anti_abuse_min_submit_enabled']), 'anti_abuse_min_submit_seconds' => self::int($v['anti_abuse_min_submit_seconds'] ?? $d['anti_abuse_min_submit_seconds'], 1, 60, (int) $d['anti_abuse_min_submit_seconds']), 'anti_abuse_throttle_enabled' => self::bool($v['anti_abuse_throttle_enabled'] ?? $d['anti_abuse_throttle_enabled']), 'anti_abuse_max_attempts' => self::int($v['anti_abuse_max_attempts'] ?? $d['anti_abuse_max_attempts'], 1, 50, (int) $d['anti_abuse_max_attempts']), 'anti_abuse_window_minutes' => self::int($v['anti_abuse_window_minutes'] ?? $d['anti_abuse_window_minutes'], 1, 1440, (int) $d['anti_abuse_window_minutes']), 'anti_abuse_block_duration_minutes' => self::int($v['anti_abuse_block_duration_minutes'] ?? $d['anti_abuse_block_duration_minutes'], 1, 1440, (int) $d['anti_abuse_block_duration_minutes']), 'anti_abuse_logging_enabled' => self::bool($v['anti_abuse_logging_enabled'] ?? $d['anti_abuse_logging_enabled'])];
+        return [
+            'booking_window' => self::int($v['booking_window'] ?? $d['booking_window'], 1, 3650, (int) $d['booking_window']),
+            'same_day_booking_allowed' => self::bool($v['same_day_booking_allowed'] ?? $d['same_day_booking_allowed']),
+            'same_day_booking_cutoff_time' => self::time_or_blank((string) ($v['same_day_booking_cutoff_time'] ?? $d['same_day_booking_cutoff_time']), (string) $d['same_day_booking_cutoff_time']),
+            'minimum_nights' => self::int($v['minimum_nights'] ?? $d['minimum_nights'], 1, 365, (int) $d['minimum_nights']),
+            'maximum_nights' => self::int($v['maximum_nights'] ?? $d['maximum_nights'], 1, 365, (int) $d['maximum_nights']),
+            'max_booking_guests' => self::int($v['max_booking_guests'] ?? $d['max_booking_guests'], 1, 100, (int) $d['max_booking_guests']),
+            'max_booking_rooms' => self::int($v['max_booking_rooms'] ?? $d['max_booking_rooms'], 1, 25, (int) $d['max_booking_rooms']),
+            'allow_multi_room_booking' => self::bool($v['allow_multi_room_booking'] ?? $d['allow_multi_room_booking']),
+            'default_reservation_source' => self::choice(\sanitize_key((string) ($v['default_reservation_source'] ?? $d['default_reservation_source'])), ['website', 'phone', 'walk_in', 'email', 'portal', 'admin'], (string) $d['default_reservation_source']),
+            'pending_reservation_expiration_minutes' => self::int($v['pending_reservation_expiration_minutes'] ?? $d['pending_reservation_expiration_minutes'], 5, 1440, (int) $d['pending_reservation_expiration_minutes']),
+            'require_phone' => self::bool($v['require_phone'] ?? $d['require_phone']),
+            'require_country' => self::bool($v['require_country'] ?? $d['require_country']),
+            'enable_special_requests' => self::bool($v['enable_special_requests'] ?? $d['enable_special_requests']),
+            'require_terms_acceptance' => self::bool($v['require_terms_acceptance'] ?? $d['require_terms_acceptance']),
+            'default_reservation_status' => self::choice(\sanitize_key((string) ($v['default_reservation_status'] ?? $d['default_reservation_status'])), ['pending', 'pending_payment', 'confirmed', 'completed', 'cancelled'], (string) $d['default_reservation_status']),
+            'default_payment_mode' => self::choice(\sanitize_key((string) ($v['default_payment_mode'] ?? $d['default_payment_mode'])), ['guest_choice', 'pay_now', 'pay_at_hotel'], (string) $d['default_payment_mode']),
+            'cancellation_allowed' => self::bool($v['cancellation_allowed'] ?? $d['cancellation_allowed']),
+            'cancellation_policy_days' => self::int($v['cancellation_policy_days'] ?? $d['cancellation_policy_days'], 0, 365, (int) $d['cancellation_policy_days']),
+            'cancellation_notice_hours' => self::int($v['cancellation_notice_hours'] ?? ((int) ($v['cancellation_policy_days'] ?? $d['cancellation_policy_days']) * 24), 0, 8760, (int) $d['cancellation_notice_hours']),
+            'cancellation_refund_percent' => self::decimal($v['cancellation_refund_percent'] ?? $d['cancellation_refund_percent'], 0.0, 100.0, (float) $d['cancellation_refund_percent']),
+            'anti_abuse_enabled' => self::bool($v['anti_abuse_enabled'] ?? $d['anti_abuse_enabled']),
+            'anti_abuse_honeypot_enabled' => self::bool($v['anti_abuse_honeypot_enabled'] ?? $d['anti_abuse_honeypot_enabled']),
+            'anti_abuse_min_submit_enabled' => self::bool($v['anti_abuse_min_submit_enabled'] ?? $d['anti_abuse_min_submit_enabled']),
+            'anti_abuse_min_submit_seconds' => self::int($v['anti_abuse_min_submit_seconds'] ?? $d['anti_abuse_min_submit_seconds'], 1, 60, (int) $d['anti_abuse_min_submit_seconds']),
+            'anti_abuse_throttle_enabled' => self::bool($v['anti_abuse_throttle_enabled'] ?? $d['anti_abuse_throttle_enabled']),
+            'anti_abuse_max_attempts' => self::int($v['anti_abuse_max_attempts'] ?? $d['anti_abuse_max_attempts'], 1, 50, (int) $d['anti_abuse_max_attempts']),
+            'anti_abuse_window_minutes' => self::int($v['anti_abuse_window_minutes'] ?? $d['anti_abuse_window_minutes'], 1, 1440, (int) $d['anti_abuse_window_minutes']),
+            'anti_abuse_block_duration_minutes' => self::int($v['anti_abuse_block_duration_minutes'] ?? $d['anti_abuse_block_duration_minutes'], 1, 1440, (int) $d['anti_abuse_block_duration_minutes']),
+            'anti_abuse_logging_enabled' => self::bool($v['anti_abuse_logging_enabled'] ?? $d['anti_abuse_logging_enabled'])
+        ];
     }
     /** @param array<string, mixed> $v @return array<string, mixed> */
     private static function normalize_checkin_checkout(array $v): array

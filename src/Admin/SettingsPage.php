@@ -1158,7 +1158,9 @@ final class SettingsPage
             'default_reservation_status' => (string) MustBookingConfig::get_setting('default_reservation_status', 'confirmed'),
             'default_payment_mode' => (string) MustBookingConfig::get_setting('default_payment_mode', 'guest_choice'),
             'cancellation_allowed' => !empty(MustBookingConfig::get_setting('cancellation_allowed', true)),
-            'cancellation_notice_hours' => (int) MustBookingConfig::get_setting('cancellation_notice_hours', 48),
+            'cancellation_policy_days' => MustBookingConfig::get_cancellation_policy_days(),
+            'cancellation_notice_hours' => MustBookingConfig::get_cancellation_notice_hours(),
+            'cancellation_refund_percent' => MustBookingConfig::get_cancellation_refund_percent(),
             'anti_abuse_enabled' => !empty(MustBookingConfig::get_setting('anti_abuse_enabled', false)),
             'anti_abuse_honeypot_enabled' => !empty(MustBookingConfig::get_setting('anti_abuse_honeypot_enabled', false)),
             'anti_abuse_min_submit_enabled' => !empty(MustBookingConfig::get_setting('anti_abuse_min_submit_enabled', false)),
@@ -1389,7 +1391,12 @@ final class SettingsPage
         $form['default_reservation_status'] = \sanitize_key((string) \wp_unslash($source['default_reservation_status'] ?? $form['default_reservation_status']));
         $form['default_payment_mode'] = \sanitize_key((string) \wp_unslash($source['default_payment_mode'] ?? $form['default_payment_mode']));
         $form['cancellation_allowed'] = self::parseBool($source, 'cancellation_allowed');
-        $form['cancellation_notice_hours'] = (int) \absint(\wp_unslash($source['cancellation_notice_hours'] ?? $form['cancellation_notice_hours']));
+        $form['cancellation_policy_days'] = (int) \absint(\wp_unslash($source['cancellation_policy_days'] ?? $form['cancellation_policy_days']));
+        $form['cancellation_notice_hours'] = $form['cancellation_policy_days'] * 24;
+        $refundPercent = \wp_unslash($source['cancellation_refund_percent'] ?? $form['cancellation_refund_percent']);
+        $form['cancellation_refund_percent'] = \is_numeric($refundPercent)
+            ? (float) $refundPercent
+            : (float) $form['cancellation_refund_percent'];
         $form['anti_abuse_enabled'] = self::parseBool($source, 'anti_abuse_enabled');
         $form['anti_abuse_honeypot_enabled'] = self::parseBool($source, 'anti_abuse_honeypot_enabled');
         $form['anti_abuse_min_submit_enabled'] = self::parseBool($source, 'anti_abuse_min_submit_enabled');
@@ -1426,8 +1433,11 @@ final class SettingsPage
         if ($form['pending_reservation_expiration_minutes'] < 5 || $form['pending_reservation_expiration_minutes'] > 1440) {
             $errors[] = \__('Pending reservation expiration must be between 5 and 1440 minutes.', 'must-hotel-booking');
         }
-        if ($form['cancellation_notice_hours'] > 720) {
-            $errors[] = \__('Cancellation notice must be 720 hours or less.', 'must-hotel-booking');
+        if ($form['cancellation_policy_days'] < 0 || $form['cancellation_policy_days'] > 365) {
+            $errors[] = \__('Cancellation policy days must be between 0 and 365.', 'must-hotel-booking');
+        }
+        if ($form['cancellation_refund_percent'] < 0 || $form['cancellation_refund_percent'] > 100) {
+            $errors[] = \__('Cancellation refund percentage must be between 0 and 100.', 'must-hotel-booking');
         }
         if ($form['anti_abuse_min_submit_enabled'] && ($form['anti_abuse_min_submit_seconds'] < 1 || $form['anti_abuse_min_submit_seconds'] > 60)) {
             $errors[] = \__('Minimum submit seconds must be between 1 and 60.', 'must-hotel-booking');
@@ -2476,8 +2486,8 @@ final class SettingsPage
         if (empty($form['allow_multi_room_booking']) && (int) ($form['max_booking_rooms'] ?? 1) > 1) {
             $warnings[] = \__('Multi-room booking is disabled while maximum rooms per reservation is greater than 1.', 'must-hotel-booking');
         }
-        if (empty($form['cancellation_allowed']) && (int) ($form['cancellation_notice_hours'] ?? 0) > 0) {
-            $warnings[] = \__('Cancellation notice hours are set even though cancellation is disabled.', 'must-hotel-booking');
+        if (empty($form['cancellation_allowed']) && (int) ($form['cancellation_policy_days'] ?? 0) > 0) {
+            $warnings[] = \__('Cancellation policy values are set even though customer cancellation is disabled.', 'must-hotel-booking');
         }
         self::renderFormStart('booking_rules');
         self::renderWarnings($warnings);
@@ -2506,8 +2516,34 @@ final class SettingsPage
         self::renderSectionIntro(\__('Operational defaults', 'must-hotel-booking'));
         self::renderField(['label' => __('Default reservation status', 'must-hotel-booking'), 'name' => 'default_reservation_status', 'type' => 'select', 'value' => $form['default_reservation_status'] ?? 'confirmed', 'options' => ['pending' => __('Pending', 'must-hotel-booking'), 'pending_payment' => __('Pending payment', 'must-hotel-booking'), 'confirmed' => __('Confirmed', 'must-hotel-booking'), 'completed' => __('Completed', 'must-hotel-booking'), 'cancelled' => __('Cancelled', 'must-hotel-booking')]]);
         self::renderField(['label' => __('Default payment mode', 'must-hotel-booking'), 'name' => 'default_payment_mode', 'type' => 'select', 'value' => $form['default_payment_mode'] ?? 'guest_choice', 'options' => ['guest_choice' => __('Guest chooses at checkout', 'must-hotel-booking'), 'pay_now' => __('Pay now', 'must-hotel-booking'), 'pay_at_hotel' => __('Pay at hotel', 'must-hotel-booking')]]);
-        self::renderField(['label' => __('Allow cancellation', 'must-hotel-booking'), 'name' => 'cancellation_allowed', 'type' => 'checkbox', 'value' => $form['cancellation_allowed'] ?? true]);
-        self::renderField(['label' => __('Cancellation notice (hours)', 'must-hotel-booking'), 'name' => 'cancellation_notice_hours', 'type' => 'number', 'min' => 0, 'max' => 720, 'value' => $form['cancellation_notice_hours'] ?? 48]);
+        self::renderField([
+            'label' => __('Allow customer cancellation', 'must-hotel-booking'),
+            'name' => 'cancellation_allowed',
+            'type' => 'checkbox',
+            'value' => $form['cancellation_allowed'] ?? true,
+            'description' => __('Allow guests to review cancellation eligibility from their booking email.', 'must-hotel-booking'),
+        ]);
+
+        self::renderField([
+            'label' => __('Cancellation policy window (days before check-in)', 'must-hotel-booking'),
+            'name' => 'cancellation_policy_days',
+            'type' => 'number',
+            'min' => 0,
+            'max' => 365,
+            'value' => $form['cancellation_policy_days'] ?? 21,
+            'description' => __('Example: 21 means online cancellation is allowed 21 or more days before check-in.', 'must-hotel-booking'),
+        ]);
+
+        self::renderField([
+            'label' => __('Refund percentage inside policy', 'must-hotel-booking'),
+            'name' => 'cancellation_refund_percent',
+            'type' => 'number',
+            'min' => 0,
+            'max' => 100,
+            'step' => '0.01',
+            'value' => $form['cancellation_refund_percent'] ?? 97,
+            'description' => __('Example: 97 means the guest receives 97% of the paid amount when cancellation is inside policy.', 'must-hotel-booking'),
+        ]);
         echo '</div>';
         echo '<div class="must-settings-grid must-settings-grid--3">';
         self::renderSectionIntro(\__('Anti-Spam Protection', 'must-hotel-booking'), \__('Optional server-side protections for public reservation submits. These checks do not add visible frontend widgets or change the booking layout.', 'must-hotel-booking'));
