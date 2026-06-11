@@ -9,6 +9,8 @@ use MustHotelBooking\Engine\BookingValidationEngine;
 use MustHotelBooking\Engine\EmailEngine;
 use MustHotelBooking\Engine\PaymentEngine;
 use MustHotelBooking\Engine\ReservationEngine;
+use MustHotelBooking\Engine\PaymentRefundService;
+use MustHotelBooking\Engine\PaymentStatusService;
 /**
  * Parse reservation ids from query string.
  *
@@ -172,12 +174,171 @@ function build_confirmation_cancellation_policy_review(int $reservationId, array
 }
 
 
+/**
+ * @return array{messages: array<int, string>, booking_id: string, reservation_ids: array<int, int>, payment_method_hint: string, cancellation_review: array<string, mixed>}
+ */
+function handle_confirmation_cancellation_post_request(): array
+{
+    $result = [
+        'messages' => [],
+        'booking_id' => '',
+        'reservation_ids' => [],
+        'payment_method_hint' => '',
+        'cancellation_review' => [],
+    ];
+
+    $requestMethod = isset($_SERVER['REQUEST_METHOD']) ? \strtoupper((string) $_SERVER['REQUEST_METHOD']) : 'GET';
+
+    if ($requestMethod !== 'POST' || !\is_array($_POST)) {
+        return $result;
+    }
+
+    $requestAction = isset($_POST['must_confirmation_action'])
+        ? \sanitize_key((string) \wp_unslash($_POST['must_confirmation_action']))
+        : '';
+
+    if ($requestAction !== 'confirm_cancellation') {
+        return $result;
+    }
+
+    $nonce = isset($_POST['must_cancellation_nonce']) ? (string) \wp_unslash($_POST['must_cancellation_nonce']) : '';
+
+    if (!\wp_verify_nonce($nonce, 'must_confirm_cancellation')) {
+        $result['messages'][] = \__('Security check failed. Please try again.', 'must-hotel-booking');
+        return $result;
+    }
+
+    $reservationId = isset($_POST['reservation_id']) ? \absint($_POST['reservation_id']) : 0;
+    $bookingId = isset($_POST['booking_id']) ? \sanitize_text_field((string) \wp_unslash($_POST['booking_id'])) : '';
+    $token = isset($_POST['cancel_token']) ? \sanitize_text_field((string) \wp_unslash($_POST['cancel_token'])) : '';
+
+    $reservation = $reservationId > 0
+        ? \MustHotelBooking\Engine\get_reservation_repository()->getReservationEmailData($reservationId)
+        : null;
+
+    if (!\is_array($reservation)) {
+        $result['messages'][] = \__('This cancellation request is no longer valid.', 'must-hotel-booking');
+        return $result;
+    }
+
+    $result['payment_method_hint'] = (string) ($reservation['payment_method'] ?? '');
+
+    if (
+        (string) ($reservation['booking_id'] ?? '') !== $bookingId
+        || !EmailEngine::isValidGuestCancellationToken($reservationId, $bookingId, (string) ($reservation['guest_email'] ?? ''), $token)
+    ) {
+        $result['messages'][] = \__('This cancellation request is invalid or has expired.', 'must-hotel-booking');
+        return $result;
+    }
+
+    $result['booking_id'] = $bookingId;
+    $result['reservation_ids'] = [$reservationId];
+
+    $status = \sanitize_key((string) ($reservation['status'] ?? ''));
+
+    if ($status === 'cancelled') {
+        $result['messages'][] = \__('This reservation is already cancelled.', 'must-hotel-booking');
+        return $result;
+    }
+
+    if (\in_array($status, ['completed', 'blocked'], true)) {
+        $result['messages'][] = \__('This reservation can no longer be cancelled online.', 'must-hotel-booking');
+        return $result;
+    }
+
+    $review = build_confirmation_cancellation_policy_review($reservationId, $reservation);
+    $result['cancellation_review'] = $review;
+
+    if (empty($review['eligible']) || !empty($review['manual_only'])) {
+        $result['messages'][] = build_confirmation_contact_hotel_message();
+        return $result;
+    }
+
+    $paymentRows = \MustHotelBooking\Engine\get_payment_repository()->getPaymentsForReservation($reservationId);
+    $paymentState = PaymentStatusService::buildReservationPaymentState($reservation, $paymentRows);
+    $amountPaid = isset($paymentState['amount_paid']) ? (float) $paymentState['amount_paid'] : 0.0;
+    $paymentMethod = \sanitize_key((string) ($paymentState['method'] ?? ''));
+    $refundPercent = isset($review['refund_percent']) ? (float) $review['refund_percent'] : 0.0;
+    $refundAmount = \round($amountPaid * ($refundPercent / 100), 2);
+
+    if ($amountPaid > 0.0) {
+        if ($refundAmount <= 0.0) {
+            $cancelResult = cancel_confirmation_reservation_without_refund($reservationId, $reservation);
+
+            if (empty($cancelResult['success']) && empty($cancelResult['queued'])) {
+                $result['messages'][] = isset($cancelResult['message']) && (string) $cancelResult['message'] !== ''
+                    ? (string) $cancelResult['message']
+                    : \__('Unable to cancel this reservation automatically. Please contact the hotel.', 'must-hotel-booking');
+
+                return $result;
+            }
+
+            $result['messages'][] = !empty($cancelResult['queued'])
+                ? \__('Your cancellation request has been queued and will be synced with the hotel system. No refund is due under the current cancellation policy.', 'must-hotel-booking')
+                : \__('Your reservation has been cancelled. No refund is due under the current cancellation policy.', 'must-hotel-booking');
+
+            return $result;
+        }
+
+        if ($paymentMethod !== 'stripe') {
+            $result['messages'][] = \__('This booking has a paid balance, but automatic online cancellation is only available for Stripe payments. Please contact the hotel to review the refund.', 'must-hotel-booking');
+            return $result;
+        }
+
+        $refundResult = (new PaymentRefundService())->requestRefund(
+            $reservationId,
+            $refundAmount,
+            [
+                'currency' => (string) ($reservation['currency'] ?? MustBookingConfig::get_currency()),
+                'refund_type' => 'guest_cancellation',
+                'reason' => \__('Guest cancelled inside online cancellation policy.', 'must-hotel-booking'),
+                'cancel_reservation' => true,
+                'source' => 'guest_cancellation_policy',
+            ]
+        );
+
+        if (empty($refundResult['success'])) {
+            $result['messages'][] = isset($refundResult['message']) && (string) $refundResult['message'] !== ''
+                ? (string) $refundResult['message']
+                : \__('Unable to process the cancellation refund. Please contact the hotel.', 'must-hotel-booking');
+
+            return $result;
+        }
+
+        $result['messages'][] = \__('Your reservation cancellation has been submitted and the eligible refund has been started.', 'must-hotel-booking');
+        return $result;
+    }
+
+    $cancelResult = cancel_confirmation_reservation_without_refund($reservationId, $reservation);
+
+    if (empty($cancelResult['success']) && empty($cancelResult['queued'])) {
+        $result['messages'][] = isset($cancelResult['message']) && (string) $cancelResult['message'] !== ''
+            ? (string) $cancelResult['message']
+            : \__('Unable to cancel this reservation automatically. Please contact the hotel.', 'must-hotel-booking');
+
+        return $result;
+    }
+
+    $result['messages'][] = !empty($cancelResult['queued'])
+        ? \__('Your cancellation request has been queued and will be synced with the hotel system.', 'must-hotel-booking')
+        : \__('Your reservation has been cancelled.', 'must-hotel-booking');
+
+    return $result;
+}
+
 
 /**
  * @return array{messages: array<int, string>, booking_id: string, reservation_ids: array<int, int>, payment_method_hint: string, cancellation_review: array<string, mixed>}
  */
 function handle_confirmation_cancellation_request(): array
 {
+
+    $postResult = handle_confirmation_cancellation_post_request();
+
+    if (!empty($postResult['messages']) || !empty($postResult['reservation_ids']) || !empty($postResult['booking_id'])) {
+        return $postResult;
+    }
+
     $result = [
         'messages' => [],
         'booking_id' => '',
