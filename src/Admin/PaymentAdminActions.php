@@ -571,6 +571,29 @@ final class PaymentAdminActions
                     MustBookingConfig::set_setting($settingKey, $value);
                 }
             }
+
+            MustBookingConfig::set_setting(
+                'pokpay_fee_percent',
+                isset($_POST['pokpay_fee_percent']) && !\is_array($_POST['pokpay_fee_percent'])
+                    ? (float) \wp_unslash($_POST['pokpay_fee_percent'])
+                    : 0.0
+            );
+            MustBookingConfig::set_setting(
+                'pokpay_fee_fixed',
+                isset($_POST['pokpay_fee_fixed']) && !\is_array($_POST['pokpay_fee_fixed'])
+                    ? (float) \wp_unslash($_POST['pokpay_fee_fixed'])
+                    : 0.0
+            );
+            MustBookingConfig::set_setting(
+                'pokpay_fee_currency',
+                isset($_POST['pokpay_fee_currency']) && !\is_array($_POST['pokpay_fee_currency'])
+                    ? \sanitize_text_field((string) \wp_unslash($_POST['pokpay_fee_currency']))
+                    : MustBookingConfig::get_currency()
+            );
+            MustBookingConfig::set_setting(
+                'pokpay_fee_customer_absorbs',
+                !empty($_POST['pokpay_fee_customer_absorbs'])
+            );
         }
 
         $this->redirectToPaymentsPage($query->buildUrlArgs([

@@ -14,9 +14,12 @@ body.must-hotel-booking-flow-page {
     padding: 140px 60px;
     box-sizing: border-box;
     display: grid;
-    grid-template-columns: minmax(0, 1170px) minmax(0, 592px);
     column-gap: 42px;
     row-gap: 85px;
+}
+
+.must-hotel-booking-page-booking-confirmation.must-booking-process-page .must-hotel-booking-container {
+    grid-template-columns: none;
 }
 
 .must-booking-process-page .must-hotel-booking-container > * {
@@ -5383,6 +5386,19 @@ div.must-confirmation-picker:nth-child(1) > div:nth-child(3) > div:nth-child(1) 
     min-height: 895px;
 }
 
+.must-hotel-booking-page-booking-confirmation.is-success-layout .must-cancellation-summary-panel {
+    align-self: center;
+    min-height: 0;
+    height: auto;
+    padding: 140px 140px 96px 0;
+    box-sizing: border-box;
+}
+
+.must-hotel-booking-page-booking-confirmation.is-success-layout .must-cancellation-summary-panel .must-confirmation-order-table {
+    width: 100%;
+    background: #ffffff;
+}
+
 @media (max-width: 1400px) {
     .must-hotel-booking-page-booking-confirmation .must-confirmation-paid-success {
         grid-template-columns: minmax(0, 1fr) minmax(300px, 620px);
@@ -5414,6 +5430,10 @@ div.must-confirmation-picker:nth-child(1) > div:nth-child(3) > div:nth-child(1) 
 
     .must-hotel-booking-page-booking-confirmation.is-success-layout .must-confirmation-paid-success-copy {
         padding: 96px 90px 72px 96px;
+    }
+
+    .must-hotel-booking-page-booking-confirmation.is-success-layout .must-cancellation-summary-panel {
+        padding: 96px 90px 72px 0;
     }
 
     .must-hotel-booking-page-booking-confirmation.is-success-layout .must-confirmation-paid-success-actions {
@@ -5472,6 +5492,11 @@ div.must-confirmation-picker:nth-child(1) > div:nth-child(3) > div:nth-child(1) 
         max-width: none;
     }
 
+    .must-hotel-booking-page-booking-confirmation.is-success-layout .must-cancellation-summary-panel {
+        max-width: none;
+        padding: 0 48px 64px;
+    }
+
     .must-hotel-booking-page-booking-confirmation.is-success-layout .must-confirmation-paid-success-media img {
         min-height: 0;
         height: 100%;
@@ -5489,6 +5514,10 @@ div.must-confirmation-picker:nth-child(1) > div:nth-child(3) > div:nth-child(1) 
 
     .must-hotel-booking-page-booking-confirmation.is-success-layout .must-confirmation-paid-success-copy {
         padding: 56px 40px 36px;
+    }
+
+    .must-hotel-booking-page-booking-confirmation.is-success-layout .must-cancellation-summary-panel {
+        padding: 56px 40px 36px 0;
     }
 
     .must-hotel-booking-page-booking-confirmation.is-success-layout .must-confirmation-paid-success-text {
@@ -5631,6 +5660,13 @@ div.must-confirmation-picker:nth-child(1) > div:nth-child(3) > div:nth-child(1) 
         order: 2;
         width: 100%;
         max-width: none;
+    }
+
+    .must-hotel-booking-page-booking-confirmation.is-success-layout .must-cancellation-summary-panel {
+        order: 2;
+        width: 100%;
+        max-width: none;
+        padding: 0 20px 80px;
     }
 
     .must-hotel-booking-page-booking-confirmation.is-success-layout .must-confirmation-paid-success-media img {

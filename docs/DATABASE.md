@@ -8,7 +8,8 @@ Verified from targeted current-code inspection on 2026-06-11. Use this document 
 - Uses WordPress `dbDelta()`.
 - DB version option: `must_hotel_booking_db_version`.
 - Version value is updated to `MUST_HOTEL_BOOKING_VERSION`.
-- Current local plugin version inspected in code: `0.4.72`; task prompt referenced `0.4.71`.
+- Current local plugin version inspected in code: `0.4.75`.
+- Payment/refund fee columns are also repaired by an idempotent current-version schema guard, because some installs can already have `must_hotel_booking_db_version` equal to the plugin version before `dbDelta()` sees newly added columns.
 
 ## Key Tables
 | Table | Purpose |
@@ -46,8 +47,8 @@ Verified from targeted current-code inspection on 2026-06-11. Use this document 
 | --- | --- |
 | `must_reservations` | `booking_id`, `room_id`, `room_type_id`, `assigned_room_id`, `rate_plan_id`, `guest_id`, `checkin`, `checkout`, `guests`, `status`, `booking_source`, `total_price`, `coupon_id`, `coupon_code`, `payment_status`, cancellation fields, provider fields, `created_at`. |
 | `mhb_inventory_locks` | `room_id`, `checkin`, `checkout`, `session_id`, `expires_at`; unique key on room/stay/session. |
-| `must_payments` | `reservation_id`, `amount`, `currency`, `method`, `status`, `transaction_id`, `paid_at`, `created_at`. |
-| `must_refunds` | `reservation_id`, `booking_id`, `payment_id`, provider/Clock IDs, gateway/provider refs, Stripe IDs, `amount`, `currency`, `reason`, `refund_type`, `status`, `clock_sync_status`, idempotency keys, failure/manual fields, timestamps. |
+| `must_payments` | `reservation_id`, `amount`, `currency`, `method`, `status`, `transaction_id`, provider fee snapshot fields, `paid_at`, `created_at`. |
+| `must_refunds` | `reservation_id`, `booking_id`, `payment_id`, provider/Clock IDs, gateway/provider refs, Stripe IDs, refund breakdown fields, `amount`, `currency`, `reason`, `refund_type`, `status`, `clock_sync_status`, idempotency keys, failure/manual fields, timestamps. |
 | `mhb_provider_mappings` | `provider`, `entity_type`, `local_table`, `local_id`, `external_id`, `external_code`, `status`, `metadata`. |
 | `mhb_provider_sync_jobs` | `provider`, `operation`, `target_type`, `target_local_id`, `target_external_id`, `status`, attempts, timing, payload. |
 

@@ -888,6 +888,14 @@ function render_payment_detail(?array $detail): void
     $paymentMethod = \sanitize_key((string) ($state['method'] ?? ''));
     $transactionId = (string) ($state['transaction_id'] ?? '');
     if ($reservationId > 0 && $amountPaid > 0.0 && \in_array($paymentMethod, ['stripe', 'pokpay'], true) && $transactionId !== '') {
+        $refundBreakdown = (new \MustHotelBooking\Engine\PaymentProviderFeeService())->calculateDefaultRefundBreakdown(
+            (array) ($detail['payments'] ?? []),
+            $amountPaid,
+            'admin',
+            0.0,
+            __('Admin default refund is paid amount minus stored provider fee.', 'must-hotel-booking')
+        );
+        $defaultRefundAmount = (float) ($refundBreakdown['final_refund_amount'] ?? $amountPaid);
         $refundHeading = $paymentMethod === 'pokpay'
             ? \__('PokPay Refund', 'must-hotel-booking')
             : \__('Stripe Refund', 'must-hotel-booking');
@@ -896,11 +904,21 @@ function render_payment_detail(?array $detail): void
         if ($paymentMethod === 'pokpay') {
             echo '<p>' . \esc_html__('PokPay refunds are submitted server-side to POK. If the API is unavailable or refund permission is missing, a manual fallback record is created for dashboard follow-up.', 'must-hotel-booking') . '</p>';
         }
+        echo '<p>' . \esc_html(\sprintf(
+            /* translators: 1: paid amount, 2: provider fee, 3: refund amount. */
+            __('Default refund: %1$s paid - %2$s provider fee = %3$s.', 'must-hotel-booking'),
+            \number_format_i18n($amountPaid, 2) . ' ' . MustBookingConfig::get_currency(),
+            \number_format_i18n((float) ($refundBreakdown['provider_fee_retained'] ?? 0.0), 2) . ' ' . MustBookingConfig::get_currency(),
+            \number_format_i18n($defaultRefundAmount, 2) . ' ' . MustBookingConfig::get_currency()
+        )) . '</p>';
+        if ((string) ($refundBreakdown['provider_fee_status'] ?? 'unknown') !== 'known') {
+            echo '<p class="must-payments-cell-note">' . \esc_html__('Provider fee is unknown. Review the fee before using an automatic/default refund amount, or enter an explicit admin override.', 'must-hotel-booking') . '</p>';
+        }
         echo '<form method="post" action="' . \esc_url(get_admin_payments_page_url(['action' => 'view', 'reservation_id' => $reservationId])) . '" class="must-payments-filter-form">';
         \wp_nonce_field('must_payment_issue_refund_' . $reservationId, 'must_payments_nonce');
         echo '<input type="hidden" name="must_payments_action" value="issue_refund" />';
         echo '<input type="hidden" name="reservation_id" value="' . \esc_attr((string) $reservationId) . '" />';
-        echo '<label><span>' . \esc_html__('Amount', 'must-hotel-booking') . '</span><input type="number" min="0.01" max="' . \esc_attr(\number_format($amountPaid, 2, '.', '')) . '" step="0.01" name="amount" value="' . \esc_attr(\number_format($amountPaid, 2, '.', '')) . '" /></label>';
+        echo '<label><span>' . \esc_html__('Amount', 'must-hotel-booking') . '</span><input type="number" min="0.01" max="' . \esc_attr(\number_format($amountPaid, 2, '.', '')) . '" step="0.01" name="amount" value="' . \esc_attr(\number_format($defaultRefundAmount, 2, '.', '')) . '" /></label>';
         echo '<label><span>' . \esc_html__('Action', 'must-hotel-booking') . '</span><select name="refund_type">';
         foreach ([
             'refund_only' => __('Refund only', 'must-hotel-booking'),
@@ -934,6 +952,8 @@ function render_payment_detail(?array $detail): void
         echo '<th>' . \esc_html__('Method', 'must-hotel-booking') . '</th>';
         echo '<th>' . \esc_html__('Status', 'must-hotel-booking') . '</th>';
         echo '<th>' . \esc_html__('Reference', 'must-hotel-booking') . '</th>';
+        echo '<th>' . \esc_html__('Provider Fee', 'must-hotel-booking') . '</th>';
+        echo '<th>' . \esc_html__('Fee Source', 'must-hotel-booking') . '</th>';
         echo '<th>' . \esc_html__('Paid At', 'must-hotel-booking') . '</th>';
         echo '<th>' . \esc_html__('Created', 'must-hotel-booking') . '</th>';
         echo '</tr></thead><tbody>';
@@ -948,6 +968,8 @@ function render_payment_detail(?array $detail): void
             echo '<td>' . render_payments_badge((string) ($paymentRow['method'] ?? '') !== '' ? (string) ($paymentRow['method'] ?? '') : __('No payment recorded', 'must-hotel-booking'), (string) ($paymentRow['method'] ?? 'info')) . '</td>';
             echo '<td>' . render_payments_status_badge((string) ($paymentRow['status'] ?? ''), (string) ($paymentRow['status'] ?? '')) . '</td>';
             echo '<td>' . \esc_html((string) ($paymentRow['transaction_id'] ?? '')) . '</td>';
+            echo '<td><div class="must-payments-money">' . \esc_html(\number_format_i18n((float) ($paymentRow['provider_fee_amount'] ?? 0.0), 2) . ' ' . (string) ($paymentRow['provider_fee_currency'] ?? MustBookingConfig::get_currency())) . '</div></td>';
+            echo '<td>' . render_payments_status_badge((string) ($paymentRow['provider_fee_status'] ?? 'unknown'), (string) ($paymentRow['provider_fee_status'] ?? 'warning')) . '<div class="must-payments-cell-note">' . \esc_html((string) ($paymentRow['provider_fee_source'] ?? '')) . '</div><div class="must-payments-cell-note">' . \esc_html((string) ($paymentRow['provider_balance_transaction_id'] ?? '')) . '</div></td>';
             echo '<td>' . \esc_html((string) ($paymentRow['paid_at'] ?? '')) . '</td>';
             echo '<td>' . \esc_html((string) ($paymentRow['created_at'] ?? '')) . '</td>';
             echo '</tr>';
@@ -1024,6 +1046,7 @@ function render_payment_detail(?array $detail): void
         echo '<table class="widefat striped must-payments-data-table must-payments-detail-table"><thead><tr>';
         echo '<th>' . \esc_html__('Provider', 'must-hotel-booking') . '</th>';
         echo '<th>' . \esc_html__('Amount', 'must-hotel-booking') . '</th>';
+        echo '<th>' . \esc_html__('Breakdown', 'must-hotel-booking') . '</th>';
         echo '<th>' . \esc_html__('Payment Reference', 'must-hotel-booking') . '</th>';
         echo '<th>' . \esc_html__('Refund Reference', 'must-hotel-booking') . '</th>';
         echo '<th>' . \esc_html__('Refund Status', 'must-hotel-booking') . '</th>';
@@ -1053,6 +1076,7 @@ function render_payment_detail(?array $detail): void
             echo '<tr>';
             echo '<td>' . \esc_html($gateway !== '' ? \ucfirst($gateway) : __('Gateway', 'must-hotel-booking')) . '</td>';
             echo '<td><div class="must-payments-money">' . \esc_html(\number_format_i18n((float) ($refundRow['amount'] ?? 0.0), 2) . ' ' . (string) ($refundRow['currency'] ?? MustBookingConfig::get_currency())) . '</div></td>';
+            echo '<td><div class="must-payments-cell-note">' . \esc_html(\sprintf(__('Paid: %s', 'must-hotel-booking'), \number_format_i18n((float) ($refundRow['original_paid_amount'] ?? 0.0), 2))) . '</div><div class="must-payments-cell-note">' . \esc_html(\sprintf(__('Provider fee retained: %s', 'must-hotel-booking'), \number_format_i18n((float) ($refundRow['provider_fee_retained'] ?? 0.0), 2))) . '</div><div class="must-payments-cell-note">' . \esc_html(\sprintf(__('Cancellation fee: %s', 'must-hotel-booking'), \number_format_i18n((float) ($refundRow['cancellation_fee_amount'] ?? 0.0), 2))) . '</div><div class="must-payments-cell-note">' . \esc_html((string) ($refundRow['refund_policy_reason'] ?? '')) . '</div></td>';
             echo '<td>' . \esc_html($providerPaymentReference) . '</td>';
             echo '<td>' . \esc_html($providerRefundReference) . '</td>';
             echo '<td>' . render_payments_status_badge((string) ($refundRow['status'] ?? ''), (string) ($refundRow['status'] ?? '')) . '</td>';
@@ -1220,6 +1244,22 @@ function render_payment_settings_panel(array $settings): void
         echo '</div>';
         echo '</section>';
     }
+
+    echo '<section class="must-payments-environment-card">';
+    echo '<div class="must-payments-environment-heading">';
+    echo '<div class="must-payments-environment-copy">';
+    echo '<h4>' . \esc_html__('PokPay Fee Estimate', 'must-hotel-booking') . '</h4>';
+    echo '<p>' . \esc_html__('Used only when PokPay does not return an exact processing fee. The calculated snapshot is stored on the payment at payment time.', 'must-hotel-booking') . '</p>';
+    echo '</div>';
+    echo '<div class="must-payments-pill-stack">' . render_payments_badge(MustBookingConfig::get_pokpay_fee_percent() > 0.0 || MustBookingConfig::get_pokpay_fee_fixed() > 0.0 ? __('Configured', 'must-hotel-booking') : __('Missing', 'must-hotel-booking'), MustBookingConfig::get_pokpay_fee_percent() > 0.0 || MustBookingConfig::get_pokpay_fee_fixed() > 0.0 ? 'ok' : 'warning') . '</div>';
+    echo '</div>';
+    echo '<div class="must-payments-credential-grid">';
+    echo '<label class="must-payments-field"><span>' . \esc_html__('Fee percentage', 'must-hotel-booking') . '</span><input type="number" min="0" max="100" step="0.01" name="pokpay_fee_percent" value="' . \esc_attr(\number_format(MustBookingConfig::get_pokpay_fee_percent(), 2, '.', '')) . '" /></label>';
+    echo '<label class="must-payments-field"><span>' . \esc_html__('Fixed fee', 'must-hotel-booking') . '</span><input type="number" min="0" step="0.01" name="pokpay_fee_fixed" value="' . \esc_attr(\number_format(MustBookingConfig::get_pokpay_fee_fixed(), 2, '.', '')) . '" /></label>';
+    echo '<label class="must-payments-field"><span>' . \esc_html__('Fee currency', 'must-hotel-booking') . '</span><input type="text" maxlength="10" name="pokpay_fee_currency" value="' . \esc_attr(MustBookingConfig::get_pokpay_fee_currency()) . '" /></label>';
+    echo '<label class="must-payments-field"><span>' . \esc_html__('Customer absorbs fee', 'must-hotel-booking') . '</span><input type="checkbox" name="pokpay_fee_customer_absorbs" value="1"' . \checked(MustBookingConfig::get_pokpay_fee_customer_absorbs(), true, false) . ' /></label>';
+    echo '</div>';
+    echo '</section>';
 
     echo '</div>';
     echo '<div class="must-payments-form-actions"><button type="submit" class="button button-primary">' . \esc_html__('Save Payment Settings', 'must-hotel-booking') . '</button></div>';

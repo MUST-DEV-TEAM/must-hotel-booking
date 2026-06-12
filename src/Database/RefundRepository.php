@@ -9,9 +9,26 @@ final class RefundRepository extends AbstractRepository
         return $this->tableExists('refunds');
     }
 
+    private function refundColumnExists(string $column): bool
+    {
+        if ($column === '' || !$this->refundsTableExists() || !\preg_match('/^[A-Za-z0-9_]+$/', $column)) {
+            return false;
+        }
+
+        $found = $this->wpdb->get_var(
+            $this->wpdb->prepare(
+                'SHOW COLUMNS FROM ' . $this->table('refunds') . ' LIKE %s',
+                $column
+            )
+        );
+
+        return (string) $found === $column;
+    }
+
     /** @param array<string, mixed> $data */
     public function createRefund(array $data): int
     {
+        $data = $this->filterExistingRefundColumns($data);
         $inserted = $this->wpdb->insert(
             $this->table('refunds'),
             $data,
@@ -25,6 +42,12 @@ final class RefundRepository extends AbstractRepository
     public function updateRefund(int $refundId, array $data): bool
     {
         if ($refundId <= 0 || empty($data)) {
+            return false;
+        }
+
+        $data = $this->filterExistingRefundColumns($data);
+
+        if (empty($data)) {
             return false;
         }
 
@@ -237,7 +260,7 @@ final class RefundRepository extends AbstractRepository
                 continue;
             }
 
-            if ($key === 'amount') {
+            if (\in_array($key, ['amount', 'original_paid_amount', 'provider_fee_retained', 'cancellation_fee_amount', 'final_refund_amount'], true)) {
                 $formats[] = '%f';
                 continue;
             }
@@ -246,5 +269,54 @@ final class RefundRepository extends AbstractRepository
         }
 
         return $formats;
+    }
+
+    /** @param array<string, mixed> $data @return array<string, mixed> */
+    private function filterExistingRefundColumns(array $data): array
+    {
+        $knownBase = [
+            'id' => true,
+            'reservation_id' => true,
+            'booking_id' => true,
+            'payment_id' => true,
+            'provider' => true,
+            'clock_booking_id' => true,
+            'clock_reservation_id' => true,
+            'clock_folio_id' => true,
+            'clock_refund_item_id' => true,
+            'gateway' => true,
+            'provider_payment_reference' => true,
+            'provider_refund_id' => true,
+            'provider_refund_reference' => true,
+            'raw_provider_status' => true,
+            'stripe_payment_intent_id' => true,
+            'stripe_charge_id' => true,
+            'stripe_refund_id' => true,
+            'amount' => true,
+            'currency' => true,
+            'reason' => true,
+            'refund_type' => true,
+            'status' => true,
+            'clock_sync_status' => true,
+            'requested_by_user_id' => true,
+            'idempotency_key' => true,
+            'clock_idempotency_key' => true,
+            'failed_reason' => true,
+            'manual_note' => true,
+            'metadata' => true,
+            'created_at' => true,
+            'updated_at' => true,
+            'completed_at' => true,
+            'manual_completed_at' => true,
+        ];
+        $filtered = [];
+
+        foreach ($data as $key => $value) {
+            if (isset($knownBase[$key]) || $this->refundColumnExists((string) $key)) {
+                $filtered[$key] = $value;
+            }
+        }
+
+        return $filtered;
     }
 }

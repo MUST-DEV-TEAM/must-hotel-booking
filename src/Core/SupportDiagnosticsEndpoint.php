@@ -190,6 +190,7 @@ final class SupportDiagnosticsEndpoint
             'refund_manual_accounting_notice' => self::getRefundManualAccountingNotice(),
             'clock_folio_accounting_summary' => self::getClockFolioAccountingSummary(),
             'clock_folio_payment_accounting_notice' => self::getClockFolioPaymentAccountingNotice($clockRequestSummary),
+            'provider_fee_capture_readiness' => self::getProviderFeeCaptureReadiness(),
             'clock_request_summary' => $clockRequestSummary,
             'phase1_trial_summary' => $phase1TrialSummary,
             'production_readiness' => self::getProductionReadiness($diagnostics, $clockSummary, $clockRequestSummary, $phase1TrialSummary),
@@ -822,6 +823,73 @@ final class SupportDiagnosticsEndpoint
         }
 
         return \MustHotelBooking\Engine\get_clock_folio_accounting_repository()->getSummary();
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private static function getProviderFeeCaptureReadiness(): array
+    {
+        global $wpdb;
+
+        $paymentsTable = $wpdb->prefix . 'must_payments';
+        $hasFeeColumns = self::tableExists($paymentsTable)
+            && self::columnExists($paymentsTable, 'provider_fee_amount')
+            && self::columnExists($paymentsTable, 'provider_fee_status')
+            && self::columnExists($paymentsTable, 'provider_balance_transaction_id');
+        $pokpayEstimateConfigured = MustBookingConfig::get_pokpay_fee_percent() > 0.0 || MustBookingConfig::get_pokpay_fee_fixed() > 0.0;
+        $pokpayCredentials = PaymentEngine::getPokPayEnvironmentCredentials();
+        $pokpayCredentialsPresent = (string) ($pokpayCredentials['merchant_id'] ?? '') !== ''
+            && (string) ($pokpayCredentials['key_id'] ?? '') !== ''
+            && (string) ($pokpayCredentials['key_secret'] ?? '') !== '';
+        $latestStripeFeeStatus = '';
+        $latestPokPayFeeStatus = '';
+        $latestPokPayFeeSource = '';
+
+        if ($hasFeeColumns) {
+            $latestStripeFeeStatus = (string) $wpdb->get_var("SELECT provider_fee_status FROM `{$paymentsTable}` WHERE method = 'stripe' AND status = 'paid' ORDER BY id DESC LIMIT 1");
+            $latestPokPayFeeStatus = (string) $wpdb->get_var("SELECT provider_fee_status FROM `{$paymentsTable}` WHERE method = 'pokpay' AND status = 'paid' ORDER BY id DESC LIMIT 1");
+            $latestPokPayFeeSource = (string) $wpdb->get_var("SELECT provider_fee_source FROM `{$paymentsTable}` WHERE method = 'pokpay' AND status = 'paid' ORDER BY id DESC LIMIT 1");
+        }
+
+        $warnings = [];
+
+        if (!$hasFeeColumns) {
+            $warnings[] = 'Payment provider fee snapshot columns are missing; run the plugin database upgrade.';
+        }
+
+        if ($latestStripeFeeStatus === 'unknown') {
+            $warnings[] = 'Latest paid Stripe payment has unknown fee capture; review Stripe balance transaction access.';
+        }
+
+        if (!$pokpayEstimateConfigured) {
+            $warnings[] = 'PokPay API fee may be unavailable and no configured fee estimate is set.';
+        }
+
+        if (!$pokpayCredentialsPresent) {
+            $warnings[] = 'PokPay credentials for the active environment are missing or need refresh.';
+        }
+
+        return [
+            'stripe_fee_capture' => $hasFeeColumns ? ($latestStripeFeeStatus !== '' ? $latestStripeFeeStatus : 'no_paid_payment_seen') : 'unavailable',
+            'pokpay_fee_source' => self::describePokPayFeeSource($latestPokPayFeeStatus, $latestPokPayFeeSource, $pokpayEstimateConfigured),
+            'pokpay_credentials_status' => $pokpayCredentialsPresent ? 'present' : 'missing',
+            'pokpay_credentials_present' => $pokpayCredentialsPresent,
+            'pokpay_credentials_note' => $pokpayCredentialsPresent ? '' : 'Refresh staging/live PokPay credentials before manual payment testing.',
+            'clock_folio_accounting_ready' => \function_exists('MustHotelBooking\\Engine\\get_clock_folio_accounting_repository')
+                && !empty(\MustHotelBooking\Engine\get_clock_folio_accounting_repository()->getSummary()['table_exists']),
+            'warnings' => $warnings,
+            'check_status' => empty($warnings) ? 'ready' : 'warning',
+        ];
+    }
+
+    private static function describePokPayFeeSource(string $latestFeeStatus, string $latestFeeSource, bool $estimateConfigured): string
+    {
+        if ($latestFeeStatus === 'known') {
+            return $latestFeeSource === 'pokpay_api' ? 'api' : 'configured_estimate';
+        }
+
+        return $estimateConfigured ? 'configured_estimate_ready' : 'missing';
     }
     /**
      * @param array<string, mixed> $clockRequestSummary

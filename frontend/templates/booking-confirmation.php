@@ -31,6 +31,7 @@ $applied_coupon_code = isset($view['applied_coupon_code']) ? (string) $view['app
 $country_options = isset($view['country_options']) && \is_array($view['country_options']) ? $view['country_options'] : [];
 $phone_country_code_options = isset($view['phone_country_code_options']) && \is_array($view['phone_country_code_options']) ? $view['phone_country_code_options'] : [];
 $cancellation_review = isset($view['cancellation_review']) && \is_array($view['cancellation_review']) ? $view['cancellation_review'] : [];
+$is_cancellation_review_layout = !empty($cancellation_review);
 if (!empty($cancellation_review['message'])) {
     $messages = \array_values(\array_filter(
         $messages,
@@ -201,9 +202,9 @@ $render_payment_method_icon = static function (string $payment_method_key, strin
 ?>
 <?php \get_header(); ?>
 <main
-    class="must-hotel-booking-page must-hotel-booking-page-booking-confirmation must-booking-process-page<?php echo $is_confirmation_success_layout ? ' is-success-layout' : ''; ?>">
+    class="must-hotel-booking-page must-hotel-booking-page-booking-confirmation must-booking-process-page<?php echo ($is_confirmation_success_layout || $is_cancellation_review_layout) ? ' is-success-layout' : ''; ?>">
     <div class="must-hotel-booking-container">
-        <?php if (!$is_confirmation_success_layout): ?>
+        <?php if (!$is_confirmation_success_layout && !$is_cancellation_review_layout): ?>
             <section class="must-booking-step-header">
                 <h1><?php echo \esc_html__('Review & Payment', 'must-hotel-booking'); ?></h1>
                 <div class="must-booking-stepper-wrap"
@@ -242,103 +243,135 @@ $render_payment_method_icon = static function (string $payment_method_key, strin
                 <?php endforeach; ?>
             </div>
         <?php endif; ?>
-        <?php if (!empty($cancellation_review)): ?>
-            <section class="must-confirmation-success must-cancellation-review-card"
-                aria-labelledby="must-cancellation-review-heading">
-                <div class="must-confirmation-success-head">
-                    <h2 id="must-cancellation-review-heading">
-                        <?php echo \esc_html__('Cancellation review', 'must-hotel-booking'); ?>
-                    </h2>
-                    <?php if (!empty($cancellation_review['eligible'])): ?>
-                        <strong>
-                            <?php echo \esc_html__('Eligible', 'must-hotel-booking'); ?>
-                        </strong>
-                    <?php else: ?>
-                        <strong>
-                            <?php echo \esc_html__('Contact hotel', 'must-hotel-booking'); ?>
-                        </strong>
-                    <?php endif; ?>
-                </div>
-                <?php if (!empty($cancellation_review['message'])): ?>
-                    <p class="must-confirmation-success-message">
-                        <?php echo \esc_html((string) $cancellation_review['message']); ?>
-                    </p>
-                <?php endif; ?>
-                <div class="must-confirmation-success-card">
-                    <p>
-                        <strong>
-                            <?php echo \esc_html__('Policy window:', 'must-hotel-booking'); ?>
-                        </strong>
-                        <?php
-                        echo \esc_html(
-                            \sprintf(
-                                /* translators: %d is the number of days before check-in. */
-                                \__('%d days before check-in', 'must-hotel-booking'),
-                                (int) ($cancellation_review['policy_days'] ?? 0)
-                            )
-                        );
-                        ?>
-                    </p>
-                    <p>
-                        <strong>
-                            <?php echo \esc_html__('Refund inside policy:', 'must-hotel-booking'); ?>
-                        </strong>
-                        <?php
-                        $refund_percent = isset($cancellation_review['refund_percent']) ? (float) $cancellation_review['refund_percent'] : 0.0;
-                        $refund_decimals = \abs($refund_percent - \round($refund_percent)) < 0.01 ? 0 : 2;
-                        echo \esc_html(
-                            \sprintf(
-                                /* translators: %s is the refund percentage. */
-                                \__('%s%%', 'must-hotel-booking'),
-                                \number_format_i18n($refund_percent, $refund_decimals)
-                            )
-                        );
-                        ?>
-                    </p>
-                    <?php if (isset($cancellation_review['days_until_checkin']) && $cancellation_review['days_until_checkin'] !== null): ?>
-                        <p>
-                            <strong>
-                                <?php echo \esc_html__('Days until check-in:', 'must-hotel-booking'); ?>
-                            </strong>
-                            <?php echo \esc_html((string) (int) $cancellation_review['days_until_checkin']); ?>
-                        </p>
-                    <?php endif; ?>
-                    <?php if (!empty($cancellation_review['checkin'])): ?>
-                        <p>
-                            <strong>
-                                <?php echo \esc_html__('Check-in:', 'must-hotel-booking'); ?>
-                            </strong>
-                            <?php echo \esc_html((string) $cancellation_review['checkin']); ?>
-                        </p>
-                    <?php endif; ?>
-                </div>
-                <?php if ($can_show_cancellation_confirm_form): ?>
-                    <form method="post" action="<?php echo \esc_url($confirmation_url); ?>"
-                        class="must-cancellation-confirm-form">
-                        <?php \wp_nonce_field('must_confirm_cancellation', 'must_cancellation_nonce'); ?>
-
-                        <input type="hidden" name="must_confirmation_action" value="confirm_cancellation" />
-                        <input type="hidden" name="reservation_id"
-                            value="<?php echo \esc_attr((string) $cancellation_reservation_id); ?>" />
-                        <input type="hidden" name="booking_id" value="<?php echo \esc_attr($cancellation_booking_id); ?>" />
-                        <input type="hidden" name="cancel_token" value="<?php echo \esc_attr($cancellation_token); ?>" />
-
-                        <p class="must-confirmation-success-message">
-                            <?php echo \esc_html__('No cancellation or refund has been processed yet. Confirm below only if you want to cancel this reservation under the displayed policy.', 'must-hotel-booking'); ?>
-                        </p>
-
-                        <button type="submit" class="must-confirmation-submit must-cancellation-confirm-submit">
-                            <span><?php echo \esc_html__('Confirm cancellation', 'must-hotel-booking'); ?></span>
-                            <?php if ($arrow_icon_url !== ''): ?>
-                                <img src="<?php echo \esc_url($arrow_icon_url); ?>" alt="" aria-hidden="true" />
-                            <?php endif; ?>
-                        </button>
-                    </form>
-                <?php endif; ?>
-            </section>
-        <?php endif; ?>
         <?php if ($success && !empty($reservations)): ?>
-            <?php if ($is_confirmation_success_layout): ?>
+            <?php if (!empty($cancellation_review)): ?>
+                <?php
+                $cancellation_reservation = isset($reservations[0]) && \is_array($reservations[0]) ? $reservations[0] : [];
+                $cancellation_guest_name = \trim((string) ($cancellation_reservation['first_name'] ?? '') . ' ' . (string) ($cancellation_reservation['last_name'] ?? ''));
+                $cancellation_checkin = (string) ($cancellation_reservation['checkin'] ?? '');
+                $cancellation_checkout = (string) ($cancellation_reservation['checkout'] ?? '');
+                $cancellation_nights = 1;
+                $cancellation_checkin_time = $cancellation_checkin !== '' ? \strtotime($cancellation_checkin) : false;
+                $cancellation_checkout_time = $cancellation_checkout !== '' ? \strtotime($cancellation_checkout) : false;
+                if ($cancellation_checkin_time !== false && $cancellation_checkout_time !== false) {
+                    $cancellation_nights = \max(1, (int) (($cancellation_checkout_time - $cancellation_checkin_time) / \DAY_IN_SECONDS));
+                }
+                $cancellation_paid_amount = isset($cancellation_review['paid_amount']) ? (float) $cancellation_review['paid_amount'] : 0.0;
+                $cancellation_provider_fee = isset($cancellation_review['provider_fee_amount']) ? (float) $cancellation_review['provider_fee_amount'] : 0.0;
+                $cancellation_fee_amount = isset($cancellation_review['refund_breakdown']['cancellation_fee_amount']) ? (float) $cancellation_review['refund_breakdown']['cancellation_fee_amount'] : 0.0;
+                $cancellation_refund_amount = isset($cancellation_review['refund_amount']) ? (float) $cancellation_review['refund_amount'] : 0.0;
+                $cancellation_payment_method = \sanitize_key((string) ($cancellation_review['payment_method'] ?? $payment_method));
+                $cancellation_heading = !empty($cancellation_review['eligible']) && empty($cancellation_review['manual_only'])
+                    ? \__('Cancel your booking', 'must-hotel-booking')
+                    : \__('Cancellation requires hotel support', 'must-hotel-booking');
+                ?>
+                <section class="must-confirmation-paid-success must-cancellation-review-card"
+                    aria-labelledby="must-cancellation-review-heading">
+                    <div class="must-confirmation-paid-success-copy">
+                        <div class="must-confirmation-paid-success-text">
+                            <h1 id="must-cancellation-review-heading" class="must-confirmation-paid-success-heading">
+                                <?php echo \esc_html($cancellation_heading); ?>
+                            </h1>
+                            <?php if (!empty($cancellation_review['message'])): ?>
+                                <p class="must-confirmation-paid-success-message">
+                                    <?php echo \esc_html((string) $cancellation_review['message']); ?>
+                                </p>
+                            <?php endif; ?>
+                            <div class="must-confirmation-order-table">
+                                <div class="must-confirmation-order-row">
+                                    <span><?php echo \esc_html__('Paid amount', 'must-hotel-booking'); ?></span>
+                                    <span><?php echo \esc_html($format_money($cancellation_paid_amount, $summary_currency)); ?></span>
+                                </div>
+                                <div class="must-confirmation-order-row">
+                                    <span><?php echo \esc_html__('Payment processing fee', 'must-hotel-booking'); ?></span>
+                                    <span><?php echo \esc_html($format_money($cancellation_provider_fee, $summary_currency)); ?></span>
+                                </div>
+                                <div class="must-confirmation-order-row">
+                                    <span><?php echo \esc_html__('Cancellation fee', 'must-hotel-booking'); ?></span>
+                                    <span><?php echo \esc_html($format_money($cancellation_fee_amount, $summary_currency)); ?></span>
+                                </div>
+                                <div class="must-confirmation-order-row is-total">
+                                    <span><?php echo \esc_html__('Final refund amount', 'must-hotel-booking'); ?></span>
+                                    <span><?php echo \esc_html($format_money($cancellation_refund_amount, $summary_currency)); ?></span>
+                                </div>
+                                <div class="must-confirmation-order-row">
+                                    <span><?php echo \esc_html__('Payment method', 'must-hotel-booking'); ?></span>
+                                    <span><?php echo \esc_html($cancellation_payment_method !== '' ? \ucfirst($cancellation_payment_method) : \__('Not recorded', 'must-hotel-booking')); ?></span>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="must-confirmation-paid-success-actions">
+                            <?php if ($can_show_cancellation_confirm_form): ?>
+                                <form method="post" action="<?php echo \esc_url($confirmation_url); ?>"
+                                    class="must-cancellation-confirm-form"
+                                    onsubmit="return window.confirm('<?php echo \esc_js(__('Cancellation is final. Cancel this booking and start the refund now?', 'must-hotel-booking')); ?>');">
+                                    <?php \wp_nonce_field('must_confirm_cancellation', 'must_cancellation_nonce'); ?>
+                                    <input type="hidden" name="must_confirmation_action" value="confirm_cancellation" />
+                                    <input type="hidden" name="reservation_id"
+                                        value="<?php echo \esc_attr((string) $cancellation_reservation_id); ?>" />
+                                    <input type="hidden" name="booking_id" value="<?php echo \esc_attr($cancellation_booking_id); ?>" />
+                                    <input type="hidden" name="cancel_token" value="<?php echo \esc_attr($cancellation_token); ?>" />
+                                    <p class="must-confirmation-policy">
+                                        <?php echo \esc_html__('Cancellation is final once submitted.', 'must-hotel-booking'); ?>
+                                    </p>
+                                    <button type="submit" class="must-confirmation-submit must-cancellation-confirm-submit">
+                                        <span>
+                                            <?php echo \esc_html(\sprintf(
+                                                /* translators: %s refund amount. */
+                                                __('Cancel booking and refund %s', 'must-hotel-booking'),
+                                                $format_money($cancellation_refund_amount, $summary_currency)
+                                            )); ?>
+                                        </span>
+                                        <?php if ($arrow_icon_url !== ''): ?>
+                                            <img src="<?php echo \esc_url($arrow_icon_url); ?>" alt="" aria-hidden="true" />
+                                        <?php endif; ?>
+                                    </button>
+                                </form>
+                            <?php else: ?>
+                                <p class="must-confirmation-policy">
+                                    <?php echo \esc_html__('Online cancellation and automatic refund are not available for this booking. Please contact the hotel team for support.', 'must-hotel-booking'); ?>
+                                </p>
+                            <?php endif; ?>
+                        </div>
+                    </div>
+                    <aside class="must-confirmation-paid-success-media must-cancellation-summary-panel">
+                        <section class="must-confirmation-order-table" aria-label="<?php echo \esc_attr__('Booking summary', 'must-hotel-booking'); ?>">
+                            <div class="must-confirmation-order-head">
+                                <span><?php echo \esc_html__('Booking summary', 'must-hotel-booking'); ?></span>
+                                <strong><?php echo \esc_html((string) ($cancellation_reservation['booking_id'] ?? $cancellation_booking_id)); ?></strong>
+                            </div>
+                            <div class="must-confirmation-order-row">
+                                <span><?php echo \esc_html__('Guest', 'must-hotel-booking'); ?></span>
+                                <span><?php echo \esc_html($cancellation_guest_name !== '' ? $cancellation_guest_name : \__('Guest', 'must-hotel-booking')); ?></span>
+                            </div>
+                            <div class="must-confirmation-order-row">
+                                <span><?php echo \esc_html__('Room', 'must-hotel-booking'); ?></span>
+                                <span><?php echo \esc_html((string) ($cancellation_reservation['room_name'] ?? __('Room', 'must-hotel-booking'))); ?></span>
+                            </div>
+                            <div class="must-confirmation-order-row">
+                                <span><?php echo \esc_html__('Check-in / Check-out', 'must-hotel-booking'); ?></span>
+                                <span><?php echo \esc_html(\trim($cancellation_checkin . ' - ' . $cancellation_checkout)); ?></span>
+                            </div>
+                            <div class="must-confirmation-order-row">
+                                <span><?php echo \esc_html__('Nights', 'must-hotel-booking'); ?></span>
+                                <span><?php echo \esc_html((string) $cancellation_nights); ?></span>
+                            </div>
+                            <div class="must-confirmation-order-row">
+                                <span><?php echo \esc_html__('Total paid', 'must-hotel-booking'); ?></span>
+                                <span><?php echo \esc_html($format_money($cancellation_paid_amount, $summary_currency)); ?></span>
+                            </div>
+                            <div class="must-confirmation-order-row">
+                                <span><?php echo \esc_html__('Cancellation policy', 'must-hotel-booking'); ?></span>
+                                <span><?php echo \esc_html(\sprintf(__('%d days before check-in', 'must-hotel-booking'), (int) ($cancellation_review['policy_days'] ?? 21))); ?></span>
+                            </div>
+                            <div class="must-confirmation-order-row">
+                                <span><?php echo \esc_html__('Current status', 'must-hotel-booking'); ?></span>
+                                <span><?php echo \esc_html(\trim((string) ($cancellation_reservation['status'] ?? '') . ' / ' . (string) ($cancellation_reservation['payment_status'] ?? ''))); ?></span>
+                            </div>
+                        </section>
+                    </aside>
+                </section>
+            <?php elseif ($is_confirmation_success_layout): ?>
                 <section class="must-confirmation-paid-success" aria-labelledby="must-confirmation-paid-success-heading">
                     <div class="must-confirmation-paid-success-copy">
                         <div class="must-confirmation-paid-success-text">

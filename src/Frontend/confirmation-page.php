@@ -8,6 +8,7 @@ use MustHotelBooking\Engine\BookingStatusEngine;
 use MustHotelBooking\Engine\BookingValidationEngine;
 use MustHotelBooking\Engine\EmailEngine;
 use MustHotelBooking\Engine\PaymentEngine;
+use MustHotelBooking\Engine\PaymentProviderFeeService;
 use MustHotelBooking\Engine\ReservationEngine;
 use MustHotelBooking\Engine\PaymentRefundService;
 use MustHotelBooking\Engine\PaymentStatusService;
@@ -105,18 +106,33 @@ function get_confirmation_reservation_checkin_value(array $reservation): string
 function build_confirmation_cancellation_policy_review(int $reservationId, array $reservation): array
 {
     $policyDays = MustBookingConfig::get_cancellation_policy_days();
-    $refundPercent = MustBookingConfig::get_cancellation_refund_percent();
     $checkinValue = get_confirmation_reservation_checkin_value($reservation);
     $hotelContactMessage = build_confirmation_contact_hotel_message();
+    $paymentRows = \MustHotelBooking\Engine\get_payment_repository()->getPaymentsForReservation($reservationId);
+    $paymentState = PaymentStatusService::buildReservationPaymentState($reservation, $paymentRows);
+    $amountPaid = isset($paymentState['amount_paid']) ? (float) $paymentState['amount_paid'] : 0.0;
+    $paymentMethod = \sanitize_key((string) ($paymentState['method'] ?? ''));
+    $refundBreakdown = (new PaymentProviderFeeService())->calculateDefaultRefundBreakdown(
+        $paymentRows,
+        $amountPaid,
+        'system',
+        0.0,
+        \__('Online cancellation more than 21 days before check-in refunds paid amount minus the stored provider fee.', 'must-hotel-booking')
+    );
 
     $base = [
         'reservation_id' => $reservationId,
         'eligible' => false,
         'manual_only' => true,
         'policy_days' => $policyDays,
-        'refund_percent' => $refundPercent,
         'days_until_checkin' => null,
         'checkin' => $checkinValue,
+        'paid_amount' => \round($amountPaid, 2),
+        'payment_method' => $paymentMethod,
+        'provider_fee_amount' => (float) ($refundBreakdown['provider_fee_retained'] ?? 0.0),
+        'provider_fee_status' => (string) ($refundBreakdown['provider_fee_status'] ?? 'unknown'),
+        'refund_amount' => (float) ($refundBreakdown['final_refund_amount'] ?? 0.0),
+        'refund_breakdown' => $refundBreakdown,
         'message' => '',
     ];
 
@@ -145,20 +161,27 @@ function build_confirmation_cancellation_policy_review(int $reservationId, array
     }
 
     $paymentStatus = \sanitize_key((string) ($reservation['payment_status'] ?? ''));
-    $refundDisplay = \number_format_i18n(
-        $refundPercent,
-        \abs($refundPercent - \round($refundPercent)) < 0.01 ? 0 : 2
-    );
 
     $base['eligible'] = true;
     $base['manual_only'] = false;
 
     if (\in_array($paymentStatus, ['paid', 'partially_paid', 'partially_refunded'], true)) {
+        if (!\in_array($paymentMethod, ['stripe', 'pokpay'], true)) {
+            $base['manual_only'] = true;
+            $base['message'] = \__('This booking has a paid balance, but automatic online cancellation is only available for supported online payments. Please contact the hotel to review the refund.', 'must-hotel-booking') . ' ' . $hotelContactMessage;
+            return $base;
+        }
+
+        if ((string) ($refundBreakdown['provider_fee_status'] ?? 'unknown') !== 'known') {
+            $base['manual_only'] = true;
+            $base['message'] = \__('This booking needs hotel support because the payment processing fee is not known yet. The hotel must review the refund before cancellation.', 'must-hotel-booking') . ' ' . $hotelContactMessage;
+            return $base;
+        }
+
         $base['message'] = \sprintf(
-            /* translators: 1: policy days, 2: refund percentage. */
-            \__('This reservation is eligible for online cancellation. The hotel policy allows online cancellation %1$d or more days before check-in. If you continue, the booking can be cancelled and up to %2$s%% of the paid amount can be refunded, depending on the payment status.', 'must-hotel-booking'),
-            $policyDays,
-            $refundDisplay
+            /* translators: %d: policy days. */
+            \__('This reservation is eligible for online cancellation. The hotel policy allows online cancellation %d or more days before check-in. If you continue, the booking will be cancelled and the stored provider fee will be retained.', 'must-hotel-booking'),
+            $policyDays
         );
 
         return $base;
@@ -258,8 +281,16 @@ function handle_confirmation_cancellation_post_request(): array
     $paymentState = PaymentStatusService::buildReservationPaymentState($reservation, $paymentRows);
     $amountPaid = isset($paymentState['amount_paid']) ? (float) $paymentState['amount_paid'] : 0.0;
     $paymentMethod = \sanitize_key((string) ($paymentState['method'] ?? ''));
-    $refundPercent = isset($review['refund_percent']) ? (float) $review['refund_percent'] : 0.0;
-    $refundAmount = \round($amountPaid * ($refundPercent / 100), 2);
+    $refundBreakdown = isset($review['refund_breakdown']) && \is_array($review['refund_breakdown'])
+        ? $review['refund_breakdown']
+        : (new PaymentProviderFeeService())->calculateDefaultRefundBreakdown(
+            $paymentRows,
+            $amountPaid,
+            'system',
+            0.0,
+            \__('Guest cancellation refunds paid amount minus stored provider fee.', 'must-hotel-booking')
+        );
+    $refundAmount = \round((float) ($refundBreakdown['final_refund_amount'] ?? 0.0), 2);
 
     if ($amountPaid > 0.0) {
         if ($refundAmount <= 0.0) {
@@ -294,6 +325,9 @@ function handle_confirmation_cancellation_post_request(): array
                 'reason' => \__('Guest cancelled inside online cancellation policy.', 'must-hotel-booking'),
                 'cancel_reservation' => true,
                 'source' => 'guest_cancellation_policy',
+                'calculated_by' => 'system',
+                'require_known_provider_fee' => true,
+                'refund_breakdown' => $refundBreakdown,
             ]
         );
 

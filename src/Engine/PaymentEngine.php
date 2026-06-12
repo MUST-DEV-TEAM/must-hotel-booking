@@ -539,6 +539,7 @@ final class PaymentEngine
                 'paid',
                 isset($session['payment_intent']) ? (string) $session['payment_intent'] : $sessionId
             );
+            (new PaymentProviderFeeService())->captureStripeFeeSnapshotForReservations($reservationIds, $session);
 
             if (\class_exists(\MustHotelBooking\Provider\Clock\ClockPaymentReconciliationService::class)) {
                 (new \MustHotelBooking\Provider\Clock\ClockPaymentReconciliationService())->reconcilePaymentSucceeded(
@@ -637,6 +638,35 @@ final class PaymentEngine
         }
 
         return (int) \round($amount * 100);
+    }
+
+    public static function convertMinorUnitsToAmount(int $amountMinor, string $currency): float
+    {
+        $currency = \strtolower(\trim($currency));
+        $zeroDecimalCurrencies = [
+            'bif',
+            'clp',
+            'djf',
+            'gnf',
+            'jpy',
+            'kmf',
+            'krw',
+            'mga',
+            'pyg',
+            'rwf',
+            'ugx',
+            'vnd',
+            'vuv',
+            'xaf',
+            'xof',
+            'xpf',
+        ];
+
+        if (\in_array($currency, $zeroDecimalCurrencies, true)) {
+            return (float) $amountMinor;
+        }
+
+        return \round($amountMinor / 100, 2);
     }
 
     /**
@@ -1032,6 +1062,11 @@ final class PaymentEngine
         if ($status === 'CAPTURED') {
             BookingStatusEngine::updateReservationStatuses($reservationIds, 'confirmed', 'paid');
             BookingStatusEngine::createPaymentRows($reservationIds, 'pokpay', 'paid', $orderId);
+            (new PaymentProviderFeeService())->capturePokPayFeeSnapshotForReservations(
+                $reservationIds,
+                isset($orderResponse['order']) && \is_array($orderResponse['order']) ? $orderResponse['order'] : [],
+                $orderId
+            );
 
             if (\class_exists(\MustHotelBooking\Provider\Clock\ClockPaymentReconciliationService::class)) {
                 (new \MustHotelBooking\Provider\Clock\ClockPaymentReconciliationService())->reconcilePaymentSucceeded(
@@ -1583,6 +1618,7 @@ final class PaymentEngine
 
             BookingStatusEngine::updateReservationStatuses($reservationIds, 'confirmed', 'paid');
             BookingStatusEngine::createPaymentRows($reservationIds, 'stripe', 'paid', $paymentIntent !== '' ? $paymentIntent : $sessionId);
+            (new PaymentProviderFeeService())->captureStripeFeeSnapshotForReservations($reservationIds, $object);
 
             if (\class_exists(\MustHotelBooking\Provider\Clock\ClockPaymentReconciliationService::class)) {
                 (new \MustHotelBooking\Provider\Clock\ClockPaymentReconciliationService())->reconcilePaymentSucceeded(

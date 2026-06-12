@@ -9,6 +9,22 @@ final class PaymentRepository extends AbstractRepository
         return $this->tableExists('payments');
     }
 
+    private function paymentColumnExists(string $column): bool
+    {
+        if ($column === '' || !$this->paymentsTableExists() || !\preg_match('/^[A-Za-z0-9_]+$/', $column)) {
+            return false;
+        }
+
+        $found = $this->wpdb->get_var(
+            $this->wpdb->prepare(
+                'SHOW COLUMNS FROM ' . $this->table('payments') . ' LIKE %s',
+                $column
+            )
+        );
+
+        return (string) $found === $column;
+    }
+
     public function getLatestPaymentIdForReservationMethod(int $reservationId, string $method): int
     {
         if ($reservationId <= 0 || \trim($method) === '') {
@@ -40,16 +56,7 @@ final class PaymentRepository extends AbstractRepository
 
         $row = $this->wpdb->get_row(
             $this->wpdb->prepare(
-                'SELECT
-                    id,
-                    reservation_id,
-                    amount,
-                    currency,
-                    method,
-                    status,
-                    transaction_id,
-                    paid_at,
-                    created_at
+                'SELECT *
                 FROM ' . $this->table('payments') . '
                 WHERE id = %d
                 LIMIT 1',
@@ -66,6 +73,7 @@ final class PaymentRepository extends AbstractRepository
      */
     public function createPayment(array $paymentData): int
     {
+        $paymentData = $this->filterExistingPaymentColumns($paymentData);
         $inserted = $this->wpdb->insert(
             $this->table('payments'),
             $paymentData,
@@ -85,6 +93,12 @@ final class PaymentRepository extends AbstractRepository
     public function updatePayment(int $paymentId, array $paymentData): bool
     {
         if ($paymentId <= 0 || empty($paymentData)) {
+            return false;
+        }
+
+        $paymentData = $this->filterExistingPaymentColumns($paymentData);
+
+        if (empty($paymentData)) {
             return false;
         }
 
@@ -332,16 +346,7 @@ final class PaymentRepository extends AbstractRepository
 
         $rows = $this->wpdb->get_results(
             $this->wpdb->prepare(
-                'SELECT
-                    id,
-                    reservation_id,
-                    amount,
-                    currency,
-                    method,
-                    status,
-                    transaction_id,
-                    paid_at,
-                    created_at
+                'SELECT *
                 FROM ' . $this->table('payments') . '
                 WHERE reservation_id = %d
                 ORDER BY COALESCE(paid_at, created_at) DESC, id DESC',
@@ -369,16 +374,7 @@ final class PaymentRepository extends AbstractRepository
         $placeholders = \implode(', ', \array_fill(0, \count($reservationIds), '%d'));
         $rows = $this->wpdb->get_results(
             $this->wpdb->prepare(
-                'SELECT
-                    id,
-                    reservation_id,
-                    amount,
-                    currency,
-                    method,
-                    status,
-                    transaction_id,
-                    paid_at,
-                    created_at
+                'SELECT *
                 FROM ' . $this->table('payments') . '
                 WHERE reservation_id IN (' . $placeholders . ')
                 ORDER BY reservation_id ASC, COALESCE(paid_at, created_at) DESC, id DESC',
@@ -622,12 +618,12 @@ final class PaymentRepository extends AbstractRepository
         $formats = [];
 
         foreach (\array_keys($paymentData) as $field) {
-            if ($field === 'amount') {
+            if (\in_array($field, ['amount', 'provider_fee_amount', 'provider_net_amount'], true)) {
                 $formats[] = '%f';
                 continue;
             }
 
-            if ($field === 'reservation_id') {
+            if (\in_array($field, ['reservation_id', 'provider_fee_absorbed_by_customer'], true)) {
                 $formats[] = '%d';
                 continue;
             }
@@ -636,5 +632,30 @@ final class PaymentRepository extends AbstractRepository
         }
 
         return $formats;
+    }
+
+    /** @param array<string, mixed> $paymentData @return array<string, mixed> */
+    private function filterExistingPaymentColumns(array $paymentData): array
+    {
+        $knownBase = [
+            'id' => true,
+            'reservation_id' => true,
+            'amount' => true,
+            'currency' => true,
+            'method' => true,
+            'status' => true,
+            'transaction_id' => true,
+            'paid_at' => true,
+            'created_at' => true,
+        ];
+        $filtered = [];
+
+        foreach ($paymentData as $key => $value) {
+            if (isset($knownBase[$key]) || $this->paymentColumnExists((string) $key)) {
+                $filtered[$key] = $value;
+            }
+        }
+
+        return $filtered;
     }
 }

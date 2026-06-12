@@ -336,6 +336,17 @@ final class PaymentAdminDataProvider
             }
         }
 
+        foreach ($paymentRows as $paymentRow) {
+            $method = \sanitize_key((string) ($paymentRow['method'] ?? ''));
+            $status = \sanitize_key((string) ($paymentRow['status'] ?? ''));
+            $feeStatus = \sanitize_key((string) ($paymentRow['provider_fee_status'] ?? ''));
+
+            if (\in_array($method, ['stripe', 'pokpay'], true) && $status === 'paid' && $feeStatus !== 'known') {
+                $state['warnings'][] = \__('Provider fee is unknown for this paid online payment. Default refunds need manual review until the fee snapshot is available.', 'must-hotel-booking');
+                break;
+            }
+        }
+
         foreach ($clockAccountingRows as $clockAccountingRow) {
             $clockAccountingStatus = \sanitize_key((string) ($clockAccountingRow['status'] ?? ''));
             $verificationStatus = \sanitize_key((string) ($clockAccountingRow['verification_status'] ?? ''));

@@ -4,7 +4,7 @@ class MustBookingConfig
 {
     public const OPTION_NAME = 'must_hotel_booking_settings';
     private const VERSION_KEY = 'settings_version';
-    private const VERSION = 5;
+    private const VERSION = 6;
     public static function get_option_name(): string
     {
         return self::OPTION_NAME;
@@ -151,6 +151,22 @@ class MustBookingConfig
     public static function get_cancellation_refund_percent(): float
     {
         return self::decimal(self::get_setting('cancellation_refund_percent', 97.0), 0.0, 100.0, 97.0);
+    }
+    public static function get_pokpay_fee_percent(): float
+    {
+        return self::decimal(self::get_setting('pokpay_fee_percent', 0.0), 0.0, 100.0, 0.0);
+    }
+    public static function get_pokpay_fee_fixed(): float
+    {
+        return self::decimal(self::get_setting('pokpay_fee_fixed', 0.0), 0.0, 999999.0, 0.0);
+    }
+    public static function get_pokpay_fee_currency(): string
+    {
+        return self::currency((string) self::get_setting('pokpay_fee_currency', self::get_currency()));
+    }
+    public static function get_pokpay_fee_customer_absorbs(): bool
+    {
+        return self::bool(self::get_setting('pokpay_fee_customer_absorbs', false));
     }
     public static function get_website_booking_flow_mode(): string
     {
@@ -405,7 +421,7 @@ class MustBookingConfig
                 'anti_abuse_logging_enabled' => false
             ],
             'checkin_checkout' => ['checkin_time' => '14:00', 'checkout_time' => '11:00', 'allow_early_checkin_request' => true, 'allow_late_checkout_request' => true, 'arrival_instructions' => '', 'departure_instructions' => '', 'guest_checkin_label' => \__('Check-in', 'must-hotel-booking'), 'guest_checkout_label' => \__('Check-out', 'must-hotel-booking')],
-            'payments_summary' => ['payment_methods' => ['pay_at_hotel' => true, 'stripe' => false, 'pokpay' => true], 'deposit_required' => false, 'deposit_type' => 'percentage', 'deposit_value' => 0.0, 'tax_rate' => 0.0, 'stripe_publishable_key' => '', 'stripe_secret_key' => '', 'stripe_webhook_secret' => '', 'stripe_local_publishable_key' => '', 'stripe_local_secret_key' => '', 'stripe_local_webhook_secret' => '', 'stripe_staging_publishable_key' => '', 'stripe_staging_secret_key' => '', 'stripe_staging_webhook_secret' => '', 'stripe_production_publishable_key' => '', 'stripe_production_secret_key' => '', 'stripe_production_webhook_secret' => '', 'pokpay_local_merchant_id' => '', 'pokpay_local_key_id' => '', 'pokpay_local_key_secret' => '', 'pokpay_staging_merchant_id' => '', 'pokpay_staging_key_id' => '', 'pokpay_staging_key_secret' => '', 'pokpay_production_merchant_id' => '', 'pokpay_production_key_id' => '', 'pokpay_production_key_secret' => ''],
+            'payments_summary' => ['payment_methods' => ['pay_at_hotel' => true, 'stripe' => false, 'pokpay' => true], 'deposit_required' => false, 'deposit_type' => 'percentage', 'deposit_value' => 0.0, 'tax_rate' => 0.0, 'stripe_publishable_key' => '', 'stripe_secret_key' => '', 'stripe_webhook_secret' => '', 'stripe_local_publishable_key' => '', 'stripe_local_secret_key' => '', 'stripe_local_webhook_secret' => '', 'stripe_staging_publishable_key' => '', 'stripe_staging_secret_key' => '', 'stripe_staging_webhook_secret' => '', 'stripe_production_publishable_key' => '', 'stripe_production_secret_key' => '', 'stripe_production_webhook_secret' => '', 'pokpay_local_merchant_id' => '', 'pokpay_local_key_id' => '', 'pokpay_local_key_secret' => '', 'pokpay_staging_merchant_id' => '', 'pokpay_staging_key_id' => '', 'pokpay_staging_key_secret' => '', 'pokpay_production_merchant_id' => '', 'pokpay_production_key_id' => '', 'pokpay_production_key_secret' => '', 'pokpay_fee_percent' => 0.0, 'pokpay_fee_fixed' => 0.0, 'pokpay_fee_currency' => 'USD', 'pokpay_fee_customer_absorbs' => false],
             'staff_access' => ['enable_staff_portal' => false, 'redirect_worker_after_login' => 'dashboard', 'hide_wp_admin_for_workers' => true, 'portal_access_roles' => self::staff_access_role_defaults(), 'capability_matrix' => self::staff_matrix_defaults(), 'portal_module_visibility' => self::portal_module_visibility_defaults()],
             'branding' => ['primary_color' => '#0f766e', 'secondary_color' => '#155e75', 'accent_color' => '#f59e0b', 'text_color' => '#16212b', 'border_radius' => 18, 'font_family' => 'Instrument Sans', 'inherit_elementor_colors' => false, 'inherit_elementor_typography' => false, 'portal_welcome_title' => \__('Welcome back', 'must-hotel-booking'), 'portal_welcome_text' => \__('Manage arrivals, departures, guest requests, and stay operations from one place.', 'must-hotel-booking'), 'booking_form_style_preset' => 'balanced'],
             'managed_pages' => ['page_rooms_id' => 0, 'page_booking_id' => 0, 'page_booking_accommodation_id' => 0, 'page_checkout_id' => 0, 'page_booking_confirmation_id' => 0, 'portal_page_id' => 0, 'portal_login_page_id' => 0],
@@ -559,6 +575,10 @@ class MustBookingConfig
             'pokpay_production_merchant_id' => \sanitize_text_field((string) ($v['pokpay_production_merchant_id'] ?? $d['pokpay_production_merchant_id'])),
             'pokpay_production_key_id' => \sanitize_text_field((string) ($v['pokpay_production_key_id'] ?? $d['pokpay_production_key_id'])),
             'pokpay_production_key_secret' => \sanitize_text_field((string) ($v['pokpay_production_key_secret'] ?? $d['pokpay_production_key_secret'])),
+            'pokpay_fee_percent' => self::decimal($v['pokpay_fee_percent'] ?? $d['pokpay_fee_percent'], 0.0, 100.0, (float) $d['pokpay_fee_percent']),
+            'pokpay_fee_fixed' => self::decimal($v['pokpay_fee_fixed'] ?? $d['pokpay_fee_fixed'], 0.0, 999999.0, (float) $d['pokpay_fee_fixed']),
+            'pokpay_fee_currency' => self::currency((string) ($v['pokpay_fee_currency'] ?? $d['pokpay_fee_currency'])),
+            'pokpay_fee_customer_absorbs' => self::bool($v['pokpay_fee_customer_absorbs'] ?? $d['pokpay_fee_customer_absorbs']),
         ];
     }
     /** @param array<string, mixed> $v @return array<string, mixed> */

@@ -451,12 +451,22 @@ function install_tables(): void
         method VARCHAR(50) NOT NULL DEFAULT '',
         status VARCHAR(50) NOT NULL DEFAULT 'pending',
         transaction_id VARCHAR(191) NOT NULL DEFAULT '',
+        provider_fee_amount DECIMAL(12,2) NOT NULL DEFAULT 0.00,
+        provider_fee_currency VARCHAR(10) NOT NULL DEFAULT '',
+        provider_net_amount DECIMAL(12,2) NOT NULL DEFAULT 0.00,
+        provider_fee_status VARCHAR(50) NOT NULL DEFAULT 'unknown',
+        provider_fee_source VARCHAR(80) NOT NULL DEFAULT '',
+        provider_balance_transaction_id VARCHAR(191) NOT NULL DEFAULT '',
+        provider_fee_absorbed_by_customer TINYINT(1) NOT NULL DEFAULT 0,
+        provider_fee_metadata LONGTEXT NULL,
         paid_at DATETIME NULL DEFAULT NULL,
         created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
         PRIMARY KEY  (id),
         KEY reservation_id (reservation_id),
         KEY status (status),
-        KEY transaction_id (transaction_id)
+        KEY transaction_id (transaction_id),
+        KEY provider_fee_status (provider_fee_status),
+        KEY provider_balance_transaction_id (provider_balance_transaction_id)
     ) {$charset_collate};";
 
     $tables[] = "CREATE TABLE {$prefix}must_refunds (
@@ -479,6 +489,12 @@ function install_tables(): void
         stripe_refund_id VARCHAR(191) NOT NULL DEFAULT '',
         amount DECIMAL(12,2) NOT NULL DEFAULT 0.00,
         currency VARCHAR(10) NOT NULL DEFAULT 'USD',
+        original_paid_amount DECIMAL(12,2) NOT NULL DEFAULT 0.00,
+        provider_fee_retained DECIMAL(12,2) NOT NULL DEFAULT 0.00,
+        cancellation_fee_amount DECIMAL(12,2) NOT NULL DEFAULT 0.00,
+        final_refund_amount DECIMAL(12,2) NOT NULL DEFAULT 0.00,
+        refund_policy_reason VARCHAR(191) NOT NULL DEFAULT '',
+        calculated_by VARCHAR(50) NOT NULL DEFAULT '',
         reason VARCHAR(191) NOT NULL DEFAULT '',
         refund_type VARCHAR(80) NOT NULL DEFAULT 'refund_only',
         status VARCHAR(50) NOT NULL DEFAULT 'pending',
@@ -763,7 +779,103 @@ function install_tables(): void
         \dbDelta($sql);
     }
 
+    ensure_payment_release_schema($wpdb);
+
     (new AccommodationCategoryUpgradeService($wpdb))->run();
 
     \update_option('must_hotel_booking_db_version', MUST_HOTEL_BOOKING_VERSION);
+}
+
+/**
+ * Ensure release-added payment/refund columns exist on databases that already
+ * stored the current DB version before dbDelta saw the new schema.
+ */
+function ensure_payment_release_schema(?\wpdb $wpdb_instance = null): void
+{
+    global $wpdb;
+
+    $db = $wpdb_instance ?: $wpdb;
+
+    ensure_table_columns(
+        $db,
+        $db->prefix . 'must_payments',
+        [
+            'provider_fee_amount' => "DECIMAL(12,2) NOT NULL DEFAULT 0.00",
+            'provider_fee_currency' => "VARCHAR(10) NOT NULL DEFAULT ''",
+            'provider_net_amount' => "DECIMAL(12,2) NOT NULL DEFAULT 0.00",
+            'provider_fee_status' => "VARCHAR(50) NOT NULL DEFAULT 'unknown'",
+            'provider_fee_source' => "VARCHAR(80) NOT NULL DEFAULT ''",
+            'provider_balance_transaction_id' => "VARCHAR(191) NOT NULL DEFAULT ''",
+            'provider_fee_absorbed_by_customer' => "TINYINT(1) NOT NULL DEFAULT 0",
+            'provider_fee_metadata' => "LONGTEXT NULL",
+        ]
+    );
+
+    ensure_table_indexes(
+        $db,
+        $db->prefix . 'must_payments',
+        [
+            'provider_fee_status' => 'provider_fee_status',
+            'provider_balance_transaction_id' => 'provider_balance_transaction_id',
+        ]
+    );
+
+    ensure_table_columns(
+        $db,
+        $db->prefix . 'must_refunds',
+        [
+            'original_paid_amount' => "DECIMAL(12,2) NOT NULL DEFAULT 0.00",
+            'provider_fee_retained' => "DECIMAL(12,2) NOT NULL DEFAULT 0.00",
+            'cancellation_fee_amount' => "DECIMAL(12,2) NOT NULL DEFAULT 0.00",
+            'final_refund_amount' => "DECIMAL(12,2) NOT NULL DEFAULT 0.00",
+            'refund_policy_reason' => "VARCHAR(191) NOT NULL DEFAULT ''",
+            'calculated_by' => "VARCHAR(50) NOT NULL DEFAULT ''",
+        ]
+    );
+}
+
+/**
+ * @param array<string, string> $columns
+ */
+function ensure_table_columns(\wpdb $wpdb, string $table, array $columns): void
+{
+    $exists = $wpdb->get_var($wpdb->prepare('SHOW TABLES LIKE %s', $table));
+
+    if ((string) $exists !== $table) {
+        return;
+    }
+
+    $existingColumns = $wpdb->get_col('SHOW COLUMNS FROM ' . $table, 0);
+    $existingColumns = \is_array($existingColumns) ? \array_map('strval', $existingColumns) : [];
+
+    foreach ($columns as $column => $definition) {
+        if (\in_array($column, $existingColumns, true)) {
+            continue;
+        }
+
+        $wpdb->query('ALTER TABLE ' . $table . ' ADD COLUMN ' . $column . ' ' . $definition);
+    }
+}
+
+/**
+ * @param array<string, string> $indexes
+ */
+function ensure_table_indexes(\wpdb $wpdb, string $table, array $indexes): void
+{
+    $exists = $wpdb->get_var($wpdb->prepare('SHOW TABLES LIKE %s', $table));
+
+    if ((string) $exists !== $table) {
+        return;
+    }
+
+    $existingIndexes = $wpdb->get_col('SHOW INDEX FROM ' . $table, 2);
+    $existingIndexes = \is_array($existingIndexes) ? \array_map('strval', $existingIndexes) : [];
+
+    foreach ($indexes as $index => $column) {
+        if (\in_array($index, $existingIndexes, true)) {
+            continue;
+        }
+
+        $wpdb->query('ALTER TABLE ' . $table . ' ADD INDEX ' . $index . ' (' . $column . ')');
+    }
 }

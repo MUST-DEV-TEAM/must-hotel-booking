@@ -40,6 +40,17 @@ final class PaymentRefundService
         $refundType = \sanitize_key((string) ($options['refund_type'] ?? 'refund_only')) ?: 'refund_only';
         $reason = \sanitize_text_field((string) ($options['reason'] ?? ''));
         $cancelAfterRefund = !empty($options['cancel_reservation']);
+        $feeService = new PaymentProviderFeeService($this->payments);
+        $breakdown = isset($options['refund_breakdown']) && \is_array($options['refund_breakdown'])
+            ? $options['refund_breakdown']
+            : $feeService->calculateDefaultRefundBreakdown(
+                $paymentRows,
+                $amountPaid,
+                (string) ($options['calculated_by'] ?? $options['source'] ?? 'admin'),
+                0.0,
+                \__('Admin refund amount uses stored provider fee snapshot as the default.', 'must-hotel-booking')
+            );
+        $breakdown['final_refund_amount'] = $amount;
         if ($amount <= 0.0) {
             return $this->failure(\__('Refund amount must be greater than zero.', 'must-hotel-booking'));
         }
@@ -55,6 +66,9 @@ final class PaymentRefundService
         if ($transactionId === '') {
             return $this->failure(\__('This online payment is missing its provider reference.', 'must-hotel-booking'));
         }
+        if (!empty($options['require_known_provider_fee']) && (string) ($breakdown['provider_fee_status'] ?? 'unknown') !== 'known') {
+            return $this->failure(\__('The provider fee is not known yet. Review the payment fee capture before issuing the default refund.', 'must-hotel-booking'));
+        }
         if ($method === 'pokpay') {
             return $this->requestPokPayRefund($reservation, $paymentRows, $state, $amount, [
                 'currency' => $currency,
@@ -63,6 +77,7 @@ final class PaymentRefundService
                 'cancel_reservation' => $cancelAfterRefund,
                 'source' => (string) ($options['source'] ?? 'admin'),
                 'transaction_id' => $transactionId,
+                'refund_breakdown' => $breakdown,
             ]);
         }
         $now = \current_time('mysql');
@@ -95,6 +110,7 @@ final class PaymentRefundService
             'stripe_payment_intent_id' => $transactionId,
             'amount' => $amount,
             'currency' => $currency,
+            ] + $feeService->refundBreakdownData($breakdown) + [
             'reason' => $reason,
             'refund_type' => $refundType,
             'status' => 'pending',
@@ -103,6 +119,7 @@ final class PaymentRefundService
             'metadata' => \wp_json_encode([
                 'cancel_reservation' => $cancelAfterRefund,
                 'source' => (string) ($options['source'] ?? 'admin'),
+                'provider_fee_status' => (string) ($breakdown['provider_fee_status'] ?? 'unknown'),
             ]),
             'created_at' => $now,
             'updated_at' => $now,
@@ -216,6 +233,17 @@ final class PaymentRefundService
         $cancelAfterRefund = !empty($options['cancel_reservation']);
         $amountPaid = (float) ($state['amount_paid'] ?? 0.0);
         $isFullRefund = \abs($amountPaid - $amount) < 0.01;
+        $feeService = new PaymentProviderFeeService($this->payments);
+        $breakdown = isset($options['refund_breakdown']) && \is_array($options['refund_breakdown'])
+            ? $options['refund_breakdown']
+            : $feeService->calculateDefaultRefundBreakdown(
+                $paymentRows,
+                $amountPaid,
+                (string) ($options['calculated_by'] ?? $options['source'] ?? 'admin'),
+                0.0,
+                \__('PokPay refund amount uses stored provider fee snapshot as the default.', 'must-hotel-booking')
+            );
+        $breakdown['final_refund_amount'] = $amount;
 
         $blockingRefund = $this->refunds->findBlockingProviderRefund($reservationId, 'pokpay', $transactionId, $amount);
         if (\is_array($blockingRefund)) {
@@ -255,6 +283,7 @@ final class PaymentRefundService
             'raw_provider_status' => 'processing',
             'amount' => $amount,
             'currency' => $currency,
+            ] + $feeService->refundBreakdownData($breakdown) + [
             'reason' => $reason,
             'refund_type' => $refundType,
             'status' => 'processing',
@@ -267,6 +296,7 @@ final class PaymentRefundService
                 'source' => (string) ($options['source'] ?? 'admin'),
                 'full_refund' => $isFullRefund,
                 'amount_minor' => PaymentEngine::convertAmountToMinorUnits($amount, $currency),
+                'provider_fee_status' => (string) ($breakdown['provider_fee_status'] ?? 'unknown'),
             ]),
             'created_at' => $now,
             'updated_at' => $now,

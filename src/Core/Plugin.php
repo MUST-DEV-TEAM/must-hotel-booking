@@ -38,6 +38,7 @@ final class Plugin
         $db_version = (string) \get_option('must_hotel_booking_db_version', '0.0.0');
 
         if (\version_compare($db_version, MUST_HOTEL_BOOKING_VERSION, '>=')) {
+            \MustHotelBooking\Database\ensure_payment_release_schema();
             return;
         }
 
