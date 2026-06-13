@@ -22,6 +22,7 @@
 | Path | Purpose | Inspect when |
 | --- | --- | --- |
 | `src/Engine/ReservationEngine.php` | Guest creation, reservation creation, status/payment defaults, confirmation rows. | Booking lifecycle or reservation creation changes. |
+| `src/Engine/BookingLifecycleSyncService.php` | Shared local status-transition wrapper for provider/website lifecycle changes; routes through `BookingStatusEngine` so hooks and emails fire. | Clock inbound sync, provider-confirmed cancellation, or any new lifecycle entry point. |
 | `src/Engine/BookingValidationEngine.php` | Request and guest form validation. | Checkout validation issues. |
 | `src/Engine/BookingStatusEngine.php` | Status/payment status updates and payment row creation. | Confirm/cancel/expire/payment state changes. |
 | `src/Provider/Local/LocalReservationProvider.php` | Provider adapter for local reservation behavior. | Local booking flow differs from engine expectations. |
@@ -126,6 +127,12 @@
 | `src/Provider/Clock/*` | Clock PMS provider, API, sync, diagnostics, reconciliation. | Clock behavior. |
 | `src/Engine/PaymentEngine.php` | Stripe/PokPay endpoints/settings. | Payment integration behavior. |
 | `src/Core/Updater.php` | GitHub plugin updater boot/status. | Release/update behavior. |
+
+## CLI Tools
+| Path | Purpose | Inspect when |
+| --- | --- | --- |
+| `tools/lifecycle-sync-smoke-test.php` | Standalone smoke test for provider/Clock cancellation routing through `BookingLifecycleSyncService`, cancellation hook idempotency, and refund-review row creation. | Changing lifecycle sync, Clock cancellation, or refund-review behavior. |
+| `tools/provider-preflight-report.php` | Read-only provider reachability/config report for Clock, Stripe, and PokPay using configured sandbox/staging credentials; does not create bookings, payments, or refunds. | Before destructive provider E2E tests or when callback/provider configuration is questioned. |
 
 ## Elementor Widgets
 | Path | Purpose | Inspect when |

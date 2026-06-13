@@ -575,6 +575,21 @@ final class ClockReservationProvider implements ReservationProviderInterface
             if (empty($pricing['success']) || !isset($pricing['total_price'])) {
                 return $this->errorResult([\__('Unable to calculate final Clock booking total for one of the selected rooms.', 'must-hotel-booking')]);
             }
+            /*
+             * Online Stripe/PokPay reservations require a verified Clock guarantee
+             * policy so Clock can calculate Required Deposit correctly.
+             */
+            if (
+                $reservationStatus === 'pending_payment'
+                && (int) ($pricing['guarantee_policy_id'] ?? 0) <= 0
+            ) {
+                return $this->errorResult([
+                    \__(
+                        'Clock did not return a guarantee policy for the selected rate. The reservation was not created and no payment was collected.',
+                        'must-hotel-booking'
+                    ),
+                ]);
+            }
             $roomMapping = \is_array($selection) && isset($selection['room_mapping']) && \is_array($selection['room_mapping']) ? $selection['room_mapping'] : null;
             $physicalMapping = \is_array($selection) && isset($selection['physical_mapping']) && \is_array($selection['physical_mapping']) ? $selection['physical_mapping'] : null;
             $ratePlanMapping = $this->ratePlanMappingForPricing($pricing, $ratePlanId);

@@ -1,5 +1,19 @@
 # Task Log
 
+## 2026-06-13 - Provider cancellation lifecycle completion and preflight
+- Changed: Extended `BookingLifecycleSyncService` so paid Stripe/PokPay bookings cancelled from Clock/provider sync create one `refund_review_required` / `clock_cancellation_review` row when no active/completed refund already exists.
+- Changed: Added admin payment warning/list metadata for refund-review rows, a standalone lifecycle smoke test, and a read-only provider preflight report for Clock/Stripe/PokPay.
+- Verified: Lifecycle smoke test passes for paid Stripe Clock cancellation idempotency: one cancellation hook and one refund-review row with provider-fee-aware amount.
+- Verified: Read-only provider preflight reached Clock sandbox booking fetch/folio endpoints, Stripe balance auth, and PokPay staging SDK-order fetch with configured credentials.
+- Blocked: Full destructive live provider E2E is still blocked by missing Clock webhook secret, missing Stripe webhook secret, and webhook URLs resolving to localhost because public callback base is blank.
+- Checks: PHP syntax checks passed on changed PHP files and CLI tools.
+
+## 2026-06-13 - Clock cancellation lifecycle routing
+- Changed: Added `BookingLifecycleSyncService` and routed Clock inbound webhook/refresh status changes, Clock booking upsert status changes, and successful outbound Clock cancellation reconciliation through it.
+- Fixed: Clock-originated cancellations no longer update only the reservation repository; they now pass through `BookingStatusEngine::updateReservationStatuses()` so cancellation hooks and email handlers run once when the status first changes to `cancelled`.
+- Limits: No live Clock/PokPay/Stripe E2E was run in this pass; provider credentials and callback reachability still need preflight before destructive sandbox tests.
+- Checks: PHP syntax checks passed on changed PHP files.
+
 ## 2026-06-13 - PokPay automatic refunds and Clock deposit posting
 - Changed: Re-enabled PokPay automatic refunds using the documented merchant SDK-order refund endpoint and retained `manual_pending` only when PokPay does not confirm the refund.
 - Changed: Added the verified Clock deposit workflow for future online payments: create or reuse a booking folio with `deposit=true`, then post the Stripe/PokPay external provider payment as a credit item on that deposit folio.

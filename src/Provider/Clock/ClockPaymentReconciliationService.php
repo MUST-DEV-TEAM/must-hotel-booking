@@ -1304,10 +1304,15 @@ final class ClockPaymentReconciliationService
             'provider_metadata' => $metadata,
         ]);
         if ($success && $targetLocalStatus !== '') {
-            $reservationRepository->updateReservationStatus(
+            (new \MustHotelBooking\Engine\BookingLifecycleSyncService($reservationRepository))->applyReservationStatusTransition(
                 $reservationId,
                 $targetLocalStatus,
-                $targetLocalPaymentStatus !== '' ? $targetLocalPaymentStatus : (string) ($row['payment_status'] ?? '')
+                $targetLocalPaymentStatus !== '' ? $targetLocalPaymentStatus : (string) ($row['payment_status'] ?? ''),
+                [
+                    'source' => (string) ($action['source'] ?? 'clock_reconciliation'),
+                    'operation' => $targetLocalStatus === 'cancelled' ? (string) ($action['operation'] ?? 'cancel_only') : 'status_transition',
+                    'idempotency_key' => $idempotencyKey,
+                ]
             );
         }
         if ($success) {

@@ -56,6 +56,8 @@ Managed pages are configured in `src/Core/ManagedPages.php` and installed/synced
 ## Cancellation Behavior
 - Cancellation rules and penalties are calculated in `src/Engine/CancellationEngine.php`.
 - Admin and portal actions can cancel/update reservations through their respective action handlers.
+- Local reservation status transitions that come from Clock inbound webhooks, scheduled Clock refreshes, Clock booking upserts, or successful outbound Clock cancellation reconciliation go through `src/Engine/BookingLifecycleSyncService.php`. That service delegates to `BookingStatusEngine::updateReservationStatuses()` so `must_hotel_booking/reservation_cancelled` fires exactly once when a reservation first becomes `cancelled`.
+- For paid Stripe/PokPay website bookings cancelled from Clock/provider sync, the lifecycle service creates a single refund-review row when no existing active/completed refund blocks it. Cancellation still releases availability through status change; actual money movement remains a staff/payment workflow.
 - Availability release is tied to reservation status becoming non-blocking; preserve this behavior.
 
 ## Expiration Behavior
@@ -76,6 +78,7 @@ Managed pages are configured in `src/Core/ManagedPages.php` and installed/synced
 - `src/Frontend/checkout-page.php`
 - `src/Frontend/confirmation-page.php`
 - `src/Engine/ReservationEngine.php`
+- `src/Engine/BookingLifecycleSyncService.php`
 - `src/Engine/AvailabilityEngine.php`
 - `src/Engine/InventoryEngine.php`
 - `src/Engine/LockEngine.php`

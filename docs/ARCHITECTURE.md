@@ -19,7 +19,7 @@
 - `lib/plugin-update-checker`: bundled updater library.
 
 ## Services And Repositories
-- Reservation lifecycle: `src/Engine/ReservationEngine.php`, `src/Database/ReservationRepository.php`.
+- Reservation lifecycle: `src/Engine/ReservationEngine.php`, `src/Engine/BookingLifecycleSyncService.php`, `src/Database/ReservationRepository.php`.
 - Availability/locks: `src/Engine/AvailabilityEngine.php`, `src/Engine/InventoryEngine.php`, `src/Engine/LockEngine.php`, `src/Database/AvailabilityRepository.php`, `src/Database/InventoryRepository.php`.
 - Payments/refunds: `src/Engine/PaymentEngine.php`, `src/Engine/PaymentStatusService.php`, `src/Engine/PaymentRefundService.php`, `src/Database/PaymentRepository.php`, `src/Database/RefundRepository.php`.
 - Providers: `src/Provider/ProviderManager.php`, `src/Provider/ProviderRegistry.php`, `src/Provider/Local/*`, `src/Provider/Clock/*`.
@@ -39,7 +39,7 @@ Registered in `src/Portal/PortalRegistry.php`: dashboard, reservations, calendar
 
 ## Integrations
 - Stripe and PokPay: `src/Engine/PaymentEngine.php`, payment gateway classes under `src/Engine/Payment`.
-- Clock PMS: provider classes under `src/Provider/Clock`, with inbound sync, auto sync, folio payment/refund sync, and reconciliation services.
+- Clock PMS: provider classes under `src/Provider/Clock`, with inbound sync, auto sync, folio payment/refund sync, and reconciliation services. Clock-originated and provider-confirmed local status transitions are routed through `BookingLifecycleSyncService` so standard reservation hooks still run; paid Stripe/PokPay cancellations from provider sync create refund-review rows for staff instead of automatic gateway refunds.
 - Elementor: `src/Elementor/*` and matching widget assets.
 - GitHub updater: `src/Core/Updater.php` and `lib/plugin-update-checker`.
 

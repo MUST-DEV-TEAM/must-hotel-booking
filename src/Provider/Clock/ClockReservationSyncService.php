@@ -213,9 +213,7 @@ final class ClockReservationSyncService
                 'checkin' => $arrival,
                 'checkout' => $departure,
                 'guests' => $guestCount,
-                'status' => $localStatus,
                 'total_price' => $totalPrice,
-                'payment_status' => $paymentStatus,
             ]);
             \MustHotelBooking\Engine\get_reservation_repository()->updateProviderMetadata($reservationId, [
                 'provider_status' => $providerStatus,
@@ -226,6 +224,16 @@ final class ClockReservationSyncService
                 'provider_payload_ref' => $providerBookingId,
                 'provider_metadata' => $metadata,
             ]);
+            (new \MustHotelBooking\Engine\BookingLifecycleSyncService())->applyReservationStatusTransition(
+                $reservationId,
+                $localStatus,
+                $paymentStatus,
+                [
+                    'source' => $source === 'bulk_sync' ? 'clock_refresh' : 'clock_sync',
+                    'operation' => $localStatus === 'cancelled' ? 'cancel_only' : 'status_transition',
+                    'idempotency_key' => 'clock-booking-upsert-' . $providerBookingId . '-' . $localStatus . '-' . $paymentStatus,
+                ]
+            );
 
             return [
                 'success' => true,

@@ -46,6 +46,7 @@ final class PaymentAdminDataProvider
             $state = PaymentStatusService::buildReservationPaymentState($row, $paymentRowsByReservation[$reservationId] ?? []);
             $providerPayment = ProviderReservationView::paymentContext($row, $state);
             $clockAccountingRows = $reservationId > 0 ? $this->clockFolioAccountingRepository->getForReservation($reservationId) : [];
+            $refundRows = $reservationId > 0 ? $this->refundRepository->getRefundsForReservation($reservationId) : [];
             $clockAccountingStatuses = [];
 
             foreach ($clockAccountingRows as $clockAccountingRow) {
@@ -64,6 +65,13 @@ final class PaymentAdminDataProvider
 
             if (!empty(\array_intersect((array) $state['clock_accounting_statuses'], ['failed', 'manual_review']))) {
                 $state['needs_review'] = true;
+            }
+
+            foreach ($refundRows as $refundRow) {
+                if (\sanitize_key((string) ($refundRow['status'] ?? '')) === 'refund_review_required') {
+                    $state['needs_review'] = true;
+                    break;
+                }
             }
 
             if (!$this->matchesDerivedFilters($state, $filters)) {
@@ -354,6 +362,12 @@ final class PaymentAdminDataProvider
         }
 
         foreach ($refundRows as $refundRow) {
+            $refundStatus = \sanitize_key((string) ($refundRow['status'] ?? ''));
+            if ($refundStatus === 'refund_review_required') {
+                $state['warnings'][] = \__('Cancelled paid booking needs a staff refund decision. Choose no refund, partial refund, full refund, or issue a refund-and-cancel action from the refund controls.', 'must-hotel-booking');
+                continue;
+            }
+
             $clockSyncStatus = \sanitize_key((string) ($refundRow['clock_sync_status'] ?? ''));
             if (\in_array($clockSyncStatus, ['failed', 'manual_review', 'retrying'], true)) {
                 $state['warnings'][] = \__('Gateway refund succeeded but failed to sync to Clock. Retry sync or mark for manual review.', 'must-hotel-booking');

@@ -272,7 +272,17 @@ final class ClockInboundSyncService
             if ($localStatus !== '' || $localPaymentStatus !== '') {
                 $targetStatus = $localStatus !== '' ? $localStatus : (string) ($row['status'] ?? '');
                 $targetPaymentStatus = $this->safeLocalPaymentStatus((string) ($row['payment_status'] ?? ''), $localPaymentStatus);
-                \MustHotelBooking\Engine\get_reservation_repository()->updateReservationStatus($reservationId, $targetStatus, $targetPaymentStatus);
+                (new \MustHotelBooking\Engine\BookingLifecycleSyncService())->applyReservationStatusTransition(
+                    $reservationId,
+                    $targetStatus,
+                    $targetPaymentStatus,
+                    [
+                        'source' => $sourceType === 'refresh_job' ? 'clock_refresh' : 'clock_webhook',
+                        'operation' => $localStatus === 'cancelled' ? 'cancel_only' : 'status_transition',
+                        'event_id' => $eventId,
+                        'idempotency_key' => $eventId !== '' ? 'clock-inbound-' . $eventId : '',
+                    ]
+                );
             }
 
             $updatedIds[] = $reservationId;

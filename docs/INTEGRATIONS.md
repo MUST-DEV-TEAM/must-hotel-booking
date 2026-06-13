@@ -35,6 +35,8 @@
 - Clock support includes availability, quote, booking/reservation provider behavior, catalog service, inbound sync, auto sync scheduler, payment reconciliation, folio payment sync, folio refund sync, mappings, and diagnostics.
 - Clock webhook URL is exposed in Clock config as `must-hotel-booking/v1/clock/webhook`.
 - Booking cancellation uses the documented `PUT /bookings/{booking_id}` endpoint with body `booking.status = canceled`; do not close folios automatically.
+- Clock inbound webhooks, scheduled refresh jobs, Clock booking upserts, and successful outbound Clock cancellation reconciliation apply local status changes through `BookingLifecycleSyncService`, not direct repository status writes. This keeps Clock-originated cancellations separate from automatic refunds while still firing the standard cancellation domain event and email hooks once.
+- For paid Stripe/PokPay website bookings cancelled from Clock/provider sync, `BookingLifecycleSyncService` creates a `refund_review_required` row for staff decision when no active/completed refund already exists. Do not replace this with automatic refund behavior unless the provider/refund policy is explicitly verified.
 - Stripe/PokPay paid rows trigger `ClockPaymentAccountingService` through `must_hotel_booking/payment_recorded`; the service creates/reuses `must_clock_folio_accounting` and guards duplicate posts by idempotency key and posting claim.
 - Clock payment posting mode is configured by `clock_payment_posting_mode`: `auto_detect`, `deposit_for_future_bookings`, `folio_payment_only`, or `manual_clock_accounting`. Default `auto_detect` posts future Stripe/PokPay website payments to a Clock deposit folio, not to the normal folio.
 - A centralized endpoint registry lives in `src/Provider/Clock/ClockEndpointRegistry.php`. Existing folio endpoints now resolve through the registry and advanced provider settings can override endpoint templates.
@@ -74,6 +76,7 @@
 - Exact provider API behavior must be verified from provider docs and current code; do not guess.
 - Clock permissions can block automatic folio payment/refund posting.
 - Production credentials and provider account configuration are unknown from current code inspection.
+- Local callback URLs are not provider-reachable unless `public_callback_base_url` is set to a public HTTPS origin/tunnel and webhook secrets are configured.
 
 ## Rules
 - Keep integration logic isolated from core booking logic.

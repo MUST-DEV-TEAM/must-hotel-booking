@@ -35,6 +35,7 @@
 - Before mutating options or creating provider test bookings, run `tools/clock-e2e-backup.php`. It creates a sanitized manifest plus ignored local JSON table/option exports under `tools/backups/`.
 - If an online provider test creates a pending payment reservation that cannot be completed, use `tools/clock-e2e-cleanup.php --reservation-id=<id> --method=stripe --status=cancelled` or the matching provider method. This marks the local reservation/payment failed through `BookingStatusEngine`; Clock cancellation may queue in `mhb_provider_sync_jobs` if the Clock API is unreachable.
 - Public-host HTML can be checked locally with a `Host` header against `127.0.0.1:10016` to confirm `localhost` URLs are not emitted before testing through ngrok.
+- Run `tools/provider-preflight-report.php` for a read-only Clock/Stripe/PokPay provider reachability report before destructive E2E. On 2026-06-13, read-only probes reached Clock sandbox booking fetch/folio endpoints, Stripe balance auth, and PokPay staging SDK-order fetch, but live callback E2E was still blocked by missing Clock webhook secret, missing Stripe webhook secret, and localhost webhook URLs.
 
 ## Refund Issue Areas
 - `src/Engine/PaymentRefundService.php`
@@ -50,8 +51,15 @@
 - `src/Provider/Clock/ClockPaymentAccountingService.php`
 - `src/Provider/Clock/ClockEndpointRegistry.php`
 - `src/Provider/Clock/ClockInboundSyncController.php`
+- `src/Engine/BookingLifecycleSyncService.php`
 - `src/Provider/Sync/ProviderSyncJobRunner.php`
 - Tables: `mhb_provider_mappings`, `mhb_provider_request_logs`, `mhb_provider_sync_jobs`
+
+### Clock cancellation reached the website but no cancellation email sent
+- Check whether the status change passed through `BookingLifecycleSyncService` and `BookingStatusEngine::updateReservationStatuses()`. Clock inbound webhooks, scheduled refresh jobs, booking upserts, and successful outbound Clock cancellation reconciliation should use that path.
+- Duplicate Clock webhooks or refreshes should leave already-cancelled reservations unchanged; `BookingStatusEngine` only fires `must_hotel_booking/reservation_cancelled` when the previous status was not already `cancelled`.
+- If the reservation is cancelled locally but no email was sent, inspect the `must_hotel_booking/email_dispatch_result` hook activity and email template enabled state before retrying financial or provider operations.
+- If the cancelled booking was paid through Stripe/PokPay, check the Payments detail warnings and `must_refunds` for `status=refund_review_required` / `refund_type=clock_cancellation_review`. That row means the cancellation synced, but staff still needs to decide and execute any refund.
 
 ### Clock future payment appears as manual review
 - Default `clock_payment_posting_mode=auto_detect` posts future Stripe/PokPay website payments to a Clock deposit folio. It creates or reuses a booking folio with `deposit=true`, then posts the external provider payment as a folio `credit_item` on that deposit folio.
@@ -79,6 +87,8 @@
 ```bash
 git diff --stat
 php -l path/to/file.php
+php tools/lifecycle-sync-smoke-test.php
+php tools/provider-preflight-report.php
 rg -n "class PaymentEngine" src
 rg -n "must_hotel_booking_db_version|CREATE TABLE" src/Database/install-tables.php
 rg -n "register_rest_route|stripe/webhook|pokpay/finalize" src/Engine/PaymentEngine.php

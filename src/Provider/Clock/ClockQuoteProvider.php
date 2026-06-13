@@ -107,7 +107,40 @@ final class ClockQuoteProvider implements QuoteProviderInterface
             ];
         }
 
-        return $this->normalizeProductQuote($product, $roomId, $checkin, $checkout, \max(1, $guests), $ratePlanId, \is_array($ratePlan) ? $ratePlan : []);
+        $quote = $this->normalizeProductQuote(
+            $product,
+            $roomId,
+            $checkin,
+            $checkout,
+            \max(1, $guests),
+            $ratePlanId,
+            \is_array($ratePlan) ? $ratePlan : []
+        );
+
+        if (empty($quote['success'])) {
+            return $quote;
+        }
+
+        $providerRateId = $this->productRateId($product);
+
+        if ($providerRateId === '' && \count($rateIds) === 1) {
+            $providerRateId = (string) \reset($rateIds);
+        }
+
+        $providerRoomTypeId = (string) ($roomMapping['external_id'] ?? '');
+
+        $guaranteePolicyId = $this->guaranteePolicyIdForStay(
+            $checkin,
+            $checkout,
+            $providerRateId,
+            $providerRoomTypeId
+        );
+
+        if ($guaranteePolicyId > 0) {
+            $quote['guarantee_policy_id'] = $guaranteePolicyId;
+        }
+
+        return $quote;
     }
 
     public function buildCheckoutRoomItems(QuoteRequest $request): array
@@ -977,6 +1010,214 @@ final class ClockQuoteProvider implements QuoteProviderInterface
         }
 
         return 0;
+    }
+
+    private function guaranteePolicyIdForStay(
+        string $checkin,
+        string $checkout,
+        string $rateId,
+        string $roomTypeId
+    ): int {
+        $rateId = \trim($rateId);
+        $roomTypeId = \trim($roomTypeId);
+
+        if (
+            $rateId === ''
+            || $roomTypeId === ''
+            || !\ctype_digit($rateId)
+            || !\ctype_digit($roomTypeId)
+            || ClockConfig::ratesAvailabilityPath() === ''
+        ) {
+            return 0;
+        }
+
+        $path = $this->appendQuery(
+            ClockConfig::ratesAvailabilityPath(),
+            [
+                $this->queryPair('from', $checkin),
+                $this->queryPair('to', $checkout),
+                $this->queryPair('rates[]', $rateId),
+                $this->queryPair('room_types[]', $roomTypeId),
+            ]
+        );
+
+        $response = $this->client->get(
+            $path,
+            [],
+            'clock.rates_availability.guarantee_policy',
+            [
+                'api_type' => 'pms_api',
+                'endpoint_name' => 'rates_availability',
+            ]
+        );
+
+        if (!$response->isSuccess()) {
+            return 0;
+        }
+
+        $policyIds = [];
+
+        $this->collectGuaranteePolicyIdsForRate(
+            $response->getData(),
+            $rateId,
+            false,
+            $policyIds
+        );
+
+        /*
+         * Every night of the stay must resolve to the same policy.
+         * Missing or conflicting policies return zero.
+         */
+        if (\count($policyIds) !== 1) {
+            return 0;
+        }
+
+        return (int) \array_key_first($policyIds);
+    }
+
+    /**
+     * @param mixed $value
+     * @param array<int, bool> $policyIds
+     */
+    private function collectGuaranteePolicyIdsForRate(
+        $value,
+        string $selectedRateId,
+        bool $insideSelectedRate,
+        array &$policyIds
+    ): void {
+        if (!\is_array($value)) {
+            return;
+        }
+
+        $currentInsideSelectedRate = $insideSelectedRate;
+
+        $directRateId = $this->firstScalarString(
+            $value,
+            [
+                'rate_id',
+                'rate_plan_id',
+                'provider_rate_id',
+                'clock_rate_id',
+            ]
+        );
+
+        if ($directRateId !== '') {
+            $currentInsideSelectedRate = $directRateId === $selectedRateId;
+        }
+
+        /*
+         * Clock commonly returns:
+         *
+         * rates
+         *   -> RATE_ID
+         *      -> DATE
+         *         -> rate_restriction
+         *            -> guarantee_policy_id
+         */
+        if (
+            isset($value['rates'])
+            && \is_array($value['rates'])
+        ) {
+            foreach ($value['rates'] as $rateKey => $rateNode) {
+                if (!\is_array($rateNode)) {
+                    continue;
+                }
+
+                $rateKeyId = \is_scalar($rateKey)
+                    ? \trim((string) $rateKey)
+                    : '';
+
+                $nodeRateId = $this->firstScalarString(
+                    $rateNode,
+                    [
+                        'rate_id',
+                        'rate_plan_id',
+                        'provider_rate_id',
+                        'clock_rate_id',
+                    ]
+                );
+
+                $isSelectedRate =
+                    $rateKeyId === $selectedRateId
+                    || $nodeRateId === $selectedRateId;
+
+                if (!$isSelectedRate) {
+                    continue;
+                }
+
+                $this->collectGuaranteePolicyIdsForRate(
+                    $rateNode,
+                    $selectedRateId,
+                    true,
+                    $policyIds
+                );
+            }
+        }
+
+        if ($currentInsideSelectedRate) {
+            foreach (['guarantee_policy_id', 'guaranteePolicyId'] as $key) {
+                if (
+                    !isset($value[$key])
+                    || !\is_scalar($value[$key])
+                ) {
+                    continue;
+                }
+
+                $policyId = (int) $value[$key];
+
+                if ($policyId > 0) {
+                    $policyIds[$policyId] = true;
+                }
+            }
+
+            foreach (['guarantee_policy', 'guaranteePolicy'] as $key) {
+                if (
+                    !isset($value[$key])
+                    || !\is_array($value[$key])
+                ) {
+                    continue;
+                }
+
+                foreach (
+                    [
+                        'id',
+                        'policy_id',
+                        'guarantee_policy_id',
+                        'guaranteePolicyId',
+                    ] as $idKey
+                ) {
+                    if (
+                        !isset($value[$key][$idKey])
+                        || !\is_scalar($value[$key][$idKey])
+                    ) {
+                        continue;
+                    }
+
+                    $policyId = (int) $value[$key][$idKey];
+
+                    if ($policyId > 0) {
+                        $policyIds[$policyId] = true;
+                    }
+                }
+            }
+        }
+
+        foreach ($value as $key => $child) {
+            /*
+             * The rates collection was already handled above so that policies
+             * belonging to other rates cannot be selected accidentally.
+             */
+            if ($key === 'rates' || !\is_array($child)) {
+                continue;
+            }
+
+            $this->collectGuaranteePolicyIdsForRate(
+                $child,
+                $selectedRateId,
+                $currentInsideSelectedRate,
+                $policyIds
+            );
+        }
     }
 
     /** @param array<string, mixed>|null $mapping */

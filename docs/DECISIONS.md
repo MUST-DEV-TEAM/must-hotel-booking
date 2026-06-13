@@ -39,3 +39,13 @@
 - Decision: In `auto_detect`, future Stripe/PokPay website payments are posted to a Clock booking deposit folio instead of a normal folio.
 - Reason: Clock's public API collection exposes booking folio creation with `booking_folio.deposit=true` and folio `credit_items`; a sandbox API trial created a deposit folio, posted the external payment, prevented duplicate posting, and reversed it with a deposit-folio negative payment.
 - Affected areas: Clock endpoint registry, Clock folio service, Clock payment accounting service, payment docs, troubleshooting notes.
+
+## 2026-06-13 - Clock cancellation status transitions use lifecycle service
+- Decision: Clock inbound sync, scheduled refresh/upsert, and successful outbound Clock cancellation reconciliation apply local reservation status transitions through `BookingLifecycleSyncService`.
+- Reason: Direct repository status updates bypassed `BookingStatusEngine`, so Clock-originated cancellations could skip `must_hotel_booking/reservation_cancelled` and the configured cancellation emails.
+- Affected areas: Clock inbound sync, Clock reservation sync, Clock reconciliation, cancellation emails, booking lifecycle docs.
+
+## 2026-06-13 - Clock/provider paid cancellations require refund review
+- Decision: A paid Stripe/PokPay website booking cancelled from Clock/provider sync creates a single `refund_review_required` row instead of automatically refunding.
+- Reason: Clock status does not prove the desired gateway refund amount/timing, and automatic money movement must remain behind explicit payment/refund workflows. The review row makes held funds visible to staff while preserving idempotent cancellation sync.
+- Affected areas: booking lifecycle sync, refund table, admin payment warnings, Clock inbound/refresh cancellation handling.

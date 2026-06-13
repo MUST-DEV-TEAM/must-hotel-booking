@@ -46,6 +46,8 @@ Payment catalog/defaults are in `src/Core/PaymentMethodRegistry.php`. Checkout o
 - Stripe refunds create a local refund row, use a Stripe idempotency key, call Stripe `refunds`, update provider IDs/status, record local refund ledger on success, and attempt Clock refund sync.
 - PokPay refunds check for blocking duplicate refund records, create local refund rows, and call the documented PokPay merchant SDK-order refund endpoint. A confirmed provider refund records the local ledger and attempts Clock refund sync when applicable. If PokPay rejects the request or does not return a confirmed refunded status, the local refund remains `manual_pending` for staff dashboard verification/completion.
 - Cash/pay-at-hotel refunds are manual outside the plugin.
+- Cancellation and refund are separate concerns. Clock-originated or provider-confirmed cancellation status transitions go through `BookingLifecycleSyncService` and do not automatically create gateway refunds; refund execution remains explicit through `PaymentRefundService` or verified provider refund webhooks.
+- When a Clock/provider cancellation reaches a paid Stripe/PokPay website booking and no active/completed refund row already blocks it, `BookingLifecycleSyncService` creates one `must_refunds` review row with `status=refund_review_required` and `refund_type=clock_cancellation_review`. This surfaces the held money for staff decision without refunding automatically.
 
 ## Clock Reconciliation
 - `src/Provider/Clock/ClockPaymentReconciliationService.php` runs after Stripe/PokPay payment success if the class exists.
@@ -69,6 +71,7 @@ Payment catalog/defaults are in `src/Core/PaymentMethodRegistry.php`. Checkout o
 - `src/Engine/BookingStatusEngine.php`
 - `src/Engine/PaymentStatusService.php`
 - `src/Engine/PaymentRefundService.php`
+- `src/Engine/BookingLifecycleSyncService.php`
 - `src/Engine/Payment/CashPayment.php`
 - `src/Engine/Payment/StripePayment.php`
 - `src/Engine/Payment/PokPayPayment.php`
