@@ -861,16 +861,122 @@ final class ClockQuoteProvider implements QuoteProviderInterface
      * @param array<string, mixed> $ratePlan
      * @return array<string, mixed>
      */
-    private function normalizeProductQuote(array $product, int $roomId, string $checkin, string $checkout, int $guests, int $ratePlanId, array $ratePlan): array
-    {
-        $quote = $this->normalizeQuote($product, $roomId, $checkin, $checkout, $guests, '', $ratePlanId, $ratePlan);
+    private function normalizeProductQuote(
+        array $product,
+        int $roomId,
+        string $checkin,
+        string $checkout,
+        int $guests,
+        int $ratePlanId,
+        array $ratePlan
+    ): array {
+        $quote = $this->normalizeQuote(
+            $product,
+            $roomId,
+            $checkin,
+            $checkout,
+            $guests,
+            '',
+            $ratePlanId,
+            $ratePlan
+        );
 
         if (!empty($quote['success'])) {
             $quote['provider_product_id'] = $this->productId($product);
             $quote['provider_product'] = $product;
+
+            /*
+             * Clock may return the guarantee/deposit policy directly on the
+             * selected product or inside one of its nested rate structures.
+             */
+            $guaranteePolicyId = $this->guaranteePolicyIdFromProduct($product);
+
+            if ($guaranteePolicyId > 0) {
+                $quote['guarantee_policy_id'] = $guaranteePolicyId;
+            }
         }
 
         return $quote;
+    }
+
+    /**
+     * Find the Clock guarantee policy attached to the selected product.
+     *
+     * Clock responses may expose this value directly or inside nested
+     * rate/restriction structures.
+     *
+     * @param array<string, mixed> $product
+     */
+    private function guaranteePolicyIdFromProduct(array $product): int
+    {
+        return $this->findGuaranteePolicyId($product, 0);
+    }
+
+    /**
+     * @param array<int|string, mixed> $node
+     */
+    private function findGuaranteePolicyId(array $node, int $depth): int
+    {
+        /*
+         * Prevent unexpected deeply nested responses from causing excessive
+         * recursion.
+         */
+        if ($depth > 6) {
+            return 0;
+        }
+
+        /*
+         * Possible direct Clock field names.
+         */
+        foreach (['guarantee_policy_id', 'guaranteePolicyId'] as $key) {
+            if (!isset($node[$key]) || !\is_scalar($node[$key])) {
+                continue;
+            }
+
+            $policyId = (int) $node[$key];
+
+            if ($policyId > 0) {
+                return $policyId;
+            }
+        }
+
+        /*
+         * Clock may return a guarantee-policy object instead of only its ID.
+         */
+        foreach (['guarantee_policy', 'guaranteePolicy'] as $key) {
+            if (!isset($node[$key]) || !\is_array($node[$key])) {
+                continue;
+            }
+
+            foreach (['id', 'policy_id', 'guarantee_policy_id', 'guaranteePolicyId'] as $idKey) {
+                if (!isset($node[$key][$idKey]) || !\is_scalar($node[$key][$idKey])) {
+                    continue;
+                }
+
+                $policyId = (int) $node[$key][$idKey];
+
+                if ($policyId > 0) {
+                    return $policyId;
+                }
+            }
+        }
+
+        /*
+         * Search nested product/rate/restriction structures.
+         */
+        foreach ($node as $value) {
+            if (!\is_array($value)) {
+                continue;
+            }
+
+            $policyId = $this->findGuaranteePolicyId($value, $depth + 1);
+
+            if ($policyId > 0) {
+                return $policyId;
+            }
+        }
+
+        return 0;
     }
 
     /** @param array<string, mixed>|null $mapping */

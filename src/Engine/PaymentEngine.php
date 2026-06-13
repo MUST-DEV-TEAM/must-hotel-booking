@@ -455,13 +455,11 @@ final class PaymentEngine
                 isset($session['payment_intent']) ? (string) $session['payment_intent'] : $sessionId
             );
             (new PaymentProviderFeeService())->captureStripeFeeSnapshotForReservations($reservationIds, $session);
-            if (\class_exists(\MustHotelBooking\Provider\Clock\ClockPaymentReconciliationService::class)) {
-                (new \MustHotelBooking\Provider\Clock\ClockPaymentReconciliationService())->reconcilePaymentSucceeded(
-                    $reservationIds,
-                    'stripe',
-                    isset($session['payment_intent']) ? (string) $session['payment_intent'] : $sessionId
-                );
-            }
+            /*
+             * Do not mark the Clock booking itself as paid.
+             * ClockPaymentAccountingService records the Stripe payment separately
+             * on a verified deposit folio through must_hotel_booking/payment_recorded.
+             */
             if ($shouldIncrementCouponUsage) {
                 $couponMetadata = isset($session['metadata']['coupon_ids']) ? (string) $session['metadata']['coupon_ids'] : '';
                 $couponIds = $couponMetadata === ''
@@ -810,7 +808,6 @@ final class PaymentEngine
                 ],
             ],
         ];
-
         $response = self::performPokPayApiRequest(
             'POST',
             'merchants/' . \rawurlencode($merchantId) . '/sdk-orders',
@@ -886,20 +883,16 @@ final class PaymentEngine
                 'message' => \__('PokPay order id is missing.', 'must-hotel-booking'),
             ];
         }
-
         $amount = \round(\max(0.0, $amount), 2);
         $currency = \strtoupper(\sanitize_text_field($currency));
-
         if ($amount <= 0.0) {
             return [
                 'success' => false,
                 'message' => \__('PokPay refund amount must be greater than zero.', 'must-hotel-booking'),
             ];
         }
-
         $credentials = self::getPokPayEnvironmentCredentials();
         $merchantId = \sanitize_text_field((string) ($credentials['merchant_id'] ?? ''));
-
         if ($merchantId === '') {
             return [
                 'success' => false,
@@ -907,18 +900,14 @@ final class PaymentEngine
                 'message' => \__('PokPay merchant id is missing.', 'must-hotel-booking'),
             ];
         }
-
         $body = [
             'refundReason' => \sanitize_text_field($reason !== '' ? $reason : \__('Website refund', 'must-hotel-booking')),
         ];
-
         if (!$fullRefund) {
             $body['refundAmount'] = self::convertAmountToMinorUnits($amount, $currency);
         }
-
         $path = 'merchants/' . \rawurlencode($merchantId) . '/sdk-orders/' . \rawurlencode($orderId) . '/refund';
         $response = self::performPokPayApiRequest('POST', $path, $body);
-
         if (empty($response['success'])) {
             return [
                 'success' => false,
@@ -930,14 +919,11 @@ final class PaymentEngine
                 'body' => isset($response['body']) && \is_array($response['body']) ? $response['body'] : [],
             ];
         }
-
         $data = self::extractPokPayResponseData(isset($response['body']) && \is_array($response['body']) ? $response['body'] : []);
         $status = self::getPokPayRefundStatus($data);
         $providerRefundId = self::extractPokPayRefundReference($data);
-
         if ($status === '' || $providerRefundId === '') {
             $orderResponse = self::getPokPaySdkOrder($orderId);
-
             if (!empty($orderResponse['success'])) {
                 $orderData = isset($orderResponse['order']) && \is_array($orderResponse['order']) ? $orderResponse['order'] : [];
                 $orderStatus = self::getPokPayRefundStatus($orderData);
@@ -946,11 +932,9 @@ final class PaymentEngine
                 $providerRefundId = $providerRefundId !== '' ? $providerRefundId : $orderRefundId;
             }
         }
-
         if ($status === '') {
             $status = !empty($data['isRefunded']) ? 'succeeded' : 'processing';
         }
-
         if (!\in_array($status, ['succeeded', 'success', 'completed', 'refunded'], true)) {
             return [
                 'success' => false,
@@ -961,7 +945,6 @@ final class PaymentEngine
                 'body' => isset($response['body']) && \is_array($response['body']) ? $response['body'] : [],
             ];
         }
-
         return [
             'success' => true,
             'provider_refund_id' => $providerRefundId !== '' ? $providerRefundId : $orderId,
@@ -1001,13 +984,11 @@ final class PaymentEngine
                 isset($orderResponse['order']) && \is_array($orderResponse['order']) ? $orderResponse['order'] : [],
                 $orderId
             );
-            if (\class_exists(\MustHotelBooking\Provider\Clock\ClockPaymentReconciliationService::class)) {
-                (new \MustHotelBooking\Provider\Clock\ClockPaymentReconciliationService())->reconcilePaymentSucceeded(
-                    $reservationIds,
-                    'pokpay',
-                    $orderId
-                );
-            }
+            /*
+             * Do not mark the Clock booking payment status as paid.
+             * The external PokPay payment is recorded separately as a Clock deposit by
+             * ClockPaymentAccountingService through must_hotel_booking/payment_recorded.
+             */
             if (\function_exists('MustHotelBooking\Frontend\clear_booking_selection')) {
                 \MustHotelBooking\Frontend\clear_booking_selection(false);
             }
@@ -1067,7 +1048,6 @@ final class PaymentEngine
                 return $url;
             }
         }
-
         foreach (['sdkOrder', 'order', 'payment', 'checkout', 'data'] as $nestedKey) {
             if (isset($data[$nestedKey]) && \is_array($data[$nestedKey])) {
                 $url = self::extractPokPaySdkConfirmUrl($data[$nestedKey]);
@@ -1076,7 +1056,6 @@ final class PaymentEngine
                 }
             }
         }
-
         foreach (['confirmUrl', 'checkoutUrl', 'paymentUrl', 'url'] as $key) {
             if (isset($data[$key]) && \is_scalar($data[$key])) {
                 $url = \trim((string) $data[$key]);
@@ -1085,7 +1064,6 @@ final class PaymentEngine
                 }
             }
         }
-
         return '';
     }
     /**
@@ -1267,16 +1245,13 @@ final class PaymentEngine
         }
         return '';
     }
-
     private static function getPokPayAccessTokenCacheKey(): string
     {
         $credentials = self::getPokPayEnvironmentCredentials();
-
         return 'must_hotel_booking_pokpay_token_' . \md5(
             self::getPokPayApiEnvironment() . '|' . $credentials['merchant_id'] . '|' . $credentials['key_id']
         );
     }
-
     /**
      * @param array<string, mixed> $body
      * @return array<string, mixed>
@@ -1300,29 +1275,22 @@ final class PaymentEngine
             'Accept' => 'application/json',
             'Content-Type' => 'application/json',
         ];
-
         if ($authenticate) {
             $tokenResult = self::getPokPayAccessToken();
-
             if (empty($tokenResult['success'])) {
                 return $tokenResult;
             }
-
             $headers['Authorization'] = 'Bearer ' . (string) ($tokenResult['access_token'] ?? '');
         }
-
         $args = [
             'method' => \strtoupper($method),
             'timeout' => 20,
             'headers' => $headers,
         ];
-
         if (!empty($body)) {
             $args['body'] = \wp_json_encode($body);
         }
-
         $response = \wp_remote_request(self::getPokPayBaseUrl() . '/' . \ltrim($path, '/'), $args);
-
         if (\is_wp_error($response)) {
             return [
                 'success' => false,
@@ -1331,13 +1299,11 @@ final class PaymentEngine
                 'message' => (string) $response->get_error_message(),
             ];
         }
-
         $statusCode = (int) \wp_remote_retrieve_response_code($response);
         $decodedBody = \json_decode((string) \wp_remote_retrieve_body($response), true);
         $bodyArray = \is_array($decodedBody) ? $decodedBody : [];
         $message = self::extractPokPayErrorMessage($bodyArray);
         $messageLower = \strtolower($message);
-
         if (
             $authenticate
             && $allowTokenRetry
@@ -1350,7 +1316,6 @@ final class PaymentEngine
             )
         ) {
             \delete_transient(self::getPokPayAccessTokenCacheKey());
-
             return self::performPokPayApiRequestOnce(
                 $method,
                 $path,
@@ -1359,7 +1324,6 @@ final class PaymentEngine
                 false
             );
         }
-
         return [
             'success' => $statusCode >= 200 && $statusCode < 300 && \is_array($decodedBody),
             'status_code' => $statusCode,
@@ -1373,25 +1337,20 @@ final class PaymentEngine
     private static function getPokPayAccessToken(): array
     {
         $credentials = self::getPokPayEnvironmentCredentials();
-
         if ($credentials['key_id'] === '' || $credentials['key_secret'] === '') {
             return [
                 'success' => false,
                 'message' => \__('PokPay key id or key secret is missing.', 'must-hotel-booking'),
             ];
         }
-
         $cacheKey = self::getPokPayAccessTokenCacheKey();
-
         $cachedToken = \get_transient($cacheKey);
-
         if (\is_string($cachedToken) && $cachedToken !== '') {
             return [
                 'success' => true,
                 'access_token' => $cachedToken,
             ];
         }
-
         $response = self::performPokPayApiRequest(
             'POST',
             'auth/sdk/login',
@@ -1401,7 +1360,6 @@ final class PaymentEngine
             ],
             false
         );
-
         if (empty($response['success'])) {
             return [
                 'success' => false,
@@ -1410,19 +1368,15 @@ final class PaymentEngine
                     : \__('PokPay authentication failed.', 'must-hotel-booking'),
             ];
         }
-
         $data = self::extractPokPayResponseData(isset($response['body']) && \is_array($response['body']) ? $response['body'] : []);
         $accessToken = isset($data['accessToken']) ? \trim((string) $data['accessToken']) : '';
-
         if ($accessToken === '') {
             return [
                 'success' => false,
                 'message' => \__('PokPay authentication returned no access token.', 'must-hotel-booking'),
             ];
         }
-
         $expiresIn = isset($data['expiresIn']) ? (int) $data['expiresIn'] : 300;
-
         /*
          * PokPay staging returns expiresIn like 600000, which is milliseconds.
          * Convert large values to seconds.
@@ -1430,18 +1384,15 @@ final class PaymentEngine
         if ($expiresIn > 86400) {
             $expiresIn = (int) \floor($expiresIn / 1000);
         }
-
         if ($expiresIn <= 0 && isset($data['expiresAt'])) {
             $expiresAt = \strtotime((string) $data['expiresAt']);
             $expiresIn = $expiresAt !== false ? \max(60, $expiresAt - \time()) : 300;
         }
-
         /*
          * Cache for slightly less than provider expiry.
          * Example: 600 seconds from PokPay becomes 540 seconds locally.
          */
         \set_transient($cacheKey, $accessToken, \max(60, $expiresIn - 60));
-
         return [
             'success' => true,
             'access_token' => $accessToken,
@@ -1661,13 +1612,11 @@ final class PaymentEngine
             BookingStatusEngine::updateReservationStatuses($reservationIds, 'confirmed', 'paid');
             BookingStatusEngine::createPaymentRows($reservationIds, 'stripe', 'paid', $paymentIntent !== '' ? $paymentIntent : $sessionId);
             (new PaymentProviderFeeService())->captureStripeFeeSnapshotForReservations($reservationIds, $object);
-            if (\class_exists(\MustHotelBooking\Provider\Clock\ClockPaymentReconciliationService::class)) {
-                (new \MustHotelBooking\Provider\Clock\ClockPaymentReconciliationService())->reconcilePaymentSucceeded(
-                    $reservationIds,
-                    'stripe',
-                    $paymentIntent !== '' ? $paymentIntent : $sessionId
-                );
-            }
+            /*
+             * Do not mark the Clock booking payment status as paid.
+             * The external Stripe payment is recorded separately as a Clock deposit by
+             * ClockPaymentAccountingService through must_hotel_booking/payment_recorded.
+             */
             unset($couponIds);
         } elseif ($type === 'checkout.session.expired') {
             BookingStatusEngine::failPendingStripeReservations($reservationIds, 'expired');

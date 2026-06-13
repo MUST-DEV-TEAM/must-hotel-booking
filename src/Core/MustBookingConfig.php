@@ -125,8 +125,6 @@ class MustBookingConfig
     {
         return self::int(self::get_setting('cancellation_policy_days', 21), 0, 365, 21);
     }
-
-
     public static function get_max_booking_guests(): int
     {
         return self::int((string) self::get_setting('max_booking_guests', 12), 1, 100, 12);
@@ -147,7 +145,6 @@ class MustBookingConfig
     {
         return self::get_cancellation_policy_days() * 24;
     }
-
     public static function get_cancellation_refund_percent(): float
     {
         return self::decimal(self::get_setting('cancellation_refund_percent', 97.0), 0.0, 100.0, 97.0);
@@ -183,63 +180,48 @@ class MustBookingConfig
     public static function build_public_callback_url(string $url): string
     {
         $base = self::get_public_callback_base_url();
-
         if ($base === '') {
             return $url;
         }
-
         $parts = \wp_parse_url($url);
         $path = isset($parts['path']) ? (string) $parts['path'] : '/';
         $query = isset($parts['query']) && (string) $parts['query'] !== '' ? '?' . (string) $parts['query'] : '';
-
         return $base . '/' . \ltrim($path, '/') . $query;
     }
     public static function build_public_rest_url(string $route): string
     {
         $route = '/' . \ltrim($route, '/');
-
         return self::build_public_callback_url(\rest_url($route));
     }
     public static function normalize_public_callback_base_url(string $url): string
     {
         $url = \trim($url);
-
         if ($url === '') {
             return '';
         }
-
         $parts = \wp_parse_url($url);
-
         if (!\is_array($parts)) {
             return '';
         }
-
         $scheme = isset($parts['scheme']) ? \strtolower((string) $parts['scheme']) : '';
         $host = isset($parts['host']) ? \strtolower((string) $parts['host']) : '';
-
         if (!\in_array($scheme, ['https', 'http'], true) || $host === '') {
             return '';
         }
-
         if (isset($parts['user']) || isset($parts['pass']) || isset($parts['query']) || isset($parts['fragment'])) {
             return '';
         }
-
         if ($scheme !== 'https' && !self::is_local_callback_host($host)) {
             return '';
         }
-
         if (\preg_match('/[\x00-\x1F\x7F]/', $url) === 1) {
             return '';
         }
-
         $port = isset($parts['port']) ? ':' . (int) $parts['port'] : '';
         $path = isset($parts['path']) ? '/' . \trim((string) $parts['path'], '/') : '';
-
         if ($path === '/') {
             $path = '';
         }
-
         return $scheme . '://' . $host . $port . $path;
     }
     public static function get_website_booking_flow_mode(): string
@@ -542,7 +524,7 @@ class MustBookingConfig
                 'clock_reservation_fetch_path' => '/bookings/{booking_id}',
                 'clock_endpoint_overrides' => [],
                 'clock_payment_posting_mode' => 'auto_detect',
-                'clock_same_day_folio_payment_enabled' => true,
+                'clock_same_day_folio_payment_enabled' => false,
                 'clock_webhook_secret' => '',
                 'clock_auto_sync_enabled' => true,
                 'clock_auto_sync_interval_minutes' => 15,
@@ -856,7 +838,6 @@ class MustBookingConfig
         if (\class_exists(\MustHotelBooking\Provider\Clock\ClockEndpointRegistry::class)) {
             return \MustHotelBooking\Provider\Clock\ClockEndpointRegistry::normalizeOverrides($overrides);
         }
-
         $normalized = [];
         foreach ($overrides as $key => $value) {
             if (!\is_string($key)) {
@@ -864,7 +845,6 @@ class MustBookingConfig
             }
             $normalized[\sanitize_key($key)] = self::api_path_or_blank((string) $value);
         }
-
         return $normalized;
     }
     private static function clock_region(string $value): string

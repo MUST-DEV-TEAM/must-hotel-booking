@@ -236,14 +236,14 @@ final class ClockReservationProvider implements ReservationProviderInterface
             'redirect_url' => \add_query_arg(
                 \array_filter(
                     [
-                    'room_id' => \is_array($selection) && !empty($selection['is_physical']) ? (int) ($selection['room_type_id'] ?? $roomId) : $roomId,
-                    'inventory_room_id' => \is_array($selection) && !empty($selection['is_physical']) ? (int) ($selection['physical_room_id'] ?? 0) : 0,
-                    'checkin' => (string) $context['checkin'],
-                    'checkout' => (string) $context['checkout'],
-                    'guests' => (int) $context['guests'],
-                    'room_count' => (int) ($context['room_count'] ?? 1),
-                    'accommodation_type' => (string) $context['accommodation_type'],
-                    'rate_plan_id' => $ratePlanId,
+                        'room_id' => \is_array($selection) && !empty($selection['is_physical']) ? (int) ($selection['room_type_id'] ?? $roomId) : $roomId,
+                        'inventory_room_id' => \is_array($selection) && !empty($selection['is_physical']) ? (int) ($selection['physical_room_id'] ?? 0) : 0,
+                        'checkin' => (string) $context['checkin'],
+                        'checkout' => (string) $context['checkout'],
+                        'guests' => (int) $context['guests'],
+                        'room_count' => (int) ($context['room_count'] ?? 1),
+                        'accommodation_type' => (string) $context['accommodation_type'],
+                        'rate_plan_id' => $ratePlanId,
                     ],
                     static function ($value): bool {
                         return $value !== 0 && $value !== '';
@@ -733,7 +733,6 @@ final class ClockReservationProvider implements ReservationProviderInterface
         }
         if (!$this->clockReservationHasRequestedPhysicalRoom($reservation, $validatedRoom)) {
             $this->rollbackUnassignedClockBooking($providerId);
-
             return [
                 'success' => false,
                 'message' => \__('Clock did not confirm the exact selected room. No payment was collected; please select another room or contact the hotel.', 'must-hotel-booking'),
@@ -744,50 +743,39 @@ final class ClockReservationProvider implements ReservationProviderInterface
             'reservation' => $reservation,
         ];
     }
-
     /** @param array<string, mixed> $reservation @param array<string, mixed> $validatedRoom */
     private function clockReservationHasRequestedPhysicalRoom(array $reservation, array $validatedRoom): bool
     {
         $physicalMapping = isset($validatedRoom['physical_mapping']) && \is_array($validatedRoom['physical_mapping']) ? $validatedRoom['physical_mapping'] : [];
         $requestedPhysicalId = (string) ($physicalMapping['external_id'] ?? '');
-
         if ($requestedPhysicalId === '') {
             return false;
         }
-
         $assignedPhysicalId = $this->firstString($reservation, ['current_room_id', 'arrival_room_id', 'room_id', 'physical_room_id']);
-
         if ($assignedPhysicalId !== '') {
             return $assignedPhysicalId === $requestedPhysicalId;
         }
-
         foreach (['room', 'physical_room', 'arrival_room', 'current_room'] as $key) {
             if (isset($reservation[$key]) && \is_array($reservation[$key])) {
                 $nestedId = $this->firstString($reservation[$key], ['id', 'room_id', 'physical_room_id']);
-
                 if ($nestedId !== '') {
                     return $nestedId === $requestedPhysicalId;
                 }
             }
         }
-
         return false;
     }
-
     private function rollbackUnassignedClockBooking(string $providerId): void
     {
         $cancelPath = ClockConfig::reservationCancelPath();
-
         if ($cancelPath === '' || $providerId === '') {
             return;
         }
-
         $method = 'POST';
         if (\preg_match('/^\/?\s*(GET|POST|PUT|PATCH|DELETE)\s+(.+)$/i', \trim($cancelPath), $matches)) {
             $method = \strtoupper((string) $matches[1]);
             $cancelPath = \trim((string) $matches[2]);
         }
-
         $path = \str_replace(['{booking_id}', '{reservation_id}', ':booking_id', ':reservation_id'], $providerId, $cancelPath);
         $this->client->request(
             $method,
@@ -825,7 +813,6 @@ final class ClockReservationProvider implements ReservationProviderInterface
             'adults' => isset($validatedRoom['guests']) ? \max(1, (int) $validatedRoom['guests']) : \max(1, (int) ($context['guests'] ?? 1)),
             'children' => 0,
             'reference_number' => $this->clockReferenceNumber($context, $validatedRoom),
-            'is_guaranteed' => false,
             'rate_id' => $this->nullableExternalId($ratePlanMapping),
             'arrival_room_type_id' => $this->nullableExternalId($roomMapping),
             'arrival_room_id' => $this->nullableExternalId($physicalMapping),
@@ -851,6 +838,14 @@ final class ClockReservationProvider implements ReservationProviderInterface
                 'guest_city' => (string) ($guestForm['city'] ?? ''),
                 'guest_zip_code' => (string) ($guestForm['zip_code'] ?? ''),
             ];
+        }
+
+        $guaranteePolicyId = isset($pricing['guarantee_policy_id'])
+            ? (int) $pricing['guarantee_policy_id']
+            : 0;
+
+        if ($guaranteePolicyId > 0) {
+            $booking['guarantee_policy_id'] = $guaranteePolicyId;
         }
         $payload = [
             'booking' => $booking,
