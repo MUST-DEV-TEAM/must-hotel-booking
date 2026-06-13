@@ -1,20 +1,15 @@
 <?php
-
 namespace MustHotelBooking\Engine;
-
 use MustHotelBooking\Core\MustBookingConfig;
 use MustHotelBooking\Database\PaymentRepository;
-
 final class PaymentProviderFeeService
 {
     /** @var PaymentRepository */
     private $payments;
-
     public function __construct(?PaymentRepository $payments = null)
     {
         $this->payments = $payments ?: get_payment_repository();
     }
-
     /**
      * @param array<int, int> $reservationIds
      * @param array<string, mixed> $session
@@ -25,24 +20,18 @@ final class PaymentProviderFeeService
         $sessionId = \sanitize_text_field((string) ($session['id'] ?? ''));
         $transactionId = $paymentIntentId !== '' ? $paymentIntentId : $sessionId;
         $snapshot = $this->fetchStripeFeeSnapshot($paymentIntentId);
-
         foreach ($reservationIds as $reservationId) {
             $paymentId = $this->payments->getLatestPaymentIdForReservationMethod((int) $reservationId, 'stripe');
-
             if ($paymentId <= 0) {
                 continue;
             }
-
             $payment = $this->payments->getPayment($paymentId);
-
             if (!\is_array($payment)) {
                 continue;
             }
-
             $this->payments->updatePayment($paymentId, $this->paymentFeeData($payment, $snapshot, $transactionId));
         }
     }
-
     /**
      * @param array<int, int> $reservationIds
      * @param array<string, mixed> $order
@@ -50,28 +39,21 @@ final class PaymentProviderFeeService
     public function capturePokPayFeeSnapshotForReservations(array $reservationIds, array $order, string $orderId): void
     {
         $snapshot = $this->extractPokPayFeeSnapshot($order);
-
         foreach ($reservationIds as $reservationId) {
             $paymentId = $this->payments->getLatestPaymentIdForReservationMethod((int) $reservationId, 'pokpay');
-
             if ($paymentId <= 0) {
                 continue;
             }
-
             $payment = $this->payments->getPayment($paymentId);
-
             if (!\is_array($payment)) {
                 continue;
             }
-
             if ((string) ($snapshot['status'] ?? '') !== 'known') {
                 $snapshot = $this->buildPokPayConfiguredEstimate((float) ($payment['amount'] ?? 0.0), (string) ($payment['currency'] ?? ''));
             }
-
             $this->payments->updatePayment($paymentId, $this->paymentFeeData($payment, $snapshot, $orderId));
         }
     }
-
     /**
      * @param array<int, array<string, mixed>> $paymentRows
      * @return array<string, mixed>
@@ -83,7 +65,6 @@ final class PaymentProviderFeeService
         $providerFee = \round(\max(0.0, (float) ($fee['amount'] ?? 0.0)), 2);
         $cancellationFee = \round(\max(0.0, $cancellationFee), 2);
         $refundAmount = \round(\max(0.0, $amountPaid - $providerFee - $cancellationFee), 2);
-
         return [
             'success' => $feeStatus === 'known' || $providerFee > 0.0,
             'provider_fee_status' => $feeStatus,
@@ -95,7 +76,6 @@ final class PaymentProviderFeeService
             'calculated_by' => \sanitize_key($calculatedBy) ?: 'system',
         ];
     }
-
     /**
      * @param array<string, mixed> $breakdown
      * @return array<string, mixed>
@@ -111,49 +91,38 @@ final class PaymentProviderFeeService
             'calculated_by' => \sanitize_key((string) ($breakdown['calculated_by'] ?? '')),
         ];
     }
-
     /** @return array<string, mixed> */
     private function fetchStripeFeeSnapshot(string $paymentIntentId): array
     {
         $paymentIntentId = \sanitize_text_field($paymentIntentId);
-
         if ($paymentIntentId === '') {
             return $this->unknownSnapshot('stripe_balance_transaction_missing_payment_intent');
         }
-
         $intentResponse = PaymentEngine::performStripeApiRequest('GET', 'payment_intents/' . \rawurlencode($paymentIntentId) . '?expand[]=latest_charge.balance_transaction');
-
         if (empty($intentResponse['success'])) {
             return $this->unknownSnapshot((string) ($intentResponse['message'] ?? 'stripe_payment_intent_fetch_failed'));
         }
-
         $intent = isset($intentResponse['body']) && \is_array($intentResponse['body']) ? $intentResponse['body'] : [];
         $charge = isset($intent['latest_charge']) && \is_array($intent['latest_charge']) ? $intent['latest_charge'] : [];
-
         if (empty($charge) && isset($intent['latest_charge']) && \is_string($intent['latest_charge'])) {
             $chargeResponse = PaymentEngine::performStripeApiRequest('GET', 'charges/' . \rawurlencode((string) $intent['latest_charge']) . '?expand[]=balance_transaction');
             $charge = !empty($chargeResponse['success']) && isset($chargeResponse['body']) && \is_array($chargeResponse['body'])
                 ? $chargeResponse['body']
                 : [];
         }
-
         $balanceTransaction = isset($charge['balance_transaction']) && \is_array($charge['balance_transaction']) ? $charge['balance_transaction'] : [];
-
         if (empty($balanceTransaction) && isset($charge['balance_transaction']) && \is_string($charge['balance_transaction'])) {
             $btResponse = PaymentEngine::performStripeApiRequest('GET', 'balance_transactions/' . \rawurlencode((string) $charge['balance_transaction']));
             $balanceTransaction = !empty($btResponse['success']) && isset($btResponse['body']) && \is_array($btResponse['body'])
                 ? $btResponse['body']
                 : [];
         }
-
         if (empty($balanceTransaction) || !isset($balanceTransaction['fee'])) {
             return $this->unknownSnapshot('stripe_balance_transaction_fee_unavailable');
         }
-
         $currency = \strtoupper(\sanitize_text_field((string) ($balanceTransaction['currency'] ?? MustBookingConfig::get_currency())));
         $fee = PaymentEngine::convertMinorUnitsToAmount((int) $balanceTransaction['fee'], $currency);
         $net = isset($balanceTransaction['net']) ? PaymentEngine::convertMinorUnitsToAmount((int) $balanceTransaction['net'], $currency) : 0.0;
-
         return [
             'status' => 'known',
             'amount' => \round($fee, 2),
@@ -168,47 +137,49 @@ final class PaymentProviderFeeService
             ],
         ];
     }
-
     /** @param array<string, mixed> $order @return array<string, mixed> */
     private function extractPokPayFeeSnapshot(array $order): array
     {
-        $fee = $this->firstNumericRecursive($order, ['processingFee', 'providerFee', 'feeAmount', 'fee', 'commissionAmount', 'commission']);
+        $fee = $this->firstNumericRecursive($order, [
+            'processingFee',
+            'providerFee',
+            'feeAmount',
+            'fee',
+            'commissionAmount',
+            'commission',
+            'totalCommissionAmount',
+            'bankCommission',
+            'bankCommissionAmount',
+        ]);
         $currency = \strtoupper(\sanitize_text_field(
             $this->firstStringRecursive($order, ['currencyCode', 'currency']) ?: MustBookingConfig::get_currency()
         ));
-
         if ($fee === null) {
             return $this->unknownSnapshot('pokpay_fee_not_returned');
         }
-
         $net = $this->firstNumericRecursive($order, ['netAmount', 'providerNetAmount', 'settlementAmount']);
         $feeAmount = $this->normalizePokPayMoney((float) $fee, $currency, $order);
-
         return [
             'status' => 'known',
             'amount' => \round($feeAmount, 2),
             'currency' => $currency,
             'net_amount' => $net !== null ? \round($this->normalizePokPayMoney((float) $net, $currency, $order), 2) : 0.0,
             'source' => 'pokpay_api',
-            'balance_transaction_id' => \sanitize_text_field((string) ($order['transactionId'] ?? $order['paymentId'] ?? $order['id'] ?? '')),
+            'balance_transaction_id' => $this->firstStringRecursive($order, ['transactionId', 'paymentId', 'id']),
             'absorbed_by_customer' => false,
             'metadata' => ['pokpay_fee_fields' => \array_keys($order)],
         ];
     }
-
     /** @return array<string, mixed> */
     private function buildPokPayConfiguredEstimate(float $amount, string $currency): array
     {
         $percent = MustBookingConfig::get_pokpay_fee_percent();
         $fixed = MustBookingConfig::get_pokpay_fee_fixed();
         $feeCurrency = MustBookingConfig::get_pokpay_fee_currency();
-
         if ($percent <= 0.0 && $fixed <= 0.0) {
             return $this->unknownSnapshot('pokpay_fee_estimate_missing');
         }
-
         $fee = \round(($amount * ($percent / 100)) + $fixed, 2);
-
         return [
             'status' => 'known',
             'amount' => \max(0.0, $fee),
@@ -225,14 +196,12 @@ final class PaymentProviderFeeService
             ],
         ];
     }
-
     /** @param array<string, mixed> $payment @param array<string, mixed> $snapshot @return array<string, mixed> */
     private function paymentFeeData(array $payment, array $snapshot, string $transactionId): array
     {
         $amount = \round((float) ($payment['amount'] ?? 0.0), 2);
         $fee = \round(\max(0.0, (float) ($snapshot['amount'] ?? 0.0)), 2);
         $net = isset($snapshot['net_amount']) ? \round((float) $snapshot['net_amount'], 2) : \round(\max(0.0, $amount - $fee), 2);
-
         return [
             'provider_fee_amount' => $fee,
             'provider_fee_currency' => \strtoupper(\sanitize_text_field((string) ($snapshot['currency'] ?? ($payment['currency'] ?? MustBookingConfig::get_currency())))),
@@ -247,7 +216,6 @@ final class PaymentProviderFeeService
             ]),
         ];
     }
-
     /** @param array<int, array<string, mixed>> $paymentRows @return array<string, mixed> */
     private function providerFeeFromPaidRows(array $paymentRows): array
     {
@@ -255,9 +223,7 @@ final class PaymentProviderFeeService
             if (!\is_array($row) || (string) ($row['status'] ?? '') !== 'paid') {
                 continue;
             }
-
             $status = \sanitize_key((string) ($row['provider_fee_status'] ?? 'unknown'));
-
             if ($status === 'known') {
                 return [
                     'status' => 'known',
@@ -265,10 +231,8 @@ final class PaymentProviderFeeService
                 ];
             }
         }
-
         return ['status' => 'unknown', 'amount' => 0.0];
     }
-
     /** @param array<string, mixed> $source @param array<int, string> $keys */
     private function firstNumeric(array $source, array $keys): ?float
     {
@@ -277,71 +241,51 @@ final class PaymentProviderFeeService
                 return (float) $source[$key];
             }
         }
-
         return null;
     }
-
     /** @param array<string, mixed> $source @param array<int, string> $keys */
     private function firstNumericRecursive(array $source, array $keys): ?float
     {
         $value = $this->firstNumeric($source, $keys);
-
         if ($value !== null) {
             return $value;
         }
-
-        foreach (['sdkOrder', 'payment', 'transaction', 'order'] as $nestedKey) {
+        foreach (['data', 'sdkOrder', 'payment', 'transaction', 'order', 'commissions'] as $nestedKey) {
             if (isset($source[$nestedKey]) && \is_array($source[$nestedKey])) {
                 $nested = $this->firstNumericRecursive($source[$nestedKey], $keys);
-
                 if ($nested !== null) {
                     return $nested;
                 }
             }
         }
-
         return null;
     }
-
     /** @param array<string, mixed> $source @param array<int, string> $keys */
     private function firstStringRecursive(array $source, array $keys): string
     {
         foreach ($keys as $key) {
             if (isset($source[$key]) && \is_scalar($source[$key])) {
                 $value = \trim((string) $source[$key]);
-
                 if ($value !== '') {
                     return $value;
                 }
             }
         }
-
-        foreach (['sdkOrder', 'payment', 'transaction', 'order'] as $nestedKey) {
+        foreach (['data', 'sdkOrder', 'payment', 'transaction', 'order', 'commissions'] as $nestedKey) {
             if (isset($source[$nestedKey]) && \is_array($source[$nestedKey])) {
                 $nested = $this->firstStringRecursive($source[$nestedKey], $keys);
-
                 if ($nested !== '') {
                     return $nested;
                 }
             }
         }
-
         return '';
     }
-
     /** @param array<string, mixed> $order */
     private function normalizePokPayMoney(float $value, string $currency, array $order): float
     {
-        $rawAmount = $this->firstNumericRecursive($order, ['amount']);
-
-        if ($rawAmount !== null && $rawAmount >= 100.0 && \abs($value - \round($value)) < 0.0001) {
-            return PaymentEngine::convertMinorUnitsToAmount((int) \round($value), $currency);
-        }
-
-        return $value;
-    }
-
-    /** @return array<string, mixed> */
+        return \round(\max(0.0, $value), 2);
+    }    /** @return array<string, mixed> */
     private function unknownSnapshot(string $reason): array
     {
         return [

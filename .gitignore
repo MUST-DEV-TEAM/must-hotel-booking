@@ -1,2 +1,4 @@
 .claude/
+.playwright-cli/
 must-hotel-booking-*.zip
+tools/backups/

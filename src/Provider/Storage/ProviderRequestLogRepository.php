@@ -145,6 +145,61 @@ final class ProviderRequestLogRepository extends AbstractRepository
         return $this->getDirectionSummary('outbound', $provider);
     }
 
+    /** @return array<string, mixed> */
+    public function getLatestOutboundLogSummary(string $provider = ''): array
+    {
+        $provider = $this->key($provider, 50);
+        $summary = [
+            'operation' => '',
+            'http_status' => 0,
+            'success' => false,
+            'error_code' => '',
+            'error_message' => '',
+            'request_summary' => [],
+            'response_summary' => [],
+            'created_at' => '',
+        ];
+
+        if (!$this->providerRequestLogsTableExists()) {
+            return $summary;
+        }
+
+        $where = 'direction = %s';
+        $params = ['outbound'];
+
+        if ($provider !== '') {
+            $where .= ' AND provider = %s';
+            $params[] = $provider;
+        }
+
+        $row = $this->wpdb->get_row(
+            $this->wpdb->prepare(
+                'SELECT operation, http_status, success, error_code, error_message, request_summary, response_summary, created_at
+                FROM ' . $this->tableName() . '
+                WHERE ' . $where . '
+                ORDER BY created_at DESC, id DESC
+                LIMIT 1',
+                ...$params
+            ),
+            ARRAY_A
+        );
+
+        if (!\is_array($row)) {
+            return $summary;
+        }
+
+        $summary['operation'] = (string) ($row['operation'] ?? '');
+        $summary['http_status'] = (int) ($row['http_status'] ?? 0);
+        $summary['success'] = !empty($row['success']);
+        $summary['error_code'] = (string) ($row['error_code'] ?? '');
+        $summary['error_message'] = (string) ($row['error_message'] ?? '');
+        $summary['request_summary'] = $this->decodeJsonSummary((string) ($row['request_summary'] ?? ''));
+        $summary['response_summary'] = $this->decodeJsonSummary((string) ($row['response_summary'] ?? ''));
+        $summary['created_at'] = (string) ($row['created_at'] ?? '');
+
+        return $summary;
+    }
+
     /**
      * @return array<string, mixed>
      */
@@ -338,6 +393,18 @@ final class ProviderRequestLogRepository extends AbstractRepository
         $json = \function_exists('wp_json_encode') ? \wp_json_encode($value) : \json_encode($value);
 
         return \is_string($json) ? $json : null;
+    }
+
+    /** @return array<string, mixed> */
+    private function decodeJsonSummary(string $value): array
+    {
+        if (\trim($value) === '') {
+            return [];
+        }
+
+        $decoded = \json_decode($value, true);
+
+        return \is_array($decoded) ? $decoded : [];
     }
 
     private function now(): string

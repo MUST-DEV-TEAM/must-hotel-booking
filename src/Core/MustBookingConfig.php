@@ -168,6 +168,80 @@ class MustBookingConfig
     {
         return self::bool(self::get_setting('pokpay_fee_customer_absorbs', false));
     }
+    public static function get_pokpay_checkout_mode(): string
+    {
+        return self::choice(
+            \sanitize_key((string) self::get_setting('pokpay_checkout_mode', 'sdk_confirm_url_redirect')),
+            ['embedded_sdk', 'sdk_confirm_url_redirect'],
+            'sdk_confirm_url_redirect'
+        );
+    }
+    public static function get_public_callback_base_url(): string
+    {
+        return self::normalize_public_callback_base_url((string) self::get_setting('public_callback_base_url', ''));
+    }
+    public static function build_public_callback_url(string $url): string
+    {
+        $base = self::get_public_callback_base_url();
+
+        if ($base === '') {
+            return $url;
+        }
+
+        $parts = \wp_parse_url($url);
+        $path = isset($parts['path']) ? (string) $parts['path'] : '/';
+        $query = isset($parts['query']) && (string) $parts['query'] !== '' ? '?' . (string) $parts['query'] : '';
+
+        return $base . '/' . \ltrim($path, '/') . $query;
+    }
+    public static function build_public_rest_url(string $route): string
+    {
+        $route = '/' . \ltrim($route, '/');
+
+        return self::build_public_callback_url(\rest_url($route));
+    }
+    public static function normalize_public_callback_base_url(string $url): string
+    {
+        $url = \trim($url);
+
+        if ($url === '') {
+            return '';
+        }
+
+        $parts = \wp_parse_url($url);
+
+        if (!\is_array($parts)) {
+            return '';
+        }
+
+        $scheme = isset($parts['scheme']) ? \strtolower((string) $parts['scheme']) : '';
+        $host = isset($parts['host']) ? \strtolower((string) $parts['host']) : '';
+
+        if (!\in_array($scheme, ['https', 'http'], true) || $host === '') {
+            return '';
+        }
+
+        if (isset($parts['user']) || isset($parts['pass']) || isset($parts['query']) || isset($parts['fragment'])) {
+            return '';
+        }
+
+        if ($scheme !== 'https' && !self::is_local_callback_host($host)) {
+            return '';
+        }
+
+        if (\preg_match('/[\x00-\x1F\x7F]/', $url) === 1) {
+            return '';
+        }
+
+        $port = isset($parts['port']) ? ':' . (int) $parts['port'] : '';
+        $path = isset($parts['path']) ? '/' . \trim((string) $parts['path'], '/') : '';
+
+        if ($path === '/') {
+            $path = '';
+        }
+
+        return $scheme . '://' . $host . $port . $path;
+    }
     public static function get_website_booking_flow_mode(): string
     {
         return self::choice(\sanitize_key((string) self::get_setting('website_booking_flow_mode', 'plugin_checkout')), ['plugin_checkout', 'clock_wbe_inline'], 'plugin_checkout');
@@ -225,6 +299,9 @@ class MustBookingConfig
             'clock_reservation_stay_update_path' => self::api_path_or_blank((string) ($provider['clock_reservation_stay_update_path'] ?? $defaults['clock_reservation_stay_update_path'])),
             'clock_reservation_guest_update_path' => self::api_path_or_blank((string) ($provider['clock_reservation_guest_update_path'] ?? $defaults['clock_reservation_guest_update_path'])),
             'clock_reservation_fetch_path' => self::api_path_or_blank((string) ($provider['clock_reservation_fetch_path'] ?? $defaults['clock_reservation_fetch_path'])),
+            'clock_endpoint_overrides' => self::clock_endpoint_overrides(isset($provider['clock_endpoint_overrides']) && \is_array($provider['clock_endpoint_overrides']) ? $provider['clock_endpoint_overrides'] : (array) $defaults['clock_endpoint_overrides']),
+            'clock_payment_posting_mode' => self::choice(\sanitize_key((string) ($provider['clock_payment_posting_mode'] ?? $defaults['clock_payment_posting_mode'])), ['auto_detect', 'deposit_for_future_bookings', 'folio_payment_only', 'manual_clock_accounting'], (string) $defaults['clock_payment_posting_mode']),
+            'clock_same_day_folio_payment_enabled' => self::bool($provider['clock_same_day_folio_payment_enabled'] ?? $defaults['clock_same_day_folio_payment_enabled']),
             'clock_webhook_secret' => \sanitize_text_field((string) ($provider['clock_webhook_secret'] ?? $defaults['clock_webhook_secret'])),
             'clock_auto_sync_enabled' => self::bool($provider['clock_auto_sync_enabled'] ?? $defaults['clock_auto_sync_enabled']),
             'clock_auto_sync_interval_minutes' => (int) self::choice((string) ($provider['clock_auto_sync_interval_minutes'] ?? $defaults['clock_auto_sync_interval_minutes']), ['5', '10', '15', '30', '60'], (string) $defaults['clock_auto_sync_interval_minutes']),
@@ -388,6 +465,7 @@ class MustBookingConfig
                 'hotel_logo_url' => '',
                 'portal_logo_url' => '',
                 'site_environment' => '',
+                'public_callback_base_url' => '',
             ],
             'booking_rules' => [
                 'booking_window' => 365,
@@ -421,7 +499,7 @@ class MustBookingConfig
                 'anti_abuse_logging_enabled' => false
             ],
             'checkin_checkout' => ['checkin_time' => '14:00', 'checkout_time' => '11:00', 'allow_early_checkin_request' => true, 'allow_late_checkout_request' => true, 'arrival_instructions' => '', 'departure_instructions' => '', 'guest_checkin_label' => \__('Check-in', 'must-hotel-booking'), 'guest_checkout_label' => \__('Check-out', 'must-hotel-booking')],
-            'payments_summary' => ['payment_methods' => ['pay_at_hotel' => true, 'stripe' => false, 'pokpay' => true], 'deposit_required' => false, 'deposit_type' => 'percentage', 'deposit_value' => 0.0, 'tax_rate' => 0.0, 'stripe_publishable_key' => '', 'stripe_secret_key' => '', 'stripe_webhook_secret' => '', 'stripe_local_publishable_key' => '', 'stripe_local_secret_key' => '', 'stripe_local_webhook_secret' => '', 'stripe_staging_publishable_key' => '', 'stripe_staging_secret_key' => '', 'stripe_staging_webhook_secret' => '', 'stripe_production_publishable_key' => '', 'stripe_production_secret_key' => '', 'stripe_production_webhook_secret' => '', 'pokpay_local_merchant_id' => '', 'pokpay_local_key_id' => '', 'pokpay_local_key_secret' => '', 'pokpay_staging_merchant_id' => '', 'pokpay_staging_key_id' => '', 'pokpay_staging_key_secret' => '', 'pokpay_production_merchant_id' => '', 'pokpay_production_key_id' => '', 'pokpay_production_key_secret' => '', 'pokpay_fee_percent' => 0.0, 'pokpay_fee_fixed' => 0.0, 'pokpay_fee_currency' => 'USD', 'pokpay_fee_customer_absorbs' => false],
+            'payments_summary' => ['payment_methods' => ['pay_at_hotel' => true, 'stripe' => false, 'pokpay' => true], 'deposit_required' => false, 'deposit_type' => 'percentage', 'deposit_value' => 0.0, 'tax_rate' => 0.0, 'stripe_publishable_key' => '', 'stripe_secret_key' => '', 'stripe_webhook_secret' => '', 'stripe_local_publishable_key' => '', 'stripe_local_secret_key' => '', 'stripe_local_webhook_secret' => '', 'stripe_staging_publishable_key' => '', 'stripe_staging_secret_key' => '', 'stripe_staging_webhook_secret' => '', 'stripe_production_publishable_key' => '', 'stripe_production_secret_key' => '', 'stripe_production_webhook_secret' => '', 'pokpay_local_merchant_id' => '', 'pokpay_local_key_id' => '', 'pokpay_local_key_secret' => '', 'pokpay_staging_merchant_id' => '', 'pokpay_staging_key_id' => '', 'pokpay_staging_key_secret' => '', 'pokpay_production_merchant_id' => '', 'pokpay_production_key_id' => '', 'pokpay_production_key_secret' => '', 'pokpay_checkout_mode' => 'sdk_confirm_url_redirect', 'pokpay_fee_percent' => 0.0, 'pokpay_fee_fixed' => 0.0, 'pokpay_fee_currency' => 'USD', 'pokpay_fee_customer_absorbs' => false],
             'staff_access' => ['enable_staff_portal' => false, 'redirect_worker_after_login' => 'dashboard', 'hide_wp_admin_for_workers' => true, 'portal_access_roles' => self::staff_access_role_defaults(), 'capability_matrix' => self::staff_matrix_defaults(), 'portal_module_visibility' => self::portal_module_visibility_defaults()],
             'branding' => ['primary_color' => '#0f766e', 'secondary_color' => '#155e75', 'accent_color' => '#f59e0b', 'text_color' => '#16212b', 'border_radius' => 18, 'font_family' => 'Instrument Sans', 'inherit_elementor_colors' => false, 'inherit_elementor_typography' => false, 'portal_welcome_title' => \__('Welcome back', 'must-hotel-booking'), 'portal_welcome_text' => \__('Manage arrivals, departures, guest requests, and stay operations from one place.', 'must-hotel-booking'), 'booking_form_style_preset' => 'balanced'],
             'managed_pages' => ['page_rooms_id' => 0, 'page_booking_id' => 0, 'page_booking_accommodation_id' => 0, 'page_checkout_id' => 0, 'page_booking_confirmation_id' => 0, 'portal_page_id' => 0, 'portal_login_page_id' => 0],
@@ -462,6 +540,9 @@ class MustBookingConfig
                 'clock_reservation_stay_update_path' => '',
                 'clock_reservation_guest_update_path' => '',
                 'clock_reservation_fetch_path' => '/bookings/{booking_id}',
+                'clock_endpoint_overrides' => [],
+                'clock_payment_posting_mode' => 'auto_detect',
+                'clock_same_day_folio_payment_enabled' => true,
                 'clock_webhook_secret' => '',
                 'clock_auto_sync_enabled' => true,
                 'clock_auto_sync_interval_minutes' => 15,
@@ -495,6 +576,7 @@ class MustBookingConfig
             'hotel_logo_url' => \esc_url_raw((string) ($v['hotel_logo_url'] ?? $d['hotel_logo_url'])),
             'portal_logo_url' => \esc_url_raw((string) ($v['portal_logo_url'] ?? $d['portal_logo_url'])),
             'site_environment' => \sanitize_key((string) ($v['site_environment'] ?? $d['site_environment'])),
+            'public_callback_base_url' => self::normalize_public_callback_base_url((string) ($v['public_callback_base_url'] ?? $d['public_callback_base_url'])),
         ];
     }
     /** @param array<string, mixed> $v @return array<string, mixed> */
@@ -575,6 +657,7 @@ class MustBookingConfig
             'pokpay_production_merchant_id' => \sanitize_text_field((string) ($v['pokpay_production_merchant_id'] ?? $d['pokpay_production_merchant_id'])),
             'pokpay_production_key_id' => \sanitize_text_field((string) ($v['pokpay_production_key_id'] ?? $d['pokpay_production_key_id'])),
             'pokpay_production_key_secret' => \sanitize_text_field((string) ($v['pokpay_production_key_secret'] ?? $d['pokpay_production_key_secret'])),
+            'pokpay_checkout_mode' => self::choice(\sanitize_key((string) ($v['pokpay_checkout_mode'] ?? $d['pokpay_checkout_mode'])), ['embedded_sdk', 'sdk_confirm_url_redirect'], (string) $d['pokpay_checkout_mode']),
             'pokpay_fee_percent' => self::decimal($v['pokpay_fee_percent'] ?? $d['pokpay_fee_percent'], 0.0, 100.0, (float) $d['pokpay_fee_percent']),
             'pokpay_fee_fixed' => self::decimal($v['pokpay_fee_fixed'] ?? $d['pokpay_fee_fixed'], 0.0, 999999.0, (float) $d['pokpay_fee_fixed']),
             'pokpay_fee_currency' => self::currency((string) ($v['pokpay_fee_currency'] ?? $d['pokpay_fee_currency'])),
@@ -674,6 +757,9 @@ class MustBookingConfig
             'clock_reservation_stay_update_path' => self::api_path_or_blank((string) ($v['clock_reservation_stay_update_path'] ?? $d['clock_reservation_stay_update_path'])),
             'clock_reservation_guest_update_path' => self::api_path_or_blank((string) ($v['clock_reservation_guest_update_path'] ?? $d['clock_reservation_guest_update_path'])),
             'clock_reservation_fetch_path' => self::api_path_or_blank((string) ($v['clock_reservation_fetch_path'] ?? $d['clock_reservation_fetch_path'])),
+            'clock_endpoint_overrides' => self::clock_endpoint_overrides(isset($v['clock_endpoint_overrides']) && \is_array($v['clock_endpoint_overrides']) ? $v['clock_endpoint_overrides'] : (array) $d['clock_endpoint_overrides']),
+            'clock_payment_posting_mode' => self::choice(\sanitize_key((string) ($v['clock_payment_posting_mode'] ?? $d['clock_payment_posting_mode'])), ['auto_detect', 'deposit_for_future_bookings', 'folio_payment_only', 'manual_clock_accounting'], (string) $d['clock_payment_posting_mode']),
+            'clock_same_day_folio_payment_enabled' => self::bool($v['clock_same_day_folio_payment_enabled'] ?? $d['clock_same_day_folio_payment_enabled']),
             'clock_webhook_secret' => \sanitize_text_field((string) ($v['clock_webhook_secret'] ?? $d['clock_webhook_secret'])),
             'clock_auto_sync_enabled' => self::bool($v['clock_auto_sync_enabled'] ?? $d['clock_auto_sync_enabled']),
             'clock_auto_sync_interval_minutes' => (int) self::choice((string) ($v['clock_auto_sync_interval_minutes'] ?? $d['clock_auto_sync_interval_minutes']), ['5', '10', '15', '30', '60'], (string) $d['clock_auto_sync_interval_minutes']),
@@ -739,6 +825,15 @@ class MustBookingConfig
     {
         return \trim($value) === '' ? $fallback : self::time($value, $fallback !== '' ? $fallback : '18:00');
     }
+    private static function is_local_callback_host(string $host): bool
+    {
+        return $host === 'localhost'
+            || $host === '127.0.0.1'
+            || $host === '::1'
+            || \substr($host, -10) === '.localhost'
+            || \substr($host, -6) === '.local'
+            || \substr($host, -5) === '.test';
+    }
     private static function api_path(string $value, string $fallback): string
     {
         $value = \trim(\sanitize_text_field($value));
@@ -754,6 +849,23 @@ class MustBookingConfig
     {
         $value = \trim($value);
         return $value !== '' ? self::api_path($value, '') : '';
+    }
+    /** @param array<string, mixed> $overrides @return array<string, string> */
+    private static function clock_endpoint_overrides(array $overrides): array
+    {
+        if (\class_exists(\MustHotelBooking\Provider\Clock\ClockEndpointRegistry::class)) {
+            return \MustHotelBooking\Provider\Clock\ClockEndpointRegistry::normalizeOverrides($overrides);
+        }
+
+        $normalized = [];
+        foreach ($overrides as $key => $value) {
+            if (!\is_string($key)) {
+                continue;
+            }
+            $normalized[\sanitize_key($key)] = self::api_path_or_blank((string) $value);
+        }
+
+        return $normalized;
     }
     private static function clock_region(string $value): string
     {

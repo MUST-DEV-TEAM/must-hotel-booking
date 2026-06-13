@@ -947,17 +947,31 @@ final class ClockPaymentReconciliationService
      * @return array<string, mixed>
      */
     private function providerRequestBody(array $payload, array $action): array
-    {
-        $requestOperation = (string) ($action['request_operation'] ?? '');
-        if ($requestOperation === 'clock.reservation_cancel') {
-            return [
-                'booking' => [
-                    'status' => 'canceled',
-                ],
-            ];
-        }
-        return $payload;
+{
+    $requestOperation = (string) ($action['request_operation'] ?? '');
+
+    if ($requestOperation === 'clock.reservation_cancel') {
+        return [
+            'booking' => [
+                'status' => 'canceled',
+            ],
+        ];
     }
+
+    if ($requestOperation === 'clock.reservation_stay_update') {
+        $checkin = isset($payload['local_target_checkin']) ? (string) $payload['local_target_checkin'] : '';
+        $checkout = isset($payload['local_target_checkout']) ? (string) $payload['local_target_checkout'] : '';
+
+        return [
+            'booking' => [
+                'arrival' => $checkin,
+                'departure' => $checkout,
+            ],
+        ];
+    }
+
+    return $payload;
+}
     private function payload(array $row, array $action, string $idempotencyKey): array
     {
         $targetGuest = isset($action['target_guest']) && \is_array($action['target_guest'])

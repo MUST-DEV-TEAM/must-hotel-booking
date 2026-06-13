@@ -1582,7 +1582,7 @@ function render_admin_reservation_detail_page(): void
     $provider = new ReservationAdminDataProvider();
     $detailData = $provider->getDetailPageData($reservationId, $mode);
 
-    echo '<div class="wrap">';
+    echo '<div class="wrap must-reservations-page must-reservation-detail-page">';
     render_admin_reservations_notice_from_query();
     render_admin_clock_wbe_inline_notice();
 

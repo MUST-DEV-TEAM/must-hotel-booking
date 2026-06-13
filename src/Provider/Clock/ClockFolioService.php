@@ -162,6 +162,78 @@ final class ClockFolioService
         ];
     }
 
+    /** @return array{success: bool, folio: array<string, mixed>, folio_id: string, message: string} */
+    public function selectOrCreateDepositFolio(string $clockBookingId, string $currency, int $reservationId = 0, string $preferredFolioId = ''): array
+    {
+        $clockBookingId = \sanitize_text_field($clockBookingId);
+        $preferredFolioId = \sanitize_text_field($preferredFolioId);
+
+        if ($clockBookingId === '') {
+            return [
+                'success' => false,
+                'folio' => [],
+                'folio_id' => '',
+                'message' => \__('Clock booking ID is missing.', 'must-hotel-booking'),
+            ];
+        }
+
+        if ($preferredFolioId !== '') {
+            $preferred = $this->viewFolio($preferredFolioId, $reservationId);
+
+            if (!empty($preferred['success'])) {
+                $folio = (array) ($preferred['folio'] ?? []);
+
+                if ($this->isPostableFolio($folio) && $this->isDepositFolio($folio)) {
+                    return [
+                        'success' => true,
+                        'folio' => $folio,
+                        'folio_id' => $preferredFolioId,
+                        'message' => '',
+                    ];
+                }
+            }
+        }
+
+        $foliosResult = $this->listBookingFolios($clockBookingId, $reservationId);
+
+        if (empty($foliosResult['success'])) {
+            return [
+                'success' => false,
+                'folio' => [],
+                'folio_id' => '',
+                'message' => (string) ($foliosResult['message'] ?? \__('Unable to list Clock booking folios.', 'must-hotel-booking')),
+            ];
+        }
+
+        $resolvedFolios = $this->resolveListedFolios((array) ($foliosResult['folios'] ?? []), $reservationId);
+        $depositFolios = [];
+
+        if (!empty($resolvedFolios['success'])) {
+            foreach ((array) ($resolvedFolios['folios'] ?? []) as $folio) {
+                if (
+                    \is_array($folio)
+                    && $this->isPostableFolio($folio)
+                    && $this->isDepositFolio($folio)
+                    && $this->folioCurrencyMatches($folio, $currency)
+                    && $this->folioId($folio) !== ''
+                ) {
+                    $depositFolios[] = $folio;
+                }
+            }
+        }
+
+        if (\count($depositFolios) === 1) {
+            return [
+                'success' => true,
+                'folio' => $depositFolios[0],
+                'folio_id' => $this->folioId($depositFolios[0]),
+                'message' => '',
+            ];
+        }
+
+        return $this->createDepositFolio($clockBookingId, $reservationId);
+    }
+
     /** @return array{success: bool, folios: array<int, array<string, mixed>>, message: string} */
     public function listBookingFolios(string $clockBookingId, int $reservationId = 0): array
     {
@@ -175,13 +247,15 @@ final class ClockFolioService
             ];
         }
 
+        $path = ClockEndpointRegistry::resolvePath('booking_folios_list', ['booking_id' => $clockBookingId]);
         $response = $this->client->request(
             'GET',
-            '/bookings/' . \rawurlencode($clockBookingId) . '/folios',
+            $path,
             [
-                'api_type' => 'pms_api',
+                'api_type' => ClockEndpointRegistry::apiType('booking_folios_list'),
                 'reservation_id' => $reservationId,
                 'external_id' => $clockBookingId,
+                'endpoint_name' => 'booking_folios_list',
             ],
             'clock.booking_folios_list'
         );
@@ -203,6 +277,59 @@ final class ClockFolioService
         ];
     }
 
+    /** @return array{success: bool, folio: array<string, mixed>, folio_id: string, message: string} */
+    private function createDepositFolio(string $clockBookingId, int $reservationId = 0): array
+    {
+        $path = ClockEndpointRegistry::resolvePath('booking_deposit_folio_create', ['booking_id' => $clockBookingId]);
+        $body = [
+            'booking_folio' => [
+                'deposit' => true,
+            ],
+        ];
+        $response = $this->client->request(
+            'POST',
+            $path,
+            [
+                'api_type' => ClockEndpointRegistry::apiType('booking_deposit_folio_create'),
+                'reservation_id' => $reservationId,
+                'external_id' => $clockBookingId,
+                'body' => $body,
+                'endpoint_name' => 'booking_deposit_folio_create',
+            ],
+            'clock.booking_deposit_folio_create'
+        );
+
+        if (!$response->isSuccess()) {
+            return [
+                'success' => false,
+                'folio' => [],
+                'folio_id' => '',
+                'message' => $response->getErrorMessage() !== ''
+                    ? $response->getErrorMessage()
+                    : \__('Clock deposit folio create request failed.', 'must-hotel-booking'),
+            ];
+        }
+
+        $folio = $this->extractFolio($response->getData());
+        $folioId = $this->folioId($folio);
+
+        if ($folioId === '') {
+            return [
+                'success' => false,
+                'folio' => [],
+                'folio_id' => '',
+                'message' => \__('Clock created a deposit folio but did not return its ID.', 'must-hotel-booking'),
+            ];
+        }
+
+        return [
+            'success' => true,
+            'folio' => $folio,
+            'folio_id' => $folioId,
+            'message' => '',
+        ];
+    }
+
     /** @return array{success: bool, folio: array<string, mixed>, message: string} */
     private function viewFolio(string $folioId, int $reservationId = 0): array
     {
@@ -216,13 +343,15 @@ final class ClockFolioService
             ];
         }
 
+        $path = ClockEndpointRegistry::resolvePath('folio_view', ['folio_id' => $folioId]);
         $response = $this->client->request(
             'GET',
-            '/folios/' . \rawurlencode($folioId),
+            $path,
             [
-                'api_type' => 'base_api',
+                'api_type' => ClockEndpointRegistry::apiType('folio_view'),
                 'reservation_id' => $reservationId,
                 'external_id' => $folioId,
+                'endpoint_name' => 'folio_view',
             ],
             'clock.folio_view'
         );
@@ -256,9 +385,10 @@ final class ClockFolioService
     {
         $response = $this->client->request(
             'GET',
-            '/payment_sub_types',
+            ClockEndpointRegistry::resolvePath('payment_sub_types'),
             [
-                'api_type' => 'base_api',
+                'api_type' => ClockEndpointRegistry::apiType('payment_sub_types'),
+                'endpoint_name' => 'payment_sub_types',
             ],
             'clock.payment_sub_types_view'
         );
@@ -289,7 +419,7 @@ final class ClockFolioService
         $this->paymentSubTypes();
         $description = $direction === 'refund'
             ? 'Website ' . $gatewayLabel . ' refund'
-            : 'Website booking payment via ' . $gatewayLabel;
+            : ($direction === 'deposit' ? 'Website booking deposit via ' . $gatewayLabel : 'Website booking payment via ' . $gatewayLabel);
 
         $body = [
             'credit_item' => [
@@ -302,17 +432,20 @@ final class ClockFolioService
             ],
         ];
 
+        $endpointName = $direction === 'deposit' ? 'booking_deposit_payment_create' : 'folio_credit_item_create';
+        $path = ClockEndpointRegistry::resolvePath($endpointName, ['folio_id' => $folioId]);
         $response = $this->client->request(
             'POST',
-            '/folios/' . \rawurlencode($folioId) . '/credit_items',
+            $path,
             [
-                'api_type' => 'base_api',
+                'api_type' => ClockEndpointRegistry::apiType($endpointName),
                 'reservation_id' => $reservationId,
                 'external_id' => $folioId,
                 'idempotency_key' => $idempotencyKey,
                 'body' => $body,
+                'endpoint_name' => $endpointName,
             ],
-            $direction === 'refund' ? 'clock.refund_credit_item_create' : 'clock.folio_payment_create'
+            $direction === 'refund' ? 'clock.refund_credit_item_create' : ($direction === 'deposit' ? 'clock.deposit_payment_create' : 'clock.folio_payment_create')
         );
 
         if (!$response->isSuccess()) {
@@ -564,6 +697,28 @@ final class ClockFolioService
         }
 
         return true;
+    }
+
+    /** @param array<string, mixed> $folio */
+    private function isDepositFolio(array $folio): bool
+    {
+        if (isset($folio['deposit'])) {
+            return \filter_var($folio['deposit'], \FILTER_VALIDATE_BOOLEAN);
+        }
+
+        foreach (['folio_type', 'type', 'kind', 'purpose'] as $key) {
+            if (!isset($folio[$key]) || !\is_scalar($folio[$key])) {
+                continue;
+            }
+
+            $value = \strtolower(\trim((string) $folio[$key]));
+
+            if (\in_array($value, ['deposit', 'deposit_folio', 'booking_deposit'], true)) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     /** @param array<string, mixed> $folio */

@@ -29,6 +29,7 @@ Verified from targeted current-code inspection on 2026-06-11. Use this document 
 | `mhb_inventory_locks` | Temporary inventory/session locks. |
 | `must_payments` | Payment ledger rows. |
 | `must_refunds` | Refund records and provider/Clock sync state. |
+| `must_clock_folio_accounting` | Clock payment/refund accounting rows, folio/credit-item IDs, retry state, and manual-review/handled-manually reason details. |
 | `must_taxes` | Tax/fee rules. |
 | `must_coupons` | Coupon rules and usage counts. |
 | `must_activity_log` | Audit/activity events. |
@@ -49,6 +50,7 @@ Verified from targeted current-code inspection on 2026-06-11. Use this document 
 | `mhb_inventory_locks` | `room_id`, `checkin`, `checkout`, `session_id`, `expires_at`; unique key on room/stay/session. |
 | `must_payments` | `reservation_id`, `amount`, `currency`, `method`, `status`, `transaction_id`, provider fee snapshot fields, `paid_at`, `created_at`. |
 | `must_refunds` | `reservation_id`, `booking_id`, `payment_id`, provider/Clock IDs, gateway/provider refs, Stripe IDs, refund breakdown fields, `amount`, `currency`, `reason`, `refund_type`, `status`, `clock_sync_status`, idempotency keys, failure/manual fields, timestamps. |
+| `must_clock_folio_accounting` | `payment_id`, `refund_id`, `reservation_id`, `booking_id`, gateway/provider refs, Clock booking/reservation/folio/credit-item IDs, `direction`, `amount`, `currency`, `status`, `verification_status`, `idempotency_key`, `attempts`, `last_error_code`, `last_error`, retry/posted/verified timestamps. |
 | `mhb_provider_mappings` | `provider`, `entity_type`, `local_table`, `local_id`, `external_id`, `external_code`, `status`, `metadata`. |
 | `mhb_provider_sync_jobs` | `provider`, `operation`, `target_type`, `target_local_id`, `target_external_id`, `status`, attempts, timing, payload. |
 

@@ -6112,7 +6112,7 @@ final class PortalController
             'payment_marked_pay_at_hotel' => \__('Payment collection mode set to pay at hotel.', 'must-hotel-booking'),
             'payment_marked_failed' => \__('Payment marked as failed.', 'must-hotel-booking'),
             'payment_refunded' => \__('Refund issued successfully.', 'must-hotel-booking'),
-            'pokpay_refund_manual_pending' => \__('PokPay refund could not be completed automatically. Refund from the POK dashboard, then mark it completed in the plugin.', 'must-hotel-booking'),
+            'pokpay_refund_manual_pending' => \__('PokPay did not confirm the automatic refund. Refund or verify it in the POK dashboard, then mark it completed in the plugin.', 'must-hotel-booking'),
             'refund_manual_completed' => \__('Manual refund marked completed and recorded in the local ledger.', 'must-hotel-booking'),
             'calendar_block_created' => \__('Manual block created from the calendar.', 'must-hotel-booking'),
             'block_updated' => \__('Manual block updated.', 'must-hotel-booking'),

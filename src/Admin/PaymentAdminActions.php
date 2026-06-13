@@ -169,6 +169,43 @@ final class PaymentAdminActions
             ]));
         }
 
+        if ($action === 'mark_clock_accounting_manual_done') {
+            $reservationId = isset($_POST['reservation_id']) ? \absint(\wp_unslash($_POST['reservation_id'])) : 0;
+            $accountingId = isset($_POST['accounting_id']) ? \absint(\wp_unslash($_POST['accounting_id'])) : 0;
+            $nonce = isset($_POST['must_payments_nonce']) ? (string) \wp_unslash($_POST['must_payments_nonce']) : '';
+
+            if ($reservationId <= 0 || $accountingId <= 0 || !\wp_verify_nonce($nonce, 'must_payment_clock_accounting_manual_done_' . $accountingId)) {
+                $this->redirectToPaymentsPage($query->buildUrlArgs([
+                    'notice' => 'invalid_nonce',
+                    'action' => 'view',
+                    'reservation_id' => $reservationId,
+                ]));
+            }
+
+            if (!\current_user_can('manage_options')) {
+                $this->redirectToPaymentsPage($query->buildUrlArgs([
+                    'notice' => 'action_failed',
+                    'action' => 'view',
+                    'reservation_id' => $reservationId,
+                ]));
+            }
+
+            $manualNote = isset($_POST['manual_note']) && !\is_array($_POST['manual_note'])
+                ? \sanitize_textarea_field((string) \wp_unslash($_POST['manual_note']))
+                : '';
+            $result = \MustHotelBooking\Engine\get_clock_folio_accounting_repository()->markHandledManually(
+                $accountingId,
+                \get_current_user_id(),
+                $manualNote
+            );
+
+            $this->redirectToPaymentsPage($query->buildUrlArgs([
+                'notice' => !empty($result['success']) ? 'clock_accounting_manual_done' : 'clock_accounting_manual_done_failed',
+                'action' => 'view',
+                'reservation_id' => $reservationId,
+            ]));
+        }
+
         if ($action !== 'save_payment_settings') {
             return $this->blankState();
         }
@@ -571,6 +608,14 @@ final class PaymentAdminActions
                     MustBookingConfig::set_setting($settingKey, $value);
                 }
             }
+
+            $pokpayCheckoutMode = isset($_POST['pokpay_checkout_mode']) && !\is_array($_POST['pokpay_checkout_mode'])
+                ? \sanitize_key((string) \wp_unslash($_POST['pokpay_checkout_mode']))
+                : 'sdk_confirm_url_redirect';
+            if (!\in_array($pokpayCheckoutMode, ['embedded_sdk', 'sdk_confirm_url_redirect'], true)) {
+                $pokpayCheckoutMode = 'sdk_confirm_url_redirect';
+            }
+            MustBookingConfig::set_setting('pokpay_checkout_mode', $pokpayCheckoutMode);
 
             MustBookingConfig::set_setting(
                 'pokpay_fee_percent',

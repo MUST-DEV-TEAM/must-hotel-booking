@@ -255,7 +255,7 @@ if (\is_array($detail)) {
         $refundProviderLabel = $paymentMethodKey === 'pokpay' ? \__('PokPay refund', 'must-hotel-booking') : \__('Stripe refund', 'must-hotel-booking');
 
         if ($paymentMethodKey === 'pokpay') {
-            echo '<div class="must-portal-feed-item"><div><strong>' . \esc_html__('PokPay automatic refund', 'must-hotel-booking') . '</strong><span>' . \esc_html__('Refunds are submitted server-side to POK. If the API is unavailable, a manual fallback record is created for dashboard follow-up.', 'must-hotel-booking') . '</span></div>';
+            echo '<div class="must-portal-feed-item"><div><strong>' . \esc_html__('PokPay manual refund', 'must-hotel-booking') . '</strong><span>' . \esc_html__('Create the refund in the POK dashboard, then mark the refund completed here so the local ledger and Clock follow-up can continue.', 'must-hotel-booking') . '</span></div>';
             PortalRenderer::renderBadge('info', \__('Gateway', 'must-hotel-booking'));
             echo '</div>';
         }

@@ -122,11 +122,13 @@ function render_payments_admin_notice_from_query(): void
         'payment_marked_pay_at_hotel' => ['success', \__('Reservation updated to pay at hotel.', 'must-hotel-booking')],
         'payment_marked_failed' => ['success', \__('Reservation payment marked failed.', 'must-hotel-booking')],
         'payment_refunded' => ['success', \__('Refund issued successfully.', 'must-hotel-booking')],
-        'pokpay_refund_manual_pending' => ['success', \__('PokPay refund could not be completed automatically. Refund from the POK dashboard, then mark it completed here.', 'must-hotel-booking')],
+        'pokpay_refund_manual_pending' => ['success', \__('PokPay did not confirm the automatic refund. Refund or verify it in the POK dashboard, then mark it completed here.', 'must-hotel-booking')],
         'refund_manual_completed' => ['success', \__('Manual refund marked completed and recorded in the local ledger.', 'must-hotel-booking')],
         'refund_manual_done' => ['success', \__('Refund marked as manually reconciled in Clock.', 'must-hotel-booking')],
         'clock_accounting_retry_success' => ['success', \__('Clock folio accounting retry completed.', 'must-hotel-booking')],
         'clock_accounting_retry_failed' => ['error', \__('Clock folio accounting retry still needs review.', 'must-hotel-booking')],
+        'clock_accounting_manual_done' => ['success', \__('Clock accounting marked handled manually.', 'must-hotel-booking')],
+        'clock_accounting_manual_done_failed' => ['error', \__('Clock accounting could not be marked handled manually.', 'must-hotel-booking')],
         'reservation_guest_email_resent' => ['success', \__('Guest confirmation email resent.', 'must-hotel-booking')],
         'reservation_admin_email_resent' => ['success', \__('Admin notification email resent.', 'must-hotel-booking')],
         'provider_backed_read_only' => ['error', \__('Provider-backed reservations are read-only in local payment actions until provider-aware payment operations are implemented.', 'must-hotel-booking')],
@@ -902,7 +904,7 @@ function render_payment_detail(?array $detail): void
         echo '<div class="must-payments-context-card">';
         echo '<span class="must-dashboard-eyebrow">' . \esc_html($refundHeading) . '</span>';
         if ($paymentMethod === 'pokpay') {
-            echo '<p>' . \esc_html__('PokPay refunds are submitted server-side to POK. If the API is unavailable or refund permission is missing, a manual fallback record is created for dashboard follow-up.', 'must-hotel-booking') . '</p>';
+            echo '<p>' . \esc_html__('PokPay refunds are attempted automatically through the verified merchant refund API. If PokPay does not confirm the refund, create or verify the refund in the POK dashboard, then mark the local refund completed here.', 'must-hotel-booking') . '</p>';
         }
         echo '<p>' . \esc_html(\sprintf(
             /* translators: 1: paid amount, 2: provider fee, 3: refund amount. */
@@ -988,11 +990,13 @@ function render_payment_detail(?array $detail): void
         echo '<th>' . \esc_html__('Direction', 'must-hotel-booking') . '</th>';
         echo '<th>' . \esc_html__('Amount', 'must-hotel-booking') . '</th>';
         echo '<th>' . \esc_html__('Status', 'must-hotel-booking') . '</th>';
-        echo '<th>' . \esc_html__('Verification', 'must-hotel-booking') . '</th>';
+        echo '<th>' . \esc_html__('Reason', 'must-hotel-booking') . '</th>';
+        echo '<th>' . \esc_html__('Clock Booking', 'must-hotel-booking') . '</th>';
         echo '<th>' . \esc_html__('Clock Folio', 'must-hotel-booking') . '</th>';
         echo '<th>' . \esc_html__('Clock Item', 'must-hotel-booking') . '</th>';
+        echo '<th>' . \esc_html__('Attempts', 'must-hotel-booking') . '</th>';
         echo '<th>' . \esc_html__('Provider Reference', 'must-hotel-booking') . '</th>';
-        echo '<th>' . \esc_html__('Last Error', 'must-hotel-booking') . '</th>';
+        echo '<th>' . \esc_html__('Latest Message', 'must-hotel-booking') . '</th>';
         echo '<th>' . \esc_html__('Action', 'must-hotel-booking') . '</th>';
         echo '</tr></thead><tbody>';
 
@@ -1004,20 +1008,35 @@ function render_payment_detail(?array $detail): void
             $accountingId = (int) ($accountingRow['id'] ?? 0);
             $accountingStatus = \sanitize_key((string) ($accountingRow['status'] ?? ''));
             $direction = \sanitize_key((string) ($accountingRow['direction'] ?? ''));
+            $reasonCode = \sanitize_key((string) ($accountingRow['last_error_code'] ?? ''));
             $reference = (string) ($accountingRow['provider_refund_id'] ?? '');
             if ($reference === '') {
                 $reference = (string) ($accountingRow['provider_transaction_id'] ?? '');
             }
+            $updatedAt = (string) ($accountingRow['updated_at'] ?? '');
+            $lastMessage = (string) ($accountingRow['last_error'] ?? '');
 
             echo '<tr>';
             echo '<td>' . render_payments_badge($direction !== '' ? $direction : __('Unknown', 'must-hotel-booking'), $direction === 'payment' ? 'ok' : 'muted') . '</td>';
             echo '<td><div class="must-payments-money">' . \esc_html(\number_format_i18n((float) ($accountingRow['amount'] ?? 0.0), 2) . ' ' . (string) ($accountingRow['currency'] ?? MustBookingConfig::get_currency())) . '</div></td>';
             echo '<td>' . render_payments_status_badge((string) ($accountingRow['status'] ?? ''), (string) ($accountingRow['status'] ?? '')) . '</td>';
-            echo '<td>' . render_payments_status_badge((string) ($accountingRow['verification_status'] ?? ''), (string) ($accountingRow['verification_status'] ?? 'info')) . '</td>';
+            echo '<td>';
+            if ($reasonCode !== '') {
+                echo '<code>' . \esc_html($reasonCode) . '</code><br><span class="description">' . \esc_html(\MustHotelBooking\Provider\Clock\ClockAccountingReason::label($reasonCode)) . '</span>';
+            } else {
+                echo '<span class="must-payments-cell-note">' . \esc_html__('None', 'must-hotel-booking') . '</span>';
+            }
+            echo '</td>';
+            echo '<td>' . \esc_html((string) ($accountingRow['clock_booking_id'] ?? '')) . '</td>';
             echo '<td>' . \esc_html((string) ($accountingRow['clock_folio_id'] ?? '')) . '</td>';
             echo '<td>' . \esc_html((string) ($accountingRow['clock_credit_item_id'] ?? '')) . '</td>';
+            echo '<td>' . \esc_html((string) ((int) ($accountingRow['attempts'] ?? 0))) . '<br><span class="description">' . \esc_html($updatedAt) . '</span>';
+            if ((string) ($accountingRow['verification_status'] ?? '') !== '') {
+                echo '<br>' . render_payments_status_badge((string) ($accountingRow['verification_status'] ?? ''), (string) ($accountingRow['verification_status'] ?? 'info'));
+            }
+            echo '</td>';
             echo '<td>' . \esc_html($reference) . '</td>';
-            echo '<td>' . \esc_html((string) ($accountingRow['last_error'] ?? '')) . '</td>';
+            echo '<td>' . \nl2br(\esc_html($lastMessage)) . '</td>';
             echo '<td>';
             if ($accountingId > 0 && \in_array($accountingStatus, ['failed', 'manual_review'], true)) {
                 echo '<form method="post" action="' . \esc_url(get_admin_payments_page_url(['action' => 'view', 'reservation_id' => (int) ($detail['reservation_id'] ?? 0)])) . '">';
@@ -1026,6 +1045,14 @@ function render_payment_detail(?array $detail): void
                 echo '<input type="hidden" name="reservation_id" value="' . \esc_attr((string) ((int) ($detail['reservation_id'] ?? 0))) . '" />';
                 echo '<input type="hidden" name="accounting_id" value="' . \esc_attr((string) $accountingId) . '" />';
                 echo '<button type="submit" class="button button-small">' . \esc_html__('Retry', 'must-hotel-booking') . '</button>';
+                echo '</form>';
+                echo '<form method="post" action="' . \esc_url(get_admin_payments_page_url(['action' => 'view', 'reservation_id' => (int) ($detail['reservation_id'] ?? 0)])) . '">';
+                \wp_nonce_field('must_payment_clock_accounting_manual_done_' . $accountingId, 'must_payments_nonce');
+                echo '<input type="hidden" name="must_payments_action" value="mark_clock_accounting_manual_done" />';
+                echo '<input type="hidden" name="reservation_id" value="' . \esc_attr((string) ((int) ($detail['reservation_id'] ?? 0))) . '" />';
+                echo '<input type="hidden" name="accounting_id" value="' . \esc_attr((string) $accountingId) . '" />';
+                echo '<input type="text" name="manual_note" placeholder="' . \esc_attr__('Internal note', 'must-hotel-booking') . '" />';
+                echo '<button type="submit" class="button button-small">' . \esc_html__('Mark handled manually', 'must-hotel-booking') . '</button>';
                 echo '</form>';
             } else {
                 echo '<span class="must-payments-cell-note">' . \esc_html__('No action', 'must-hotel-booking') . '</span>';
@@ -1147,8 +1174,14 @@ function render_payment_settings_panel(array $settings): void
     $states = isset($settings['states']) && \is_array($settings['states']) ? $settings['states'] : [];
     $environmentCatalog = isset($settings['environment_catalog']) && \is_array($settings['environment_catalog']) ? $settings['environment_catalog'] : [];
     $activeEnvironment = isset($settings['active_environment']) ? (string) $settings['active_environment'] : '';
+    $publicCallbackBaseUrl = isset($settings['public_callback_base_url']) ? (string) $settings['public_callback_base_url'] : '';
     $webhookUrl = isset($settings['webhook_url']) ? (string) $settings['webhook_url'] : '';
+    $pokpayWebhookUrl = isset($settings['pokpay_webhook_url']) ? (string) $settings['pokpay_webhook_url'] : '';
     $pokpayEnvironment = isset($settings['pokpay_environment']) ? (string) $settings['pokpay_environment'] : 'staging';
+    $pokpayCheckoutMode = isset($settings['pokpay_checkout_mode']) ? \sanitize_key((string) $settings['pokpay_checkout_mode']) : 'sdk_confirm_url_redirect';
+    if (!\in_array($pokpayCheckoutMode, ['embedded_sdk', 'sdk_confirm_url_redirect'], true)) {
+        $pokpayCheckoutMode = 'sdk_confirm_url_redirect';
+    }
     $enabledMethodCount = \count(\array_filter($states));
 
     echo '<section id="must-payment-settings" class="postbox must-dashboard-panel must-payments-panel">';
@@ -1215,10 +1248,34 @@ function render_payment_settings_panel(array $settings): void
     }
 
     echo '<div class="must-payments-webhook-box"><span class="must-payments-webhook-label">' . \esc_html__('Webhook URL', 'must-hotel-booking') . '</span><code>' . \esc_html($webhookUrl) . '</code></div>';
+    if ($publicCallbackBaseUrl !== '') {
+        echo '<div class="must-payments-webhook-box"><span class="must-payments-webhook-label">' . \esc_html__('Public callback base', 'must-hotel-booking') . '</span><code>' . \esc_html($publicCallbackBaseUrl) . '</code></div>';
+    }
     echo '</div>';
 
     echo '<div class="must-payments-subsection">';
     echo '<div class="must-payments-subsection-heading"><h3>' . \esc_html__('PokPay Checkout', 'must-hotel-booking') . '</h3><p>' . \esc_html__('Store PokPay merchant credentials by site environment. Localhost and staging use PokPay staging; production uses PokPay production.', 'must-hotel-booking') . '</p></div>';
+
+    echo '<section class="must-payments-environment-card">';
+    echo '<div class="must-payments-environment-heading">';
+    echo '<div class="must-payments-environment-copy">';
+    echo '<h4>' . \esc_html__('PokPay checkout mode', 'must-hotel-booking') . '</h4>';
+    echo '<p>' . \esc_html__('Choose whether guests pay inside the Review & Payment page or are redirected to PokPay/RPay from the SDK order confirm URL.', 'must-hotel-booking') . '</p>';
+    echo '</div>';
+    echo '<div class="must-payments-pill-stack">' . render_payments_badge($pokpayCheckoutMode === 'sdk_confirm_url_redirect' ? __('Redirect', 'must-hotel-booking') : __('Embedded SDK', 'must-hotel-booking'), 'info') . '</div>';
+    echo '</div>';
+    echo '<div class="must-payments-method-grid">';
+    echo '<label class="must-payments-method-card' . ($pokpayCheckoutMode === 'embedded_sdk' ? ' is-enabled' : '') . '">';
+    echo '<input type="radio" name="pokpay_checkout_mode" value="embedded_sdk"' . \checked($pokpayCheckoutMode, 'embedded_sdk', false) . ' />';
+    echo '<span class="must-payments-method-copy"><strong>' . \esc_html__('Embedded SDK', 'must-hotel-booking') . '</strong><small>' . \esc_html__('Embedded SDK: show PokPay card form inside the Review & Payment page.', 'must-hotel-booking') . '</small></span>';
+    echo '</label>';
+    echo '<label class="must-payments-method-card' . ($pokpayCheckoutMode === 'sdk_confirm_url_redirect' ? ' is-enabled' : '') . '">';
+    echo '<input type="radio" name="pokpay_checkout_mode" value="sdk_confirm_url_redirect"' . \checked($pokpayCheckoutMode, 'sdk_confirm_url_redirect', false) . ' />';
+    echo '<span class="must-payments-method-copy"><strong>' . \esc_html__('Redirect', 'must-hotel-booking') . '</strong><small>' . \esc_html__('Redirect: create a PokPay SDK order and redirect the guest to the PokPay/RPay confirmUrl page.', 'must-hotel-booking') . '</small></span>';
+    echo '</label>';
+    echo '</div>';
+    echo '</section>';
+    echo '<div class="must-payments-webhook-box"><span class="must-payments-webhook-label">' . \esc_html__('PokPay webhook URL', 'must-hotel-booking') . '</span><code>' . \esc_html($pokpayWebhookUrl) . '</code></div>';
 
     foreach ($environmentCatalog as $environmentKey => $environmentMeta) {
         if (!\is_string($environmentKey) || !\is_array($environmentMeta)) {

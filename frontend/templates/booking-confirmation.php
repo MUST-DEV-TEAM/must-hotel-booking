@@ -16,7 +16,8 @@ $payment_methods = isset($view['payment_methods']) && \is_array($view['payment_m
 $pending_payment = isset($view['pending_payment']) && \is_array($view['pending_payment']) ? $view['pending_payment'] : [];
 $is_pokpay_pending = (string) ($pending_payment['method'] ?? '') === 'pokpay'
     && (string) ($pending_payment['session_id'] ?? '') !== ''
-    && !empty($pending_payment['reservation_ids']);
+    && !empty($pending_payment['reservation_ids'])
+    && (string) ($pending_payment['checkout_mode'] ?? '') === 'embedded_sdk';
 $confirmation_cta_label = isset($view['confirmation_cta_label']) ? (string) $view['confirmation_cta_label'] : \__('Confirm reservation', 'must-hotel-booking');
 $primary_guest = isset($view['primary_guest']) && \is_array($view['primary_guest']) ? $view['primary_guest'] : null;
 $total_price = isset($view['total_price']) ? (float) $view['total_price'] : 0.0;
@@ -41,35 +42,29 @@ if (!empty($cancellation_review['message'])) {
     ));
 }
 $cancellation_reservation_id = isset($cancellation_review['reservation_id']) ? (int) $cancellation_review['reservation_id'] : 0;
-
 $cancellation_booking_id = '';
 if (isset($_POST['booking_id'])) {
     $cancellation_booking_id = \sanitize_text_field((string) \wp_unslash($_POST['booking_id']));
 } elseif (isset($_GET['booking_id'])) {
     $cancellation_booking_id = \sanitize_text_field((string) \wp_unslash($_GET['booking_id']));
 }
-
 $cancellation_token = '';
 if (isset($_POST['cancel_token'])) {
     $cancellation_token = \sanitize_text_field((string) \wp_unslash($_POST['cancel_token']));
 } elseif (isset($_GET['cancel_token'])) {
     $cancellation_token = \sanitize_text_field((string) \wp_unslash($_GET['cancel_token']));
 }
-
 $can_show_cancellation_confirm_form = !empty($cancellation_review['eligible'])
     && empty($cancellation_review['manual_only'])
     && $cancellation_reservation_id > 0
     && $cancellation_booking_id !== ''
     && $cancellation_token !== '';
-
 if ($can_show_cancellation_confirm_form && !empty($reservations)) {
     foreach ($reservations as $reservation) {
         if (!\is_array($reservation)) {
             continue;
         }
-
         $reservation_status = \sanitize_key((string) ($reservation['status'] ?? ''));
-
         if (\in_array($reservation_status, ['cancelled', 'completed', 'blocked'], true)) {
             $can_show_cancellation_confirm_form = false;
             break;
@@ -257,13 +252,16 @@ $render_payment_method_icon = static function (string $payment_method_key, strin
                     $cancellation_nights = \max(1, (int) (($cancellation_checkout_time - $cancellation_checkin_time) / \DAY_IN_SECONDS));
                 }
                 $cancellation_paid_amount = isset($cancellation_review['paid_amount']) ? (float) $cancellation_review['paid_amount'] : 0.0;
-                $cancellation_provider_fee = isset($cancellation_review['provider_fee_amount']) ? (float) $cancellation_review['provider_fee_amount'] : 0.0;
-                $cancellation_fee_amount = isset($cancellation_review['refund_breakdown']['cancellation_fee_amount']) ? (float) $cancellation_review['refund_breakdown']['cancellation_fee_amount'] : 0.0;
-                $cancellation_refund_amount = isset($cancellation_review['refund_amount']) ? (float) $cancellation_review['refund_amount'] : 0.0;
-                $cancellation_payment_method = \sanitize_key((string) ($cancellation_review['payment_method'] ?? $payment_method));
-                $cancellation_heading = !empty($cancellation_review['eligible']) && empty($cancellation_review['manual_only'])
-                    ? \__('Cancel your booking', 'must-hotel-booking')
+                $cancellation_is_online_eligible = !empty($cancellation_review['eligible']) && empty($cancellation_review['manual_only']);
+                $cancellation_heading = $cancellation_is_online_eligible
+                    ? \__('Cancel your reservation', 'must-hotel-booking')
                     : \__('Cancellation requires hotel support', 'must-hotel-booking');
+                $cancellation_review_message = isset($cancellation_review['message'])
+                    ? (string) $cancellation_review['message']
+                    : '';
+                if ($cancellation_is_online_eligible) {
+                    $cancellation_review_message = \__('This reservation is eligible for online cancellation. If you continue, the reservation will be cancelled and you will receive a full refund minus the payment processing fee.', 'must-hotel-booking');
+                }
                 ?>
                 <section class="must-confirmation-paid-success must-cancellation-review-card"
                     aria-labelledby="must-cancellation-review-heading">
@@ -272,104 +270,41 @@ $render_payment_method_icon = static function (string $payment_method_key, strin
                             <h1 id="must-cancellation-review-heading" class="must-confirmation-paid-success-heading">
                                 <?php echo \esc_html($cancellation_heading); ?>
                             </h1>
-                            <?php if (!empty($cancellation_review['message'])): ?>
+                            <?php if ($cancellation_review_message !== ''): ?>
                                 <p class="must-confirmation-paid-success-message">
-                                    <?php echo \esc_html((string) $cancellation_review['message']); ?>
+                                    <?php echo \esc_html($cancellation_review_message); ?>
                                 </p>
                             <?php endif; ?>
-                            <div class="must-confirmation-order-table">
-                                <div class="must-confirmation-order-row">
-                                    <span><?php echo \esc_html__('Paid amount', 'must-hotel-booking'); ?></span>
-                                    <span><?php echo \esc_html($format_money($cancellation_paid_amount, $summary_currency)); ?></span>
-                                </div>
-                                <div class="must-confirmation-order-row">
-                                    <span><?php echo \esc_html__('Payment processing fee', 'must-hotel-booking'); ?></span>
-                                    <span><?php echo \esc_html($format_money($cancellation_provider_fee, $summary_currency)); ?></span>
-                                </div>
-                                <div class="must-confirmation-order-row">
-                                    <span><?php echo \esc_html__('Cancellation fee', 'must-hotel-booking'); ?></span>
-                                    <span><?php echo \esc_html($format_money($cancellation_fee_amount, $summary_currency)); ?></span>
-                                </div>
-                                <div class="must-confirmation-order-row is-total">
-                                    <span><?php echo \esc_html__('Final refund amount', 'must-hotel-booking'); ?></span>
-                                    <span><?php echo \esc_html($format_money($cancellation_refund_amount, $summary_currency)); ?></span>
-                                </div>
-                                <div class="must-confirmation-order-row">
-                                    <span><?php echo \esc_html__('Payment method', 'must-hotel-booking'); ?></span>
-                                    <span><?php echo \esc_html($cancellation_payment_method !== '' ? \ucfirst($cancellation_payment_method) : \__('Not recorded', 'must-hotel-booking')); ?></span>
-                                </div>
-                            </div>
                         </div>
-                        <div class="must-confirmation-paid-success-actions">
-                            <?php if ($can_show_cancellation_confirm_form): ?>
+                        <?php if ($can_show_cancellation_confirm_form): ?>
+                            <div class="must-confirmation-paid-success-actions">
                                 <form method="post" action="<?php echo \esc_url($confirmation_url); ?>"
                                     class="must-cancellation-confirm-form"
-                                    onsubmit="return window.confirm('<?php echo \esc_js(__('Cancellation is final. Cancel this booking and start the refund now?', 'must-hotel-booking')); ?>');">
+                                    onsubmit="return window.confirm('<?php echo \esc_js(__('Cancellation is final. Cancel this booking now?', 'must-hotel-booking')); ?>');">
                                     <?php \wp_nonce_field('must_confirm_cancellation', 'must_cancellation_nonce'); ?>
                                     <input type="hidden" name="must_confirmation_action" value="confirm_cancellation" />
                                     <input type="hidden" name="reservation_id"
                                         value="<?php echo \esc_attr((string) $cancellation_reservation_id); ?>" />
-                                    <input type="hidden" name="booking_id" value="<?php echo \esc_attr($cancellation_booking_id); ?>" />
-                                    <input type="hidden" name="cancel_token" value="<?php echo \esc_attr($cancellation_token); ?>" />
-                                    <p class="must-confirmation-policy">
-                                        <?php echo \esc_html__('Cancellation is final once submitted.', 'must-hotel-booking'); ?>
-                                    </p>
+                                    <input type="hidden" name="booking_id"
+                                        value="<?php echo \esc_attr($cancellation_booking_id); ?>" />
+                                    <input type="hidden" name="cancel_token"
+                                        value="<?php echo \esc_attr($cancellation_token); ?>" />
                                     <button type="submit" class="must-confirmation-submit must-cancellation-confirm-submit">
-                                        <span>
-                                            <?php echo \esc_html(\sprintf(
-                                                /* translators: %s refund amount. */
-                                                __('Cancel booking and refund %s', 'must-hotel-booking'),
-                                                $format_money($cancellation_refund_amount, $summary_currency)
-                                            )); ?>
-                                        </span>
+                                        <span><?php echo \esc_html__('Cancel reservation', 'must-hotel-booking'); ?></span>
                                         <?php if ($arrow_icon_url !== ''): ?>
                                             <img src="<?php echo \esc_url($arrow_icon_url); ?>" alt="" aria-hidden="true" />
                                         <?php endif; ?>
                                     </button>
                                 </form>
-                            <?php else: ?>
-                                <p class="must-confirmation-policy">
-                                    <?php echo \esc_html__('Online cancellation and automatic refund are not available for this booking. Please contact the hotel team for support.', 'must-hotel-booking'); ?>
-                                </p>
-                            <?php endif; ?>
-                        </div>
+                            </div>
+                        <?php endif; ?>
                     </div>
-                    <aside class="must-confirmation-paid-success-media must-cancellation-summary-panel">
-                        <section class="must-confirmation-order-table" aria-label="<?php echo \esc_attr__('Booking summary', 'must-hotel-booking'); ?>">
-                            <div class="must-confirmation-order-head">
-                                <span><?php echo \esc_html__('Booking summary', 'must-hotel-booking'); ?></span>
-                                <strong><?php echo \esc_html((string) ($cancellation_reservation['booking_id'] ?? $cancellation_booking_id)); ?></strong>
-                            </div>
-                            <div class="must-confirmation-order-row">
-                                <span><?php echo \esc_html__('Guest', 'must-hotel-booking'); ?></span>
-                                <span><?php echo \esc_html($cancellation_guest_name !== '' ? $cancellation_guest_name : \__('Guest', 'must-hotel-booking')); ?></span>
-                            </div>
-                            <div class="must-confirmation-order-row">
-                                <span><?php echo \esc_html__('Room', 'must-hotel-booking'); ?></span>
-                                <span><?php echo \esc_html((string) ($cancellation_reservation['room_name'] ?? __('Room', 'must-hotel-booking'))); ?></span>
-                            </div>
-                            <div class="must-confirmation-order-row">
-                                <span><?php echo \esc_html__('Check-in / Check-out', 'must-hotel-booking'); ?></span>
-                                <span><?php echo \esc_html(\trim($cancellation_checkin . ' - ' . $cancellation_checkout)); ?></span>
-                            </div>
-                            <div class="must-confirmation-order-row">
-                                <span><?php echo \esc_html__('Nights', 'must-hotel-booking'); ?></span>
-                                <span><?php echo \esc_html((string) $cancellation_nights); ?></span>
-                            </div>
-                            <div class="must-confirmation-order-row">
-                                <span><?php echo \esc_html__('Total paid', 'must-hotel-booking'); ?></span>
-                                <span><?php echo \esc_html($format_money($cancellation_paid_amount, $summary_currency)); ?></span>
-                            </div>
-                            <div class="must-confirmation-order-row">
-                                <span><?php echo \esc_html__('Cancellation policy', 'must-hotel-booking'); ?></span>
-                                <span><?php echo \esc_html(\sprintf(__('%d days before check-in', 'must-hotel-booking'), (int) ($cancellation_review['policy_days'] ?? 21))); ?></span>
-                            </div>
-                            <div class="must-confirmation-order-row">
-                                <span><?php echo \esc_html__('Current status', 'must-hotel-booking'); ?></span>
-                                <span><?php echo \esc_html(\trim((string) ($cancellation_reservation['status'] ?? '') . ' / ' . (string) ($cancellation_reservation['payment_status'] ?? ''))); ?></span>
-                            </div>
-                        </section>
-                    </aside>
+                    <?php if ($success_offer_image_url !== ''): ?>
+                        <div class="must-confirmation-paid-success-media">
+                            <img src="<?php echo \esc_url($success_offer_image_url); ?>"
+                                alt="<?php echo \esc_attr__('Hotel terrace view', 'must-hotel-booking'); ?>" />
+                        </div>
+                    <?php endif; ?>
                 </section>
             <?php elseif ($is_confirmation_success_layout): ?>
                 <section class="must-confirmation-paid-success" aria-labelledby="must-confirmation-paid-success-heading">
@@ -453,75 +388,174 @@ $render_payment_method_icon = static function (string $payment_method_key, strin
                 </section>
             <?php endif; ?>
         <?php elseif ($is_form_mode): ?>
-            <?php if ($is_pokpay_pending): ?>
-                <div class="must-confirmation-form">
-                <?php else: ?>
-                    <form method="post" action="<?php echo \esc_url($confirmation_url); ?>" class="must-confirmation-form">
-                        <?php \wp_nonce_field('must_confirm_booking', 'must_confirmation_nonce'); ?>
-                    <?php endif; ?>
-                    <?php if (!$is_pokpay_pending && $show_honeypot && $honeypot_field_name !== ''): ?>
-                        <div style="position:absolute !important;left:-10000px !important;top:auto !important;width:1px !important;height:1px !important;overflow:hidden !important;"
-                            aria-hidden="true" role="presentation">
-                            <label
-                                for="must-confirmation-honeypot"><?php echo \esc_html__('Leave this field empty', 'must-hotel-booking'); ?></label>
-                            <input id="must-confirmation-honeypot" type="text"
-                                name="<?php echo \esc_attr($honeypot_field_name); ?>" value="" tabindex="-1"
-                                autocomplete="new-password" autocapitalize="off" autocorrect="off" spellcheck="false"
-                                data-lpignore="true" data-1p-ignore="true" aria-hidden="true" />
-                        </div>
-                    <?php endif; ?>
-                    <?php if (!$is_pokpay_pending): ?>
-                        <input type="hidden" name="applied_coupon_code"
-                            value="<?php echo \esc_attr($applied_coupon_code); ?>" />
-                    <?php endif; ?>
-                    <?php if ($can_confirm): ?>
-                        <div class="must-confirmation-layout">
-                            <section class="must-confirmation-billing-panel">
-                                <div class="must-confirmation-billing-inner">
-                                    <div class="must-confirmation-billing-section">
-                                        <h2><?php echo \esc_html__('Billing Information', 'must-hotel-booking'); ?></h2>
-                                        <div class="must-confirmation-form-grid">
-                                            <label class="must-confirmation-field">
-                                                <span
-                                                    class="screen-reader-text"><?php echo \esc_html__('First Name', 'must-hotel-booking'); ?></span>
-                                                <input type="text" name="first_name"
-                                                    value="<?php echo \esc_attr((string) ($billing_form['first_name'] ?? '')); ?>"
-                                                    placeholder="<?php echo \esc_attr__('First Name*', 'must-hotel-booking'); ?>"
-                                                    required />
-                                            </label>
-                                            <label class="must-confirmation-field">
-                                                <span
-                                                    class="screen-reader-text"><?php echo \esc_html__('Last Name', 'must-hotel-booking'); ?></span>
-                                                <input type="text" name="last_name"
-                                                    value="<?php echo \esc_attr((string) ($billing_form['last_name'] ?? '')); ?>"
-                                                    placeholder="<?php echo \esc_attr__('Last Name*', 'must-hotel-booking'); ?>"
-                                                    required />
-                                            </label>
-                                            <label class="must-confirmation-field">
-                                                <span
-                                                    class="screen-reader-text"><?php echo \esc_html__('Company Name (Optional)', 'must-hotel-booking'); ?></span>
-                                                <input type="text" name="company"
-                                                    value="<?php echo \esc_attr((string) ($billing_form['company'] ?? '')); ?>"
-                                                    placeholder="<?php echo \esc_attr__('Company Name (Optional)', 'must-hotel-booking'); ?>" />
-                                            </label>
-                                            <div class="must-confirmation-field must-confirmation-field-select">
-                                                <span
-                                                    class="screen-reader-text"><?php echo \esc_html__('Country of Residence', 'must-hotel-booking'); ?></span>
-                                                <div class="must-confirmation-picker must-confirmation-picker-country<?php echo $country_picker_has_selection ? '' : ' is-placeholder'; ?>"
+            <form method="post" action="<?php echo \esc_url($confirmation_url); ?>" class="must-confirmation-form">
+                <?php \wp_nonce_field('must_confirm_booking', 'must_confirmation_nonce'); ?>
+                <?php if ($show_honeypot && $honeypot_field_name !== ''): ?>
+                    <div style="position:absolute !important;left:-10000px !important;top:auto !important;width:1px !important;height:1px !important;overflow:hidden !important;"
+                        aria-hidden="true" role="presentation">
+                        <label
+                            for="must-confirmation-honeypot"><?php echo \esc_html__('Leave this field empty', 'must-hotel-booking'); ?></label>
+                        <input id="must-confirmation-honeypot" type="text" name="<?php echo \esc_attr($honeypot_field_name); ?>"
+                            value="" tabindex="-1" autocomplete="new-password" autocapitalize="off" autocorrect="off"
+                            spellcheck="false" data-lpignore="true" data-1p-ignore="true" aria-hidden="true" />
+                    </div>
+                <?php endif; ?>
+                <input type="hidden" name="applied_coupon_code" value="<?php echo \esc_attr($applied_coupon_code); ?>" />
+                <?php if ($can_confirm): ?>
+                    <div class="must-confirmation-layout">
+                        <section class="must-confirmation-billing-panel">
+                            <div class="must-confirmation-billing-inner">
+                                <div class="must-confirmation-billing-section">
+                                    <h2><?php echo \esc_html__('Billing Information', 'must-hotel-booking'); ?></h2>
+                                    <div class="must-confirmation-form-grid">
+                                        <label class="must-confirmation-field">
+                                            <span
+                                                class="screen-reader-text"><?php echo \esc_html__('First Name', 'must-hotel-booking'); ?></span>
+                                            <input type="text" name="first_name"
+                                                value="<?php echo \esc_attr((string) ($billing_form['first_name'] ?? '')); ?>"
+                                                placeholder="<?php echo \esc_attr__('First Name*', 'must-hotel-booking'); ?>"
+                                                required />
+                                        </label>
+                                        <label class="must-confirmation-field">
+                                            <span
+                                                class="screen-reader-text"><?php echo \esc_html__('Last Name', 'must-hotel-booking'); ?></span>
+                                            <input type="text" name="last_name"
+                                                value="<?php echo \esc_attr((string) ($billing_form['last_name'] ?? '')); ?>"
+                                                placeholder="<?php echo \esc_attr__('Last Name*', 'must-hotel-booking'); ?>"
+                                                required />
+                                        </label>
+                                        <label class="must-confirmation-field">
+                                            <span
+                                                class="screen-reader-text"><?php echo \esc_html__('Company Name (Optional)', 'must-hotel-booking'); ?></span>
+                                            <input type="text" name="company"
+                                                value="<?php echo \esc_attr((string) ($billing_form['company'] ?? '')); ?>"
+                                                placeholder="<?php echo \esc_attr__('Company Name (Optional)', 'must-hotel-booking'); ?>" />
+                                        </label>
+                                        <div class="must-confirmation-field must-confirmation-field-select">
+                                            <span
+                                                class="screen-reader-text"><?php echo \esc_html__('Country of Residence', 'must-hotel-booking'); ?></span>
+                                            <div class="must-confirmation-picker must-confirmation-picker-country<?php echo $country_picker_has_selection ? '' : ' is-placeholder'; ?>"
+                                                data-checkout-picker="1"
+                                                data-picker-placeholder="<?php echo \esc_attr($country_picker_placeholder); ?>">
+                                                <input type="hidden" name="country"
+                                                    value="<?php echo \esc_attr($selected_country); ?>" data-picker-input="1" />
+                                                <button type="button" class="must-confirmation-picker-toggle"
+                                                    data-picker-toggle="1" aria-haspopup="listbox" aria-expanded="false"
+                                                    aria-label="<?php echo \esc_attr__('Country of Residence', 'must-hotel-booking'); ?>">
+                                                    <span class="must-confirmation-picker-toggle-copy">
+                                                        <span
+                                                            class="must-confirmation-picker-flag<?php echo $country_picker_has_selection ? '' : ' is-hidden'; ?>"
+                                                            data-picker-selected-flag="1"><?php echo \esc_html($country_picker_display_flag); ?></span>
+                                                        <span class="must-confirmation-picker-label"
+                                                            data-picker-selected-label="1"><?php echo \esc_html($country_picker_display_label); ?></span>
+                                                    </span>
+                                                    <?php if ($dropdown_icon_url !== ''): ?>
+                                                        <img class="must-picker-chevron"
+                                                            src="<?php echo \esc_url($dropdown_icon_url); ?>" alt=""
+                                                            aria-hidden="true" />
+                                                    <?php endif; ?>
+                                                </button>
+                                                <div class="must-confirmation-picker-panel" data-picker-panel="1" hidden>
+                                                    <div class="must-confirmation-picker-search-wrap">
+                                                        <input type="text" class="must-confirmation-picker-search"
+                                                            data-picker-search="1" value=""
+                                                            placeholder="<?php echo \esc_attr($country_picker_search_placeholder); ?>"
+                                                            aria-label="<?php echo \esc_attr($country_picker_search_placeholder); ?>" />
+                                                    </div>
+                                                    <div class="must-confirmation-picker-options" role="listbox">
+                                                        <?php foreach ($country_options as $country_option): ?>
+                                                            <?php
+                                                            $country_option_value = isset($country_option['value']) ? (string) $country_option['value'] : '';
+                                                            $country_option_code = isset($country_option['code']) ? (string) $country_option['code'] : '';
+                                                            $country_option_name = isset($country_option['name']) ? (string) $country_option['name'] : '';
+                                                            $country_option_dial_code = isset($country_option['dial_code']) ? (string) $country_option['dial_code'] : '';
+                                                            $country_option_flag = isset($country_option['flag']) ? (string) $country_option['flag'] : '';
+                                                            $country_option_search = \strtolower(\trim($country_option_code . ' ' . $country_option_name . ' ' . $country_option_dial_code));
+                                                            $country_option_is_selected = $country_option_value === $selected_country;
+                                                            ?>
+                                                            <button type="button"
+                                                                class="must-confirmation-picker-option<?php echo $country_option_is_selected ? ' is-selected' : ''; ?>"
+                                                                data-picker-option="1"
+                                                                data-value="<?php echo \esc_attr($country_option_value); ?>"
+                                                                data-label="<?php echo \esc_attr($country_option_name); ?>"
+                                                                data-flag="<?php echo \esc_attr($country_option_flag); ?>"
+                                                                data-search="<?php echo \esc_attr($country_option_search); ?>"
+                                                                role="option"
+                                                                aria-selected="<?php echo $country_option_is_selected ? 'true' : 'false'; ?>">
+                                                                <span class="must-confirmation-picker-option-flag"
+                                                                    aria-hidden="true"><?php echo \esc_html($country_option_flag); ?></span>
+                                                                <span class="must-confirmation-picker-option-copy">
+                                                                    <span
+                                                                        class="must-confirmation-picker-option-title"><?php echo \esc_html($country_option_name); ?></span>
+                                                                    <span
+                                                                        class="must-confirmation-picker-option-meta"><?php echo \esc_html(\trim($country_option_code . ' ' . $country_option_dial_code)); ?></span>
+                                                                </span>
+                                                            </button>
+                                                        <?php endforeach; ?>
+                                                        <p class="must-confirmation-picker-empty" data-picker-empty="1" hidden>
+                                                            <?php echo \esc_html($picker_no_results_label); ?>
+                                                        </p>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        </div>
+                                        <label class="must-confirmation-field">
+                                            <span
+                                                class="screen-reader-text"><?php echo \esc_html__('Street Address', 'must-hotel-booking'); ?></span>
+                                            <input type="text" name="street_address"
+                                                value="<?php echo \esc_attr((string) ($billing_form['street_address'] ?? '')); ?>"
+                                                placeholder="<?php echo \esc_attr__('Street Address*', 'must-hotel-booking'); ?>"
+                                                required />
+                                        </label>
+                                        <label class="must-confirmation-field">
+                                            <span
+                                                class="screen-reader-text"><?php echo \esc_html__('Apartment, Suite, Unit, etc.', 'must-hotel-booking'); ?></span>
+                                            <input type="text" name="address_line_2"
+                                                value="<?php echo \esc_attr((string) ($billing_form['address_line_2'] ?? '')); ?>"
+                                                placeholder="<?php echo \esc_attr__('Apartment, Suite, Unit, etc (Optional)', 'must-hotel-booking'); ?>" />
+                                        </label>
+                                        <label class="must-confirmation-field">
+                                            <span
+                                                class="screen-reader-text"><?php echo \esc_html__('Town / City', 'must-hotel-booking'); ?></span>
+                                            <input type="text" name="city"
+                                                value="<?php echo \esc_attr((string) ($billing_form['city'] ?? '')); ?>"
+                                                placeholder="<?php echo \esc_attr__('Town / City*', 'must-hotel-booking'); ?>"
+                                                required />
+                                        </label>
+                                        <label class="must-confirmation-field">
+                                            <span
+                                                class="screen-reader-text"><?php echo \esc_html__('County', 'must-hotel-booking'); ?></span>
+                                            <input type="text" name="county"
+                                                value="<?php echo \esc_attr((string) ($billing_form['county'] ?? '')); ?>"
+                                                placeholder="<?php echo \esc_attr__('County*', 'must-hotel-booking'); ?>"
+                                                required />
+                                        </label>
+                                        <label class="must-confirmation-field">
+                                            <span
+                                                class="screen-reader-text"><?php echo \esc_html__('Postcode / ZIP', 'must-hotel-booking'); ?></span>
+                                            <input type="text" name="postcode"
+                                                value="<?php echo \esc_attr((string) ($billing_form['postcode'] ?? '')); ?>"
+                                                placeholder="<?php echo \esc_attr__('Postcode / ZIP*', 'must-hotel-booking'); ?>"
+                                                required />
+                                        </label>
+                                        <div class="must-confirmation-field must-confirmation-field-phone">
+                                            <span
+                                                class="screen-reader-text"><?php echo \esc_html__('Phone Number', 'must-hotel-booking'); ?></span>
+                                            <div class="must-confirmation-phone-shell">
+                                                <div class="must-confirmation-picker must-confirmation-picker-phone"
                                                     data-checkout-picker="1"
-                                                    data-picker-placeholder="<?php echo \esc_attr($country_picker_placeholder); ?>">
-                                                    <input type="hidden" name="country"
-                                                        value="<?php echo \esc_attr($selected_country); ?>"
+                                                    data-picker-placeholder="<?php echo \esc_attr($phone_picker_display_label); ?>">
+                                                    <input type="hidden" name="phone_country_code"
+                                                        value="<?php echo \esc_attr((string) ($selected_phone_option['value'] ?? $selected_phone_country_code)); ?>"
                                                         data-picker-input="1" />
                                                     <button type="button" class="must-confirmation-picker-toggle"
                                                         data-picker-toggle="1" aria-haspopup="listbox" aria-expanded="false"
-                                                        aria-label="<?php echo \esc_attr__('Country of Residence', 'must-hotel-booking'); ?>">
+                                                        aria-label="<?php echo \esc_attr__('Phone country code', 'must-hotel-booking'); ?>">
                                                         <span class="must-confirmation-picker-toggle-copy">
-                                                            <span
-                                                                class="must-confirmation-picker-flag<?php echo $country_picker_has_selection ? '' : ' is-hidden'; ?>"
-                                                                data-picker-selected-flag="1"><?php echo \esc_html($country_picker_display_flag); ?></span>
+                                                            <span class="must-confirmation-picker-flag"
+                                                                data-picker-selected-flag="1"><?php echo \esc_html($phone_picker_display_flag); ?></span>
                                                             <span class="must-confirmation-picker-label"
-                                                                data-picker-selected-label="1"><?php echo \esc_html($country_picker_display_label); ?></span>
+                                                                data-picker-selected-label="1"><?php echo \esc_html($phone_picker_display_label); ?></span>
                                                         </span>
                                                         <?php if ($dropdown_icon_url !== ''): ?>
                                                             <img class="must-picker-chevron"
@@ -533,303 +567,192 @@ $render_payment_method_icon = static function (string $payment_method_key, strin
                                                         <div class="must-confirmation-picker-search-wrap">
                                                             <input type="text" class="must-confirmation-picker-search"
                                                                 data-picker-search="1" value=""
-                                                                placeholder="<?php echo \esc_attr($country_picker_search_placeholder); ?>"
-                                                                aria-label="<?php echo \esc_attr($country_picker_search_placeholder); ?>" />
+                                                                placeholder="<?php echo \esc_attr($phone_picker_search_placeholder); ?>"
+                                                                aria-label="<?php echo \esc_attr($phone_picker_search_placeholder); ?>" />
                                                         </div>
                                                         <div class="must-confirmation-picker-options" role="listbox">
-                                                            <?php foreach ($country_options as $country_option): ?>
+                                                            <?php foreach ($phone_country_code_options as $phone_country_code_option): ?>
                                                                 <?php
-                                                                $country_option_value = isset($country_option['value']) ? (string) $country_option['value'] : '';
-                                                                $country_option_code = isset($country_option['code']) ? (string) $country_option['code'] : '';
-                                                                $country_option_name = isset($country_option['name']) ? (string) $country_option['name'] : '';
-                                                                $country_option_dial_code = isset($country_option['dial_code']) ? (string) $country_option['dial_code'] : '';
-                                                                $country_option_flag = isset($country_option['flag']) ? (string) $country_option['flag'] : '';
-                                                                $country_option_search = \strtolower(\trim($country_option_code . ' ' . $country_option_name . ' ' . $country_option_dial_code));
-                                                                $country_option_is_selected = $country_option_value === $selected_country;
+                                                                $phone_option_value = isset($phone_country_code_option['value']) ? (string) $phone_country_code_option['value'] : '';
+                                                                $phone_option_country_code = isset($phone_country_code_option['country_code']) ? (string) $phone_country_code_option['country_code'] : '';
+                                                                $phone_option_country_name = isset($phone_country_code_option['country_name']) ? (string) $phone_country_code_option['country_name'] : '';
+                                                                $phone_option_dial_code = isset($phone_country_code_option['dial_code']) ? (string) $phone_country_code_option['dial_code'] : '';
+                                                                $phone_option_flag = isset($phone_country_code_option['flag']) ? (string) $phone_country_code_option['flag'] : '';
+                                                                $phone_option_display_label = \trim($phone_option_country_code . ' ' . $phone_option_dial_code);
+                                                                $phone_option_search = \strtolower(\trim($phone_option_country_code . ' ' . $phone_option_country_name . ' ' . $phone_option_dial_code));
+                                                                $phone_option_is_selected = $phone_option_value === (string) ($selected_phone_option['value'] ?? $selected_phone_country_code);
                                                                 ?>
                                                                 <button type="button"
-                                                                    class="must-confirmation-picker-option<?php echo $country_option_is_selected ? ' is-selected' : ''; ?>"
+                                                                    class="must-confirmation-picker-option<?php echo $phone_option_is_selected ? ' is-selected' : ''; ?>"
                                                                     data-picker-option="1"
-                                                                    data-value="<?php echo \esc_attr($country_option_value); ?>"
-                                                                    data-label="<?php echo \esc_attr($country_option_name); ?>"
-                                                                    data-flag="<?php echo \esc_attr($country_option_flag); ?>"
-                                                                    data-search="<?php echo \esc_attr($country_option_search); ?>"
+                                                                    data-value="<?php echo \esc_attr($phone_option_value); ?>"
+                                                                    data-label="<?php echo \esc_attr($phone_option_display_label); ?>"
+                                                                    data-flag="<?php echo \esc_attr($phone_option_flag); ?>"
+                                                                    data-search="<?php echo \esc_attr($phone_option_search); ?>"
                                                                     role="option"
-                                                                    aria-selected="<?php echo $country_option_is_selected ? 'true' : 'false'; ?>">
+                                                                    aria-selected="<?php echo $phone_option_is_selected ? 'true' : 'false'; ?>">
                                                                     <span class="must-confirmation-picker-option-flag"
-                                                                        aria-hidden="true"><?php echo \esc_html($country_option_flag); ?></span>
+                                                                        aria-hidden="true"><?php echo \esc_html($phone_option_flag); ?></span>
                                                                     <span class="must-confirmation-picker-option-copy">
                                                                         <span
-                                                                            class="must-confirmation-picker-option-title"><?php echo \esc_html($country_option_name); ?></span>
+                                                                            class="must-confirmation-picker-option-title"><?php echo \esc_html($phone_option_country_name); ?></span>
                                                                         <span
-                                                                            class="must-confirmation-picker-option-meta"><?php echo \esc_html(\trim($country_option_code . ' ' . $country_option_dial_code)); ?></span>
+                                                                            class="must-confirmation-picker-option-meta"><?php echo \esc_html($phone_option_display_label); ?></span>
                                                                     </span>
                                                                 </button>
                                                             <?php endforeach; ?>
                                                             <p class="must-confirmation-picker-empty" data-picker-empty="1"
-                                                                hidden><?php echo \esc_html($picker_no_results_label); ?></p>
+                                                                hidden><?php echo \esc_html($picker_no_results_label); ?>
+                                                            </p>
                                                         </div>
                                                     </div>
                                                 </div>
+                                                <span class="must-confirmation-phone-divider" aria-hidden="true">|</span>
+                                                <input type="text" name="phone_number"
+                                                    value="<?php echo \esc_attr((string) ($billing_form['phone_number'] ?? '')); ?>"
+                                                    placeholder="<?php echo \esc_attr__('Phone Number*', 'must-hotel-booking'); ?>"
+                                                    inputmode="numeric" pattern="[0-9]*" autocomplete="tel-national" required />
                                             </div>
-                                            <label class="must-confirmation-field">
-                                                <span
-                                                    class="screen-reader-text"><?php echo \esc_html__('Street Address', 'must-hotel-booking'); ?></span>
-                                                <input type="text" name="street_address"
-                                                    value="<?php echo \esc_attr((string) ($billing_form['street_address'] ?? '')); ?>"
-                                                    placeholder="<?php echo \esc_attr__('Street Address*', 'must-hotel-booking'); ?>"
-                                                    required />
-                                            </label>
-                                            <label class="must-confirmation-field">
-                                                <span
-                                                    class="screen-reader-text"><?php echo \esc_html__('Apartment, Suite, Unit, etc.', 'must-hotel-booking'); ?></span>
-                                                <input type="text" name="address_line_2"
-                                                    value="<?php echo \esc_attr((string) ($billing_form['address_line_2'] ?? '')); ?>"
-                                                    placeholder="<?php echo \esc_attr__('Apartment, Suite, Unit, etc (Optional)', 'must-hotel-booking'); ?>" />
-                                            </label>
-                                            <label class="must-confirmation-field">
-                                                <span
-                                                    class="screen-reader-text"><?php echo \esc_html__('Town / City', 'must-hotel-booking'); ?></span>
-                                                <input type="text" name="city"
-                                                    value="<?php echo \esc_attr((string) ($billing_form['city'] ?? '')); ?>"
-                                                    placeholder="<?php echo \esc_attr__('Town / City*', 'must-hotel-booking'); ?>"
-                                                    required />
-                                            </label>
-                                            <label class="must-confirmation-field">
-                                                <span
-                                                    class="screen-reader-text"><?php echo \esc_html__('County', 'must-hotel-booking'); ?></span>
-                                                <input type="text" name="county"
-                                                    value="<?php echo \esc_attr((string) ($billing_form['county'] ?? '')); ?>"
-                                                    placeholder="<?php echo \esc_attr__('County*', 'must-hotel-booking'); ?>"
-                                                    required />
-                                            </label>
-                                            <label class="must-confirmation-field">
-                                                <span
-                                                    class="screen-reader-text"><?php echo \esc_html__('Postcode / ZIP', 'must-hotel-booking'); ?></span>
-                                                <input type="text" name="postcode"
-                                                    value="<?php echo \esc_attr((string) ($billing_form['postcode'] ?? '')); ?>"
-                                                    placeholder="<?php echo \esc_attr__('Postcode / ZIP*', 'must-hotel-booking'); ?>"
-                                                    required />
-                                            </label>
-                                            <div class="must-confirmation-field must-confirmation-field-phone">
-                                                <span
-                                                    class="screen-reader-text"><?php echo \esc_html__('Phone Number', 'must-hotel-booking'); ?></span>
-                                                <div class="must-confirmation-phone-shell">
-                                                    <div class="must-confirmation-picker must-confirmation-picker-phone"
-                                                        data-checkout-picker="1"
-                                                        data-picker-placeholder="<?php echo \esc_attr($phone_picker_display_label); ?>">
-                                                        <input type="hidden" name="phone_country_code"
-                                                            value="<?php echo \esc_attr((string) ($selected_phone_option['value'] ?? $selected_phone_country_code)); ?>"
-                                                            data-picker-input="1" />
-                                                        <button type="button" class="must-confirmation-picker-toggle"
-                                                            data-picker-toggle="1" aria-haspopup="listbox" aria-expanded="false"
-                                                            aria-label="<?php echo \esc_attr__('Phone country code', 'must-hotel-booking'); ?>">
-                                                            <span class="must-confirmation-picker-toggle-copy">
-                                                                <span class="must-confirmation-picker-flag"
-                                                                    data-picker-selected-flag="1"><?php echo \esc_html($phone_picker_display_flag); ?></span>
-                                                                <span class="must-confirmation-picker-label"
-                                                                    data-picker-selected-label="1"><?php echo \esc_html($phone_picker_display_label); ?></span>
-                                                            </span>
-                                                            <?php if ($dropdown_icon_url !== ''): ?>
-                                                                <img class="must-picker-chevron"
-                                                                    src="<?php echo \esc_url($dropdown_icon_url); ?>" alt=""
-                                                                    aria-hidden="true" />
-                                                            <?php endif; ?>
-                                                        </button>
-                                                        <div class="must-confirmation-picker-panel" data-picker-panel="1"
-                                                            hidden>
-                                                            <div class="must-confirmation-picker-search-wrap">
-                                                                <input type="text" class="must-confirmation-picker-search"
-                                                                    data-picker-search="1" value=""
-                                                                    placeholder="<?php echo \esc_attr($phone_picker_search_placeholder); ?>"
-                                                                    aria-label="<?php echo \esc_attr($phone_picker_search_placeholder); ?>" />
-                                                            </div>
-                                                            <div class="must-confirmation-picker-options" role="listbox">
-                                                                <?php foreach ($phone_country_code_options as $phone_country_code_option): ?>
-                                                                    <?php
-                                                                    $phone_option_value = isset($phone_country_code_option['value']) ? (string) $phone_country_code_option['value'] : '';
-                                                                    $phone_option_country_code = isset($phone_country_code_option['country_code']) ? (string) $phone_country_code_option['country_code'] : '';
-                                                                    $phone_option_country_name = isset($phone_country_code_option['country_name']) ? (string) $phone_country_code_option['country_name'] : '';
-                                                                    $phone_option_dial_code = isset($phone_country_code_option['dial_code']) ? (string) $phone_country_code_option['dial_code'] : '';
-                                                                    $phone_option_flag = isset($phone_country_code_option['flag']) ? (string) $phone_country_code_option['flag'] : '';
-                                                                    $phone_option_display_label = \trim($phone_option_country_code . ' ' . $phone_option_dial_code);
-                                                                    $phone_option_search = \strtolower(\trim($phone_option_country_code . ' ' . $phone_option_country_name . ' ' . $phone_option_dial_code));
-                                                                    $phone_option_is_selected = $phone_option_value === (string) ($selected_phone_option['value'] ?? $selected_phone_country_code);
-                                                                    ?>
-                                                                    <button type="button"
-                                                                        class="must-confirmation-picker-option<?php echo $phone_option_is_selected ? ' is-selected' : ''; ?>"
-                                                                        data-picker-option="1"
-                                                                        data-value="<?php echo \esc_attr($phone_option_value); ?>"
-                                                                        data-label="<?php echo \esc_attr($phone_option_display_label); ?>"
-                                                                        data-flag="<?php echo \esc_attr($phone_option_flag); ?>"
-                                                                        data-search="<?php echo \esc_attr($phone_option_search); ?>"
-                                                                        role="option"
-                                                                        aria-selected="<?php echo $phone_option_is_selected ? 'true' : 'false'; ?>">
-                                                                        <span class="must-confirmation-picker-option-flag"
-                                                                            aria-hidden="true"><?php echo \esc_html($phone_option_flag); ?></span>
-                                                                        <span class="must-confirmation-picker-option-copy">
-                                                                            <span
-                                                                                class="must-confirmation-picker-option-title"><?php echo \esc_html($phone_option_country_name); ?></span>
-                                                                            <span
-                                                                                class="must-confirmation-picker-option-meta"><?php echo \esc_html($phone_option_display_label); ?></span>
-                                                                        </span>
-                                                                    </button>
-                                                                <?php endforeach; ?>
-                                                                <p class="must-confirmation-picker-empty" data-picker-empty="1"
-                                                                    hidden><?php echo \esc_html($picker_no_results_label); ?>
-                                                                </p>
-                                                            </div>
-                                                        </div>
-                                                    </div>
-                                                    <span class="must-confirmation-phone-divider" aria-hidden="true">|</span>
-                                                    <input type="text" name="phone_number"
-                                                        value="<?php echo \esc_attr((string) ($billing_form['phone_number'] ?? '')); ?>"
-                                                        placeholder="<?php echo \esc_attr__('Phone Number*', 'must-hotel-booking'); ?>"
-                                                        inputmode="numeric" pattern="[0-9]*" autocomplete="tel-national"
-                                                        required />
-                                                </div>
-                                            </div>
-                                            <label class="must-confirmation-field">
-                                                <span
-                                                    class="screen-reader-text"><?php echo \esc_html__('Email Address', 'must-hotel-booking'); ?></span>
-                                                <input type="email" name="email"
-                                                    value="<?php echo \esc_attr((string) ($billing_form['email'] ?? '')); ?>"
-                                                    placeholder="<?php echo \esc_attr__('Email Address*', 'must-hotel-booking'); ?>"
-                                                    required />
-                                            </label>
                                         </div>
-                                    </div>
-                                    <div class="must-confirmation-special-section">
-                                        <label class="must-confirmation-field must-confirmation-field-textarea">
+                                        <label class="must-confirmation-field">
                                             <span
-                                                class="screen-reader-text"><?php echo \esc_html__('Special Requests', 'must-hotel-booking'); ?></span>
-                                            <textarea name="special_requests" rows="4"
-                                                placeholder="<?php echo \esc_attr__('Special Requests (Optional)', 'must-hotel-booking'); ?>"><?php echo \esc_textarea((string) ($billing_form['special_requests'] ?? '')); ?></textarea>
+                                                class="screen-reader-text"><?php echo \esc_html__('Email Address', 'must-hotel-booking'); ?></span>
+                                            <input type="email" name="email"
+                                                value="<?php echo \esc_attr((string) ($billing_form['email'] ?? '')); ?>"
+                                                placeholder="<?php echo \esc_attr__('Email Address*', 'must-hotel-booking'); ?>"
+                                                required />
                                         </label>
                                     </div>
                                 </div>
-                            </section>
-                            <aside class="must-confirmation-side">
-                                <section class="must-confirmation-order-table">
-                                    <div class="must-confirmation-order-head">
-                                        <span><?php echo \esc_html__('Product', 'must-hotel-booking'); ?></span>
-                                        <span><?php echo \esc_html__('Subtotal', 'must-hotel-booking'); ?></span>
-                                    </div>
-                                    <?php foreach ($selected_rooms as $selected_room_item): ?>
-                                        <?php
-                                        $room = isset($selected_room_item['room']) && \is_array($selected_room_item['room']) ? $selected_room_item['room'] : [];
-                                        $pricing = isset($selected_room_item['pricing']) && \is_array($selected_room_item['pricing']) ? $selected_room_item['pricing'] : [];
-                                        $room_name = isset($room['name']) ? (string) $room['name'] : \__('Room', 'must-hotel-booking');
-                                        $rate_plan_name = isset($selected_room_item['rate_plan']['name']) ? (string) $selected_room_item['rate_plan']['name'] : '';
-                                        $room_currency = isset($room['currency']) ? (string) $room['currency'] : $summary_currency;
-                                        $room_total = isset($pricing['total_price']) ? (float) $pricing['total_price'] : (isset($room['dynamic_total_price']) ? (float) $room['dynamic_total_price'] : 0.0);
-                                        ?>
-                                        <div class="must-confirmation-order-row">
-                                            <span>
-                                                <?php echo \esc_html($room_name); ?>
-                                                <?php if ($rate_plan_name !== ''): ?>
-                                                    <small><?php echo \esc_html(' - ' . $rate_plan_name); ?></small>
-                                                <?php endif; ?>
-                                            </span>
-                                            <span><?php echo \esc_html($format_money($room_total, $room_currency)); ?></span>
-                                        </div>
-                                    <?php endforeach; ?>
+                                <div class="must-confirmation-special-section">
+                                    <label class="must-confirmation-field must-confirmation-field-textarea">
+                                        <span
+                                            class="screen-reader-text"><?php echo \esc_html__('Special Requests', 'must-hotel-booking'); ?></span>
+                                        <textarea name="special_requests" rows="4"
+                                            placeholder="<?php echo \esc_attr__('Special Requests (Optional)', 'must-hotel-booking'); ?>"><?php echo \esc_textarea((string) ($billing_form['special_requests'] ?? '')); ?></textarea>
+                                    </label>
+                                </div>
+                            </div>
+                        </section>
+                        <aside class="must-confirmation-side">
+                            <section class="must-confirmation-order-table">
+                                <div class="must-confirmation-order-head">
+                                    <span><?php echo \esc_html__('Product', 'must-hotel-booking'); ?></span>
+                                    <span><?php echo \esc_html__('Subtotal', 'must-hotel-booking'); ?></span>
+                                </div>
+                                <?php foreach ($selected_rooms as $selected_room_item): ?>
+                                    <?php
+                                    $room = isset($selected_room_item['room']) && \is_array($selected_room_item['room']) ? $selected_room_item['room'] : [];
+                                    $pricing = isset($selected_room_item['pricing']) && \is_array($selected_room_item['pricing']) ? $selected_room_item['pricing'] : [];
+                                    $room_name = isset($room['name']) ? (string) $room['name'] : \__('Room', 'must-hotel-booking');
+                                    $rate_plan_name = isset($selected_room_item['rate_plan']['name']) ? (string) $selected_room_item['rate_plan']['name'] : '';
+                                    $room_currency = isset($room['currency']) ? (string) $room['currency'] : $summary_currency;
+                                    $room_total = isset($pricing['total_price']) ? (float) $pricing['total_price'] : (isset($room['dynamic_total_price']) ? (float) $room['dynamic_total_price'] : 0.0);
+                                    ?>
                                     <div class="must-confirmation-order-row">
-                                        <span><?php echo \esc_html__('Subtotal', 'must-hotel-booking'); ?></span>
-                                        <span><?php echo \esc_html($format_money($subtotal_before_taxes, $summary_currency)); ?></span>
-                                    </div>
-                                    <?php if ($discount_total > 0.0): ?>
-                                        <div class="must-confirmation-order-row">
-                                            <span>
-                                                <?php
-                                                echo \esc_html(
-                                                    $applied_coupon_code !== ''
-                                                    ? \sprintf(__('Discount (%s)', 'must-hotel-booking'), \strtoupper($applied_coupon_code))
-                                                    : __('Discount Used', 'must-hotel-booking')
-                                                );
-                                                ?>
-                                            </span>
-                                            <span><?php echo \esc_html('-' . $format_money($discount_total, $summary_currency)); ?></span>
-                                        </div>
-                                    <?php endif; ?>
-                                    <div class="must-confirmation-order-row is-total">
-                                        <span><?php echo \esc_html__('Total', 'must-hotel-booking'); ?></span>
-                                        <span><?php echo \esc_html($format_money($total_price, $summary_currency)); ?></span>
-                                    </div>
-                                </section>
-                                <section class="must-confirmation-payment-method">
-                                    <h2><?php echo \esc_html__('Payment Method', 'must-hotel-booking'); ?></h2>
-                                    <div class="must-confirmation-payment-box">
-                                        <div class="must-confirmation-payment-options">
-                                            <?php foreach ($payment_methods as $payment_method_key => $payment_method_meta): ?>
-                                                <?php
-                                                $payment_method_label = isset($payment_method_meta['label']) ? (string) $payment_method_meta['label'] : $payment_method_key;
-                                                $payment_method_cta = \MustHotelBooking\Engine\PaymentEngine::getCheckoutPaymentCtaLabel($payment_method_key);
-                                                $payment_method_tooltip = $payment_method_key === 'stripe'
-                                                    ? \__('Pay with Stripe', 'must-hotel-booking')
-                                                    : ($payment_method_key === 'pokpay'
-                                                        ? \__('Pay with PokPay', 'must-hotel-booking')
-                                                        : ($payment_method_key === 'pay_at_hotel'
-                                                            ? \__('Pay with cash at hotel', 'must-hotel-booking')
-                                                            : \sprintf(\__('Pay with %s', 'must-hotel-booking'), $payment_method_label)));
-                                                ?>
-                                                <label
-                                                    class="must-confirmation-payment-option must-confirmation-payment-option--<?php echo \esc_attr($payment_method_key); ?>"
-                                                    title="<?php echo \esc_attr($payment_method_tooltip); ?>">
-                                                    <input type="radio" name="payment_method"
-                                                        value="<?php echo \esc_attr($payment_method_key); ?>"
-                                                        data-cta-label="<?php echo \esc_attr($payment_method_cta); ?>"
-                                                        aria-label="<?php echo \esc_attr($payment_method_tooltip); ?>" <?php checked($payment_method_key, $payment_method); ?> />
-                                                    <span class="must-confirmation-payment-option-visual" aria-hidden="true">
-                                                        <span class="must-confirmation-payment-option-icon">
-                                                            <?php echo $render_payment_method_icon($payment_method_key, $payment_method_label); ?>
-                                                        </span>
-                                                    </span>
-                                                    <span
-                                                        class="screen-reader-text"><?php echo \esc_html($payment_method_tooltip); ?></span>
-                                                </label>
-                                            <?php endforeach; ?>
-                                        </div>
-                                    </div>
-                                    <?php if ($is_pokpay_pending): ?>
-                                        <div class="must-confirmation-pokpay-panel" data-pokpay-panel="1">
-                                            <p class="must-confirmation-pokpay-intro">
-                                                <?php echo \esc_html__('Complete your secure PokPay card payment below.', 'must-hotel-booking'); ?>
-                                            </p>
-                                            <div id="pok-payment-container" class="must-confirmation-pokpay-container"></div>
-                                            <p class="must-confirmation-pokpay-status" data-pokpay-status="1" role="status"
-                                                aria-live="polite"></p>
-                                        </div>
-                                    <?php endif; ?>
-                                </section>
-                                <section class="must-confirmation-policy-section">
-                                    <p class="must-confirmation-policy">
-                                        <?php echo \esc_html__('Your personal data will be used to process your order, support your experience throughout this website, and for other purposes described in our privacy policy.', 'must-hotel-booking'); ?>
-                                    </p>
-                                </section>
-                                <section class="must-confirmation-action">
-                                    <?php if (!$is_pokpay_pending): ?>
-                                        <button type="submit" name="must_confirmation_action" value="confirm_booking"
-                                            class="must-confirmation-submit">
-                                            <span><?php echo \esc_html($confirmation_cta_label); ?></span>
-                                            <?php if ($arrow_icon_url !== ''): ?>
-                                                <img src="<?php echo \esc_url($arrow_icon_url); ?>" alt="" aria-hidden="true" />
+                                        <span>
+                                            <?php echo \esc_html($room_name); ?>
+                                            <?php if ($rate_plan_name !== ''): ?>
+                                                <small><?php echo \esc_html(' - ' . $rate_plan_name); ?></small>
                                             <?php endif; ?>
-                                        </button>
-                                    <?php endif; ?>
+                                        </span>
+                                        <span><?php echo \esc_html($format_money($room_total, $room_currency)); ?></span>
+                                    </div>
+                                <?php endforeach; ?>
+                                <div class="must-confirmation-order-row">
+                                    <span><?php echo \esc_html__('Subtotal', 'must-hotel-booking'); ?></span>
+                                    <span><?php echo \esc_html($format_money($subtotal_before_taxes, $summary_currency)); ?></span>
+                                </div>
+                                <?php if ($discount_total > 0.0): ?>
+                                    <div class="must-confirmation-order-row">
+                                        <span>
+                                            <?php
+                                            echo \esc_html(
+                                                $applied_coupon_code !== ''
+                                                ? \sprintf(__('Discount (%s)', 'must-hotel-booking'), \strtoupper($applied_coupon_code))
+                                                : __('Discount Used', 'must-hotel-booking')
+                                            );
+                                            ?>
+                                        </span>
+                                        <span><?php echo \esc_html('-' . $format_money($discount_total, $summary_currency)); ?></span>
+                                    </div>
+                                <?php endif; ?>
+                                <div class="must-confirmation-order-row is-total">
+                                    <span><?php echo \esc_html__('Total', 'must-hotel-booking'); ?></span>
+                                    <span><?php echo \esc_html($format_money($total_price, $summary_currency)); ?></span>
+                                </div>
+                            </section>
+                            <section class="must-confirmation-payment-method">
+                                <h2><?php echo \esc_html__('Payment Method', 'must-hotel-booking'); ?></h2>
+                                <div class="must-confirmation-payment-box">
+                                    <div class="must-confirmation-payment-options">
+                                        <?php foreach ($payment_methods as $payment_method_key => $payment_method_meta): ?>
+                                            <?php
+                                            $payment_method_label = isset($payment_method_meta['label']) ? (string) $payment_method_meta['label'] : $payment_method_key;
+                                            $payment_method_cta = \MustHotelBooking\Engine\PaymentEngine::getCheckoutPaymentCtaLabel($payment_method_key);
+                                            $payment_method_tooltip = $payment_method_key === 'stripe'
+                                                ? \__('Pay with Stripe', 'must-hotel-booking')
+                                                : ($payment_method_key === 'pokpay'
+                                                    ? \__('Pay with PokPay', 'must-hotel-booking')
+                                                    : ($payment_method_key === 'pay_at_hotel'
+                                                        ? \__('Pay with cash at hotel', 'must-hotel-booking')
+                                                        : \sprintf(\__('Pay with %s', 'must-hotel-booking'), $payment_method_label)));
+                                            ?>
+                                            <label
+                                                class="must-confirmation-payment-option must-confirmation-payment-option--<?php echo \esc_attr($payment_method_key); ?>"
+                                                title="<?php echo \esc_attr($payment_method_tooltip); ?>">
+                                                <input type="radio" name="payment_method"
+                                                    value="<?php echo \esc_attr($payment_method_key); ?>"
+                                                    data-cta-label="<?php echo \esc_attr($payment_method_cta); ?>"
+                                                    aria-label="<?php echo \esc_attr($payment_method_tooltip); ?>" <?php checked($payment_method_key, $payment_method); ?> />
+                                                <span class="must-confirmation-payment-option-visual" aria-hidden="true">
+                                                    <span class="must-confirmation-payment-option-icon">
+                                                        <?php echo $render_payment_method_icon($payment_method_key, $payment_method_label); ?>
+                                                    </span>
+                                                </span>
+                                                <span
+                                                    class="screen-reader-text"><?php echo \esc_html($payment_method_tooltip); ?></span>
+                                            </label>
+                                        <?php endforeach; ?>
+                                    </div>
+                                </div>
+
+                            </section>
+                            <section class="must-confirmation-policy-section">
+                                <p class="must-confirmation-policy">
+                                    <?php echo \esc_html__('Your personal data will be used to process your order, support your experience throughout this website, and for other purposes described in our privacy policy.', 'must-hotel-booking'); ?>
+                                </p>
+                            </section>
+                            <?php if ($is_pokpay_pending): ?>
+                                <section class="must-confirmation-pokpay-checkout"
+                                    aria-labelledby="must-confirmation-pokpay-heading">
+                                    <h2 id="must-confirmation-pokpay-heading">
+                                        <?php echo \esc_html__('Secure PokPay payment', 'must-hotel-booking'); ?>
+                                    </h2>
+                                    <p class="must-confirmation-policy" data-pokpay-status>
+                                        <?php echo \esc_html__('Loading secure PokPay checkout...', 'must-hotel-booking'); ?>
+                                    </p>
+                                    <div id="pok-payment-container" class="must-confirmation-pokpay-container"></div>
                                 </section>
-                            </aside>
-                        </div>
-                    <?php else: ?>
-                        <p><a
-                                href="<?php echo \esc_url($checkout_url); ?>"><?php echo \esc_html__('Back to Guest Information', 'must-hotel-booking'); ?></a>
-                        </p>
-                    <?php endif; ?>
-                    <?php if ($is_pokpay_pending): ?>
-                </div>
-            <?php else: ?>
-                </form>
-            <?php endif; ?>
+                            <?php else: ?>
+                                <section class="must-confirmation-action">
+                                    <button type="submit" name="must_confirmation_action" value="confirm_booking"
+                                        class="must-confirmation-submit">
+                                        <span><?php echo \esc_html($confirmation_cta_label); ?></span>
+                                        <?php if ($arrow_icon_url !== ''): ?>
+                                            <img src="<?php echo \esc_url($arrow_icon_url); ?>" alt="" aria-hidden="true" />
+                                        <?php endif; ?>
+                                    </button>
+                                </section>
+                            <?php endif; ?>
+                        </aside>
+                    </div>
+                <?php else: ?>
+                    <p><a
+                            href="<?php echo \esc_url($checkout_url); ?>"><?php echo \esc_html__('Back to Guest Information', 'must-hotel-booking'); ?></a>
+                    </p>
+                <?php endif; ?>
+            </form>
         <?php else: ?>
             <p><?php echo \esc_html((string) ($view['message'] ?? __('Reservation details are unavailable.', 'must-hotel-booking'))); ?>
             </p>

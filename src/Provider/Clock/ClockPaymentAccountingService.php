@@ -115,23 +115,47 @@ final class ClockPaymentAccountingService
             return $this->result(true, false, 'already_posted', ['accounting_id' => $accountingId]);
         }
 
+        if ((string) ($accounting['status'] ?? '') === 'handled_manually') {
+            return $this->result(true, false, 'handled_manually', ['accounting_id' => $accountingId]);
+        }
+
         if ($transactionId === '') {
-            return $this->markManualReview($accountingId, \__('Provider transaction reference is missing.', 'must-hotel-booking'));
+            return $this->markManualReview($accountingId, ClockAccountingReason::CLOCK_POSTING_REQUIRES_MANUAL_ACTION, \__('Provider transaction reference is missing.', 'must-hotel-booking'));
         }
 
         if ($clockBookingId === '') {
-            return $this->markManualReview($accountingId, \__('Clock booking or reservation ID is missing; local booking remains paid.', 'must-hotel-booking'));
+            return $this->markManualReview($accountingId, ClockAccountingReason::CLOCK_BOOKING_NOT_FOUND, \__('Clock booking or reservation ID is missing; local booking remains paid.', 'must-hotel-booking'));
         }
 
         if ($amount <= 0.0) {
-            return $this->markManualReview($accountingId, \__('Payment amount is not positive.', 'must-hotel-booking'));
+            return $this->markManualReview($accountingId, ClockAccountingReason::CLOCK_POSTING_REQUIRES_MANUAL_ACTION, \__('Payment amount is not positive.', 'must-hotel-booking'));
         }
 
-        $folioResult = $this->folios->selectPaymentFolio($clockBookingId, $amount, $currency, $reservationId);
+        $postingDecision = $this->paymentPostingDecision($reservation);
+
+        if ((string) ($postingDecision['mode'] ?? '') === 'manual') {
+            return $this->markManualReview(
+                $accountingId,
+                (string) ($postingDecision['reason_code'] ?? ClockAccountingReason::CLOCK_POSTING_REQUIRES_MANUAL_ACTION),
+                (string) ($postingDecision['message'] ?? \__('Clock payment accounting requires manual review.', 'must-hotel-booking'))
+            );
+        }
+
+        if ((string) ($postingDecision['mode'] ?? '') === 'deposit') {
+            $folioResult = $this->folios->selectOrCreateDepositFolio(
+                $clockBookingId,
+                $currency,
+                $reservationId,
+                (string) ($accounting['clock_folio_id'] ?? '')
+            );
+        } else {
+            $folioResult = $this->folios->selectPaymentFolio($clockBookingId, $amount, $currency, $reservationId);
+        }
 
         if (empty($folioResult['success'])) {
             return $this->markFailure(
                 $accountingId,
+                ClockAccountingReason::forFolioMessage((string) ($folioResult['message'] ?? '')),
                 (string) ($folioResult['message'] ?? \__('Unable to select a Clock folio.', 'must-hotel-booking')),
                 false,
                 $enqueueRetry
@@ -139,7 +163,8 @@ final class ClockPaymentAccountingService
         }
 
         $folioId = (string) ($folioResult['folio_id'] ?? '');
-        $postResult = $this->postAndRecord($accountingId, $folioId, $gateway, 'payment', $amount, $currency, $transactionId, $idempotencyKey, $reservationId);
+        $direction = (string) ($postingDecision['mode'] ?? '') === 'deposit' ? 'deposit' : 'payment';
+        $postResult = $this->postAndRecord($accountingId, $folioId, $gateway, $direction, $amount, $currency, $transactionId, $idempotencyKey, $reservationId);
 
         if (empty($postResult['success']) && !empty($postResult['retry']) && $enqueueRetry) {
             $this->enqueueRetry($accountingId, $folioId);
@@ -213,8 +238,12 @@ final class ClockPaymentAccountingService
             return $this->result(true, false, 'already_posted', ['accounting_id' => $accountingId]);
         }
 
+        if ((string) ($accounting['status'] ?? '') === 'handled_manually') {
+            return $this->result(true, false, 'handled_manually', ['accounting_id' => $accountingId]);
+        }
+
         if ($clockBookingId === '') {
-            $result = $this->markManualReview($accountingId, \__('Clock booking or reservation ID is missing; refund remains completed locally.', 'must-hotel-booking'));
+            $result = $this->markManualReview($accountingId, ClockAccountingReason::CLOCK_BOOKING_NOT_FOUND, \__('Clock booking or reservation ID is missing; refund remains completed locally.', 'must-hotel-booking'));
             $this->mirrorRefundFailure($refundId, 'manual_review', (string) ($result['message'] ?? ''));
 
             return $result;
@@ -224,7 +253,7 @@ final class ClockPaymentAccountingService
 
         if (!\is_array($originalAccounting)) {
             $message = \__('Refund cannot be posted to Clock because the original successful payment folio is unknown.', 'must-hotel-booking');
-            $result = $this->markManualReview($accountingId, $message);
+            $result = $this->markManualReview($accountingId, ClockAccountingReason::REFUND_REQUIRES_MANUAL_CLOCK_ACTION, $message);
             $this->mirrorRefundFailure($refundId, 'manual_review', $message);
 
             return $result;
@@ -235,7 +264,7 @@ final class ClockPaymentAccountingService
 
         if (empty($folioResult['success'])) {
             $message = (string) ($folioResult['message'] ?? \__('Unable to validate original Clock payment folio.', 'must-hotel-booking'));
-            $result = $this->markFailure($accountingId, $message, false, $enqueueRetry);
+            $result = $this->markFailure($accountingId, ClockAccountingReason::forFolioMessage($message), $message, false, $enqueueRetry);
             $this->mirrorRefundFailure($refundId, 'failed', $message);
 
             return $result;
@@ -269,6 +298,10 @@ final class ClockPaymentAccountingService
 
         if ((string) ($row['status'] ?? '') === 'posted') {
             return $this->result(true, false, 'already_posted', ['accounting_id' => $accountingId]);
+        }
+
+        if ((string) ($row['status'] ?? '') === 'handled_manually') {
+            return $this->result(true, false, 'handled_manually', ['accounting_id' => $accountingId]);
         }
 
         if ((string) ($row['direction'] ?? '') === 'refund') {
@@ -327,6 +360,10 @@ final class ClockPaymentAccountingService
         if (empty($postResult['success'])) {
             return $this->markFailure(
                 $accountingId,
+                ClockAccountingReason::forFolioMessage(
+                    (string) ($postResult['message'] ?? \__('Clock credit item create request failed.', 'must-hotel-booking')),
+                    (string) ($postResult['error_code'] ?? '')
+                ),
                 (string) ($postResult['message'] ?? \__('Clock credit item create request failed.', 'must-hotel-booking')),
                 !empty($postResult['retryable']),
                 false,
@@ -355,11 +392,11 @@ final class ClockPaymentAccountingService
     }
 
     /** @return array<string, mixed> */
-    private function markManualReview(int $accountingId, string $message): array
+    private function markManualReview(int $accountingId, string $reasonCode, string $message): array
     {
         $this->accounting->update($accountingId, [
             'status' => 'manual_review',
-            'last_error_code' => 'manual_review',
+            'last_error_code' => ClockAccountingReason::normalize($reasonCode, ClockAccountingReason::CLOCK_POSTING_REQUIRES_MANUAL_ACTION),
             'last_error' => $message,
             'next_retry_at' => null,
             'updated_at' => $this->now(),
@@ -369,12 +406,12 @@ final class ClockPaymentAccountingService
     }
 
     /** @return array<string, mixed> */
-    private function markFailure(int $accountingId, string $message, bool $retryable, bool $enqueueRetry, string $errorCode = ''): array
+    private function markFailure(int $accountingId, string $reasonCode, string $message, bool $retryable, bool $enqueueRetry, string $errorCode = ''): array
     {
         $status = $retryable ? 'failed' : ($errorCode === 'forbidden' ? 'manual_review' : 'failed');
         $this->accounting->update($accountingId, [
             'status' => $status,
-            'last_error_code' => $errorCode,
+            'last_error_code' => ClockAccountingReason::normalize($reasonCode, ClockAccountingReason::CLOCK_REQUEST_FAILED),
             'last_error' => $message,
             'next_retry_at' => $retryable ? $this->datePlusMinutes(5) : null,
             'updated_at' => $this->now(),
@@ -386,6 +423,60 @@ final class ClockPaymentAccountingService
         }
 
         return $this->result(false, $retryable, $message, ['accounting_id' => $accountingId]);
+    }
+
+    /** @param array<string, mixed> $reservation @return array{mode: string, message: string, reason_code?: string} */
+    private function paymentPostingDecision(array $reservation): array
+    {
+        $configuredMode = ClockConfig::paymentPostingMode();
+
+        if ($configuredMode === 'manual_clock_accounting') {
+            return [
+                'mode' => 'manual',
+                'reason_code' => ClockAccountingReason::CLOCK_POSTING_REQUIRES_MANUAL_ACTION,
+                'message' => \__('Clock payment posting mode is manual accounting; website payment is paid locally and must be recorded in Clock by reception/accounting.', 'must-hotel-booking'),
+            ];
+        }
+
+        if ($configuredMode === 'folio_payment_only') {
+            return ['mode' => 'folio', 'message' => ''];
+        }
+
+        if (!$this->isFutureReservation($reservation)) {
+            if (ClockConfig::sameDayFolioPaymentEnabled()) {
+                return ['mode' => 'folio', 'message' => ''];
+            }
+
+            return [
+                'mode' => 'manual',
+                'reason_code' => ClockAccountingReason::SAME_DAY_FOLIO_POSTING_DISABLED,
+                'message' => \__('Clock same-day/current-stay folio payment posting is disabled; record the website payment manually in Clock.', 'must-hotel-booking'),
+            ];
+        }
+
+        if (ClockConfig::hasVerifiedDepositPaymentEndpoint()) {
+            return ['mode' => 'deposit', 'message' => ''];
+        }
+
+        return [
+            'mode' => 'manual',
+            'reason_code' => ClockAccountingReason::FUTURE_BOOKING_REQUIRES_DEPOSIT_ENDPOINT,
+            'message' => \__('Future online payment was not posted as a Clock folio payment because no verified booking deposit/prepayment API endpoint is configured. Record it manually in Clock as a required deposit/prepayment.', 'must-hotel-booking'),
+        ];
+    }
+
+    /** @param array<string, mixed> $reservation */
+    private function isFutureReservation(array $reservation): bool
+    {
+        $checkin = \trim((string) ($reservation['checkin'] ?? ''));
+
+        if ($checkin === '') {
+            return true;
+        }
+
+        $today = \function_exists('current_time') ? \current_time('Y-m-d') : \gmdate('Y-m-d');
+
+        return $checkin > $today;
     }
 
     private function enqueueRetry(int $accountingId, string $folioId): void

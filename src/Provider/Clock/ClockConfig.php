@@ -171,6 +171,37 @@ final class ClockConfig
     {
         return self::inboundSyncPaths()['reservation_fetch'];
     }
+    public static function paymentPostingMode(): string
+    {
+        $mode = \sanitize_key((string) (self::settings()['clock_payment_posting_mode'] ?? 'auto_detect'));
+
+        return \in_array($mode, ['auto_detect', 'deposit_for_future_bookings', 'folio_payment_only', 'manual_clock_accounting'], true) ? $mode : 'auto_detect';
+    }
+    public static function sameDayFolioPaymentEnabled(): bool
+    {
+        return !empty(self::settings()['clock_same_day_folio_payment_enabled']);
+    }
+    /** @return array<string, string> */
+    public static function endpointOverrides(): array
+    {
+        $settings = self::settings();
+        return isset($settings['clock_endpoint_overrides']) && \is_array($settings['clock_endpoint_overrides'])
+            ? ClockEndpointRegistry::normalizeOverrides($settings['clock_endpoint_overrides'])
+            : ClockEndpointRegistry::normalizeOverrides([]);
+    }
+    public static function bookingDepositPaymentPath(): string
+    {
+        return ClockEndpointRegistry::resolveTemplate('booking_deposit_folio_create');
+    }
+    public static function bookingDepositRefundPath(): string
+    {
+        return ClockEndpointRegistry::resolveTemplate('booking_deposit_payment_refund');
+    }
+    public static function hasVerifiedDepositPaymentEndpoint(): bool
+    {
+        return self::bookingDepositPaymentPath() !== ''
+            && ClockEndpointRegistry::resolveTemplate('booking_deposit_payment_create') !== '';
+    }
     public static function webhookSecret(): string
     {
         return (string) (self::settings()['clock_webhook_secret'] ?? '');
@@ -429,6 +460,7 @@ final class ClockConfig
             'clock_legacy_base_url' => self::baseUrl(),
             'clock_api_user_set' => self::apiUser() !== '',
             'clock_api_key_set' => self::apiKey() !== '',
+            'clock_credentials_valid' => self::isConfigured(),
             'clock_property_id' => self::propertyId(),
             'clock_wbe_hotel_id' => self::wbeHotelId(),
             'clock_timeout_seconds' => self::timeoutSeconds(),
@@ -442,6 +474,7 @@ final class ClockConfig
             'clock_availability_path' => $publicBookingPaths['availability'],
             'clock_quote_path' => $publicBookingPaths['quote'],
             'clock_reservation_create_path' => $publicBookingPaths['reservation_create'],
+            'clock_booking_create_endpoint_reachable' => $publicBookingPaths['reservation_create'] !== '',
             'clock_reconciliation_paths_configured' => $configuredReconciliationPaths,
             'clock_reservation_status_update_path' => $reconciliationPaths['reservation_status_update'],
             'clock_payment_status_sync_supported' => $reconciliationPaths['reservation_status_update'] !== '',
@@ -455,8 +488,20 @@ final class ClockConfig
             'clock_reservation_guest_update_path' => $reconciliationPaths['reservation_guest_update'],
             'clock_inbound_sync_paths_configured' => $configuredInboundSyncPaths,
             'clock_reservation_fetch_path' => $inboundSyncPaths['reservation_fetch'],
+            'clock_booking_folio_endpoint_reachable' => ClockEndpointRegistry::resolvePath('booking_folios_list', ['booking_id' => '{booking_id}']) !== '',
+            'clock_folio_credit_item_endpoint_reachable' => ClockEndpointRegistry::resolvePath('folio_credit_item_create', ['folio_id' => '{folio_id}']) !== '',
+            'clock_endpoint_definitions' => ClockEndpointRegistry::definitions(),
+            'clock_endpoint_overrides' => self::endpointOverrides(),
+            'clock_booking_deposit_payment_path' => self::bookingDepositPaymentPath(),
+            'clock_booking_deposit_payment_configured' => self::hasVerifiedDepositPaymentEndpoint(),
+            'clock_booking_deposit_prepayment_endpoint_found_configured' => self::hasVerifiedDepositPaymentEndpoint(),
+            'clock_booking_deposit_refund_path' => self::bookingDepositRefundPath(),
+            'clock_payment_posting_mode' => self::paymentPostingMode(),
+            'clock_same_day_folio_payment_enabled' => self::sameDayFolioPaymentEnabled(),
+            'clock_required_rights_missing' => self::requiredRightsMissing(),
             'clock_webhook_secret_set' => self::webhookSecret() !== '',
-            'clock_webhook_url' => \function_exists('rest_url') ? \rest_url('must-hotel-booking/v1/clock/webhook') : '',
+            'public_callback_base_url' => MustBookingConfig::get_public_callback_base_url(),
+            'clock_webhook_url' => \function_exists('rest_url') ? MustBookingConfig::build_public_rest_url('must-hotel-booking/v1/clock/webhook') : '',
             'clock_auto_sync_enabled' => self::autoSyncEnabled(),
             'clock_auto_sync_interval_minutes' => self::autoSyncIntervalMinutes(),
             'clock_auto_sync_batch_size' => self::autoSyncBatchSize(),
@@ -474,6 +519,17 @@ final class ClockConfig
             }
         }
         return $count;
+    }
+    /** @return array<int, string> */
+    private static function requiredRightsMissing(): array
+    {
+        if (!self::hasVerifiedDepositPaymentEndpoint() && \in_array(self::paymentPostingMode(), ['auto_detect', 'deposit_for_future_bookings'], true)) {
+            return [
+                \__('Clock deposit folio endpoint configuration is unavailable; future online payments will enter manual Clock accounting instead of posting to a normal folio.', 'must-hotel-booking'),
+            ];
+        }
+
+        return [];
     }
     public static function normalizePath(string $path): string
     {

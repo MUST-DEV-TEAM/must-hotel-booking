@@ -11,6 +11,7 @@ use MustHotelBooking\Engine\PaymentEngine;
 use MustHotelBooking\Provider\Clock\ClockConfig;
 use MustHotelBooking\Provider\Clock\ClockCatalogService;
 use MustHotelBooking\Provider\Clock\ClockConnectionDiagnostic;
+use MustHotelBooking\Provider\Clock\ClockEndpointRegistry;
 use MustHotelBooking\Provider\Clock\ClockEndpointResolver;
 use MustHotelBooking\Provider\Clock\ClockInboundSyncService;
 use MustHotelBooking\Provider\Clock\ClockReservationSyncService;
@@ -558,6 +559,9 @@ final class SettingsPage
             'clock_products_path' => '/products',
             'clock_reservation_create_path' => '/bookings/',
             'clock_reservation_fetch_path' => '/bookings/{booking_id}',
+            'clock_endpoint_overrides' => [],
+            'clock_payment_posting_mode' => 'auto_detect',
+            'clock_same_day_folio_payment_enabled' => true,
             'clock_timeout_seconds' => \max(1, (int) ($provider['clock_timeout_seconds'] ?? 15)),
             'fallback_to_local_when_clock_unavailable' => false,
         ]);
@@ -1131,6 +1135,7 @@ final class SettingsPage
             'hotel_logo_url' => (string) MustBookingConfig::get_setting('hotel_logo_url', ''),
             'portal_logo_url' => (string) MustBookingConfig::get_setting('portal_logo_url', ''),
             'site_environment' => PaymentEngine::getActiveSiteEnvironment(),
+            'public_callback_base_url' => MustBookingConfig::get_public_callback_base_url(),
         ];
         return \array_merge($form, $overrides);
     }
@@ -1323,6 +1328,7 @@ final class SettingsPage
             'hotel_logo_url' => \esc_url_raw((string) \wp_unslash($source['hotel_logo_url'] ?? '')),
             'portal_logo_url' => \esc_url_raw((string) \wp_unslash($source['portal_logo_url'] ?? '')),
             'site_environment' => PaymentEngine::normalizeStripeEnvironment((string) \wp_unslash($source['site_environment'] ?? 'production')),
+            'public_callback_base_url' => MustBookingConfig::normalize_public_callback_base_url((string) \wp_unslash($source['public_callback_base_url'] ?? '')),
         ];
         $errors = [];
         if ($form['hotel_name'] === '') {
@@ -1339,6 +1345,10 @@ final class SettingsPage
         }
         if (!\in_array($form['currency_display'], ['symbol', 'symbol_code', 'code'], true)) {
             $form['currency_display'] = 'symbol_code';
+        }
+        $rawPublicCallbackBaseUrl = \trim((string) \wp_unslash($source['public_callback_base_url'] ?? ''));
+        if ($rawPublicCallbackBaseUrl !== '' && $form['public_callback_base_url'] === '') {
+            $errors[] = \__('Public callback base URL must be a valid HTTPS origin without credentials, query string, or fragment. HTTP is allowed only for local development hosts.', 'must-hotel-booking');
         }
         return [
             'form' => $form,
@@ -1359,6 +1369,7 @@ final class SettingsPage
                     'hotel_logo_url' => $form['hotel_logo_url'],
                     'portal_logo_url' => $form['portal_logo_url'],
                     'site_environment' => $form['site_environment'],
+                    'public_callback_base_url' => $form['public_callback_base_url'],
                 ],
                 'notifications_summary' => [
                     'booking_notification_email' => $form['booking_notification_email'],
@@ -1714,7 +1725,12 @@ final class SettingsPage
         $form['clock_subscription_id'] = ClockEndpointResolver::normalizeNumericId((string) \wp_unslash($source['clock_subscription_id'] ?? ''));
         $form['clock_account_id'] = ClockEndpointResolver::normalizeNumericId((string) \wp_unslash($source['clock_account_id'] ?? ''));
         $form['clock_api_user'] = \sanitize_text_field((string) \wp_unslash($source['clock_api_user'] ?? ($form['clock_api_user'] ?? '')));
-        $form['clock_api_key'] = \sanitize_text_field((string) \wp_unslash($source['clock_api_key'] ?? ($form['clock_api_key'] ?? '')));
+        $posted_api_key = isset($source['clock_api_key']) && !\is_array($source['clock_api_key'])
+            ? \sanitize_text_field((string) \wp_unslash($source['clock_api_key']))
+            : '';
+        if ($posted_api_key !== '') {
+            $form['clock_api_key'] = $posted_api_key;
+        }
         $form['clock_property_id'] = \sanitize_text_field((string) \wp_unslash($source['clock_property_id'] ?? ($form['clock_property_id'] ?? '')));
         $form['clock_wbe_hotel_id'] = ClockEndpointResolver::normalizeNumericId((string) \wp_unslash($source['clock_wbe_hotel_id'] ?? ''));
         $form['fallback_to_local_when_clock_unavailable'] = self::parseBool($source, 'fallback_to_local_when_clock_unavailable');
@@ -1735,14 +1751,31 @@ final class SettingsPage
         $form['clock_reservation_stay_update_path'] = ClockConfig::normalizeOptionalPath((string) \wp_unslash($source['clock_reservation_stay_update_path'] ?? ($form['clock_reservation_stay_update_path'] ?? '')));
         $form['clock_reservation_guest_update_path'] = ClockConfig::normalizeOptionalPath((string) \wp_unslash($source['clock_reservation_guest_update_path'] ?? ($form['clock_reservation_guest_update_path'] ?? '')));
         $form['clock_reservation_fetch_path'] = ClockConfig::normalizeOptionalPath((string) \wp_unslash($source['clock_reservation_fetch_path'] ?? ($form['clock_reservation_fetch_path'] ?? '')));
-        $form['clock_webhook_secret'] = \sanitize_text_field((string) \wp_unslash($source['clock_webhook_secret'] ?? ($form['clock_webhook_secret'] ?? '')));
+        $postedOverrides = isset($source['clock_endpoint_overrides']) && \is_array($source['clock_endpoint_overrides'])
+            ? \wp_unslash($source['clock_endpoint_overrides'])
+            : ($form['clock_endpoint_overrides'] ?? []);
+        $endpointOverrideErrors = ClockEndpointRegistry::validateOverrides(\is_array($postedOverrides) ? $postedOverrides : []);
+        $form['clock_endpoint_overrides'] = empty($endpointOverrideErrors)
+            ? ClockEndpointRegistry::normalizeOverrides(\is_array($postedOverrides) ? $postedOverrides : [], true)
+            : (\is_array($postedOverrides) ? \array_map('strval', $postedOverrides) : []);
+        $form['clock_payment_posting_mode'] = \sanitize_key((string) \wp_unslash($source['clock_payment_posting_mode'] ?? ($form['clock_payment_posting_mode'] ?? 'auto_detect')));
+        if (!\in_array($form['clock_payment_posting_mode'], ['auto_detect', 'deposit_for_future_bookings', 'folio_payment_only', 'manual_clock_accounting'], true)) {
+            $form['clock_payment_posting_mode'] = 'auto_detect';
+        }
+        $form['clock_same_day_folio_payment_enabled'] = self::parseBool($source, 'clock_same_day_folio_payment_enabled');
+        $posted_webhook_secret = isset($source['clock_webhook_secret']) && !\is_array($source['clock_webhook_secret'])
+            ? \sanitize_text_field((string) \wp_unslash($source['clock_webhook_secret']))
+            : '';
+        if ($posted_webhook_secret !== '') {
+            $form['clock_webhook_secret'] = $posted_webhook_secret;
+        }
         $form['clock_auto_sync_enabled'] = self::parseBool($source, 'clock_auto_sync_enabled');
         $form['clock_auto_sync_interval_minutes'] = ClockConfig::normalizeAutoSyncInterval((int) \absint(\wp_unslash($source['clock_auto_sync_interval_minutes'] ?? ($form['clock_auto_sync_interval_minutes'] ?? 15))));
         $form['clock_auto_sync_batch_size'] = \max(10, \min(100, (int) \absint(\wp_unslash($source['clock_auto_sync_batch_size'] ?? ($form['clock_auto_sync_batch_size'] ?? 25)))));
         $form['clock_auto_sync_past_days'] = \max(0, \min(90, (int) \absint(\wp_unslash($source['clock_auto_sync_past_days'] ?? ($form['clock_auto_sync_past_days'] ?? 2)))));
         $form['clock_auto_sync_future_days'] = \max(1, \min(1095, (int) \absint(\wp_unslash($source['clock_auto_sync_future_days'] ?? ($form['clock_auto_sync_future_days'] ?? 365)))));
         $form['clock_timeout_seconds'] = (int) \absint(\wp_unslash($source['clock_timeout_seconds'] ?? $form['clock_timeout_seconds']));
-        $errors = [];
+        $errors = $endpointOverrideErrors;
         if (!\in_array($form['website_booking_flow_mode'], ['plugin_checkout', 'clock_wbe_inline'], true)) {
             $form['website_booking_flow_mode'] = 'plugin_checkout';
         }
@@ -2473,6 +2506,13 @@ final class SettingsPage
                 return (string) ($meta['label'] ?? '');
             }, PaymentEngine::getStripeEnvironmentCatalog())
         ]);
+        self::renderField([
+            'label' => __('Public callback base URL', 'must-hotel-booking'),
+            'name' => 'public_callback_base_url',
+            'type' => 'url',
+            'value' => $form['public_callback_base_url'] ?? '',
+            'description' => __('Optional. Use only for reverse proxies, staging tunnels, or webhook delivery. When set, Stripe, PokPay, and Clock provider callback URLs use this public HTTPS base while normal admin/frontend navigation keeps the WordPress site URL.', 'must-hotel-booking'),
+        ]);
         echo '</div>';
         self::renderPanelEnd();
         self::renderFormEnd(\__('Save General Settings', 'must-hotel-booking'));
@@ -3007,10 +3047,26 @@ final class SettingsPage
             self::renderField(['label' => __('PMS API URL', 'must-hotel-booking'), 'name' => 'clock_pms_api_url', 'type' => 'url', 'value' => $form['clock_pms_api_url'] ?? '', 'description' => __('Example: https://sky-eu1.clock-software.com/pms_api/172528/16307', 'must-hotel-booking')]);
             self::renderField(['label' => __('Base API URL', 'must-hotel-booking'), 'name' => 'clock_base_api_url', 'type' => 'url', 'value' => $form['clock_base_api_url'] ?? '', 'description' => __('Optional now. Needed for Base API/payment/webhook features when Clock grants access.', 'must-hotel-booking')]);
             self::renderField(['label' => __('API user', 'must-hotel-booking'), 'name' => 'clock_api_user', 'value' => $form['clock_api_user'] ?? '']);
-            self::renderField(['label' => __('API key', 'must-hotel-booking'), 'name' => 'clock_api_key', 'type' => 'password', 'value' => $form['clock_api_key'] ?? '']);
+            self::renderField([
+                'label' => __('API key', 'must-hotel-booking'),
+                'name' => 'clock_api_key',
+                'type' => 'password',
+                'value' => '',
+                'description' => !empty($form['clock_api_key'])
+                    ? __('API key is saved. Leave blank to keep it.', 'must-hotel-booking')
+                    : __('Enter the Clock API key.', 'must-hotel-booking'),
+            ]);
             self::renderField(['label' => __('Clock environment', 'must-hotel-booking'), 'name' => 'clock_environment', 'type' => 'select', 'value' => $form['clock_environment'] ?? 'production', 'options' => ['production' => __('Production', 'must-hotel-booking'), 'sandbox' => __('Sandbox / test', 'must-hotel-booking'), 'custom' => __('Custom', 'must-hotel-booking')]]);
             self::renderField(['label' => __('Request timeout (seconds)', 'must-hotel-booking'), 'name' => 'clock_timeout_seconds', 'type' => 'number', 'min' => 1, 'max' => 60, 'value' => $form['clock_timeout_seconds'] ?? 15]);
-            self::renderField(['label' => __('Webhook shared secret', 'must-hotel-booking'), 'name' => 'clock_webhook_secret', 'type' => 'password', 'value' => $form['clock_webhook_secret'] ?? '', 'description' => __('Optional. Use when enabling Clock push/webhook sync.', 'must-hotel-booking')]);
+            self::renderField([
+                'label' => __('Webhook shared secret', 'must-hotel-booking'),
+                'name' => 'clock_webhook_secret',
+                'type' => 'password',
+                'value' => '',
+                'description' => !empty($form['clock_webhook_secret'])
+                    ? __('Webhook shared secret is saved. Leave blank to keep it.', 'must-hotel-booking')
+                    : __('Optional. Use when enabling Clock push/webhook sync.', 'must-hotel-booking'),
+            ]);
             self::renderField([
                 'label' => __('Enable automatic Clock reservation sync', 'must-hotel-booking'),
                 'name' => 'clock_auto_sync_enabled',
@@ -3049,6 +3105,26 @@ final class SettingsPage
             echo '<details class="must-settings-advanced"><summary>' . \esc_html__('Advanced Clock endpoint paths', 'must-hotel-booking') . '</summary>';
             echo '<p class="description">' . \esc_html__('Leave these on defaults unless Clock support gives you a different endpoint. They are shown for diagnostics, not normal setup.', 'must-hotel-booking') . '</p>';
             echo '<p class="description">' . \esc_html__('Supported path tokens: {booking_id}, {reservation_id}, {provider_booking_id}, {provider_reservation_id}, {provider_room_id}, {provider_room_code}, {checkin}, {checkout}.', 'must-hotel-booking') . '</p>';
+            self::renderField([
+                'label' => __('Clock payment posting mode', 'must-hotel-booking'),
+                'name' => 'clock_payment_posting_mode',
+                'type' => 'select',
+                'value' => $form['clock_payment_posting_mode'] ?? 'auto_detect',
+                'options' => [
+                    'auto_detect' => __('Auto-detect deposit endpoint; otherwise manual accounting', 'must-hotel-booking'),
+                    'deposit_for_future_bookings' => __('Deposit for future bookings; manual if endpoint unverified', 'must-hotel-booking'),
+                    'folio_payment_only' => __('Folio payment only - not recommended for future reservations', 'must-hotel-booking'),
+                    'manual_clock_accounting' => __('Manual Clock accounting', 'must-hotel-booking'),
+                ],
+                'description' => __('Default auto-detect will not post future online payments as folio credit items unless a verified deposit/prepayment endpoint exists.', 'must-hotel-booking'),
+            ]);
+            self::renderField([
+                'label' => __('Allow same-day folio payment posting', 'must-hotel-booking'),
+                'name' => 'clock_same_day_folio_payment_enabled',
+                'type' => 'checkbox',
+                'value' => $form['clock_same_day_folio_payment_enabled'] ?? true,
+                'description' => __('Same-day/current-stay payments may still be posted to a Clock folio when enabled.', 'must-hotel-booking'),
+            ]);
             echo '<div class="must-settings-grid must-settings-grid--3">';
             self::renderField(['label' => __('Connection test path', 'must-hotel-booking'), 'name' => 'clock_connection_path', 'value' => $form['clock_connection_path'] ?? '/room_types']);
             self::renderField(['label' => __('Room types path', 'must-hotel-booking'), 'name' => 'clock_room_types_path', 'value' => $form['clock_room_types_path'] ?? '/room_types']);
@@ -3065,6 +3141,7 @@ final class SettingsPage
             self::renderField(['label' => __('Reservation guest update path', 'must-hotel-booking'), 'name' => 'clock_reservation_guest_update_path', 'value' => $form['clock_reservation_guest_update_path'] ?? '', 'description' => __('Optional Clock guest/contact update endpoint. Supports {booking_id} and {reservation_id}.', 'must-hotel-booking')]);
             self::renderField(['label' => __('Rate plans path', 'must-hotel-booking'), 'name' => 'clock_rate_plans_path', 'value' => ($form['clock_rate_plans_path'] ?? '') !== '' ? $form['clock_rate_plans_path'] : '/rate_plans']);
             echo '</div>';
+            self::renderClockEndpointOverrideTable($form);
             $mutationPaths = [
                 'cancel' => (string) ($form['clock_reservation_cancel_path'] ?? ''),
                 'status' => (string) ($form['clock_reservation_status_update_path'] ?? ''),
@@ -3157,6 +3234,38 @@ final class SettingsPage
         self::renderClockSyncHealthPanel($providerData);
         self::renderClockMappingsPanel();
     }
+    /** @param array<string, mixed> $form */
+    private static function renderClockEndpointOverrideTable(array $form): void
+    {
+        $overrides = isset($form['clock_endpoint_overrides']) && \is_array($form['clock_endpoint_overrides'])
+            ? $form['clock_endpoint_overrides']
+            : [];
+
+        echo '<h3>' . \esc_html__('Advanced Endpoints', 'must-hotel-booking') . '</h3>';
+        echo '<p class="description notice notice-warning inline" style="padding:8px 12px;">' . \esc_html__('Changing endpoint templates can break the Clock integration. Leave overrides empty unless Clock support confirms the exact endpoint and required rights. API secrets are not shown here.', 'must-hotel-booking') . '</p>';
+        echo '<table class="widefat striped"><thead><tr>';
+        echo '<th>' . \esc_html__('Key', 'must-hotel-booking') . '</th>';
+        echo '<th>' . \esc_html__('Default', 'must-hotel-booking') . '</th>';
+        echo '<th>' . \esc_html__('Override', 'must-hotel-booking') . '</th>';
+        echo '<th>' . \esc_html__('Use', 'must-hotel-booking') . '</th>';
+        echo '</tr></thead><tbody>';
+
+        foreach (ClockEndpointRegistry::definitions() as $key => $definition) {
+            $override = isset($overrides[$key]) ? (string) $overrides[$key] : '';
+            echo '<tr>';
+            echo '<td><code>' . \esc_html((string) $key) . '</code><br><span class="description">' . \esc_html((string) ($definition['label'] ?? '')) . '</span></td>';
+            echo '<td><code>' . \esc_html((string) ($definition['method'] ?? '')) . ' ' . \esc_html((string) ($definition['default_template'] ?? '')) . '</code><br><span class="description">' . \esc_html((string) ($definition['api_area'] ?? '')) . '</span></td>';
+            echo '<td><input type="text" class="regular-text" name="clock_endpoint_overrides[' . \esc_attr((string) $key) . ']" value="' . \esc_attr($override) . '" placeholder="' . \esc_attr__('Use default', 'must-hotel-booking') . '" /></td>';
+            echo '<td><span class="description">' . \esc_html((string) ($definition['description'] ?? '')) . '</span>';
+            if ((string) ($definition['required_rights'] ?? '') !== '') {
+                echo '<br><span class="description"><strong>' . \esc_html__('Rights:', 'must-hotel-booking') . '</strong> ' . \esc_html((string) $definition['required_rights']) . '</span>';
+            }
+            echo '</td>';
+            echo '</tr>';
+        }
+
+        echo '</tbody></table>';
+    }
     /**
      * Preserve legacy/internal provider values while the guided setup hides them.
      *
@@ -3180,6 +3289,8 @@ final class SettingsPage
             'clock_wbe_room_type_rates_path' => (string) ($form['clock_wbe_room_type_rates_path'] ?? '/rates'),
             'clock_availability_path' => (string) ($form['clock_availability_path'] ?? ''),
             'clock_quote_path' => (string) ($form['clock_quote_path'] ?? ''),
+            'clock_payment_posting_mode' => (string) ($form['clock_payment_posting_mode'] ?? 'auto_detect'),
+            'clock_same_day_folio_payment_enabled' => !empty($form['clock_same_day_folio_payment_enabled']) ? '1' : '',
         ];
         if ($setupChoice !== 'clock_wbe_inline') {
             $hidden['clock_wbe_hotel_id'] = (string) ($form['clock_wbe_hotel_id'] ?? '');
@@ -3197,6 +3308,12 @@ final class SettingsPage
             $hidden['clock_rate_plans_path'] = (string) ($form['clock_rate_plans_path'] ?? '/rate_plans');
             $hidden['clock_reservation_create_path'] = (string) ($form['clock_reservation_create_path'] ?? '/bookings/');
             $hidden['clock_reservation_fetch_path'] = (string) ($form['clock_reservation_fetch_path'] ?? '/bookings/{booking_id}');
+            foreach ((array) ($form['clock_endpoint_overrides'] ?? []) as $key => $value) {
+                $key = \sanitize_key((string) $key);
+                if ($key !== '' && (string) $value !== '') {
+                    $hidden['clock_endpoint_overrides[' . $key . ']'] = (string) $value;
+                }
+            }
             $hidden['clock_auto_sync_enabled'] = !empty($form['clock_auto_sync_enabled']) ? '1' : '';
             $hidden['clock_auto_sync_interval_minutes'] = (string) ($form['clock_auto_sync_interval_minutes'] ?? 15);
             $hidden['clock_auto_sync_batch_size'] = (string) ($form['clock_auto_sync_batch_size'] ?? 25);

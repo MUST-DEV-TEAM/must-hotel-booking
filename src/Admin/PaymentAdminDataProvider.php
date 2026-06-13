@@ -45,8 +45,24 @@ final class PaymentAdminDataProvider
             $reservationId = isset($row['id']) ? (int) $row['id'] : 0;
             $state = PaymentStatusService::buildReservationPaymentState($row, $paymentRowsByReservation[$reservationId] ?? []);
             $providerPayment = ProviderReservationView::paymentContext($row, $state);
+            $clockAccountingRows = $reservationId > 0 ? $this->clockFolioAccountingRepository->getForReservation($reservationId) : [];
+            $clockAccountingStatuses = [];
+
+            foreach ($clockAccountingRows as $clockAccountingRow) {
+                if (!\is_array($clockAccountingRow)) {
+                    continue;
+                }
+
+                $clockAccountingStatuses[] = \sanitize_key((string) ($clockAccountingRow['status'] ?? ''));
+            }
+
+            $state['clock_accounting_statuses'] = \array_values(\array_filter(\array_unique($clockAccountingStatuses)));
 
             if (ProviderReservationView::isProviderBacked($row) && !empty($providerPayment['needs_attention'])) {
+                $state['needs_review'] = true;
+            }
+
+            if (!empty(\array_intersect((array) $state['clock_accounting_statuses'], ['failed', 'manual_review']))) {
                 $state['needs_review'] = true;
             }
 
@@ -138,6 +154,15 @@ final class PaymentAdminDataProvider
 
         if ($group === 'needs_review') {
             return $needsReview;
+        }
+
+        if (\strpos($group, 'clock_accounting_') === 0) {
+            $clockStatus = \substr($group, \strlen('clock_accounting_'));
+            $clockStatuses = isset($state['clock_accounting_statuses']) && \is_array($state['clock_accounting_statuses'])
+                ? $state['clock_accounting_statuses']
+                : [];
+
+            return \in_array($clockStatus, \array_map('strval', $clockStatuses), true);
         }
 
         if ($group === 'partial') {
@@ -411,8 +436,11 @@ final class PaymentAdminDataProvider
             'states' => PaymentMethodRegistry::getStates(),
             'environment_catalog' => PaymentEngine::getStripeEnvironmentCatalog(),
             'active_environment' => PaymentEngine::getActiveSiteEnvironment(),
+            'public_callback_base_url' => MustBookingConfig::get_public_callback_base_url(),
             'webhook_url' => PaymentEngine::getStripeWebhookUrl(),
+            'pokpay_webhook_url' => MustBookingConfig::build_public_rest_url('must-hotel-booking/v1/pokpay/webhook'),
             'pokpay_environment' => PaymentEngine::getPokPayApiEnvironment(),
+            'pokpay_checkout_mode' => MustBookingConfig::get_pokpay_checkout_mode(),
         ];
     }
 
@@ -446,6 +474,10 @@ final class PaymentAdminDataProvider
             'pay_at_hotel' => \__('Pay at hotel', 'must-hotel-booking'),
             'failed_incomplete' => \__('Failed or incomplete', 'must-hotel-booking'),
             'needs_review' => \__('Needs review', 'must-hotel-booking'),
+            'clock_accounting_manual_review' => \__('Clock accounting: manual review', 'must-hotel-booking'),
+            'clock_accounting_failed' => \__('Clock accounting: failed', 'must-hotel-booking'),
+            'clock_accounting_handled_manually' => \__('Clock accounting: handled manually', 'must-hotel-booking'),
+            'clock_accounting_posted' => \__('Clock accounting: posted', 'must-hotel-booking'),
         ];
     }
 

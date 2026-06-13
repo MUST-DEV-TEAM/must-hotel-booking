@@ -1,14 +1,11 @@
 <?php
-
 namespace MustHotelBooking\Engine;
-
 use MustHotelBooking\Core\ManagedPages;
 use MustHotelBooking\Core\MustBookingConfig;
 use MustHotelBooking\Core\PaymentMethodRegistry;
 use MustHotelBooking\Core\ReservationStatus;
 use MustHotelBooking\Engine\Payment\PaymentFactory;
 use MustHotelBooking\Engine\Payment\PaymentInterface;
-
 final class PaymentEngine
 {
     /**
@@ -21,11 +18,11 @@ final class PaymentEngine
             'reservation_ids' => [],
             'session_id' => '',
             'checkout_url' => '',
+            'checkout_mode' => '',
             'expires_at' => '',
             'created_at' => '',
         ];
     }
-
     /**
      * @param mixed $value
      * @return array<string, mixed>
@@ -35,7 +32,6 @@ final class PaymentEngine
         if (!\is_array($value)) {
             return self::getEmptyPendingPaymentFlowData();
         }
-
         $reservationIds = isset($value['reservation_ids']) && \is_array($value['reservation_ids'])
             ? \array_values(
                 \array_filter(
@@ -46,17 +42,16 @@ final class PaymentEngine
                 )
             )
             : [];
-
         return [
             'method' => isset($value['method']) ? \sanitize_key((string) $value['method']) : '',
             'reservation_ids' => $reservationIds,
             'session_id' => isset($value['session_id']) ? \sanitize_text_field((string) $value['session_id']) : '',
             'checkout_url' => isset($value['checkout_url']) ? \esc_url_raw((string) $value['checkout_url']) : '',
+            'checkout_mode' => isset($value['checkout_mode']) ? \sanitize_key((string) $value['checkout_mode']) : '',
             'expires_at' => isset($value['expires_at']) ? \sanitize_text_field((string) $value['expires_at']) : '',
             'created_at' => isset($value['created_at']) ? \sanitize_text_field((string) $value['created_at']) : '',
         ];
     }
-
     /**
      * @return array<string, array<string, string>>
      */
@@ -66,81 +61,63 @@ final class PaymentEngine
         $enabled = PaymentMethodRegistry::getEnabled();
         $options = [];
         $preferredOrder = ['pokpay', 'stripe', 'pay_at_hotel'];
-
         foreach ($preferredOrder as $method) {
             if (!\in_array($method, $enabled, true)) {
                 continue;
             }
-
             $methodKey = \sanitize_key((string) $method);
-
             if (!self::isGatewayAvailable($methodKey)) {
                 continue;
             }
-
             if (!isset($catalog[$methodKey]) || !\is_array($catalog[$methodKey])) {
                 continue;
             }
-
             $options[$methodKey] = [
                 'label' => isset($catalog[$methodKey]['label']) ? (string) $catalog[$methodKey]['label'] : $methodKey,
                 'description' => isset($catalog[$methodKey]['description']) ? (string) $catalog[$methodKey]['description'] : '',
             ];
         }
-
         foreach ($enabled as $method) {
             $methodKey = \sanitize_key((string) $method);
-
             if (isset($options[$methodKey])) {
                 continue;
             }
-
             if (!self::isGatewayAvailable($methodKey)) {
                 continue;
             }
-
             if (!isset($catalog[$methodKey]) || !\is_array($catalog[$methodKey])) {
                 continue;
             }
-
             $options[$methodKey] = [
                 'label' => isset($catalog[$methodKey]['label']) ? (string) $catalog[$methodKey]['label'] : $methodKey,
                 'description' => isset($catalog[$methodKey]['description']) ? (string) $catalog[$methodKey]['description'] : '',
             ];
         }
-
         if (empty($options)) {
             $options['pay_at_hotel'] = [
                 'label' => \__('Pay at hotel', 'must-hotel-booking'),
                 'description' => \__('Guest pays in cash at the property during check-in or check-out.', 'must-hotel-booking'),
             ];
         }
-
         return $options;
     }
-
     public static function getGateway(string $method = ''): PaymentInterface
     {
         return PaymentFactory::create($method);
     }
-
     public static function normalizeMethod(string $method): string
     {
         return PaymentFactory::normalizeMethod($method);
     }
-
     public static function normalizeCheckoutPaymentMethod(string $paymentMethod): string
     {
         $paymentMethod = \sanitize_key($paymentMethod);
         $availableMethods = \array_keys(self::getCheckoutPaymentMethods());
-
         if (\in_array($paymentMethod, $availableMethods, true)) {
             return $paymentMethod;
         }
-
         return (string) (\reset($availableMethods) ?: 'pay_at_hotel');
     }
-
     /**
      * @param array<string, mixed> $source
      * @param array<string, mixed> $flowData
@@ -148,45 +125,35 @@ final class PaymentEngine
     public static function getSelectedCheckoutPaymentMethod(array $source, array $flowData = []): string
     {
         $rawMethod = isset($source['payment_method']) ? (string) \wp_unslash($source['payment_method']) : '';
-
         if ($rawMethod === '' && isset($flowData['payment_method'])) {
             $rawMethod = (string) $flowData['payment_method'];
         }
-
         return self::normalizeCheckoutPaymentMethod($rawMethod);
     }
-
     public static function getCheckoutPaymentCtaLabel(string $paymentMethod): string
     {
         $paymentMethod = self::normalizeCheckoutPaymentMethod($paymentMethod);
         $gateway = self::normalizeMethod($paymentMethod);
-
         if ($paymentMethod === 'clock_pms') {
             return \__('Confirm in Clock PMS', 'must-hotel-booking');
         }
-
         if ($gateway === 'stripe') {
             return \__('Pay now with card', 'must-hotel-booking');
         }
-
         if ($gateway === 'pokpay') {
             return \__('Pay now with PokPay', 'must-hotel-booking');
         }
-
         return \__('Confirm reservation', 'must-hotel-booking');
     }
-
     /**
      * @return array<string, mixed>|null
      */
     public static function getCouponRuleByCode(string $couponCode): ?array
     {
         $coupon = CouponService::getCouponByCode($couponCode);
-
         if (!\is_array($coupon)) {
             return null;
         }
-
         return [
             'id' => isset($coupon['id']) ? (int) $coupon['id'] : 0,
             'code' => isset($coupon['code']) ? (string) $coupon['code'] : '',
@@ -203,7 +170,6 @@ final class PaymentEngine
             'used_count' => isset($coupon['used_count']) ? (int) $coupon['used_count'] : 0,
         ];
     }
-
     /**
      * @return array<string, array<string, string>>
      */
@@ -227,17 +193,14 @@ final class PaymentEngine
             ],
         ];
     }
-
     public static function detectStripeEnvironmentFromUrl(string $url): string
     {
         $parts = \wp_parse_url($url);
         $host = isset($parts['host']) ? \strtolower((string) $parts['host']) : '';
         $scheme = isset($parts['scheme']) ? \strtolower((string) $parts['scheme']) : '';
-
         if ($host === '') {
             return 'production';
         }
-
         if (
             $host === 'localhost' ||
             $host === '127.0.0.1' ||
@@ -248,71 +211,56 @@ final class PaymentEngine
         ) {
             return 'local';
         }
-
         if (\filter_var($host, \FILTER_VALIDATE_IP) !== false) {
             return 'staging';
         }
-
         if ($scheme !== 'https') {
             return 'staging';
         }
-
         return 'production';
     }
-
     public static function detectStripeEnvironmentFromSiteUrl(): string
     {
         return self::detectStripeEnvironmentFromUrl((string) \home_url('/'));
     }
-
     public static function normalizeStripeEnvironment(string $environment): string
     {
         $environment = \sanitize_key($environment);
         $catalog = self::getStripeEnvironmentCatalog();
-
         if (isset($catalog[$environment])) {
             return $environment;
         }
-
         return self::detectStripeEnvironmentFromSiteUrl();
     }
-
     public static function getActiveSiteEnvironment(): string
     {
         $settings = MustBookingConfig::get_all_settings();
         $savedEnvironment = \is_array($settings) && isset($settings['site_environment'])
             ? (string) $settings['site_environment']
             : '';
-
         if ($savedEnvironment === '') {
             return self::detectStripeEnvironmentFromSiteUrl();
         }
-
         return self::normalizeStripeEnvironment($savedEnvironment);
     }
-
     public static function getSiteEnvironmentLabel(string $environment = ''): string
     {
         $environment = $environment !== '' ? self::normalizeStripeEnvironment($environment) : self::getActiveSiteEnvironment();
         $catalog = self::getStripeEnvironmentCatalog();
-
         return isset($catalog[$environment]['label']) ? (string) $catalog[$environment]['label'] : $environment;
     }
-
     /**
      * @return array{publishable_key: string, secret_key: string, webhook_secret: string}
      */
     public static function getStripeEnvironmentSettingKeys(string $environment): array
     {
         $environment = self::normalizeStripeEnvironment($environment);
-
         return [
             'publishable_key' => 'stripe_' . $environment . '_publishable_key',
             'secret_key' => 'stripe_' . $environment . '_secret_key',
             'webhook_secret' => 'stripe_' . $environment . '_webhook_secret',
         ];
     }
-
     /**
      * @return array{publishable_key: string, secret_key: string, webhook_secret: string}
      */
@@ -321,54 +269,43 @@ final class PaymentEngine
         $environment = $environment !== '' ? self::normalizeStripeEnvironment($environment) : self::getActiveSiteEnvironment();
         $keys = self::getStripeEnvironmentSettingKeys($environment);
         $settings = MustBookingConfig::get_all_settings();
-
         return [
             'publishable_key' => \is_array($settings) && isset($settings[$keys['publishable_key']]) ? (string) $settings[$keys['publishable_key']] : '',
             'secret_key' => \is_array($settings) && isset($settings[$keys['secret_key']]) ? (string) $settings[$keys['secret_key']] : '',
             'webhook_secret' => \is_array($settings) && isset($settings[$keys['webhook_secret']]) ? (string) $settings[$keys['webhook_secret']] : '',
         ];
     }
-
     public static function getStripePublishableKey(): string
     {
         $credentials = self::getStripeEnvironmentCredentials();
-
         return isset($credentials['publishable_key']) ? (string) $credentials['publishable_key'] : '';
     }
-
     public static function getStripeSecretKey(): string
     {
         $credentials = self::getStripeEnvironmentCredentials();
-
         return isset($credentials['secret_key']) ? (string) $credentials['secret_key'] : '';
     }
-
     public static function getStripeWebhookSecret(): string
     {
         $credentials = self::getStripeEnvironmentCredentials();
-
         return isset($credentials['webhook_secret']) ? (string) $credentials['webhook_secret'] : '';
     }
-
     public static function isStripeCheckoutConfigured(): bool
     {
         return self::getStripePublishableKey() !== '' && self::getStripeSecretKey() !== '';
     }
-
     /**
      * @return array{merchant_id: string, key_id: string, key_secret: string}
      */
     public static function getPokPayEnvironmentSettingKeys(string $environment): array
     {
         $environment = self::normalizeStripeEnvironment($environment);
-
         return [
             'merchant_id' => 'pokpay_' . $environment . '_merchant_id',
             'key_id' => 'pokpay_' . $environment . '_key_id',
             'key_secret' => 'pokpay_' . $environment . '_key_secret',
         ];
     }
-
     /**
      * @return array{merchant_id: string, key_id: string, key_secret: string}
      */
@@ -377,62 +314,56 @@ final class PaymentEngine
         $environment = $environment !== '' ? self::normalizeStripeEnvironment($environment) : self::getActiveSiteEnvironment();
         $keys = self::getPokPayEnvironmentSettingKeys($environment);
         $settings = MustBookingConfig::get_all_settings();
-
         return [
             'merchant_id' => \is_array($settings) && isset($settings[$keys['merchant_id']]) ? (string) $settings[$keys['merchant_id']] : '',
             'key_id' => \is_array($settings) && isset($settings[$keys['key_id']]) ? (string) $settings[$keys['key_id']] : '',
             'key_secret' => \is_array($settings) && isset($settings[$keys['key_secret']]) ? (string) $settings[$keys['key_secret']] : '',
         ];
     }
-
     public static function getPokPayApiEnvironment(string $environment = ''): string
     {
         $environment = $environment !== '' ? self::normalizeStripeEnvironment($environment) : self::getActiveSiteEnvironment();
-
         return $environment === 'production' ? 'production' : 'staging';
     }
-
     public static function getPokPayBaseUrl(string $environment = ''): string
     {
         return self::getPokPayApiEnvironment($environment) === 'production'
             ? 'https://api.pokpay.io'
             : 'https://api-staging.pokpay.io';
     }
-
     public static function getPokPayCdnUrl(): string
     {
         return 'https://static.pokpay.io/public/dist/pokpayments/pok-payment.js';
     }
-
+    public static function getPokPayCheckoutMode(): string
+    {
+        return \class_exists(MustBookingConfig::class)
+            ? MustBookingConfig::get_pokpay_checkout_mode()
+            : 'sdk_confirm_url_redirect';
+    }
     public static function isPokPayConfigured(): bool
     {
         $credentials = self::getPokPayEnvironmentCredentials();
-
         return $credentials['merchant_id'] !== '' && $credentials['key_id'] !== '' && $credentials['key_secret'] !== '';
     }
-
     public static function getStripeCheckoutExpiryMinutes(): int
     {
         return 30;
     }
-
     public static function getPendingPaymentCleanupMinutes(): int
     {
         return 35;
     }
-
     public static function getStripeWebhookUrl(): string
     {
-        return \rest_url('must-hotel-booking/v1/stripe/webhook');
+        return MustBookingConfig::build_public_rest_url('must-hotel-booking/v1/stripe/webhook');
     }
-
     /**
      * @return array{reservation_status: string, payment_status: string, clear_selection: bool, increment_coupon_usage: bool}
      */
     public static function getReservationCreationOptions(string $method): array
     {
         $gateway = self::normalizeMethod($method);
-
         if ($gateway === 'stripe' || $gateway === 'pokpay') {
             return [
                 'reservation_status' => 'pending_payment',
@@ -441,7 +372,6 @@ final class PaymentEngine
                 'increment_coupon_usage' => false,
             ];
         }
-
         return [
             'reservation_status' => 'confirmed',
             'payment_status' => 'unpaid',
@@ -449,19 +379,15 @@ final class PaymentEngine
             'increment_coupon_usage' => true,
         ];
     }
-
     public static function isGatewayAvailable(string $method): bool
     {
         $validation = self::getGateway($method)->validatePayment();
-
         return !empty($validation['success']);
     }
-
     public static function supportsReusablePendingReservations(string $method): bool
     {
         return \in_array(self::normalizeMethod($method), ['stripe', 'pokpay'], true);
     }
-
     /**
      * @param array<int, int> $reservationIds
      * @param array<string, mixed> $context
@@ -473,10 +399,8 @@ final class PaymentEngine
             'reservation_ids' => self::normalizeReservationIds($reservationIds),
             'method' => \sanitize_key($method),
         ];
-
         return self::getGateway($method)->processPayment($payload, $amount, $context);
     }
-
     /**
      * @param array<int, int> $reservationIds
      * @param array<string, mixed> $context
@@ -488,10 +412,8 @@ final class PaymentEngine
             'reservation_ids' => self::normalizeReservationIds($reservationIds),
             'method' => \sanitize_key($method),
         ];
-
         return self::getGateway($method)->refundPayment($payload, $amount, $context);
     }
-
     /**
      * @param array<int, int> $reservationIds
      * @return array<string, mixed>
@@ -504,34 +426,27 @@ final class PaymentEngine
                 'message' => '',
             ];
         }
-
         $reservationIds = self::normalizeReservationIds($reservationIds);
         $sessionResponse = self::getStripeCheckoutSession($sessionId);
-
         if (empty($sessionResponse['success'])) {
             return [
                 'success' => false,
                 'message' => isset($sessionResponse['message']) ? (string) $sessionResponse['message'] : '',
             ];
         }
-
         $session = isset($sessionResponse['session']) && \is_array($sessionResponse['session']) ? $sessionResponse['session'] : [];
         $paymentStatus = isset($session['payment_status']) ? (string) $session['payment_status'] : '';
         $sessionStatus = isset($session['status']) ? (string) $session['status'] : '';
-
         if ($paymentStatus === 'paid' && $sessionStatus === 'complete') {
             $reservationRows = get_reservation_repository()->getReservationsByIds($reservationIds);
             $shouldIncrementCouponUsage = false;
-
             foreach ($reservationRows as $reservationRow) {
                 $status = isset($reservationRow['status']) ? (string) $reservationRow['status'] : '';
-
                 if (!ReservationStatus::isConfirmed($status)) {
                     $shouldIncrementCouponUsage = true;
                     break;
                 }
             }
-
             BookingStatusEngine::updateReservationStatuses($reservationIds, 'confirmed', 'paid');
             BookingStatusEngine::createPaymentRows(
                 $reservationIds,
@@ -540,7 +455,6 @@ final class PaymentEngine
                 isset($session['payment_intent']) ? (string) $session['payment_intent'] : $sessionId
             );
             (new PaymentProviderFeeService())->captureStripeFeeSnapshotForReservations($reservationIds, $session);
-
             if (\class_exists(\MustHotelBooking\Provider\Clock\ClockPaymentReconciliationService::class)) {
                 (new \MustHotelBooking\Provider\Clock\ClockPaymentReconciliationService())->reconcilePaymentSucceeded(
                     $reservationIds,
@@ -548,7 +462,6 @@ final class PaymentEngine
                     isset($session['payment_intent']) ? (string) $session['payment_intent'] : $sessionId
                 );
             }
-
             if ($shouldIncrementCouponUsage) {
                 $couponMetadata = isset($session['metadata']['coupon_ids']) ? (string) $session['metadata']['coupon_ids'] : '';
                 $couponIds = $couponMetadata === ''
@@ -561,55 +474,62 @@ final class PaymentEngine
                             }
                         )
                     );
-
                 unset($couponIds);
             }
-
             return [
                 'success' => true,
                 'state' => 'paid',
             ];
         }
-
         if ($sessionStatus === 'expired') {
             BookingStatusEngine::failPendingStripeReservations($reservationIds, 'expired');
-
             return [
                 'success' => true,
                 'state' => 'expired',
             ];
         }
-
         return [
             'success' => true,
             'state' => 'pending',
         ];
     }
-
     public static function isStripeCheckoutUrl(string $url): bool
     {
         $url = \trim($url);
-
         if ($url === '') {
             return false;
         }
-
         $parts = \wp_parse_url($url);
         $host = isset($parts['host']) ? \strtolower((string) $parts['host']) : '';
         $scheme = isset($parts['scheme']) ? \strtolower((string) $parts['scheme']) : '';
-
         if ($host === '' || $scheme !== 'https') {
             return false;
         }
-
         return $host === 'checkout.stripe.com' || $host === 'pay.stripe.com';
     }
-
+    public static function isPokPayCheckoutUrl(string $url): bool
+    {
+        $url = \trim($url);
+        if ($url === '') {
+            return false;
+        }
+        $parts = \wp_parse_url($url);
+        $host = isset($parts['host']) ? \strtolower((string) $parts['host']) : '';
+        $scheme = isset($parts['scheme']) ? \strtolower((string) $parts['scheme']) : '';
+        if ($host === '' || $scheme !== 'https') {
+            return false;
+        }
+        return $host === 'pokpay.io'
+            || \substr($host, -10) === '.pokpay.io'
+            || $host === 'rpay.ai'
+            || \substr($host, -8) === '.rpay.ai'
+            || $host === 'rpay.al'
+            || \substr($host, -8) === '.rpay.al';
+    }
     public static function convertAmountToStripeMinorUnits(float $amount, string $currency): int
     {
         return self::convertAmountToMinorUnits($amount, $currency);
     }
-
     public static function convertAmountToMinorUnits(float $amount, string $currency): int
     {
         $currency = \strtolower(\trim($currency));
@@ -632,14 +552,11 @@ final class PaymentEngine
             'xof',
             'xpf',
         ];
-
         if (\in_array($currency, $zeroDecimalCurrencies, true)) {
             return (int) \round($amount);
         }
-
         return (int) \round($amount * 100);
     }
-
     public static function convertMinorUnitsToAmount(int $amountMinor, string $currency): float
     {
         $currency = \strtolower(\trim($currency));
@@ -661,14 +578,11 @@ final class PaymentEngine
             'xof',
             'xpf',
         ];
-
         if (\in_array($currency, $zeroDecimalCurrencies, true)) {
             return (float) $amountMinor;
         }
-
         return \round($amountMinor / 100, 2);
     }
-
     /**
      * @param array<string, scalar> $body
      * @return array<string, mixed>
@@ -676,7 +590,6 @@ final class PaymentEngine
     public static function performStripeApiRequest(string $method, string $path, array $body = [], array $options = []): array
     {
         $secretKey = self::getStripeSecretKey();
-
         if ($secretKey === '') {
             return [
                 'success' => false,
@@ -685,7 +598,6 @@ final class PaymentEngine
                 'message' => \__('Stripe secret key is missing.', 'must-hotel-booking'),
             ];
         }
-
         $endpoint = 'https://api.stripe.com/v1/' . \ltrim($path, '/');
         $args = [
             'method' => \strtoupper($method),
@@ -694,17 +606,13 @@ final class PaymentEngine
                 'Authorization' => 'Bearer ' . $secretKey,
             ],
         ];
-
         if (!empty($options['idempotency_key'])) {
             $args['headers']['Idempotency-Key'] = \sanitize_text_field((string) $options['idempotency_key']);
         }
-
         if (!empty($body)) {
             $args['body'] = $body;
         }
-
         $response = \wp_remote_request($endpoint, $args);
-
         if (\is_wp_error($response)) {
             return [
                 'success' => false,
@@ -713,10 +621,8 @@ final class PaymentEngine
                 'message' => (string) $response->get_error_message(),
             ];
         }
-
         $statusCode = (int) \wp_remote_retrieve_response_code($response);
         $decodedBody = \json_decode((string) \wp_remote_retrieve_body($response), true);
-
         return [
             'success' => $statusCode >= 200 && $statusCode < 300 && \is_array($decodedBody),
             'status_code' => $statusCode,
@@ -726,7 +632,6 @@ final class PaymentEngine
                 : '',
         ];
     }
-
     /**
      * @param array<int, int> $reservationIds
      * @param array<string, string> $guestForm
@@ -736,29 +641,24 @@ final class PaymentEngine
     public static function createStripeCheckoutSession(array $reservationIds, array $guestForm, float $totalAmount, string $currency, array $couponIds = [], array $options = []): array
     {
         $reservationIds = self::normalizeReservationIds($reservationIds);
-
         if (empty($reservationIds)) {
             return [
                 'success' => false,
                 'message' => \__('No reservations are available for Stripe checkout.', 'must-hotel-booking'),
             ];
         }
-
         $hotelName = \class_exists(MustBookingConfig::class)
             ? MustBookingConfig::get_hotel_name()
             : \get_bloginfo('name');
         $amountMinor = self::convertAmountToStripeMinorUnits($totalAmount, $currency);
-
         if ($amountMinor <= 0) {
             return [
                 'success' => false,
                 'message' => \__('Stripe requires a positive payment amount.', 'must-hotel-booking'),
             ];
         }
-
         $successUrl = isset($options['success_url']) ? \esc_url_raw((string) $options['success_url']) : '';
         $cancelUrl = isset($options['cancel_url']) ? \esc_url_raw((string) $options['cancel_url']) : '';
-
         if ($successUrl === '') {
             $successUrl = \add_query_arg(
                 [
@@ -770,7 +670,6 @@ final class PaymentEngine
                 ManagedPages::getBookingConfirmationPageUrl()
             );
         }
-
         if ($cancelUrl === '') {
             $cancelUrl = \add_query_arg(
                 [
@@ -780,7 +679,8 @@ final class PaymentEngine
                 ManagedPages::getBookingConfirmationPageUrl()
             );
         }
-
+        $successUrl = MustBookingConfig::build_public_callback_url($successUrl);
+        $cancelUrl = MustBookingConfig::build_public_callback_url($cancelUrl);
         $successUrl = \str_replace(
             [
                 '%7BCHECKOUT_SESSION_ID%7D',
@@ -809,9 +709,7 @@ final class PaymentEngine
             'metadata[source]' => 'must-hotel-booking',
             'expires_at' => (string) $expiresAt,
         ];
-
         $response = self::performStripeApiRequest('POST', 'checkout/sessions', $payload);
-
         if (empty($response['success'])) {
             return [
                 'success' => false,
@@ -820,18 +718,15 @@ final class PaymentEngine
                     : \__('Unable to create the Stripe checkout session.', 'must-hotel-booking'),
             ];
         }
-
         $session = isset($response['body']) && \is_array($response['body']) ? $response['body'] : [];
         $sessionId = isset($session['id']) ? (string) $session['id'] : '';
         $checkoutUrl = isset($session['url']) ? (string) $session['url'] : '';
-
         if ($sessionId === '' || $checkoutUrl === '') {
             return [
                 'success' => false,
                 'message' => \__('Stripe returned an incomplete checkout session.', 'must-hotel-booking'),
             ];
         }
-
         return [
             'success' => true,
             'session_id' => $sessionId,
@@ -842,7 +737,6 @@ final class PaymentEngine
             'payment_intent' => isset($session['payment_intent']) ? (string) $session['payment_intent'] : '',
         ];
     }
-
     /**
      * @param array<int, int> $reservationIds
      * @param array<string, string> $guestForm
@@ -851,47 +745,70 @@ final class PaymentEngine
     public static function createPokPaySdkOrder(array $reservationIds, array $guestForm, float $totalAmount, string $currency): array
     {
         $reservationIds = self::normalizeReservationIds($reservationIds);
-
         if (empty($reservationIds)) {
             return [
                 'success' => false,
                 'message' => \__('No reservations are available for PokPay checkout.', 'must-hotel-booking'),
             ];
         }
-
         $credentials = self::getPokPayEnvironmentCredentials();
         $merchantId = $credentials['merchant_id'];
-        $amountMinor = self::convertAmountToMinorUnits($totalAmount, $currency);
-
+        $pokpayAmount = \round(\max(0.0, $totalAmount), 2);
         if ($merchantId === '' || $credentials['key_id'] === '' || $credentials['key_secret'] === '') {
             return [
                 'success' => false,
                 'message' => \__('PokPay credentials are missing for the active environment.', 'must-hotel-booking'),
             ];
         }
-
-        if ($amountMinor <= 0) {
+        if ($pokpayAmount <= 0) {
             return [
                 'success' => false,
                 'message' => \__('PokPay requires a positive payment amount.', 'must-hotel-booking'),
             ];
         }
-
         $hotelName = \class_exists(MustBookingConfig::class)
             ? MustBookingConfig::get_hotel_name()
             : \get_bloginfo('name');
         $description = $hotelName !== ''
             ? \sprintf(
-                /* translators: %s is hotel name. */
                 \__('%s stay reservation', 'must-hotel-booking'),
                 $hotelName
             )
             : \__('Hotel stay reservation', 'must-hotel-booking');
+        $confirmationUrl = ManagedPages::getBookingConfirmationPageUrl();
+        $successUrl = \add_query_arg(
+            [
+                'reservation_ids' => \implode(',', $reservationIds),
+                'payment_method' => 'pokpay',
+                'pokpay_return' => 'success',
+            ],
+            $confirmationUrl
+        );
+        $failUrl = \add_query_arg(
+            [
+                'reservation_ids' => \implode(',', $reservationIds),
+                'payment_method' => 'pokpay',
+                'pokpay_return' => 'cancel',
+            ],
+            $confirmationUrl
+        );
+        $successUrl = MustBookingConfig::build_public_callback_url($successUrl);
+        $failUrl = MustBookingConfig::build_public_callback_url($failUrl);
         $payload = [
-            'amount' => $amountMinor,
+            'amount' => $pokpayAmount,
             'currencyCode' => \strtoupper($currency),
             'autoCapture' => true,
             'description' => $description . ' #' . \implode(',', $reservationIds),
+            'webhookUrl' => MustBookingConfig::build_public_rest_url('must-hotel-booking/v1/pokpay/webhook'),
+            'redirectUrl' => $successUrl,
+            'failRedirectUrl' => $failUrl,
+            'products' => [
+                [
+                    'name' => $hotelName !== '' ? $hotelName . ' stay reservation' : 'Hotel stay reservation',
+                    'quantity' => 1,
+                    'price' => $pokpayAmount,
+                ],
+            ],
         ];
 
         $response = self::performPokPayApiRequest(
@@ -899,7 +816,6 @@ final class PaymentEngine
             'merchants/' . \rawurlencode($merchantId) . '/sdk-orders',
             $payload
         );
-
         if (empty($response['success'])) {
             return [
                 'success' => false,
@@ -908,67 +824,62 @@ final class PaymentEngine
                     : \__('Unable to create the PokPay payment order.', 'must-hotel-booking'),
             ];
         }
-
         $data = self::extractPokPayResponseData(isset($response['body']) && \is_array($response['body']) ? $response['body'] : []);
         $orderId = self::extractPokPayOrderId($data);
-
         if ($orderId === '') {
             return [
                 'success' => false,
                 'message' => \__('PokPay returned an incomplete payment order.', 'must-hotel-booking'),
             ];
         }
-
+        $checkoutUrl = self::extractPokPaySdkConfirmUrl($data);
+        if ($checkoutUrl === '') {
+            self::logPokPayMissingCheckoutUrlDiagnostics($data, $orderId);
+        }
         return [
             'success' => true,
             'order_id' => $orderId,
+            'transaction_id' => $orderId,
+            'session_id' => $orderId,
+            'redirect_url' => $checkoutUrl,
+            'checkout_url' => $checkoutUrl,
             'status' => self::getPokPayOrderStatus($data),
             'expires_at' => isset($data['expiresAt']) ? (string) $data['expiresAt'] : (isset($data['expires_at']) ? (string) $data['expires_at'] : ''),
             'order' => $data,
         ];
     }
-
     /**
      * @return array<string, mixed>
      */
     public static function getPokPaySdkOrder(string $orderId): array
     {
         $orderId = \trim($orderId);
-
         if ($orderId === '') {
             return [
                 'success' => false,
                 'message' => \__('PokPay order id is missing.', 'must-hotel-booking'),
             ];
         }
-
         $response = self::performPokPayApiRequest('GET', 'sdk-orders/' . \rawurlencode($orderId));
-
         if (empty($response['success'])) {
             return [
                 'success' => false,
                 'message' => isset($response['message']) ? (string) $response['message'] : \__('Unable to retrieve PokPay order.', 'must-hotel-booking'),
             ];
         }
-
         $data = self::extractPokPayResponseData(isset($response['body']) && \is_array($response['body']) ? $response['body'] : []);
-
         return [
             'success' => true,
             'order' => $data,
             'status' => self::getPokPayOrderStatus($data),
         ];
     }
-
     /**
      * @return array<string, mixed>
      */
     public static function refundPokPaySdkOrder(string $orderId, float $amount, string $currency, string $reason = '', bool $fullRefund = true): array
     {
         $orderId = \sanitize_text_field($orderId);
-        $credentials = self::getPokPayEnvironmentCredentials();
-        $merchantId = \sanitize_text_field((string) ($credentials['merchant_id'] ?? ''));
-
         if ($orderId === '') {
             return [
                 'success' => false,
@@ -976,39 +887,37 @@ final class PaymentEngine
             ];
         }
 
-        if ($merchantId === '' || (string) ($credentials['key_id'] ?? '') === '' || (string) ($credentials['key_secret'] ?? '') === '') {
+        $amount = \round(\max(0.0, $amount), 2);
+        $currency = \strtoupper(\sanitize_text_field($currency));
+
+        if ($amount <= 0.0) {
             return [
                 'success' => false,
-                'manual_fallback' => true,
-                'message' => \__('PokPay credentials are missing for the active environment.', 'must-hotel-booking'),
+                'message' => \__('PokPay refund amount must be greater than zero.', 'must-hotel-booking'),
             ];
         }
 
-        $payload = [];
-        $reason = \sanitize_text_field($reason);
+        $credentials = self::getPokPayEnvironmentCredentials();
+        $merchantId = \sanitize_text_field((string) ($credentials['merchant_id'] ?? ''));
 
-        if ($reason !== '') {
-            $payload['refundReason'] = $reason;
+        if ($merchantId === '') {
+            return [
+                'success' => false,
+                'manual_fallback' => true,
+                'message' => \__('PokPay merchant id is missing.', 'must-hotel-booking'),
+            ];
         }
+
+        $body = [
+            'refundReason' => \sanitize_text_field($reason !== '' ? $reason : \__('Website refund', 'must-hotel-booking')),
+        ];
 
         if (!$fullRefund) {
-            $amountMinor = self::convertAmountToMinorUnits($amount, $currency);
-
-            if ($amountMinor <= 0) {
-                return [
-                    'success' => false,
-                    'message' => \__('PokPay refund amount must be greater than zero.', 'must-hotel-booking'),
-                ];
-            }
-
-            $payload['refundAmount'] = $amountMinor;
+            $body['refundAmount'] = self::convertAmountToMinorUnits($amount, $currency);
         }
 
-        $response = self::performPokPayApiRequest(
-            'POST',
-            'merchants/' . \rawurlencode($merchantId) . '/sdk-orders/' . \rawurlencode($orderId) . '/refund',
-            $payload
-        );
+        $path = 'merchants/' . \rawurlencode($merchantId) . '/sdk-orders/' . \rawurlencode($orderId) . '/refund';
+        $response = self::performPokPayApiRequest('POST', $path, $body);
 
         if (empty($response['success'])) {
             return [
@@ -1017,21 +926,51 @@ final class PaymentEngine
                 'status_code' => (int) ($response['status_code'] ?? 0),
                 'message' => isset($response['message']) && (string) $response['message'] !== ''
                     ? (string) $response['message']
-                    : \__('Unable to create the PokPay refund.', 'must-hotel-booking'),
+                    : \__('PokPay refund request failed.', 'must-hotel-booking'),
                 'body' => isset($response['body']) && \is_array($response['body']) ? $response['body'] : [],
             ];
         }
 
         $data = self::extractPokPayResponseData(isset($response['body']) && \is_array($response['body']) ? $response['body'] : []);
+        $status = self::getPokPayRefundStatus($data);
+        $providerRefundId = self::extractPokPayRefundReference($data);
+
+        if ($status === '' || $providerRefundId === '') {
+            $orderResponse = self::getPokPaySdkOrder($orderId);
+
+            if (!empty($orderResponse['success'])) {
+                $orderData = isset($orderResponse['order']) && \is_array($orderResponse['order']) ? $orderResponse['order'] : [];
+                $orderStatus = self::getPokPayRefundStatus($orderData);
+                $orderRefundId = self::extractPokPayRefundReference($orderData);
+                $status = $status !== '' ? $status : $orderStatus;
+                $providerRefundId = $providerRefundId !== '' ? $providerRefundId : $orderRefundId;
+            }
+        }
+
+        if ($status === '') {
+            $status = !empty($data['isRefunded']) ? 'succeeded' : 'processing';
+        }
+
+        if (!\in_array($status, ['succeeded', 'success', 'completed', 'refunded'], true)) {
+            return [
+                'success' => false,
+                'manual_fallback' => true,
+                'status_code' => (int) ($response['status_code'] ?? 0),
+                'message' => \__('PokPay accepted the refund request but did not return a completed refund status. Review the order in PokPay before marking the local refund completed.', 'must-hotel-booking'),
+                'status' => $status,
+                'body' => isset($response['body']) && \is_array($response['body']) ? $response['body'] : [],
+            ];
+        }
 
         return [
             'success' => true,
-            'refund' => $data,
-            'provider_refund_id' => self::extractPokPayRefundReference($data),
-            'status' => self::getPokPayRefundStatus($data),
+            'provider_refund_id' => $providerRefundId !== '' ? $providerRefundId : $orderId,
+            'status' => 'succeeded',
+            'raw_status' => $status,
+            'status_code' => (int) ($response['status_code'] ?? 0),
+            'body' => isset($response['body']) && \is_array($response['body']) ? $response['body'] : [],
         ];
     }
-
     /**
      * @param array<int, int> $reservationIds
      * @return array<string, mixed>
@@ -1040,26 +979,21 @@ final class PaymentEngine
     {
         $orderId = \sanitize_text_field($orderId);
         $reservationIds = self::normalizeReservationIds($reservationIds);
-
         if ($orderId === '' || empty($reservationIds)) {
             return [
                 'success' => false,
                 'message' => \__('PokPay payment details are missing.', 'must-hotel-booking'),
             ];
         }
-
         $orderResponse = self::getPokPaySdkOrder($orderId);
-
         if (empty($orderResponse['success'])) {
             return [
                 'success' => false,
                 'message' => isset($orderResponse['message']) ? (string) $orderResponse['message'] : \__('Unable to verify the PokPay payment.', 'must-hotel-booking'),
             ];
         }
-
         $status = isset($orderResponse['status']) ? \strtoupper((string) $orderResponse['status']) : '';
-
-        if ($status === 'CAPTURED') {
+        if (\in_array($status, ['CAPTURED', 'PAID', 'COMPLETED'], true)) {
             BookingStatusEngine::updateReservationStatuses($reservationIds, 'confirmed', 'paid');
             BookingStatusEngine::createPaymentRows($reservationIds, 'pokpay', 'paid', $orderId);
             (new PaymentProviderFeeService())->capturePokPayFeeSnapshotForReservations(
@@ -1067,7 +1001,6 @@ final class PaymentEngine
                 isset($orderResponse['order']) && \is_array($orderResponse['order']) ? $orderResponse['order'] : [],
                 $orderId
             );
-
             if (\class_exists(\MustHotelBooking\Provider\Clock\ClockPaymentReconciliationService::class)) {
                 (new \MustHotelBooking\Provider\Clock\ClockPaymentReconciliationService())->reconcilePaymentSucceeded(
                     $reservationIds,
@@ -1075,11 +1008,9 @@ final class PaymentEngine
                     $orderId
                 );
             }
-
             if (\function_exists('MustHotelBooking\Frontend\clear_booking_selection')) {
                 \MustHotelBooking\Frontend\clear_booking_selection(false);
             }
-
             return [
                 'success' => true,
                 'state' => 'paid',
@@ -1094,28 +1025,105 @@ final class PaymentEngine
                 ),
             ];
         }
-
         if (\in_array($status, ['FAILED', 'DECLINED', 'CANCELED', 'CANCELLED', 'EXPIRED'], true)) {
             BookingStatusEngine::failPendingPaymentReservations(
                 $reservationIds,
                 'pokpay',
                 $status === 'EXPIRED' ? 'expired' : 'payment_failed'
             );
-
             return [
                 'success' => false,
                 'state' => $status === 'EXPIRED' ? 'expired' : 'failed',
                 'message' => \__('PokPay could not confirm this payment. Please try again or use another card.', 'must-hotel-booking'),
             ];
         }
-
         return [
             'success' => true,
             'state' => 'pending',
             'message' => \__('PokPay is still finalizing this payment. Please wait a moment and try again.', 'must-hotel-booking'),
         ];
     }
+    /**
+     * @param array<string, mixed> $data
+     */
+    private static function extractPokPaySdkConfirmUrl(array $data): string
+    {
+        foreach ([
+            ['sdkOrder', '_self', 'confirmUrl'],
+            ['sdkOrder', '_self', 'checkoutUrl'],
+            ['sdkOrder', '_self', 'paymentUrl'],
+            ['sdkOrder', 'checkoutUrl'],
+            ['sdkOrder', 'paymentUrl'],
+            ['sdkOrder', 'url'],
+            ['_self', 'confirmUrl'],
+            ['_self', 'checkoutUrl'],
+            ['_self', 'paymentUrl'],
+            ['order', '_self', 'confirmUrl'],
+            ['order', '_self', 'checkoutUrl'],
+            ['order', '_self', 'paymentUrl'],
+        ] as $path) {
+            $url = self::getNestedString($data, $path);
+            if ($url !== '' && self::isPokPayCheckoutUrl($url)) {
+                return $url;
+            }
+        }
 
+        foreach (['sdkOrder', 'order', 'payment', 'checkout', 'data'] as $nestedKey) {
+            if (isset($data[$nestedKey]) && \is_array($data[$nestedKey])) {
+                $url = self::extractPokPaySdkConfirmUrl($data[$nestedKey]);
+                if ($url !== '') {
+                    return $url;
+                }
+            }
+        }
+
+        foreach (['confirmUrl', 'checkoutUrl', 'paymentUrl', 'url'] as $key) {
+            if (isset($data[$key]) && \is_scalar($data[$key])) {
+                $url = \trim((string) $data[$key]);
+                if ($url !== '' && self::isPokPayCheckoutUrl($url)) {
+                    return $url;
+                }
+            }
+        }
+
+        return '';
+    }
+    /**
+     * @param array<string, mixed> $data
+     * @param array<int, string> $path
+     */
+    private static function getNestedString(array $data, array $path): string
+    {
+        $cursor = $data;
+        $lastIndex = \count($path) - 1;
+        foreach ($path as $index => $key) {
+            if (!\is_array($cursor) || !\array_key_exists($key, $cursor)) {
+                return '';
+            }
+            if ($index === $lastIndex) {
+                return \is_scalar($cursor[$key]) ? \trim((string) $cursor[$key]) : '';
+            }
+            $cursor = $cursor[$key];
+        }
+        return '';
+    }
+    /**
+     * @param array<string, mixed> $data
+     */
+    private static function logPokPayMissingCheckoutUrlDiagnostics(array $data, string $orderId): void
+    {
+        $sdkOrder = isset($data['sdkOrder']) && \is_array($data['sdkOrder']) ? $data['sdkOrder'] : [];
+        $sdkSelf = isset($sdkOrder['_self']) && \is_array($sdkOrder['_self']) ? $sdkOrder['_self'] : [];
+        $context = [
+            'endpoint' => 'POST merchants/{merchantId}/sdk-orders',
+            'order_id' => \sanitize_text_field($orderId),
+            'top_level_keys' => \array_values(\array_filter(\array_map('strval', \array_keys($data)))),
+            'sdk_order_keys' => \array_values(\array_filter(\array_map('strval', \array_keys($sdkOrder)))),
+            'sdk_order_self_keys' => \array_values(\array_filter(\array_map('strval', \array_keys($sdkSelf)))),
+            'has_sdk_order_self_confirm_url' => isset($sdkSelf['confirmUrl']) && \is_scalar($sdkSelf['confirmUrl']) && \trim((string) $sdkSelf['confirmUrl']) !== '',
+        ];
+        \error_log('MUST Hotel Booking PokPay missing confirmUrl: ' . \wp_json_encode($context));
+    }
     /**
      * @param array<string, mixed> $body
      * @return array<string, mixed>
@@ -1125,58 +1133,86 @@ final class PaymentEngine
         if (isset($body['data']) && \is_array($body['data'])) {
             return $body['data'];
         }
-
         return $body;
     }
-
     /**
      * @param array<string, mixed> $data
      */
     private static function extractPokPayOrderId(array $data): string
     {
-        if (isset($data['sdkOrder']) && \is_array($data['sdkOrder'])) {
-            return self::extractPokPayOrderId($data['sdkOrder']);
-        }
-
         foreach (['id', 'orderId', 'sdkOrderId', 'sdk_order_id'] as $key) {
             if (isset($data[$key]) && \is_scalar($data[$key])) {
                 $value = \trim((string) $data[$key]);
-
                 if ($value !== '') {
                     return $value;
                 }
             }
         }
-
+        foreach (['sdkOrder', 'order', 'payment', 'data'] as $nestedKey) {
+            if (isset($data[$nestedKey]) && \is_array($data[$nestedKey])) {
+                $value = self::extractPokPayOrderId($data[$nestedKey]);
+                if ($value !== '') {
+                    return $value;
+                }
+            }
+        }
         return '';
     }
-
     /**
      * @param array<string, mixed> $data
      */
     public static function getPokPayOrderStatus(array $data): string
     {
-        if (isset($data['sdkOrder']) && \is_array($data['sdkOrder'])) {
-            return self::getPokPayOrderStatus($data['sdkOrder']);
-        }
-
         foreach (['status', 'paymentStatus', 'payment_status', 'state'] as $key) {
             if (isset($data[$key]) && \is_scalar($data[$key])) {
                 return \strtoupper(\sanitize_key((string) $data[$key]));
             }
         }
-
+        foreach (['sdkOrder', 'order', 'payment', 'data'] as $nestedKey) {
+            if (isset($data[$nestedKey]) && \is_array($data[$nestedKey])) {
+                $value = self::getPokPayOrderStatus($data[$nestedKey]);
+                if ($value !== '') {
+                    return $value;
+                }
+            }
+        }
         if (!empty($data['isRefunded'])) {
             return 'REFUNDED';
         }
-
+        if (!empty($data['isCaptured'])) {
+            return 'CAPTURED';
+        }
         if (!empty($data['isCompleted'])) {
             return 'CAPTURED';
         }
-
+        $capturedAmount = self::firstNumericValue($data, ['capturedAmount', 'captured_amount']);
+        $finalAmount = self::firstNumericValue($data, ['finalAmount', 'final_amount', 'amount']);
+        if ($capturedAmount !== null && $finalAmount !== null && $finalAmount > 0 && $capturedAmount >= $finalAmount) {
+            return 'CAPTURED';
+        }
         return '';
     }
-
+    /**
+     * @param array<string, mixed> $data
+     * @param array<int, string> $keys
+     */
+    private static function firstNumericValue(array $data, array $keys): ?float
+    {
+        foreach ($keys as $key) {
+            if (isset($data[$key]) && \is_numeric($data[$key])) {
+                return (float) $data[$key];
+            }
+        }
+        foreach (['sdkOrder', 'order', 'payment', 'data'] as $nestedKey) {
+            if (isset($data[$nestedKey]) && \is_array($data[$nestedKey])) {
+                $value = self::firstNumericValue($data[$nestedKey], $keys);
+                if ($value !== null) {
+                    return $value;
+                }
+            }
+        }
+        return null;
+    }
     /**
      * @param array<string, mixed> $data
      */
@@ -1184,33 +1220,26 @@ final class PaymentEngine
     {
         if (isset($data['refund']) && \is_array($data['refund'])) {
             $nested = self::extractPokPayRefundReference($data['refund']);
-
             if ($nested !== '') {
                 return $nested;
             }
         }
-
         if (isset($data['sdkOrder']) && \is_array($data['sdkOrder'])) {
             $nested = self::extractPokPayRefundReference($data['sdkOrder']);
-
             if ($nested !== '') {
                 return $nested;
             }
         }
-
         foreach (['refundId', 'refund_id', 'providerRefundId', 'provider_refund_id', 'transactionId', 'id'] as $key) {
             if (isset($data[$key]) && \is_scalar($data[$key])) {
                 $value = \trim((string) $data[$key]);
-
                 if ($value !== '') {
                     return $value;
                 }
             }
         }
-
         return '';
     }
-
     /**
      * @param array<string, mixed> $data
      */
@@ -1218,31 +1247,34 @@ final class PaymentEngine
     {
         if (isset($data['refund']) && \is_array($data['refund'])) {
             $nested = self::getPokPayRefundStatus($data['refund']);
-
             if ($nested !== '') {
                 return $nested;
             }
         }
-
         if (isset($data['sdkOrder']) && \is_array($data['sdkOrder'])) {
             $nested = self::getPokPayRefundStatus($data['sdkOrder']);
-
             if ($nested !== '') {
                 return $nested;
             }
         }
-
         foreach (['status', 'refundStatus', 'refund_status', 'state'] as $key) {
             if (isset($data[$key]) && \is_scalar($data[$key])) {
                 return \strtolower(\sanitize_key((string) $data[$key]));
             }
         }
-
         if (!empty($data['isRefunded'])) {
             return 'succeeded';
         }
-
         return '';
+    }
+
+    private static function getPokPayAccessTokenCacheKey(): string
+    {
+        $credentials = self::getPokPayEnvironmentCredentials();
+
+        return 'must_hotel_booking_pokpay_token_' . \md5(
+            self::getPokPayApiEnvironment() . '|' . $credentials['merchant_id'] . '|' . $credentials['key_id']
+        );
     }
 
     /**
@@ -1251,6 +1283,19 @@ final class PaymentEngine
      */
     public static function performPokPayApiRequest(string $method, string $path, array $body = [], bool $authenticate = true): array
     {
+        return self::performPokPayApiRequestOnce($method, $path, $body, $authenticate, true);
+    }
+    /**
+     * @param array<string, mixed> $body
+     * @return array<string, mixed>
+     */
+    private static function performPokPayApiRequestOnce(
+        string $method,
+        string $path,
+        array $body = [],
+        bool $authenticate = true,
+        bool $allowTokenRetry = true
+    ): array {
         $headers = [
             'Accept' => 'application/json',
             'Content-Type' => 'application/json',
@@ -1290,15 +1335,38 @@ final class PaymentEngine
         $statusCode = (int) \wp_remote_retrieve_response_code($response);
         $decodedBody = \json_decode((string) \wp_remote_retrieve_body($response), true);
         $bodyArray = \is_array($decodedBody) ? $decodedBody : [];
+        $message = self::extractPokPayErrorMessage($bodyArray);
+        $messageLower = \strtolower($message);
+
+        if (
+            $authenticate
+            && $allowTokenRetry
+            && (
+                $statusCode === 401
+                || \str_contains($messageLower, 'expired token')
+                || \str_contains($messageLower, 'token expired')
+                || \str_contains($messageLower, 'jwt expired')
+                || \str_contains($messageLower, 'unauthorized')
+            )
+        ) {
+            \delete_transient(self::getPokPayAccessTokenCacheKey());
+
+            return self::performPokPayApiRequestOnce(
+                $method,
+                $path,
+                $body,
+                $authenticate,
+                false
+            );
+        }
 
         return [
             'success' => $statusCode >= 200 && $statusCode < 300 && \is_array($decodedBody),
             'status_code' => $statusCode,
             'body' => $bodyArray,
-            'message' => self::extractPokPayErrorMessage($bodyArray),
+            'message' => $message,
         ];
     }
-
     /**
      * @return array<string, mixed>
      */
@@ -1313,7 +1381,8 @@ final class PaymentEngine
             ];
         }
 
-        $cacheKey = 'must_hotel_booking_pokpay_token_' . \md5(self::getPokPayApiEnvironment() . '|' . $credentials['merchant_id'] . '|' . $credentials['key_id']);
+        $cacheKey = self::getPokPayAccessTokenCacheKey();
+
         $cachedToken = \get_transient($cacheKey);
 
         if (\is_string($cachedToken) && $cachedToken !== '') {
@@ -1352,13 +1421,25 @@ final class PaymentEngine
             ];
         }
 
-        $expiresIn = isset($data['expiresIn']) ? (int) $data['expiresIn'] : 3000;
+        $expiresIn = isset($data['expiresIn']) ? (int) $data['expiresIn'] : 300;
+
+        /*
+         * PokPay staging returns expiresIn like 600000, which is milliseconds.
+         * Convert large values to seconds.
+         */
+        if ($expiresIn > 86400) {
+            $expiresIn = (int) \floor($expiresIn / 1000);
+        }
 
         if ($expiresIn <= 0 && isset($data['expiresAt'])) {
             $expiresAt = \strtotime((string) $data['expiresAt']);
-            $expiresIn = $expiresAt !== false ? \max(60, $expiresAt - \time()) : 3000;
+            $expiresIn = $expiresAt !== false ? \max(60, $expiresAt - \time()) : 300;
         }
 
+        /*
+         * Cache for slightly less than provider expiry.
+         * Example: 600 seconds from PokPay becomes 540 seconds locally.
+         */
         \set_transient($cacheKey, $accessToken, \max(60, $expiresIn - 60));
 
         return [
@@ -1366,7 +1447,6 @@ final class PaymentEngine
             'access_token' => $accessToken,
         ];
     }
-
     /**
      * @param array<string, mixed> $body
      */
@@ -1375,89 +1455,70 @@ final class PaymentEngine
         if (isset($body['message']) && \is_scalar($body['message'])) {
             return (string) $body['message'];
         }
-
         if (isset($body['error']['message']) && \is_scalar($body['error']['message'])) {
             return (string) $body['error']['message'];
         }
-
         if (isset($body['error']) && \is_scalar($body['error'])) {
             return (string) $body['error'];
         }
-
         return '';
     }
-
     /**
      * @return array<string, mixed>
      */
     public static function getStripeCheckoutSession(string $sessionId): array
     {
         $sessionId = \trim($sessionId);
-
         if ($sessionId === '') {
             return [
                 'success' => false,
                 'message' => \__('Stripe session id is missing.', 'must-hotel-booking'),
             ];
         }
-
         $response = self::performStripeApiRequest('GET', 'checkout/sessions/' . \rawurlencode($sessionId));
-
         if (empty($response['success'])) {
             return [
                 'success' => false,
                 'message' => isset($response['message']) ? (string) $response['message'] : \__('Unable to retrieve Stripe session.', 'must-hotel-booking'),
             ];
         }
-
         return [
             'success' => true,
             'session' => isset($response['body']) && \is_array($response['body']) ? $response['body'] : [],
         ];
     }
-
     public static function verifyStripeWebhookSignature(string $payload, string $signatureHeader, string $webhookSecret, int $tolerance = 300): bool
     {
         if ($payload === '' || $signatureHeader === '' || $webhookSecret === '') {
             return false;
         }
-
         $timestamp = 0;
         $signatures = [];
-
         foreach (\explode(',', $signatureHeader) as $part) {
             $segments = \explode('=', \trim($part), 2);
-
             if (\count($segments) !== 2) {
                 continue;
             }
-
             if ($segments[0] === 't') {
                 $timestamp = (int) $segments[1];
                 continue;
             }
-
             if ($segments[0] === 'v1') {
                 $signatures[] = (string) $segments[1];
             }
         }
-
         if ($timestamp <= 0 || empty($signatures) || \abs(\time() - $timestamp) > $tolerance) {
             return false;
         }
-
         $signedPayload = $timestamp . '.' . $payload;
         $expectedSignature = \hash_hmac('sha256', $signedPayload, $webhookSecret);
-
         foreach ($signatures as $signature) {
             if (\hash_equals($expectedSignature, $signature)) {
                 return true;
             }
         }
-
         return false;
     }
-
     /**
      * @param array<string, mixed> $session
      * @return array<int, int>
@@ -1466,11 +1527,9 @@ final class PaymentEngine
     {
         $metadata = isset($session['metadata']) && \is_array($session['metadata']) ? $session['metadata'] : [];
         $rawIds = isset($metadata['reservation_ids']) ? (string) $metadata['reservation_ids'] : '';
-
         if ($rawIds === '') {
             return [];
         }
-
         return \array_values(
             \array_filter(
                 \array_map('intval', \array_map('trim', \explode(',', $rawIds))),
@@ -1480,20 +1539,16 @@ final class PaymentEngine
             )
         );
     }
-
     public static function cleanupExpiredPendingPaymentReservations(): void
     {
         $cutoff = \gmdate('Y-m-d H:i:s', \time() - (self::getPendingPaymentCleanupMinutes() * 60));
         $reservationIds = get_reservation_repository()->findExpiredPendingPaymentReservationIds($cutoff);
-
         if (empty($reservationIds)) {
             return;
         }
-
         $paymentRowsByReservation = get_payment_repository()->getPaymentsForReservationIds($reservationIds);
         $stripeReservationIds = [];
         $pokPayReservationIdsByOrder = [];
-
         foreach ($reservationIds as $reservationId) {
             $rows = isset($paymentRowsByReservation[$reservationId]) && \is_array($paymentRowsByReservation[$reservationId])
                 ? $paymentRowsByReservation[$reservationId]
@@ -1501,36 +1556,28 @@ final class PaymentEngine
             $latestRow = isset($rows[0]) && \is_array($rows[0]) ? $rows[0] : [];
             $method = isset($latestRow['method']) ? \sanitize_key((string) $latestRow['method']) : 'stripe';
             $transactionId = isset($latestRow['transaction_id']) ? \sanitize_text_field((string) $latestRow['transaction_id']) : '';
-
             if ($method === 'pokpay' && $transactionId !== '') {
                 if (!isset($pokPayReservationIdsByOrder[$transactionId])) {
                     $pokPayReservationIdsByOrder[$transactionId] = [];
                 }
-
                 $pokPayReservationIdsByOrder[$transactionId][] = (int) $reservationId;
                 continue;
             }
-
             $stripeReservationIds[] = (int) $reservationId;
         }
-
         foreach ($pokPayReservationIdsByOrder as $orderId => $orderReservationIds) {
             $result = self::finalizePokPayOrder((string) $orderId, $orderReservationIds);
-
             if (!empty($result['success']) && (string) ($result['state'] ?? '') === 'paid') {
                 continue;
             }
-
             if ((string) ($result['state'] ?? '') !== 'failed' && (string) ($result['state'] ?? '') !== 'expired') {
                 BookingStatusEngine::failPendingPaymentReservations($orderReservationIds, 'pokpay', 'expired');
             }
         }
-
         if (!empty($stripeReservationIds)) {
             BookingStatusEngine::failPendingStripeReservations($stripeReservationIds, 'expired');
         }
     }
-
     public static function registerPaymentRestRoutes(): void
     {
         \register_rest_route(
@@ -1542,7 +1589,6 @@ final class PaymentEngine
                 'permission_callback' => '__return_true',
             ]
         );
-
         \register_rest_route(
             'must-hotel-booking/v1',
             '/pokpay/finalize',
@@ -1552,7 +1598,6 @@ final class PaymentEngine
                 'permission_callback' => '__return_true',
             ]
         );
-
         \register_rest_route(
             'must-hotel-booking/v1',
             '/pokpay/error',
@@ -1562,45 +1607,43 @@ final class PaymentEngine
                 'permission_callback' => '__return_true',
             ]
         );
+        \register_rest_route(
+            'must-hotel-booking/v1',
+            '/pokpay/webhook',
+            [
+                'methods' => \WP_REST_Server::CREATABLE,
+                'callback' => [self::class, 'handlePokPayWebhookRequest'],
+                'permission_callback' => '__return_true',
+            ]
+        );
     }
-
     public static function registerHooks(): void
     {
         \add_action('rest_api_init', [self::class, 'registerPaymentRestRoutes']);
         \add_action(LockEngine::getCleanupCronHook(), [self::class, 'cleanupExpiredPendingPaymentReservations']);
     }
-
     public static function handleStripeWebhookRequest(\WP_REST_Request $request): \WP_REST_Response
     {
         $payload = (string) $request->get_body();
         $signatureHeader = (string) $request->get_header('stripe-signature');
         $webhookSecret = self::getStripeWebhookSecret();
-
         if (!self::verifyStripeWebhookSignature($payload, $signatureHeader, $webhookSecret)) {
             return new \WP_REST_Response(['success' => false, 'message' => 'Invalid Stripe signature.'], 400);
         }
-
         $event = \json_decode($payload, true);
-
         if (!\is_array($event)) {
             return new \WP_REST_Response(['success' => false, 'message' => 'Invalid Stripe payload.'], 400);
         }
-
         $type = isset($event['type']) ? (string) $event['type'] : '';
         $object = isset($event['data']['object']) && \is_array($event['data']['object']) ? $event['data']['object'] : [];
-
         if (\in_array($type, ['refund.created', 'refund.updated', 'charge.refunded'], true)) {
             (new PaymentRefundService())->handleStripeWebhookEvent($event);
-
             return new \WP_REST_Response(['success' => true], 200);
         }
-
         $reservationIds = self::getReservationIdsFromStripeSession($object);
-
         if (empty($reservationIds)) {
             return new \WP_REST_Response(['success' => true], 200);
         }
-
         if ($type === 'checkout.session.completed') {
             $paymentIntent = isset($object['payment_intent']) ? (string) $object['payment_intent'] : '';
             $sessionId = isset($object['id']) ? (string) $object['id'] : '';
@@ -1615,11 +1658,9 @@ final class PaymentEngine
                         }
                     )
                 );
-
             BookingStatusEngine::updateReservationStatuses($reservationIds, 'confirmed', 'paid');
             BookingStatusEngine::createPaymentRows($reservationIds, 'stripe', 'paid', $paymentIntent !== '' ? $paymentIntent : $sessionId);
             (new PaymentProviderFeeService())->captureStripeFeeSnapshotForReservations($reservationIds, $object);
-
             if (\class_exists(\MustHotelBooking\Provider\Clock\ClockPaymentReconciliationService::class)) {
                 (new \MustHotelBooking\Provider\Clock\ClockPaymentReconciliationService())->reconcilePaymentSucceeded(
                     $reservationIds,
@@ -1627,36 +1668,28 @@ final class PaymentEngine
                     $paymentIntent !== '' ? $paymentIntent : $sessionId
                 );
             }
-
             unset($couponIds);
         } elseif ($type === 'checkout.session.expired') {
             BookingStatusEngine::failPendingStripeReservations($reservationIds, 'expired');
         }
-
         return new \WP_REST_Response(['success' => true], 200);
     }
-
     public static function handlePokPayFinalizeRequest(\WP_REST_Request $request): \WP_REST_Response
     {
         $nonce = (string) $request->get_header('x-wp-nonce');
-
         if (!\wp_verify_nonce($nonce, 'wp_rest')) {
             return new \WP_REST_Response(['success' => false, 'message' => 'Invalid request.'], 403);
         }
-
         $params = $request->get_json_params();
         $params = \is_array($params) ? $params : [];
         $orderId = isset($params['order_id']) ? \sanitize_text_field((string) $params['order_id']) : '';
         $reservationIds = self::normalizeReservationIdsFromMixed($params['reservation_ids'] ?? []);
-
         if ($orderId === '' || empty($reservationIds)) {
             return new \WP_REST_Response(['success' => false, 'message' => \__('Payment details are missing.', 'must-hotel-booking')], 400);
         }
-
         if (\function_exists('MustHotelBooking\Frontend\get_booking_selection_flow_data')) {
             $flowData = \MustHotelBooking\Frontend\get_booking_selection_flow_data();
             $pendingPayment = self::normalizePendingPaymentFlowData($flowData['pending_payment'] ?? []);
-
             if (
                 (string) ($pendingPayment['method'] ?? '') === 'pokpay'
                 && (string) ($pendingPayment['session_id'] ?? '') !== ''
@@ -1665,13 +1698,10 @@ final class PaymentEngine
                 return new \WP_REST_Response(['success' => false, 'message' => \__('This PokPay session no longer matches the active booking.', 'must-hotel-booking')], 409);
             }
         }
-
         if (!self::reservationPaymentsMatchPokPayOrder($reservationIds, $orderId)) {
             return new \WP_REST_Response(['success' => false, 'message' => \__('This PokPay order does not match the active booking.', 'must-hotel-booking')], 409);
         }
-
         $result = self::finalizePokPayOrder($orderId, $reservationIds);
-
         if (empty($result['success'])) {
             return new \WP_REST_Response([
                 'success' => false,
@@ -1679,7 +1709,6 @@ final class PaymentEngine
                 'message' => isset($result['message']) ? (string) $result['message'] : \__('Unable to confirm the PokPay payment.', 'must-hotel-booking'),
             ], 400);
         }
-
         return new \WP_REST_Response([
             'success' => true,
             'state' => isset($result['state']) ? (string) $result['state'] : 'pending',
@@ -1687,15 +1716,12 @@ final class PaymentEngine
             'redirect_url' => isset($result['redirect_url']) ? (string) $result['redirect_url'] : '',
         ], 200);
     }
-
     public static function handlePokPayErrorRequest(\WP_REST_Request $request): \WP_REST_Response
     {
         $nonce = (string) $request->get_header('x-wp-nonce');
-
         if (!\wp_verify_nonce($nonce, 'wp_rest')) {
             return new \WP_REST_Response(['success' => false], 403);
         }
-
         $params = $request->get_json_params();
         $params = \is_array($params) ? $params : [];
         $context = [
@@ -1703,12 +1729,28 @@ final class PaymentEngine
             'message' => isset($params['message']) ? \substr(\sanitize_text_field((string) $params['message']), 0, 500) : '',
             'code' => isset($params['code']) ? \substr(\sanitize_key((string) $params['code']), 0, 80) : '',
         ];
-
         \error_log('MUST Hotel Booking PokPay checkout error: ' . \wp_json_encode($context));
-
         return new \WP_REST_Response(['success' => true], 200);
     }
-
+    public static function handlePokPayWebhookRequest(\WP_REST_Request $request): \WP_REST_Response
+    {
+        $params = $request->get_json_params();
+        $params = \is_array($params) ? $params : [];
+        $data = self::extractPokPayResponseData($params);
+        $orderId = self::extractPokPayOrderId($data);
+        if ($orderId === '') {
+            return new \WP_REST_Response(['success' => false, 'message' => 'Missing PokPay order id.'], 400);
+        }
+        $reservationIds = get_payment_repository()->findReservationIdsByTransactionId($orderId);
+        if (empty($reservationIds)) {
+            return new \WP_REST_Response(['success' => false, 'message' => 'Unknown PokPay order id.'], 404);
+        }
+        $result = self::finalizePokPayOrder($orderId, $reservationIds);
+        return new \WP_REST_Response([
+            'success' => !empty($result['success']),
+            'state' => isset($result['state']) ? (string) $result['state'] : '',
+        ], 200);
+    }
     /**
      * @param array<int, int> $reservationIds
      * @return array<int, int>
@@ -1724,7 +1766,6 @@ final class PaymentEngine
             )
         );
     }
-
     /**
      * @param mixed $value
      * @return array<int, int>
@@ -1734,14 +1775,11 @@ final class PaymentEngine
         if (\is_string($value)) {
             $value = \explode(',', $value);
         }
-
         if (!\is_array($value)) {
             return [];
         }
-
         return self::normalizeReservationIds($value);
     }
-
     /**
      * @param array<int, int> $reservationIds
      */
@@ -1749,38 +1787,30 @@ final class PaymentEngine
     {
         $reservationIds = self::normalizeReservationIds($reservationIds);
         $orderId = \sanitize_text_field($orderId);
-
         if ($orderId === '' || empty($reservationIds)) {
             return false;
         }
-
         $paymentsByReservation = get_payment_repository()->getPaymentsForReservationIds($reservationIds);
-
         foreach ($reservationIds as $reservationId) {
             $rows = isset($paymentsByReservation[$reservationId]) && \is_array($paymentsByReservation[$reservationId])
                 ? $paymentsByReservation[$reservationId]
                 : [];
             $hasMatchingPayment = false;
-
             foreach ($rows as $row) {
                 if (!\is_array($row)) {
                     continue;
                 }
-
                 $method = isset($row['method']) ? \sanitize_key((string) $row['method']) : '';
                 $transactionId = isset($row['transaction_id']) ? \sanitize_text_field((string) $row['transaction_id']) : '';
-
                 if ($method === 'pokpay' && $transactionId === $orderId) {
                     $hasMatchingPayment = true;
                     break;
                 }
             }
-
             if (!$hasMatchingPayment) {
                 return false;
             }
         }
-
         return true;
     }
 }

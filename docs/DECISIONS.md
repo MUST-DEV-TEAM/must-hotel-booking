@@ -29,3 +29,13 @@
 - Decision: Run an idempotent payment/refund schema repair even when the stored DB version is already greater than or equal to the plugin version.
 - Reason: Release candidates can add columns while local/live databases already store the current version, so relying only on version-gated `dbDelta()` can leave required columns missing.
 - Affected areas: plugin database upgrade bootstrap, `must_payments`, `must_refunds`, support diagnostics.
+
+## 2026-06-13 - PokPay automatic refund endpoint
+- Decision: Use PokPay's documented merchant SDK-order refund endpoint before falling back to manual dashboard verification.
+- Reason: PokPay's public Postman/API collection verified `POST /merchants/{merchantId}/sdk-orders/{sdkOrderId}/refund` with `refundReason` and optional `refundAmount`, and a staging full refund succeeded with the SDK order returning `REFUNDED`.
+- Affected areas: PokPay refund service, admin/manual refund workflow, payment docs, troubleshooting notes.
+
+## 2026-06-13 - Clock future payments post to deposit folios
+- Decision: In `auto_detect`, future Stripe/PokPay website payments are posted to a Clock booking deposit folio instead of a normal folio.
+- Reason: Clock's public API collection exposes booking folio creation with `booking_folio.deposit=true` and folio `credit_items`; a sandbox API trial created a deposit folio, posted the external payment, prevented duplicate posting, and reversed it with a deposit-folio negative payment.
+- Affected areas: Clock endpoint registry, Clock folio service, Clock payment accounting service, payment docs, troubleshooting notes.

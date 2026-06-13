@@ -59,7 +59,7 @@ final class ClockFolioAccountingRepository extends AbstractRepository
                     attempts = attempts + 1,
                     updated_at = %s
                 WHERE id = %d
-                    AND status IN (%s, %s)
+                    AND status IN (%s, %s, %s)
                     AND clock_credit_item_id = %s',
                 'retrying',
                 \sanitize_text_field($folioId),
@@ -67,6 +67,7 @@ final class ClockFolioAccountingRepository extends AbstractRepository
                 $id,
                 'pending',
                 'failed',
+                'manual_review',
                 ''
             )
         );
@@ -128,6 +129,69 @@ final class ClockFolioAccountingRepository extends AbstractRepository
         $id = $this->create($data);
 
         return $id > 0 ? (array) $this->get($id) : [];
+    }
+
+    /** @return array{success: bool, message: string} */
+    public function markHandledManually(int $id, int $userId, string $note = ''): array
+    {
+        $row = $this->get($id);
+
+        if (!\is_array($row)) {
+            return [
+                'success' => false,
+                'message' => \__('Clock accounting row not found.', 'must-hotel-booking'),
+            ];
+        }
+
+        $status = \sanitize_key((string) ($row['status'] ?? ''));
+
+        if ($status === 'handled_manually') {
+            return [
+                'success' => false,
+                'message' => \__('Clock accounting row was already marked handled manually.', 'must-hotel-booking'),
+            ];
+        }
+
+        if (!\in_array($status, ['manual_review', 'failed'], true)) {
+            return [
+                'success' => false,
+                'message' => \__('Only failed or manual-review Clock accounting rows can be marked handled manually.', 'must-hotel-booking'),
+            ];
+        }
+
+        $reasonCode = \sanitize_key((string) ($row['last_error_code'] ?? ''));
+        $previousMessage = \trim((string) ($row['last_error'] ?? ''));
+        $handledAt = $this->now();
+        $note = \sanitize_textarea_field($note);
+        $messageParts = [
+            'handled_manually_at=' . $handledAt,
+            'handled_manually_by_user_id=' . \max(0, $userId),
+            'previous_status=' . $status,
+            'reason_code=' . ($reasonCode !== '' ? $reasonCode : 'manual_review'),
+        ];
+
+        if ($note !== '') {
+            $messageParts[] = 'note=' . $note;
+        }
+
+        if ($previousMessage !== '') {
+            $messageParts[] = 'previous_message=' . $previousMessage;
+        }
+
+        $updated = $this->update($id, [
+            'status' => 'handled_manually',
+            'last_error_code' => $reasonCode !== '' ? $reasonCode : 'manual_review',
+            'last_error' => \implode("\n", $messageParts),
+            'next_retry_at' => null,
+            'updated_at' => $handledAt,
+        ]);
+
+        return [
+            'success' => $updated,
+            'message' => $updated
+                ? \__('Clock accounting row marked handled manually.', 'must-hotel-booking')
+                : \__('Unable to mark Clock accounting row handled manually.', 'must-hotel-booking'),
+        ];
     }
 
     /** @return array<int, array<string, mixed>> */
@@ -222,6 +286,7 @@ final class ClockFolioAccountingRepository extends AbstractRepository
             'posted' => 0,
             'failed' => 0,
             'manual_review' => 0,
+            'handled_manually' => 0,
             'pending' => 0,
             'latest_error' => '',
         ];
@@ -235,6 +300,7 @@ final class ClockFolioAccountingRepository extends AbstractRepository
         $summary['posted'] = (int) $this->wpdb->get_var("SELECT COUNT(*) FROM {$table} WHERE status = 'posted'");
         $summary['failed'] = (int) $this->wpdb->get_var("SELECT COUNT(*) FROM {$table} WHERE status = 'failed'");
         $summary['manual_review'] = (int) $this->wpdb->get_var("SELECT COUNT(*) FROM {$table} WHERE status = 'manual_review'");
+        $summary['handled_manually'] = (int) $this->wpdb->get_var("SELECT COUNT(*) FROM {$table} WHERE status = 'handled_manually'");
         $summary['pending'] = (int) $this->wpdb->get_var("SELECT COUNT(*) FROM {$table} WHERE status IN ('pending', 'retrying')");
         $summary['latest_error'] = (string) $this->wpdb->get_var(
             "SELECT last_error FROM {$table} WHERE last_error <> '' ORDER BY updated_at DESC, id DESC LIMIT 1"

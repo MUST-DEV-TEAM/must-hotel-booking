@@ -29,6 +29,13 @@
 - PokPay routes: `must-hotel-booking/v1/pokpay/finalize`, `must-hotel-booking/v1/pokpay/error`
 - Check webhook secrets, REST nonce behavior, payment row transaction IDs, and reservation IDs.
 
+### Public callback/tunnel testing
+- Use Settings -> General -> Public callback base URL, or `tools/clock-e2e-settings.php --public-callback-base-url=https://example.ngrok-free.dev`, when provider callbacks/returns must use a public HTTPS host instead of `localhost`.
+- The setting affects provider callback URL helpers and public-host request URL rewriting only; leave it blank after E2E testing to restore normal local URL generation.
+- Before mutating options or creating provider test bookings, run `tools/clock-e2e-backup.php`. It creates a sanitized manifest plus ignored local JSON table/option exports under `tools/backups/`.
+- If an online provider test creates a pending payment reservation that cannot be completed, use `tools/clock-e2e-cleanup.php --reservation-id=<id> --method=stripe --status=cancelled` or the matching provider method. This marks the local reservation/payment failed through `BookingStatusEngine`; Clock cancellation may queue in `mhb_provider_sync_jobs` if the Clock API is unreachable.
+- Public-host HTML can be checked locally with a `Host` header against `127.0.0.1:10016` to confirm `localhost` URLs are not emitted before testing through ngrok.
+
 ## Refund Issue Areas
 - `src/Engine/PaymentRefundService.php`
 - `src/Database/RefundRepository.php`
@@ -40,9 +47,19 @@
 - `src/Provider/Clock/ClockPaymentReconciliationService.php`
 - `src/Provider/Clock/ClockFolioPaymentSyncService.php`
 - `src/Provider/Clock/ClockFolioRefundSyncService.php`
+- `src/Provider/Clock/ClockPaymentAccountingService.php`
+- `src/Provider/Clock/ClockEndpointRegistry.php`
 - `src/Provider/Clock/ClockInboundSyncController.php`
 - `src/Provider/Sync/ProviderSyncJobRunner.php`
 - Tables: `mhb_provider_mappings`, `mhb_provider_request_logs`, `mhb_provider_sync_jobs`
+
+### Clock future payment appears as manual review
+- Default `clock_payment_posting_mode=auto_detect` posts future Stripe/PokPay website payments to a Clock deposit folio. It creates or reuses a booking folio with `deposit=true`, then posts the external provider payment as a folio `credit_item` on that deposit folio.
+- Check Settings -> Provider -> Advanced Clock endpoint paths for `Clock payment posting mode`, `booking_deposit_folio_create`, and `booking_deposit_payment_create`.
+- If the hotel wants legacy behavior for testing, set `folio_payment_only`, but this is not recommended for future reservations because it may settle/affect the folio balance before arrival.
+- If deposit posting enters manual review, check the Clock API user has rights to create booking folios and folio credit items, and confirm the booking ID has not been cancelled/voided in Clock.
+- Clock endpoint overrides in Settings -> Provider must be relative paths beginning with `/` and can only use placeholders allowed by the endpoint registry. Unsafe values are rejected instead of saved.
+- Clock accounting reason codes appear in the Payments detail screen from `must_clock_folio_accounting.last_error_code`. `handled_manually` means staff recorded or reviewed the accounting in Clock outside the plugin; it is not a successful API post.
 
 ## Admin/Staff Portal Issue Areas
 - Admin menu and dashboard: `src/Admin/dashboard.php`.

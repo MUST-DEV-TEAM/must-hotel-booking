@@ -81,8 +81,6 @@ function get_confirmation_result_copy(array $reservations, string $payment_metho
 {
     return BookingStatusEngine::getConfirmationResultCopy($reservations, $payment_method_hint);
 }
-
-
 /**
  * @param array<string, mixed> $reservation
  */
@@ -90,15 +88,12 @@ function get_confirmation_reservation_checkin_value(array $reservation): string
 {
     foreach (['checkin', 'check_in', 'check_in_date', 'arrival', 'arrival_date', 'start_date'] as $key) {
         $value = isset($reservation[$key]) ? \trim((string) $reservation[$key]) : '';
-
         if ($value !== '') {
             return \sanitize_text_field($value);
         }
     }
-
     return '';
 }
-
 /**
  * @param array<string, mixed> $reservation
  * @return array<string, mixed>
@@ -119,7 +114,6 @@ function build_confirmation_cancellation_policy_review(int $reservationId, array
         0.0,
         \__('Online cancellation more than 21 days before check-in refunds paid amount minus the stored provider fee.', 'must-hotel-booking')
     );
-
     $base = [
         'reservation_id' => $reservationId,
         'eligible' => false,
@@ -135,68 +129,52 @@ function build_confirmation_cancellation_policy_review(int $reservationId, array
         'refund_breakdown' => $refundBreakdown,
         'message' => '',
     ];
-
     if ($checkinValue === '') {
         $base['message'] = \__('We could not verify the check-in date for this reservation. Please contact the hotel to review cancellation options.', 'must-hotel-booking') . ' ' . $hotelContactMessage;
         return $base;
     }
-
     $checkinTimestamp = \strtotime($checkinValue);
-
     if ($checkinTimestamp === false) {
         $base['message'] = \__('We could not verify the check-in date for this reservation. Please contact the hotel to review cancellation options.', 'must-hotel-booking') . ' ' . $hotelContactMessage;
         return $base;
     }
-
     $nowTimestamp = (int) \current_time('timestamp');
     $secondsUntilCheckin = $checkinTimestamp - $nowTimestamp;
     $daysUntilCheckin = (int) \floor($secondsUntilCheckin / \DAY_IN_SECONDS);
     $isEligible = $secondsUntilCheckin >= ($policyDays * \DAY_IN_SECONDS);
-
     $base['days_until_checkin'] = $daysUntilCheckin;
-
     if (!$isEligible) {
         $base['message'] = $hotelContactMessage;
         return $base;
     }
-
     $paymentStatus = \sanitize_key((string) ($reservation['payment_status'] ?? ''));
-
     $base['eligible'] = true;
     $base['manual_only'] = false;
-
     if (\in_array($paymentStatus, ['paid', 'partially_paid', 'partially_refunded'], true)) {
         if (!\in_array($paymentMethod, ['stripe', 'pokpay'], true)) {
             $base['manual_only'] = true;
             $base['message'] = \__('This booking has a paid balance, but automatic online cancellation is only available for supported online payments. Please contact the hotel to review the refund.', 'must-hotel-booking') . ' ' . $hotelContactMessage;
             return $base;
         }
-
         if ((string) ($refundBreakdown['provider_fee_status'] ?? 'unknown') !== 'known') {
             $base['manual_only'] = true;
-            $base['message'] = \__('This booking needs hotel support because the payment processing fee is not known yet. The hotel must review the refund before cancellation.', 'must-hotel-booking') . ' ' . $hotelContactMessage;
+            $base['message'] = \__('This booking needs hotel support because the payment processing fee is not known yet. The hotel must review the refund before cancellation.', 'must-hotel-booking') . ' ' . build_confirmation_hotel_contact_details_message();
             return $base;
         }
-
         $base['message'] = \sprintf(
             /* translators: %d: policy days. */
-            \__('This reservation is eligible for online cancellation. The hotel policy allows online cancellation %d or more days before check-in. If you continue, the booking will be cancelled and the stored provider fee will be retained.', 'must-hotel-booking'),
+            \__('This reservation is eligible for online cancellation. The hotel policy allows online cancellation %d or more days before check-in. If you continue, the reservation will be cancelled and you will receive a full refund minus the payment processing fee.', 'must-hotel-booking'),
             $policyDays
         );
-
         return $base;
     }
-
     $base['message'] = \sprintf(
         /* translators: %d: policy days. */
         \__('This reservation is eligible for online cancellation. The hotel policy allows online cancellation %d or more days before check-in. No online refund is needed because this booking does not appear to have a paid online payment.', 'must-hotel-booking'),
         $policyDays
     );
-
     return $base;
 }
-
-
 /**
  * @return array{messages: array<int, string>, booking_id: string, reservation_ids: array<int, int>, payment_method_hint: string, cancellation_review: array<string, mixed>}
  */
@@ -209,43 +187,32 @@ function handle_confirmation_cancellation_post_request(): array
         'payment_method_hint' => '',
         'cancellation_review' => [],
     ];
-
     $requestMethod = isset($_SERVER['REQUEST_METHOD']) ? \strtoupper((string) $_SERVER['REQUEST_METHOD']) : 'GET';
-
     if ($requestMethod !== 'POST' || !\is_array($_POST)) {
         return $result;
     }
-
     $requestAction = isset($_POST['must_confirmation_action'])
         ? \sanitize_key((string) \wp_unslash($_POST['must_confirmation_action']))
         : '';
-
     if ($requestAction !== 'confirm_cancellation') {
         return $result;
     }
-
     $nonce = isset($_POST['must_cancellation_nonce']) ? (string) \wp_unslash($_POST['must_cancellation_nonce']) : '';
-
     if (!\wp_verify_nonce($nonce, 'must_confirm_cancellation')) {
         $result['messages'][] = \__('Security check failed. Please try again.', 'must-hotel-booking');
         return $result;
     }
-
     $reservationId = isset($_POST['reservation_id']) ? \absint($_POST['reservation_id']) : 0;
     $bookingId = isset($_POST['booking_id']) ? \sanitize_text_field((string) \wp_unslash($_POST['booking_id'])) : '';
     $token = isset($_POST['cancel_token']) ? \sanitize_text_field((string) \wp_unslash($_POST['cancel_token'])) : '';
-
     $reservation = $reservationId > 0
         ? \MustHotelBooking\Engine\get_reservation_repository()->getReservationEmailData($reservationId)
         : null;
-
     if (!\is_array($reservation)) {
         $result['messages'][] = \__('This cancellation request is no longer valid.', 'must-hotel-booking');
         return $result;
     }
-
     $result['payment_method_hint'] = (string) ($reservation['payment_method'] ?? '');
-
     if (
         (string) ($reservation['booking_id'] ?? '') !== $bookingId
         || !EmailEngine::isValidGuestCancellationToken($reservationId, $bookingId, (string) ($reservation['guest_email'] ?? ''), $token)
@@ -253,30 +220,23 @@ function handle_confirmation_cancellation_post_request(): array
         $result['messages'][] = \__('This cancellation request is invalid or has expired.', 'must-hotel-booking');
         return $result;
     }
-
     $result['booking_id'] = $bookingId;
     $result['reservation_ids'] = [$reservationId];
-
     $status = \sanitize_key((string) ($reservation['status'] ?? ''));
-
     if ($status === 'cancelled') {
         $result['messages'][] = \__('This reservation is already cancelled.', 'must-hotel-booking');
         return $result;
     }
-
     if (\in_array($status, ['completed', 'blocked'], true)) {
         $result['messages'][] = \__('This reservation can no longer be cancelled online.', 'must-hotel-booking');
         return $result;
     }
-
     $review = build_confirmation_cancellation_policy_review($reservationId, $reservation);
     $result['cancellation_review'] = $review;
-
     if (empty($review['eligible']) || !empty($review['manual_only'])) {
         $result['messages'][] = build_confirmation_contact_hotel_message();
         return $result;
     }
-
     $paymentRows = \MustHotelBooking\Engine\get_payment_repository()->getPaymentsForReservation($reservationId);
     $paymentState = PaymentStatusService::buildReservationPaymentState($reservation, $paymentRows);
     $amountPaid = isset($paymentState['amount_paid']) ? (float) $paymentState['amount_paid'] : 0.0;
@@ -291,31 +251,24 @@ function handle_confirmation_cancellation_post_request(): array
             \__('Guest cancellation refunds paid amount minus stored provider fee.', 'must-hotel-booking')
         );
     $refundAmount = \round((float) ($refundBreakdown['final_refund_amount'] ?? 0.0), 2);
-
     if ($amountPaid > 0.0) {
         if ($refundAmount <= 0.0) {
             $cancelResult = cancel_confirmation_reservation_without_refund($reservationId, $reservation);
-
             if (empty($cancelResult['success']) && empty($cancelResult['queued'])) {
                 $result['messages'][] = isset($cancelResult['message']) && (string) $cancelResult['message'] !== ''
                     ? (string) $cancelResult['message']
                     : \__('Unable to cancel this reservation automatically. Please contact the hotel.', 'must-hotel-booking');
-
                 return $result;
             }
-
             $result['messages'][] = !empty($cancelResult['queued'])
                 ? \__('Your cancellation request has been queued and will be synced with the hotel system. No refund is due under the current cancellation policy.', 'must-hotel-booking')
                 : \__('Your reservation has been cancelled. No refund is due under the current cancellation policy.', 'must-hotel-booking');
-
             return $result;
         }
-
         if (!\in_array($paymentMethod, ['stripe', 'pokpay'], true)) {
             $result['messages'][] = \__('This booking has a paid balance, but automatic online cancellation is only available for supported online payments. Please contact the hotel to review the refund.', 'must-hotel-booking');
             return $result;
         }
-
         $refundResult = (new PaymentRefundService())->requestRefund(
             $reservationId,
             $refundAmount,
@@ -330,54 +283,40 @@ function handle_confirmation_cancellation_post_request(): array
                 'refund_breakdown' => $refundBreakdown,
             ]
         );
-
         if (empty($refundResult['success'])) {
             $result['messages'][] = isset($refundResult['message']) && (string) $refundResult['message'] !== ''
                 ? (string) $refundResult['message']
                 : \__('Unable to process the cancellation refund. Please contact the hotel.', 'must-hotel-booking');
-
             return $result;
         }
-
         if ((string) ($refundResult['status'] ?? '') === 'manual_pending') {
             $result['messages'][] = \__('The automatic refund could not be completed. Please contact the hotel to review the cancellation and refund.', 'must-hotel-booking');
             return $result;
         }
-
         $result['messages'][] = \__('Your reservation cancellation has been submitted and the eligible refund has been started.', 'must-hotel-booking');
         return $result;
     }
-
     $cancelResult = cancel_confirmation_reservation_without_refund($reservationId, $reservation);
-
     if (empty($cancelResult['success']) && empty($cancelResult['queued'])) {
         $result['messages'][] = isset($cancelResult['message']) && (string) $cancelResult['message'] !== ''
             ? (string) $cancelResult['message']
             : \__('Unable to cancel this reservation automatically. Please contact the hotel.', 'must-hotel-booking');
-
         return $result;
     }
-
     $result['messages'][] = !empty($cancelResult['queued'])
         ? \__('Your cancellation request has been queued and will be synced with the hotel system.', 'must-hotel-booking')
         : \__('Your reservation has been cancelled.', 'must-hotel-booking');
-
     return $result;
 }
-
-
 /**
  * @return array{messages: array<int, string>, booking_id: string, reservation_ids: array<int, int>, payment_method_hint: string, cancellation_review: array<string, mixed>}
  */
 function handle_confirmation_cancellation_request(): array
 {
-
     $postResult = handle_confirmation_cancellation_post_request();
-
     if (!empty($postResult['messages']) || !empty($postResult['reservation_ids']) || !empty($postResult['booking_id'])) {
         return $postResult;
     }
-
     $result = [
         'messages' => [],
         'booking_id' => '',
@@ -419,7 +358,6 @@ function handle_confirmation_cancellation_request(): array
         return $result;
     }
     $review = build_confirmation_cancellation_policy_review($reservationId, $reservation);
-
     $result['cancellation_review'] = $review;
     $result['messages'][] = (string) ($review['message'] ?? '');
     return $result;
@@ -501,6 +439,25 @@ function build_confirmation_contact_hotel_message(): string
         );
     }
     return $message;
+}
+function build_confirmation_hotel_contact_details_message(): string
+{
+    $hotelEmail = MustBookingConfig::get_booking_notification_email();
+    $hotelPhone = MustBookingConfig::get_hotel_phone();
+    $message = '';
+    if ($hotelEmail !== '') {
+        $message .= ' ' . \sprintf(
+            \__('Email: %s.', 'must-hotel-booking'),
+            $hotelEmail
+        );
+    }
+    if ($hotelPhone !== '') {
+        $message .= ' ' . \sprintf(
+            \__('Phone: %s.', 'must-hotel-booking'),
+            $hotelPhone
+        );
+    }
+    return \trim($message);
 }
 /**
  * Build view data for the pre-submit confirmation step.
@@ -711,33 +668,45 @@ function get_pending_confirmation_page_view_data(): array
                                     'reservation_ids' => $reservation_ids,
                                     'session_id' => (string) ($payment_result['session_id'] ?? $payment_result['transaction_id'] ?? ''),
                                     'checkout_url' => (string) ($payment_result['checkout_url'] ?? $payment_result['redirect_url'] ?? ''),
+                                    'checkout_mode' => (string) ($payment_result['checkout_mode'] ?? ''),
                                     'expires_at' => (string) ($payment_result['expires_at'] ?? ''),
                                     'created_at' => \current_time('mysql'),
                                 ]);
                                 update_booking_selection_flow_data([
                                     'pending_payment' => $pending_payment,
                                 ]);
-                                $stripe_checkout_url = (string) ($payment_result['redirect_url'] ?? '');
+                                $checkout_url = (string) ($payment_result['redirect_url'] ?? $payment_result['checkout_url'] ?? '');
                                 $gateway = PaymentEngine::normalizeMethod($payment_method);
+                                if ($gateway === 'stripe' && $checkout_url !== '' && PaymentEngine::isStripeCheckoutUrl($checkout_url)) {
+                                    \wp_redirect($checkout_url);
+                                    exit;
+                                }
                                 if (
-                                    $gateway === 'stripe' &&
-                                    $stripe_checkout_url !== ''
-                                    && PaymentEngine::isStripeCheckoutUrl($stripe_checkout_url)
+                                    $gateway === 'pokpay'
+                                    && !empty($payment_result['requires_redirect'])
+                                    && $checkout_url !== ''
+                                    && PaymentEngine::isPokPayCheckoutUrl($checkout_url)
                                 ) {
-                                    \wp_redirect($stripe_checkout_url);
+                                    \wp_redirect($checkout_url);
                                     exit;
                                 }
                                 if ($gateway === 'pokpay' && !empty($payment_result['requires_embedded_checkout'])) {
-                                    $messages[] = \__('Complete your PokPay card payment below.', 'must-hotel-booking');
+                                    $messages[] = \__('Complete your secure PokPay card payment below.', 'must-hotel-booking');
                                 } else {
                                     if ($created_new_draft) {
-                                        BookingStatusEngine::failPendingPaymentReservations($reservation_ids, $gateway === 'pokpay' ? 'pokpay' : 'stripe', 'payment_failed');
+                                        BookingStatusEngine::failPendingPaymentReservations(
+                                            $reservation_ids,
+                                            $gateway === 'pokpay' ? 'pokpay' : 'stripe',
+                                            'payment_failed'
+                                        );
                                     }
                                     update_booking_selection_flow_data([
                                         'pending_payment' => PaymentEngine::getEmptyPendingPaymentFlowData(),
                                     ]);
                                     $pending_payment = PaymentEngine::getEmptyPendingPaymentFlowData();
-                                    $messages[] = \__('The online payment provider returned an invalid checkout response. Please try again.', 'must-hotel-booking');
+                                    $messages[] = $gateway === 'pokpay'
+                                        ? \__('PokPay checkout could not be started. Please try again.', 'must-hotel-booking')
+                                        : \__('The online payment provider returned an invalid checkout response. Please try again.', 'must-hotel-booking');
                                 }
                             }
                         }
@@ -859,6 +828,8 @@ function get_confirmation_page_view_data(): array
     $payment_method_hint = isset($_GET['payment_method']) ? \sanitize_key((string) \wp_unslash($_GET['payment_method'])) : '';
     $stripe_return = isset($_GET['stripe_return']) ? \sanitize_key((string) \wp_unslash($_GET['stripe_return'])) : '';
     $session_id = isset($_GET['session_id']) ? \sanitize_text_field((string) \wp_unslash($_GET['session_id'])) : '';
+    $pokpay_return = isset($_GET['pokpay_return']) ? \sanitize_key((string) \wp_unslash($_GET['pokpay_return'])) : '';
+    $pokpay_order_id = isset($_GET['order_id']) ? \sanitize_text_field((string) \wp_unslash($_GET['order_id'])) : '';
     $requestAction = isset($_GET['must_action']) ? \sanitize_key((string) \wp_unslash($_GET['must_action'])) : '';
     $isCancellationReviewRequest = \in_array($requestAction, ['review_cancellation', 'cancel_reservation'], true);
     if ($payment_method_hint === '' && !empty($cancellationResult['payment_method_hint'])) {
@@ -877,6 +848,48 @@ function get_confirmation_page_view_data(): array
                 $messages[] = (string) $sync_result['message'];
             }
         }
+        if (PaymentEngine::normalizeMethod($payment_method_hint) === 'pokpay' && $pokpay_return !== '') {
+            if ($pokpay_order_id === '') {
+                $payments_by_reservation = \MustHotelBooking\Engine\get_payment_repository()->getPaymentsForReservationIds($reservation_ids);
+                foreach ($reservation_ids as $reservation_id) {
+                    $rows = isset($payments_by_reservation[$reservation_id]) && \is_array($payments_by_reservation[$reservation_id])
+                        ? $payments_by_reservation[$reservation_id]
+                        : [];
+                    foreach ($rows as $row) {
+                        if (!\is_array($row)) {
+                            continue;
+                        }
+                        $method = isset($row['method']) ? \sanitize_key((string) $row['method']) : '';
+                        $status = isset($row['status']) ? \sanitize_key((string) $row['status']) : '';
+                        $transaction_id = isset($row['transaction_id']) ? \sanitize_text_field((string) $row['transaction_id']) : '';
+                        if ($method === 'pokpay' && $transaction_id !== '' && \in_array($status, ['pending', 'pending_payment'], true)) {
+                            $pokpay_order_id = $transaction_id;
+                            break 2;
+                        }
+                    }
+                }
+            }
+            if ($pokpay_return === 'success') {
+                if ($pokpay_order_id !== '') {
+                    $sync_result = PaymentEngine::finalizePokPayOrder($pokpay_order_id, $reservation_ids);
+                    if (!empty($sync_result['success']) && isset($sync_result['state'])) {
+                        if ((string) $sync_result['state'] === 'pending') {
+                            $messages[] = \__('PokPay has returned, but the payment is still being finalized. Please wait a moment and refresh if needed.', 'must-hotel-booking');
+                        } elseif ((string) $sync_result['state'] === 'paid') {
+                            $messages[] = \__('PokPay payment confirmed.', 'must-hotel-booking');
+                        }
+                    } elseif (isset($sync_result['message']) && (string) $sync_result['message'] !== '') {
+                        $messages[] = (string) $sync_result['message'];
+                    }
+                } else {
+                    $messages[] = \__('PokPay returned without a payment reference. Please contact the hotel if payment was completed.', 'must-hotel-booking');
+                }
+            }
+            if (\in_array($pokpay_return, ['cancel', 'failed', 'error'], true)) {
+                BookingStatusEngine::failPendingPaymentReservations($reservation_ids, 'pokpay', 'payment_failed');
+                $messages[] = \__('PokPay payment was cancelled or failed. You can review your booking and try again.', 'must-hotel-booking');
+            }
+        }
         $reservations = ReservationEngine::getConfirmationRowsByIds($reservation_ids);
     } else {
         $booking_id = !empty($cancellationResult['booking_id'])
@@ -884,7 +897,6 @@ function get_confirmation_page_view_data(): array
             : (!$isCancellationReviewRequest && isset($_GET['booking_id'])
                 ? \sanitize_text_field((string) \wp_unslash($_GET['booking_id']))
                 : '');
-
         if ($booking_id !== '') {
             $reservations = ReservationEngine::getConfirmationRowsByBookingId($booking_id);
         }
@@ -892,7 +904,12 @@ function get_confirmation_page_view_data(): array
     if (!empty($reservations)) {
         $status_copy = BookingStatusEngine::getConfirmationResultCopy($reservations, $payment_method_hint);
         if (
-            (PaymentEngine::normalizeMethod($payment_method_hint) === 'stripe' || $stripe_return === 'success') &&
+            (
+                PaymentEngine::normalizeMethod($payment_method_hint) === 'stripe'
+                || PaymentEngine::normalizeMethod($payment_method_hint) === 'pokpay'
+                || $stripe_return === 'success'
+                || $pokpay_return === 'success'
+            ) &&
             !empty($reservations) &&
             \function_exists(__NAMESPACE__ . '\clear_booking_selection')
         ) {
@@ -967,7 +984,8 @@ function enqueue_confirmation_page_assets(): void
     $pending_payment = PaymentEngine::normalizePendingPaymentFlowData($flow_data['pending_payment'] ?? []);
     $is_pokpay_pending = (string) ($pending_payment['method'] ?? '') === 'pokpay'
         && (string) ($pending_payment['session_id'] ?? '') !== ''
-        && !empty($pending_payment['reservation_ids']);
+        && !empty($pending_payment['reservation_ids'])
+        && (string) ($pending_payment['checkout_mode'] ?? '') === 'embedded_sdk';
     $confirmation_dependencies = [];
     \wp_enqueue_style(
         'must-hotel-booking-booking-page',

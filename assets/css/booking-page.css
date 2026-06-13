@@ -5282,6 +5282,7 @@ div.must-confirmation-picker:nth-child(1) > div:nth-child(3) > div:nth-child(1) 
 
 .must-hotel-booking-page-booking-confirmation.is-success-layout .must-confirmation-paid-success-text {
     max-width: 560px;
+    gap: 20px;
 }
 
 .must-hotel-booking-page-booking-confirmation .must-confirmation-paid-success-heading,

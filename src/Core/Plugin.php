@@ -59,6 +59,7 @@ final class Plugin
         \MustHotelBooking\Core\PluginSupportWidget::registerHooks();
         \MustHotelBooking\Core\SupportDiagnosticsEndpoint::registerHooks();
         \MustHotelBooking\Core\ActivityLogger::registerHooks();
+        \MustHotelBooking\Core\PublicCallbackUrl::registerHooks();
 
         \MustHotelBooking\Engine\LockEngine::registerHooks();
         \MustHotelBooking\Engine\LockEngine::scheduleCleanupCron();

@@ -33,13 +33,15 @@ The set of enabled methods is stored in the `payment_methods` key of the `paymen
 
 ## PokPay refunds
 
-PokPay automatic refunds are supported server-side through the POK endpoint:
+PokPay automatic refunds are enabled through the official PokPay public Postman/API collection endpoint verified on 2026-06-13:
 
-`POST /merchants/:merchantId/sdk-orders/:sdkOrderId/refund`
+```
+POST /merchants/:merchantId/sdk-orders/:sdkOrderId/refund
+```
 
-The request uses the existing PokPay bearer token flow from `POST /auth/sdk/login`. Full refunds omit `refundAmount`; partial refunds send `refundAmount` in the same minor-unit format used when creating SDK orders. The plugin creates a local refund record before calling PokPay, blocks duplicate in-progress/completed refunds for the same reservation/payment/amount, and records a refunded payment ledger row only after the API succeeds.
+The request uses merchant bearer authentication and sends `refundReason`; `refundAmount` is optional and omitted for full refunds. The response may only return the SDK order with `isRefunded=true`, so `PaymentEngine::refundPokPaySdkOrder()` treats the refund response plus a follow-up SDK order fetch as provider evidence. A provider refund/reference ID is stored when present; otherwise the SDK order ID is used as the provider reference.
 
-If PokPay credentials are missing, refund permission is unavailable, or the API call fails, the plugin creates a `manual_pending` refund record. Staff can refund from the POK dashboard and then mark the refund completed in the plugin.
+If PokPay rejects the request, returns an incomplete status, or the order is already refunded, the plugin keeps the local refund as `manual_pending`. Staff then verify/refund from the POK dashboard and mark the refund completed in the plugin so the local refund ledger, cancel-after-refund flow, and Clock refund accounting can continue.
 
 ---
 

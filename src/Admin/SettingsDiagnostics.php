@@ -169,6 +169,7 @@ final class SettingsDiagnostics
             'pokpay_enabled' => $pokpayEnabled,
             'pokpay_configured' => $pokpayConfigured,
             'pokpay_environment' => PaymentEngine::getPokPayApiEnvironment(),
+            'pokpay_webhook_url' => MustBookingConfig::build_public_rest_url('must-hotel-booking/v1/pokpay/webhook'),
             'default_payment_mode' => (string) MustBookingConfig::get_setting('default_payment_mode', 'guest_choice'),
             'deposit_required' => !empty(MustBookingConfig::get_setting('deposit_required', false)),
             'deposit_type' => (string) MustBookingConfig::get_setting('deposit_type', 'percentage'),
@@ -257,6 +258,7 @@ final class SettingsDiagnostics
             'wordpress_version' => (string) \get_bloginfo('version'),
             'php_version' => \PHP_VERSION,
             'site_url' => (string) \home_url('/'),
+            'public_callback_base_url' => MustBookingConfig::get_public_callback_base_url(),
             'site_environment' => PaymentEngine::getSiteEnvironmentLabel(),
             'room_count' => $roomCount,
             'email_template_count' => \count($emailTemplates),
@@ -294,6 +296,7 @@ final class SettingsDiagnostics
         $syncJobSummary = $syncJobs->getStatusSummary(ProviderManager::CLOCK_MODE);
         $inboundSummary = $requestLogs->getInboundSummary(ProviderManager::CLOCK_MODE);
         $outboundSummary = $requestLogs->getOutboundSummary(ProviderManager::CLOCK_MODE);
+        $latestOutbound = $requestLogs->getLatestOutboundLogSummary(ProviderManager::CLOCK_MODE);
         $syncJobCounts = isset($syncJobSummary['counts']) && \is_array($syncJobSummary['counts']) ? $syncJobSummary['counts'] : [];
 
         if ((string) $configuredMode === 'clock' && !empty($providerSummary['clock_direct_api_configured'])) {
@@ -352,6 +355,7 @@ final class SettingsDiagnostics
             ],
             'request_logs' => [
                 'outbound_summary' => $outboundSummary,
+                'latest_outbound' => $latestOutbound,
             ],
         ];
 
@@ -392,6 +396,7 @@ final class SettingsDiagnostics
             'WordPress Version: ' . (string) ($data['environment']['wordpress_version'] ?? ''),
             'PHP Version: ' . (string) ($data['environment']['php_version'] ?? ''),
             'Site URL: ' . (string) ($data['environment']['site_url'] ?? ''),
+            'Public Callback Base URL: ' . (string) ($data['environment']['public_callback_base_url'] ?? ''),
             'Hotel: ' . (string) ($data['environment']['hotel_name'] ?? ''),
             'Currency: ' . (string) ($data['environment']['currency'] ?? ''),
             'Timezone: ' . (string) ($data['environment']['timezone'] ?? ''),
@@ -471,6 +476,7 @@ final class SettingsDiagnostics
         $lines[] = 'Clock Resolved Base URL: ' . (string) ($clock['clock_base_url'] ?? '');
         $lines[] = 'Clock API User Set: ' . (!empty($clock['clock_api_user_set']) ? 'yes' : 'no');
         $lines[] = 'Clock API Key Set: ' . (!empty($clock['clock_api_key_set']) ? 'yes' : 'no');
+        $lines[] = 'Clock Credentials Valid: ' . (!empty($clock['clock_credentials_valid']) ? 'yes' : 'no');
         $lines[] = 'Clock Property ID: ' . (string) ($clock['clock_property_id'] ?? '');
         $lines[] = 'Clock WBE Hotel ID: ' . (string) ($clock['clock_wbe_hotel_id'] ?? '');
         $lines[] = 'Clock Catalog Paths Configured: ' . (string) ($clock['clock_catalog_paths_configured'] ?? 0);
@@ -490,12 +496,24 @@ final class SettingsDiagnostics
         $lines[] = 'Clock Outbound Last Error Operation: ' . (string) ($outboundSummary['last_error_operation'] ?? '');
         $lines[] = 'Clock Outbound Last Error HTTP Status: ' . (string) ($outboundSummary['last_error_http_status'] ?? 0);
         $lines[] = 'Clock Outbound Last Error: ' . (string) ($outboundSummary['last_error'] ?? '');
+        $latestOutbound = isset($requestLogs['latest_outbound']) && \is_array($requestLogs['latest_outbound']) ? $requestLogs['latest_outbound'] : [];
+        $lines[] = 'Clock Latest Outbound Operation: ' . (string) ($latestOutbound['operation'] ?? '');
+        $lines[] = 'Clock Latest Outbound HTTP Status: ' . (string) ($latestOutbound['http_status'] ?? 0);
+        $lines[] = 'Clock Latest Outbound Success: ' . (!empty($latestOutbound['success']) ? 'yes' : 'no');
+        $lines[] = 'Clock Payment Posting Mode: ' . (string) ($clock['clock_payment_posting_mode'] ?? '');
+        $lines[] = 'Clock Booking Create Endpoint Reachable/Configured: ' . (!empty($clock['clock_booking_create_endpoint_reachable']) ? 'yes' : 'no');
+        $lines[] = 'Clock Booking Folio Endpoint Reachable/Configured: ' . (!empty($clock['clock_booking_folio_endpoint_reachable']) ? 'yes' : 'no');
+        $lines[] = 'Clock Folio Credit Item Endpoint Reachable/Configured: ' . (!empty($clock['clock_folio_credit_item_endpoint_reachable']) ? 'yes' : 'no');
+        $lines[] = 'Clock Booking Deposit Endpoint Configured: ' . (!empty($clock['clock_booking_deposit_payment_configured']) ? 'yes' : 'no');
+        $lines[] = 'Clock Same-Day Folio Payment Enabled: ' . (!empty($clock['clock_same_day_folio_payment_enabled']) ? 'yes' : 'no');
         $lines[] = 'Clock Public Booking Configured: ' . (!empty($clock['clock_public_booking_configured']) ? 'yes' : 'no');
         $lines[] = 'Clock Public Booking Paths Configured: ' . (string) ($clock['clock_public_booking_paths_configured'] ?? 0);
         $lines[] = 'Clock Reconciliation Paths Configured: ' . (string) ($clock['clock_reconciliation_paths_configured'] ?? 0);
         $lines[] = 'Clock Inbound Sync Paths Configured: ' . (string) ($clock['clock_inbound_sync_paths_configured'] ?? 0);
         $lines[] = 'Clock Webhook Secret Set: ' . (!empty($clock['clock_webhook_secret_set']) ? 'yes' : 'no');
         $lines[] = 'Clock Webhook URL: ' . (string) ($clock['clock_webhook_url'] ?? '');
+        $lines[] = 'Stripe Webhook URL: ' . (string) ($data['payments']['stripe_webhook_url'] ?? '');
+        $lines[] = 'PokPay Webhook URL: ' . (string) ($data['payments']['pokpay_webhook_url'] ?? '');
         $inboundSync = isset($data['provider']['inbound_sync']) && \is_array($data['provider']['inbound_sync']) ? $data['provider']['inbound_sync'] : [];
         $inboundSummary = isset($inboundSync['summary']) && \is_array($inboundSync['summary']) ? $inboundSync['summary'] : [];
         $lines[] = 'Clock Inbound Events Total: ' . (string) ($inboundSummary['total'] ?? 0);
