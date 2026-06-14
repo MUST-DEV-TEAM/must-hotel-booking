@@ -36,6 +36,8 @@
 - If an online provider test creates a pending payment reservation that cannot be completed, use `tools/clock-e2e-cleanup.php --reservation-id=<id> --method=stripe --status=cancelled` or the matching provider method. This marks the local reservation/payment failed through `BookingStatusEngine`; Clock cancellation may queue in `mhb_provider_sync_jobs` if the Clock API is unreachable.
 - Public-host HTML can be checked locally with a `Host` header against `127.0.0.1:10016` to confirm `localhost` URLs are not emitted before testing through ngrok.
 - Run `tools/provider-preflight-report.php` for a read-only Clock/Stripe/PokPay provider reachability report before destructive E2E. On 2026-06-13, read-only probes reached Clock sandbox booking fetch/folio endpoints, Stripe balance auth, and PokPay staging SDK-order fetch, but live callback E2E was still blocked by missing Clock webhook secret, missing Stripe webhook secret, and localhost webhook URLs.
+- Run `php tests/E2E/production-lifecycle-harness.php` for the read-only production-readiness E2E gate. It verifies current backups, non-production Stripe/PokPay/Clock configuration, public callback/webhook readiness, and reports blocked lifecycle groups without creating external records. Use `--allow-external-writes` only after the report shows no `FAIL` or `BLOCKED` prerequisites.
+- Missing Clock webhook secret blocks only inbound Clock webhook replay. It should not block unrelated outbound Clock sandbox tests such as booking fetch, folio listing, positive payment accounting, negative refund accounting, or folio rereads.
 
 ## Refund Issue Areas
 - `src/Engine/PaymentRefundService.php`

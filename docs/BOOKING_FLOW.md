@@ -60,6 +60,12 @@ Managed pages are configured in `src/Core/ManagedPages.php` and installed/synced
 - For paid Stripe/PokPay website bookings cancelled from Clock/provider sync, the lifecycle service creates a single refund-review row when no existing active/completed refund blocks it. Cancellation still releases availability through status change; actual money movement remains a staff/payment workflow.
 - Availability release is tied to reservation status becoming non-blocking; preserve this behavior.
 
+## Clock Stay Amendments
+- Admin and staff stay-date amendments for Clock-backed reservations route through `ClockPaymentReconciliationService::updateStayDates()`.
+- The service validates date order, check-in timing, reservation status, provider booking references, and local availability before synchronizing changed dates to Clock.
+- After Clock sync, local pricing is refreshed from Clock/provider data when available. Increased totals are marked `additional_payment_review_required`; reduced totals are marked `refund_or_credit_review_required`. Both use `manual_review_required` and do not automatically charge, refund, or post Clock credit items without an explicit business rule.
+- Duplicate amendment requests use the existing provider sync idempotency key/retry path. Failed Clock sync keeps pricing reconciliation flagged rather than silently treating the local reservation as financially settled.
+
 ## Expiration Behavior
 - Expired locks are cleaned by `LockEngine`.
 - Expired pending online payments are handled by `PaymentEngine::cleanupExpiredPendingPaymentReservations()` on the lock cleanup cron hook.

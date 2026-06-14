@@ -1769,6 +1769,18 @@ final class SettingsPage
         if ($posted_webhook_secret !== '') {
             $form['clock_webhook_secret'] = $posted_webhook_secret;
         }
+        $posted_webhook_basic_username = isset($source['clock_webhook_basic_username']) && !\is_array($source['clock_webhook_basic_username'])
+            ? \sanitize_text_field((string) \wp_unslash($source['clock_webhook_basic_username']))
+            : '';
+        if ($posted_webhook_basic_username !== '') {
+            $form['clock_webhook_basic_username'] = $posted_webhook_basic_username;
+        }
+        $posted_webhook_basic_password = isset($source['clock_webhook_basic_password']) && !\is_array($source['clock_webhook_basic_password'])
+            ? \sanitize_text_field((string) \wp_unslash($source['clock_webhook_basic_password']))
+            : '';
+        if ($posted_webhook_basic_password !== '') {
+            $form['clock_webhook_basic_password'] = $posted_webhook_basic_password;
+        }
         $form['clock_auto_sync_enabled'] = self::parseBool($source, 'clock_auto_sync_enabled');
         $form['clock_auto_sync_interval_minutes'] = ClockConfig::normalizeAutoSyncInterval((int) \absint(\wp_unslash($source['clock_auto_sync_interval_minutes'] ?? ($form['clock_auto_sync_interval_minutes'] ?? 15))));
         $form['clock_auto_sync_batch_size'] = \max(10, \min(100, (int) \absint(\wp_unslash($source['clock_auto_sync_batch_size'] ?? ($form['clock_auto_sync_batch_size'] ?? 25)))));
@@ -3059,13 +3071,31 @@ final class SettingsPage
             self::renderField(['label' => __('Clock environment', 'must-hotel-booking'), 'name' => 'clock_environment', 'type' => 'select', 'value' => $form['clock_environment'] ?? 'production', 'options' => ['production' => __('Production', 'must-hotel-booking'), 'sandbox' => __('Sandbox / test', 'must-hotel-booking'), 'custom' => __('Custom', 'must-hotel-booking')]]);
             self::renderField(['label' => __('Request timeout (seconds)', 'must-hotel-booking'), 'name' => 'clock_timeout_seconds', 'type' => 'number', 'min' => 1, 'max' => 60, 'value' => $form['clock_timeout_seconds'] ?? 15]);
             self::renderField([
-                'label' => __('Webhook shared secret', 'must-hotel-booking'),
+                'label' => __('Legacy webhook token / HMAC secret', 'must-hotel-booking'),
                 'name' => 'clock_webhook_secret',
                 'type' => 'password',
                 'value' => '',
                 'description' => !empty($form['clock_webhook_secret'])
-                    ? __('Webhook shared secret is saved. Leave blank to keep it.', 'must-hotel-booking')
-                    : __('Optional. Use when enabling Clock push/webhook sync.', 'must-hotel-booking'),
+                    ? __('Legacy token/HMAC secret is saved. Leave blank to keep it.', 'must-hotel-booking')
+                    : __('Optional backward-compatible auth for custom Clock webhook senders. Clock PMS PUSH uses Amazon SNS signatures and can also use the Basic credentials below.', 'must-hotel-booking'),
+            ]);
+            self::renderField([
+                'label' => __('Clock PUSH Basic username', 'must-hotel-booking'),
+                'name' => 'clock_webhook_basic_username',
+                'type' => 'password',
+                'value' => '',
+                'description' => !empty($form['clock_webhook_basic_username'])
+                    ? __('Clock PUSH Basic username is saved. Leave blank to keep it.', 'must-hotel-booking')
+                    : __('Optional. Use only if the Clock PUSH endpoint URL includes HTTP Basic credentials.', 'must-hotel-booking'),
+            ]);
+            self::renderField([
+                'label' => __('Clock PUSH Basic password', 'must-hotel-booking'),
+                'name' => 'clock_webhook_basic_password',
+                'type' => 'password',
+                'value' => '',
+                'description' => !empty($form['clock_webhook_basic_password'])
+                    ? __('Clock PUSH Basic password is saved. Leave blank to keep it.', 'must-hotel-booking')
+                    : __('Optional. This is checked against the HTTP Basic Authorization header from Clock PUSH.', 'must-hotel-booking'),
             ]);
             self::renderField([
                 'label' => __('Enable automatic Clock reservation sync', 'must-hotel-booking'),
@@ -3408,8 +3438,11 @@ final class SettingsPage
             ],
             [
                 'label' => \__('Inbound webhook sync', 'must-hotel-booking'),
-                'ready' => !empty($summary['clock_webhook_secret_set']),
-                'note' => \__('Webhook authentication and booking payload handling are available. Add a shared secret and configure Clock to call this site URL.', 'must-hotel-booking'),
+                'ready' => true,
+                'always_show_note' => true,
+                'note' => !empty($summary['clock_webhook_basic_auth_set'])
+                    ? \__('Clock PUSH/SNS payloads are verified with Amazon SNS signatures. Optional HTTP Basic authentication is configured for the endpoint URL.', 'must-hotel-booking')
+                    : \__('Clock PUSH/SNS payloads are verified with Amazon SNS signatures. Configure optional HTTP Basic credentials only if the Clock endpoint URL includes them.', 'must-hotel-booking'),
             ],
         ];
         self::renderPanelStart(\__('Clock readiness', 'must-hotel-booking'), \__('Per-capability readiness for direct Clock API mode. WBE Inline readiness is intentionally not counted here.', 'must-hotel-booking'));

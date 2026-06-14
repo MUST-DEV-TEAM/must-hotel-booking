@@ -126,12 +126,10 @@ final class ClockPaymentAccountingService
             $folioResult = $this->folios->selectPaymentFolio($clockBookingId, $amount, $currency, $reservationId);
         }
         if (empty($folioResult['success'])) {
-            return $this->markFailure(
+            return $this->markManualReview(
                 $accountingId,
                 ClockAccountingReason::forFolioMessage((string) ($folioResult['message'] ?? '')),
-                (string) ($folioResult['message'] ?? \__('Unable to select a Clock folio.', 'must-hotel-booking')),
-                false,
-                $enqueueRetry
+                (string) ($folioResult['message'] ?? \__('Unable to select a Clock folio.', 'must-hotel-booking'))
             );
         }
         $folioId = (string) ($folioResult['folio_id'] ?? '');
@@ -214,8 +212,8 @@ final class ClockPaymentAccountingService
         $folioResult = $this->folios->validateRefundFolio($clockBookingId, $folioId, $reservationId);
         if (empty($folioResult['success'])) {
             $message = (string) ($folioResult['message'] ?? \__('Unable to validate original Clock payment folio.', 'must-hotel-booking'));
-            $result = $this->markFailure($accountingId, ClockAccountingReason::forFolioMessage($message), $message, false, $enqueueRetry);
-            $this->mirrorRefundFailure($refundId, 'failed', $message);
+            $result = $this->markManualReview($accountingId, ClockAccountingReason::forFolioMessage($message), $message);
+            $this->mirrorRefundFailure($refundId, 'manual_review', $message);
             return $result;
         }
         $reference = $providerRefundId !== '' ? $providerRefundId : $idempotencyKey;

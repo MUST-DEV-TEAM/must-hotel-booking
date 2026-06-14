@@ -1,5 +1,11 @@
 # Decisions
 
+## 2026-06-14 - Amendment and accounting financial mismatches require manual review
+- Decision: Stay amendments that change Clock/provider pricing do not automatically create extra charges, partial refunds, or Clock credit items without an explicit business rule.
+- Reason: Production readiness requires cancellation/refund separation and forbids invented automatic financial adjustment policies.
+- Affected areas: Clock stay amendments, payment reconciliation, refund/credit review, Clock accounting, admin provider mirror diagnostics.
+- Implementation note: Increased amended totals are recorded as `additional_payment_review_required`; reduced amended totals are recorded as `refund_or_credit_review_required`; both require staff review. Ambiguous Clock folio/accounting targets are manual-review states; reconciliation may retry safe transient failures but must not auto-repair uncertain financial mismatches by creating payments, refunds, or Clock accounting rows.
+
 ## 2026-06-11 - Initial Codex knowledge base setup
 - Decision: The project now uses `AGENTS.md` plus concise root-level `docs/` files as a Codex knowledge base.
 - Reason: Future Codex tasks should read relevant docs before searching code, reduce token usage, and preserve booking/payment/dashboard/database behavior.

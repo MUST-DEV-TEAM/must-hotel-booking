@@ -178,8 +178,8 @@ final class PaymentEngine
         return [
             'local' => [
                 'label' => \__('Localhost', 'must-hotel-booking'),
-                'description' => \__('Use for local development sites such as localhost or LocalWP domains.', 'must-hotel-booking'),
-                'example' => 'http://localhost',
+                'description' => \__('Use for local development sites; callbacks should be configured with a temporary public HTTPS base only during testing.', 'must-hotel-booking'),
+                'example' => '',
             ],
             'staging' => [
                 'label' => \__('Staging / IP website', 'must-hotel-booking'),
@@ -188,8 +188,8 @@ final class PaymentEngine
             ],
             'production' => [
                 'label' => \__('Live website', 'must-hotel-booking'),
-                'description' => \__('Use for the real HTTPS website such as https://empirebeachresort.al.', 'must-hotel-booking'),
-                'example' => 'https://empirebeachresort.al',
+                'description' => \__('Use for the real HTTPS website such as https://new.empirebeachresort.al.', 'must-hotel-booking'),
+                'example' => 'https://new.empirebeachresort.al',
             ],
         ];
     }
@@ -438,6 +438,13 @@ final class PaymentEngine
         $paymentStatus = isset($session['payment_status']) ? (string) $session['payment_status'] : '';
         $sessionStatus = isset($session['status']) ? (string) $session['status'] : '';
         if ($paymentStatus === 'paid' && $sessionStatus === 'complete') {
+            $transactionId = isset($session['payment_intent']) ? (string) $session['payment_intent'] : $sessionId;
+            if (self::stripeCompletedSessionAlreadyRecorded($reservationIds, $transactionId)) {
+                return [
+                    'success' => true,
+                    'state' => 'paid',
+                ];
+            }
             $reservationRows = get_reservation_repository()->getReservationsByIds($reservationIds);
             $shouldIncrementCouponUsage = false;
             foreach ($reservationRows as $reservationRow) {
@@ -452,7 +459,7 @@ final class PaymentEngine
                 $reservationIds,
                 'stripe',
                 'paid',
-                isset($session['payment_intent']) ? (string) $session['payment_intent'] : $sessionId
+                $transactionId
             );
             (new PaymentProviderFeeService())->captureStripeFeeSnapshotForReservations($reservationIds, $session);
             /*
@@ -1598,6 +1605,10 @@ final class PaymentEngine
         if ($type === 'checkout.session.completed') {
             $paymentIntent = isset($object['payment_intent']) ? (string) $object['payment_intent'] : '';
             $sessionId = isset($object['id']) ? (string) $object['id'] : '';
+            $transactionId = $paymentIntent !== '' ? $paymentIntent : $sessionId;
+            if (self::stripeCompletedSessionAlreadyRecorded($reservationIds, $transactionId)) {
+                return new \WP_REST_Response(['success' => true], 200);
+            }
             $couponMetadata = isset($object['metadata']['coupon_ids']) ? (string) $object['metadata']['coupon_ids'] : '';
             $couponIds = $couponMetadata === ''
                 ? []
@@ -1610,7 +1621,7 @@ final class PaymentEngine
                     )
                 );
             BookingStatusEngine::updateReservationStatuses($reservationIds, 'confirmed', 'paid');
-            BookingStatusEngine::createPaymentRows($reservationIds, 'stripe', 'paid', $paymentIntent !== '' ? $paymentIntent : $sessionId);
+            BookingStatusEngine::createPaymentRows($reservationIds, 'stripe', 'paid', $transactionId);
             (new PaymentProviderFeeService())->captureStripeFeeSnapshotForReservations($reservationIds, $object);
             /*
              * Do not mark the Clock booking payment status as paid.
@@ -1760,6 +1771,31 @@ final class PaymentEngine
                 return false;
             }
         }
+        return true;
+    }
+
+    /**
+     * @param array<int, int> $reservationIds
+     */
+    private static function stripeCompletedSessionAlreadyRecorded(array $reservationIds, string $transactionId): bool
+    {
+        $transactionId = \trim($transactionId);
+        if ($transactionId === '' || empty($reservationIds)) {
+            return false;
+        }
+
+        $payments = get_payment_repository();
+        foreach ($reservationIds as $reservationId) {
+            $paymentId = $payments->getLatestPaymentIdForReservationMethodTransaction((int) $reservationId, 'stripe', $transactionId);
+            if ($paymentId <= 0) {
+                return false;
+            }
+            $payment = $payments->getPayment($paymentId);
+            if (!\is_array($payment) || (string) ($payment['status'] ?? '') !== 'paid') {
+                return false;
+            }
+        }
+
         return true;
     }
 }

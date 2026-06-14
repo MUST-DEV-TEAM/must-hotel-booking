@@ -247,6 +247,7 @@ final class ProviderSyncJobRepository extends AbstractRepository
             $this->wpdb->prepare(
                 'UPDATE ' . $this->tableName() . '
                 SET status = %s,
+                    attempts = attempts + 1,
                     locked_at = NULL,
                     run_after = %s,
                     last_error = %s,
@@ -254,7 +255,7 @@ final class ProviderSyncJobRepository extends AbstractRepository
                 WHERE status = %s
                     AND locked_at IS NOT NULL
                     AND locked_at <= %s
-                    AND attempts < max_attempts',
+                    AND attempts + 1 < max_attempts',
                 self::STATUS_RETRYABLE,
                 $now,
                 \__('Provider sync job lock expired before completion.', 'must-hotel-booking'),
@@ -267,6 +268,7 @@ final class ProviderSyncJobRepository extends AbstractRepository
             $this->wpdb->prepare(
                 'UPDATE ' . $this->tableName() . '
                 SET status = %s,
+                    attempts = attempts + 1,
                     locked_at = NULL,
                     run_after = NULL,
                     last_error = %s,
@@ -274,7 +276,7 @@ final class ProviderSyncJobRepository extends AbstractRepository
                 WHERE status = %s
                     AND locked_at IS NOT NULL
                     AND locked_at <= %s
-                    AND attempts >= max_attempts',
+                    AND attempts + 1 >= max_attempts',
                 self::STATUS_EXHAUSTED,
                 \__('Provider sync job lock expired after all attempts were used.', 'must-hotel-booking'),
                 $now,

@@ -8,7 +8,7 @@ Verified from targeted current-code inspection on 2026-06-11. Use this document 
 - Uses WordPress `dbDelta()`.
 - DB version option: `must_hotel_booking_db_version`.
 - Version value is updated to `MUST_HOTEL_BOOKING_VERSION`.
-- Current local plugin version inspected in code: `0.4.75`.
+- Current local plugin version inspected in code: `0.4.80`.
 - Payment/refund fee columns are also repaired by an idempotent current-version schema guard, because some installs can already have `must_hotel_booking_db_version` equal to the plugin version before `dbDelta()` sees newly added columns.
 
 ## Key Tables

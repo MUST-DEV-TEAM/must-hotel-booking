@@ -174,7 +174,6 @@ final class ClockConfig
     public static function paymentPostingMode(): string
     {
         $mode = \sanitize_key((string) (self::settings()['clock_payment_posting_mode'] ?? 'auto_detect'));
-
         return \in_array($mode, ['auto_detect', 'deposit_for_future_bookings', 'folio_payment_only', 'manual_clock_accounting'], true) ? $mode : 'auto_detect';
     }
     public static function sameDayFolioPaymentEnabled(): bool
@@ -205,6 +204,14 @@ final class ClockConfig
     public static function webhookSecret(): string
     {
         return (string) (self::settings()['clock_webhook_secret'] ?? '');
+    }
+    public static function webhookBasicUsername(): string
+    {
+        return (string) (self::settings()['clock_webhook_basic_username'] ?? '');
+    }
+    public static function webhookBasicPassword(): string
+    {
+        return (string) (self::settings()['clock_webhook_basic_password'] ?? '');
     }
     public static function autoSyncEnabled(): bool
     {
@@ -331,8 +338,20 @@ final class ClockConfig
     public static function inboundSyncPaths(): array
     {
         $settings = self::settings();
+        $reservationFetchPath = self::normalizeOptionalPath(
+            (string) ($settings['clock_reservation_fetch_path'] ?? '')
+        );
+        /*
+         * Older installations may have saved this field as an explicit blank,
+         * which overrides the current default and silently disables inbound
+         * polling. Auto-sync already has its own enabled setting, so a blank
+         * endpoint should use Clock's standard booking-view endpoint.
+         */
+        if ($reservationFetchPath === '') {
+            $reservationFetchPath = '/bookings/{booking_id}';
+        }
         return [
-            'reservation_fetch' => self::normalizeOptionalPath((string) ($settings['clock_reservation_fetch_path'] ?? '')),
+            'reservation_fetch' => $reservationFetchPath,
         ];
     }
     public static function isPublicBookingConfigured(): bool
@@ -500,6 +519,7 @@ final class ClockConfig
             'clock_same_day_folio_payment_enabled' => self::sameDayFolioPaymentEnabled(),
             'clock_required_rights_missing' => self::requiredRightsMissing(),
             'clock_webhook_secret_set' => self::webhookSecret() !== '',
+            'clock_webhook_basic_auth_set' => self::webhookBasicUsername() !== '' || self::webhookBasicPassword() !== '',
             'public_callback_base_url' => MustBookingConfig::get_public_callback_base_url(),
             'clock_webhook_url' => \function_exists('rest_url') ? MustBookingConfig::build_public_rest_url('must-hotel-booking/v1/clock/webhook') : '',
             'clock_auto_sync_enabled' => self::autoSyncEnabled(),
@@ -528,7 +548,6 @@ final class ClockConfig
                 \__('Clock deposit folio endpoint configuration is unavailable; future online payments will enter manual Clock accounting instead of posting to a normal folio.', 'must-hotel-booking'),
             ];
         }
-
         return [];
     }
     public static function normalizePath(string $path): string
@@ -549,14 +568,11 @@ final class ClockConfig
     {
         $path = \trim($path);
         $value = $path !== '' ? $path : \trim($default);
-
         if (\preg_match('/^\/?\s*(GET|POST|PUT|PATCH|DELETE)\s+(.+)$/i', $value, $matches) === 1) {
             $method = \strtoupper($matches[1]);
             $endpointPath = self::normalizePath((string) $matches[2]);
-
             return $method . ' ' . $endpointPath;
         }
-
         return self::normalizeOptionalPath($value);
     }
     private static function normalizeBaseUrl(string $url): string

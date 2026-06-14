@@ -44,6 +44,10 @@ final class PaymentAdminActions
             return;
         }
 
+        if (!$this->currentUserCanManagePayments()) {
+            $this->redirectToPaymentsPage($query->buildUrlArgs(['notice' => 'action_failed']));
+        }
+
         if (!\in_array($action, ['mark_paid', 'mark_unpaid', 'mark_pending', 'mark_pay_at_hotel', 'mark_failed', 'resend_guest_email', 'resend_admin_email'], true)) {
             return;
         }
@@ -88,6 +92,13 @@ final class PaymentAdminActions
         }
 
         $action = isset($_POST['must_payments_action']) ? \sanitize_key((string) \wp_unslash($_POST['must_payments_action'])) : '';
+
+        if ($action !== '' && !$this->currentUserCanManagePayments()) {
+            return [
+                'errors' => [\__('You do not have permission to manage payments.', 'must-hotel-booking')],
+                'settings_errors' => [\__('You do not have permission to manage payments.', 'must-hotel-booking')],
+            ];
+        }
 
         if ($action === 'issue_refund') {
             $reservationId = isset($_POST['reservation_id']) ? \absint(\wp_unslash($_POST['reservation_id'])) : 0;
@@ -644,6 +655,11 @@ final class PaymentAdminActions
         $this->redirectToPaymentsPage($query->buildUrlArgs([
             'notice' => $saved ? 'payment_settings_saved' : 'payment_settings_save_failed',
         ]));
+    }
+
+    private function currentUserCanManagePayments(): bool
+    {
+        return \current_user_can('manage_options');
     }
 
     private function mapActionNotice(string $action): string

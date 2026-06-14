@@ -1399,6 +1399,17 @@ function render_admin_reservation_detail_page_content(array $detailData): void
             if (!empty($pricingSync['amount_due'])) {
                 echo '<tr><th>' . \esc_html__('Synced amount due', 'must-hotel-booking') . '</th><td>' . \esc_html((string) $pricingSync['amount_due']) . '</td></tr>';
             }
+            if (!empty($pricingSync['financial_adjustment_required'])) {
+                $adjustmentType = (string) ($pricingSync['financial_adjustment_type'] ?? '');
+                $adjustmentLabel = $adjustmentType === 'additional_payment_review_required'
+                    ? \__('Additional payment review required', 'must-hotel-booking')
+                    : \__('Refund or credit review required', 'must-hotel-booking');
+                echo '<tr><th>' . \esc_html__('Financial adjustment', 'must-hotel-booking') . '</th><td>' . render_admin_reservation_badge($adjustmentLabel, 'warning');
+                if (!empty($pricingSync['financial_adjustment_amount'])) {
+                    echo ' <span class="description">' . \esc_html((string) $pricingSync['financial_adjustment_amount']) . '</span>';
+                }
+                echo '</td></tr>';
+            }
             if (!empty($pricingSync['error'])) {
                 echo '<tr><th>' . \esc_html__('Pricing sync error', 'must-hotel-booking') . '</th><td>' . \esc_html((string) $pricingSync['error']) . '</td></tr>';
             }

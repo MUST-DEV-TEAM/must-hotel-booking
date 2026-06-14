@@ -133,6 +133,7 @@
 | --- | --- | --- |
 | `tools/lifecycle-sync-smoke-test.php` | Standalone smoke test for provider/Clock cancellation routing through `BookingLifecycleSyncService`, cancellation hook idempotency, and refund-review row creation. | Changing lifecycle sync, Clock cancellation, or refund-review behavior. |
 | `tools/provider-preflight-report.php` | Read-only provider reachability/config report for Clock, Stripe, and PokPay using configured sandbox/staging credentials; does not create bookings, payments, or refunds. | Before destructive provider E2E tests or when callback/provider configuration is questioned. |
+| `tests/E2E/production-lifecycle-harness.php` | Read-only-by-default production-readiness E2E harness with correlation IDs, backup checks, non-production guards, and lifecycle PASS/BLOCKED/FAIL reporting. | Before staged Stripe/PokPay/Clock lifecycle writes or release readiness verification. |
 
 ## Elementor Widgets
 | Path | Purpose | Inspect when |

@@ -42,16 +42,24 @@ final class ClockReservationAutoSyncScheduler
             self::unscheduleCron();
             return;
         }
-        $interval = self::scheduleName(ClockConfig::autoSyncIntervalMinutes());
+        $interval = self::scheduleName(
+            ClockConfig::autoSyncIntervalMinutes()
+        );
         $next = \wp_next_scheduled(self::CRON_HOOK);
-        $currentSchedule = \function_exists('wp_get_schedule') ? \wp_get_schedule(self::CRON_HOOK) : '';
+        $currentSchedule = \function_exists('wp_get_schedule')
+            ? \wp_get_schedule(self::CRON_HOOK)
+            : '';
         if ($next !== false && $currentSchedule === $interval) {
             return;
         }
         if ($next !== false) {
             self::unscheduleCron();
         }
-        \wp_schedule_event(\time() + 60, $interval, self::CRON_HOOK);
+        \wp_schedule_event(
+            \time() + 60,
+            $interval,
+            self::CRON_HOOK
+        );
     }
     public static function unscheduleCron(): void
     {
@@ -73,8 +81,14 @@ final class ClockReservationAutoSyncScheduler
         if (\get_transient(self::LOCK_KEY)) {
             return;
         }
-        $minute = \defined('MINUTE_IN_SECONDS') ? (int) MINUTE_IN_SECONDS : 60;
-        \set_transient(self::LOCK_KEY, '1', 10 * $minute);
+        $minute = \defined('MINUTE_IN_SECONDS')
+            ? (int) MINUTE_IN_SECONDS
+            : 60;
+        \set_transient(
+            self::LOCK_KEY,
+            (string) \time(),
+            10 * $minute
+        );
         try {
             (new self())->runScheduledSync();
         } finally {

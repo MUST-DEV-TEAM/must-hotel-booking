@@ -242,16 +242,20 @@ function firstFolioId($data): string
 
 function isPublicUrl(string $url): bool
 {
+    $scheme = \strtolower((string) \parse_url($url, \PHP_URL_SCHEME));
     $host = \strtolower((string) \parse_url($url, \PHP_URL_HOST));
 
-    return $host !== '' && !\in_array($host, ['localhost', '127.0.0.1', '::1'], true);
+    return $scheme === 'https'
+        && $host !== ''
+        && !\in_array($host, ['localhost', '127.0.0.1', '::1'], true)
+        && \substr($host, -10) !== '.localhost'
+        && \substr($host, -6) !== '.local'
+        && \substr($host, -5) !== '.test';
 }
 
 function stripeWebhookSecretSet(): bool
 {
-    $settings = MustBookingConfig::get_group_settings('payments_summary');
-
-    return !empty($settings['stripe_webhook_secret']);
+    return PaymentEngine::getStripeWebhookSecret() !== '';
 }
 
 /** @return array<int, string> */

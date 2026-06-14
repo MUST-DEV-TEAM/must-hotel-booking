@@ -29,6 +29,8 @@ global $wpdb;
 $clock = MustBookingConfig::get_clock_settings();
 $payments = MustBookingConfig::get_group_settings('payments_summary');
 $tablePrefix = (string) $wpdb->prefix;
+$activeSiteEnvironment = PaymentEngine::getActiveSiteEnvironment();
+$activeStripeCredentials = PaymentEngine::getStripeEnvironmentCredentials($activeSiteEnvironment);
 
 $tableExists = static function (string $table) use ($wpdb): bool {
     return (string) $wpdb->get_var($wpdb->prepare('SHOW TABLES LIKE %s', $table)) === $table;
@@ -66,7 +68,7 @@ $report = [
         'plugin_version' => \defined('MUST_HOTEL_BOOKING_VERSION') ? MUST_HOTEL_BOOKING_VERSION : '',
         'provider_mode' => ProviderManager::getConfiguredMode(),
         'active_provider' => ProviderManager::activeKey(),
-        'active_site_environment' => PaymentEngine::getActiveSiteEnvironment(),
+        'active_site_environment' => $activeSiteEnvironment,
         'public_callback_base_url' => MustBookingConfig::get_public_callback_base_url(),
     ],
     'clock' => [
@@ -94,7 +96,7 @@ $report = [
         'stripe_local_secret_set' => !empty($payments['stripe_local_secret_key']),
         'stripe_staging_secret_set' => !empty($payments['stripe_staging_secret_key']),
         'stripe_production_secret_set' => !empty($payments['stripe_production_secret_key']),
-        'stripe_webhook_secret_set' => !empty($payments['stripe_webhook_secret']),
+        'stripe_webhook_secret_set' => !empty($activeStripeCredentials['webhook_secret']),
         'pokpay_checkout_mode' => (string) ($payments['pokpay_checkout_mode'] ?? ''),
         'pokpay_local_credentials_set' => !empty($payments['pokpay_local_merchant_id']) && !empty($payments['pokpay_local_key_id']) && !empty($payments['pokpay_local_key_secret']),
         'pokpay_staging_credentials_set' => !empty($payments['pokpay_staging_merchant_id']) && !empty($payments['pokpay_staging_key_id']) && !empty($payments['pokpay_staging_key_secret']),

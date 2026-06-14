@@ -4,7 +4,7 @@
 - Plugin name: MUST Hotel Booking.
 - Purpose: manage hotel accommodations, rooms, availability, reservations, pricing, checkout, payments, staff operations, and related WordPress admin workflows.
 - Requested baseline version: `0.4.71`.
-- Current local code inspected: `0.4.72` in `must-hotel-booking.php` header and `MUST_HOTEL_BOOKING_VERSION`.
+- Current local code inspected: `0.4.80` in `must-hotel-booking.php` header and `MUST_HOTEL_BOOKING_VERSION`.
 - Inspection provenance: targeted current-code inspection on 2026-06-11; verify against code before changing behavior.
 
 ## Main User Types
@@ -32,5 +32,5 @@
 
 ## Unknowns Needing Manual Confirmation
 - Production payment/provider credentials and Clock API permissions.
-- Whether the intended release version should remain `0.4.72` or be treated as `0.4.71` from the task prompt.
+- Clock inbound synchronization must be replay-tested after the production Clock PUSH endpoint is configured. Official Clock PUSH uses Amazon SNS signatures and optional endpoint Basic auth, not a custom Clock shared secret.
 - Any site-specific theme/Elementor overrides outside this plugin.

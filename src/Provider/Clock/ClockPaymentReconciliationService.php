@@ -846,10 +846,13 @@ final class ClockPaymentReconciliationService
     private function updatePricingMetadata(int $reservationId, array $row, string $checkin, string $checkout, array $pricing, string $idempotencyKey, bool $success, string $syncStatus, string $syncError): void
     {
         $metadata = $this->decodeMetadata($row['provider_metadata'] ?? null);
-        $totalPrice = $success && isset($pricing['total_price']) ? \round((float) $pricing['total_price'], 2) : (float) ($row['total_price'] ?? 0.0);
+        $previousTotalPrice = isset($row['total_price']) ? \round((float) $row['total_price'], 2) : 0.0;
+        $totalPrice = $success && isset($pricing['total_price']) ? \round((float) $pricing['total_price'], 2) : $previousTotalPrice;
+        $priceDelta = \round($totalPrice - $previousTotalPrice, 2);
         $paymentSummary = \MustHotelBooking\Engine\get_payment_repository()->getReservationPaymentSummary($reservationId);
         $amountPaid = isset($paymentSummary['amount_paid']) ? \round((float) $paymentSummary['amount_paid'], 2) : 0.0;
         $amountDue = \round(\max(0.0, $totalPrice - $amountPaid), 2);
+        $financialAdjustment = $this->financialAdjustmentReview($success, $priceDelta);
         $providerPaymentStatus = $success
             ? (string) ($pricing['provider_payment_status'] ?? (string) ($row['provider_payment_status'] ?? ''))
             : (string) ($row['provider_payment_status'] ?? '');
@@ -859,19 +862,27 @@ final class ClockPaymentReconciliationService
             'checkin' => $checkin,
             'checkout' => $checkout,
             'pricing_source' => (string) ($pricing['pricing_source'] ?? ''),
-            'previous_total_price' => isset($row['total_price']) ? \round((float) $row['total_price'], 2) : 0.0,
+            'previous_total_price' => $previousTotalPrice,
             'total_price' => $totalPrice,
+            'price_delta' => $priceDelta,
             'room_subtotal' => isset($pricing['room_subtotal']) ? \round((float) $pricing['room_subtotal'], 2) : null,
             'fees_total' => isset($pricing['fees_total']) ? \round((float) $pricing['fees_total'], 2) : null,
             'taxes_total' => isset($pricing['taxes_total']) ? \round((float) $pricing['taxes_total'], 2) : null,
             'discount_total' => isset($pricing['discount_total']) ? \round((float) $pricing['discount_total'], 2) : null,
             'amount_paid' => $amountPaid,
             'amount_due' => $amountDue,
+            'financial_adjustment_type' => $financialAdjustment['type'],
+            'financial_adjustment_amount' => $financialAdjustment['amount'],
+            'financial_adjustment_status' => $financialAdjustment['status'],
             'sync_status' => $syncStatus,
             'sync_error' => $syncError,
             'synced_at' => $this->now(),
         ];
         $metadata['pricing_reconciliation_required'] = !$success;
+        $metadata['financial_adjustment_required'] = $financialAdjustment['status'] === 'manual_review_required';
+        $metadata['financial_adjustment_status'] = $financialAdjustment['status'];
+        $metadata['financial_adjustment_type'] = $financialAdjustment['type'];
+        $metadata['financial_adjustment_amount'] = $financialAdjustment['amount'];
         if ($success && isset($pricing['provider_pricing']) && \is_array($pricing['provider_pricing'])) {
             $metadata['last_provider_pricing_refresh']['provider_pricing'] = $pricing['provider_pricing'];
         }
@@ -896,6 +907,32 @@ final class ClockPaymentReconciliationService
             $updates['coupon_code'] = \sanitize_text_field((string) $pricing['applied_coupon']);
         }
         \MustHotelBooking\Engine\get_reservation_repository()->updateReservation($reservationId, $updates);
+    }
+
+    /** @return array{type: string, amount: float, status: string} */
+    private function financialAdjustmentReview(bool $pricingSynced, float $priceDelta): array
+    {
+        if (!$pricingSynced || \abs($priceDelta) < 0.01) {
+            return [
+                'type' => 'none',
+                'amount' => 0.0,
+                'status' => 'not_required',
+            ];
+        }
+
+        if ($priceDelta > 0.0) {
+            return [
+                'type' => 'additional_payment_review_required',
+                'amount' => \round($priceDelta, 2),
+                'status' => 'manual_review_required',
+            ];
+        }
+
+        return [
+            'type' => 'refund_or_credit_review_required',
+            'amount' => \round(\abs($priceDelta), 2),
+            'status' => 'manual_review_required',
+        ];
     }
     /**
      * @param array<string, mixed> $row

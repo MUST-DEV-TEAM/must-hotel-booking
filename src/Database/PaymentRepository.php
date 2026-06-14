@@ -45,6 +45,29 @@ final class PaymentRepository extends AbstractRepository
         );
     }
 
+    public function getLatestPaymentIdForReservationMethodTransaction(int $reservationId, string $method, string $transactionId): int
+    {
+        $transactionId = \trim($transactionId);
+        if ($reservationId <= 0 || \trim($method) === '' || $transactionId === '') {
+            return 0;
+        }
+
+        return (int) $this->wpdb->get_var(
+            $this->wpdb->prepare(
+                'SELECT id
+                FROM ' . $this->table('payments') . '
+                WHERE reservation_id = %d
+                    AND method = %s
+                    AND transaction_id = %s
+                ORDER BY CASE WHEN status = \'paid\' THEN 0 ELSE 1 END ASC, id DESC
+                LIMIT 1',
+                $reservationId,
+                $method,
+                $transactionId
+            )
+        );
+    }
+
     /**
      * @return array<string, mixed>|null
      */

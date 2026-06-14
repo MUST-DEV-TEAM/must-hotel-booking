@@ -86,7 +86,12 @@ final class BookingStatusEngine
                 continue;
             }
 
-            $existingPaymentId = $paymentRepository->getLatestPaymentIdForReservationMethod($reservationId, $method);
+            $existingPaymentId = $transactionId !== ''
+                ? $paymentRepository->getLatestPaymentIdForReservationMethodTransaction($reservationId, $method, $transactionId)
+                : 0;
+            if ($existingPaymentId <= 0) {
+                $existingPaymentId = $paymentRepository->getLatestPaymentIdForReservationMethod($reservationId, $method);
+            }
             $paymentData = [
                 'amount' => isset($reservationRow['total_price']) ? (float) $reservationRow['total_price'] : 0.0,
                 'currency' => $currency,

@@ -232,13 +232,14 @@ final class ClockFolioAccountingRepository extends AbstractRepository
             $row = $this->wpdb->get_row(
                 $this->wpdb->prepare(
                     'SELECT * FROM ' . $this->table('clock_folio_accounting') . '
-                    WHERE direction = %s
+                    WHERE direction IN (%s, %s)
                         AND payment_id = %d
                         AND status = %s
                         AND clock_folio_id <> \'\'
                     ORDER BY id DESC
                     LIMIT 1',
                     'payment',
+                    'deposit',
                     $paymentId,
                     'posted'
                 ),
@@ -257,7 +258,7 @@ final class ClockFolioAccountingRepository extends AbstractRepository
         $row = $this->wpdb->get_row(
             $this->wpdb->prepare(
                 'SELECT * FROM ' . $this->table('clock_folio_accounting') . '
-                WHERE direction = %s
+                WHERE direction IN (%s, %s)
                     AND reservation_id = %d
                     AND gateway = %s
                     AND provider_transaction_id = %s
@@ -266,6 +267,7 @@ final class ClockFolioAccountingRepository extends AbstractRepository
                 ORDER BY id DESC
                 LIMIT 1',
                 'payment',
+                'deposit',
                 $reservationId,
                 $gateway,
                 $providerPaymentReference,

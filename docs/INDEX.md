@@ -20,7 +20,7 @@ This folder is the concise project knowledge base for Codex task navigation. Do 
 - Always run `git status --short` before editing and preserve unrelated existing changes.
 
 ## Known Uncertain Areas
-- The task prompt referenced inspected version `0.4.71`, while the current local plugin header reports `0.4.72`.
+- Older task prompts referenced inspected versions `0.4.71`/`0.4.72`; the current local plugin header reports `0.4.80`.
 - No separate logged-in customer account dashboard was found.
 - No `add_shortcode` registration was found in targeted inspection.
 - Production provider credentials, Clock API permissions, and site/theme overrides are unknown from current code inspection.

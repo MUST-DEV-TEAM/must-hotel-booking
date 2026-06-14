@@ -30,6 +30,7 @@ Payment catalog/defaults are in `src/Core/PaymentMethodRegistry.php`. Checkout o
 - Stripe webhook verifies the `stripe-signature` header with the configured webhook secret before processing.
 - Stripe Checkout success/cancel URLs and Stripe webhook URL diagnostics use the optional public callback base setting when configured.
 - `checkout.session.completed` updates reservations to `confirmed` and `paid`, creates payment rows, and triggers Clock payment reconciliation when available.
+- Duplicate Stripe completed-session processing must resolve by exact payment intent/session transaction first; if that exact transaction already has a paid row, the callback is a no-op so a later refund ledger row is not converted back into a paid payment.
 - `checkout.session.expired` fails pending Stripe reservations as expired.
 - PokPay finalization route is `must-hotel-booking/v1/pokpay/finalize`.
 - PokPay finalization requires `x-wp-nonce`, validates order/reservation relationship against payment rows, then finalizes through PokPay API/order checks.
@@ -54,10 +55,12 @@ Payment catalog/defaults are in `src/Core/PaymentMethodRegistry.php`. Checkout o
 - `src/Provider/Clock/ClockFolioPaymentSyncService.php` handles Clock folio payment sync.
 - `src/Provider/Clock/ClockFolioRefundSyncService.php` handles refund credit item sync.
 - `src/Provider/Clock/ClockPaymentAccountingService.php` chooses Clock accounting by `clock_payment_posting_mode`. Default `auto_detect` posts future Stripe/PokPay website payments to Clock deposit folios using the verified booking-folio `deposit=true` plus folio `credit_items` workflow. It does not silently post future payments to the normal folio when deposit posting fails.
+- Refund sync must treat posted `deposit` accounting rows as valid original payment folios for future-stay bookings, not only rows with direction `payment`.
 - `folio_payment_only` preserves legacy folio credit-item posting and is not recommended for future reservations because it can settle/affect folio balance before arrival.
 - Same-day/current-stay payments can still use folio posting when `clock_same_day_folio_payment_enabled` is true.
 - Clock payment/refund accounting stores stable reason codes in `must_clock_folio_accounting.last_error_code` and human-readable messages in `last_error`.
 - Admin payment detail can mark failed/manual-review payment accounting rows as `handled_manually` after staff handles Clock outside the plugin. This does not post to Clock and does not change the local paid payment status.
+- Ambiguous Clock folio selection, missing original refund folio, and unverifiable accounting target states are manual-review states. Reconciliation may retry safe transient provider failures, but must not create payments, refunds, or Clock credit items for uncertain financial mismatches.
 - Some Clock folio/deposit operations may require manual staff accounting if Clock permissions, folio IDs, deposit folio creation, or deposit credit-item posting fail.
 
 ## Booking/Payment Relationship

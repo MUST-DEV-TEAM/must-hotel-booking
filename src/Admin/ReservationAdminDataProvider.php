@@ -881,6 +881,14 @@ final class ReservationAdminDataProvider
             'amount_due' => isset($last['amount_due']) && \is_numeric($last['amount_due'])
                 ? $this->formatMoney((float) $last['amount_due'])
                 : '',
+            'financial_adjustment_required' => !empty($metadata['financial_adjustment_required']),
+            'financial_adjustment_type' => (string) ($metadata['financial_adjustment_type'] ?? ($last['financial_adjustment_type'] ?? '')),
+            'financial_adjustment_status' => (string) ($metadata['financial_adjustment_status'] ?? ($last['financial_adjustment_status'] ?? '')),
+            'financial_adjustment_amount' => isset($metadata['financial_adjustment_amount']) && \is_numeric($metadata['financial_adjustment_amount'])
+                ? $this->formatMoney((float) $metadata['financial_adjustment_amount'])
+                : (isset($last['financial_adjustment_amount']) && \is_numeric($last['financial_adjustment_amount'])
+                    ? $this->formatMoney((float) $last['financial_adjustment_amount'])
+                    : ''),
             'pricing_source' => (string) ($last['pricing_source'] ?? ''),
         ];
     }

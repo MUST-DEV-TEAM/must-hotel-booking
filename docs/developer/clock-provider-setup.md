@@ -60,7 +60,9 @@ Path tokens are replaced at call time with URL-encoded values from the mirror re
 | Room types path | `clock_room_types_path` | Used by catalog sync to fetch remote accommodations. |
 | Rooms path | `clock_rooms_path` | Used by catalog sync to fetch remote physical rooms. |
 | Rate plans path | `clock_rate_plans_path` | Used by catalog sync to fetch remote rate plans. |
-| Webhook secret | `clock_webhook_secret` | Validates inbound Clock webhook payloads. |
+| Clock PUSH Basic username | `clock_webhook_basic_username` | Optional HTTP Basic username when the Clock PUSH endpoint URL embeds credentials. |
+| Clock PUSH Basic password | `clock_webhook_basic_password` | Optional HTTP Basic password when the Clock PUSH endpoint URL embeds credentials. |
+| Legacy webhook token / HMAC secret | `clock_webhook_secret` | Backward-compatible auth for custom Bearer/HMAC webhook senders. Official Clock PUSH uses Amazon SNS signatures, not this value. |
 | Timeout | `clock_timeout_seconds` | Default: 15. Max: 60. |
 
 ---
@@ -83,16 +85,18 @@ Missing accommodation mappings block Clock public booking for those rooms. The r
 
 ## Webhook / Inbound Sync
 
-Clock can push reservation status updates to the plugin via webhook.
+Clock can push reservation status updates to the plugin via PUSH webhooks.
 
 **Webhook URL:** `{site}/wp-json/must-hotel-booking/v1/clock/webhook`
 
 The endpoint is registered by `ClockInboundSyncController`. It:
-1. Validates the webhook signature against `clock_webhook_secret` (if set).
-2. Extracts `provider_reservation_id` / `provider_booking_id` from the payload.
-3. Finds matching local mirror reservations.
-4. Maps Clock status strings to local `status` and `payment_status` values.
-5. Updates provider metadata (`provider_status`, `provider_payment_status`, `provider_synced_at`, `provider_sync_error`).
+1. Parses official Amazon SNS envelopes.
+2. Verifies SNS signatures after validating that `SigningCertURL` is a safe Amazon SNS certificate URL.
+3. Confirms SNS `SubscriptionConfirmation` messages only through safe Amazon SNS `SubscribeURL` hosts.
+4. Supports optional HTTP Basic authentication if Clock embeds credentials in the endpoint URL.
+5. Extracts the Clock event type from SNS `Subject` and event data from the JSON string in `Message`.
+6. Preserves legacy Bearer token and HMAC validation through `clock_webhook_secret` for custom senders.
+7. Finds matching local mirror reservations, maps Clock status strings, and updates provider metadata.
 
 If no webhook is configured, inbound sync can be triggered manually or via `ProviderSyncJobRunner` refresh jobs (operation `reservation_refresh`).
 
