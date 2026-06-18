@@ -93,6 +93,10 @@ if (\is_array($detail)) {
     $timeline = isset($detail['timeline']) && \is_array($detail['timeline']) ? $detail['timeline'] : [];
     $emails = isset($detail['emails']) && \is_array($detail['emails']) ? $detail['emails'] : [];
     $assignableRooms = isset($detail['assignable_rooms']) && \is_array($detail['assignable_rooms']) ? $detail['assignable_rooms'] : [];
+    $amendmentRoomTypes = isset($detail['amendment_room_types']) && \is_array($detail['amendment_room_types']) ? $detail['amendment_room_types'] : [];
+    $amendmentRooms = isset($detail['amendment_rooms']) && \is_array($detail['amendment_rooms']) ? $detail['amendment_rooms'] : [];
+    $amendmentRatePlans = isset($detail['amendment_rate_plans']) && \is_array($detail['amendment_rate_plans']) ? $detail['amendment_rate_plans'] : [];
+    $amendmentState = isset($detail['amendment_state']) && \is_array($detail['amendment_state']) ? $detail['amendment_state'] : [];
     $detailForms = isset($detail['forms']) && \is_array($detail['forms']) ? $detail['forms'] : [];
     $providerContext = isset($detail['provider']) && \is_array($detail['provider']) ? $detail['provider'] : [];
     $providerPaymentSync = isset($providerContext['payment_sync']) && \is_array($providerContext['payment_sync'])
@@ -117,10 +121,20 @@ if (\is_array($detail)) {
     $hasCheckedOut = $checkedOutAtRaw !== '' && $checkedOutAtRaw !== '0000-00-00 00:00:00';
     $isInHouseReservation = $hasCheckedIn && !$hasCheckedOut;
     $hasCancellationRequest = !empty($reservation['cancellation_requested']);
+    $providerMetadata = \json_decode((string) ($reservation['provider_metadata'] ?? ''), true);
+    $providerMetadata = \is_array($providerMetadata) ? $providerMetadata : [];
+    $cancellationCleanup = isset($providerMetadata['cancellation_financial_cleanup'])
+        && \is_array($providerMetadata['cancellation_financial_cleanup'])
+        ? $providerMetadata['cancellation_financial_cleanup']
+        : [];
+    $cancellationSnapshot = isset($cancellationCleanup['snapshot']) && \is_array($cancellationCleanup['snapshot'])
+        ? $cancellationCleanup['snapshot']
+        : [];
     $canProviderCheckIn = $isProviderBacked && ProviderReservationActionPolicy::supportsProviderAction($providerContext, 'reservation_checkin', ProviderReservationActionPolicy::SURFACE_PORTAL);
     $canProviderCheckOut = $isProviderBacked && ProviderReservationActionPolicy::supportsProviderAction($providerContext, 'reservation_checkout', ProviderReservationActionPolicy::SURFACE_PORTAL);
     $canProviderRoomOperation = $isProviderBacked && ProviderReservationActionPolicy::supportsProviderAction($providerContext, 'reservation_assign_room', ProviderReservationActionPolicy::SURFACE_PORTAL);
     $canProviderStayEdit = $isProviderBacked && ProviderReservationActionPolicy::supportsProviderAction($providerContext, 'reservation_update_stay', ProviderReservationActionPolicy::SURFACE_PORTAL);
+    $canProviderAmend = $isProviderBacked && ProviderReservationActionPolicy::supportsProviderAction($providerContext, 'reservation_amend', ProviderReservationActionPolicy::SURFACE_PORTAL);
     $canProviderGuestEdit = $isProviderBacked
         && ProviderReservationActionPolicy::supportsProviderAction($providerContext, 'reservation_save_guest', ProviderReservationActionPolicy::SURFACE_PORTAL)
         && !\in_array($statusKey, ['cancelled', 'completed', 'blocked', 'expired', 'payment_failed'], true);
@@ -135,7 +149,16 @@ if (\is_array($detail)) {
         && !$hasCheckedOut
         && (string) ($stay['checkin'] ?? '') !== ''
         && (string) ($stay['checkin'] ?? '') <= \current_time('Y-m-d');
-    $canShowAssignRoom = (!$isProviderBacked || $canProviderRoomOperation) && ($isInHouseReservation ? $canMoveRoom : $canAssignRoom) && !\in_array($statusKey, ['cancelled', 'completed', 'blocked'], true);
+    $canShowAssignRoom = (!$isProviderBacked || $canProviderRoomOperation)
+        && !($isProviderBacked && $isInHouseReservation)
+        && ($isInHouseReservation ? $canMoveRoom : $canAssignRoom)
+        && !\in_array($statusKey, ['cancelled', 'completed', 'blocked'], true);
+    $canShowAmendment = (!$isProviderBacked || $canProviderAmend)
+        && $canEditStay
+        && ($isInHouseReservation ? $canMoveRoom : $canAssignRoom)
+        && !($isProviderBacked && $isInHouseReservation)
+        && !\in_array($statusKey, ['cancelled', 'completed', 'blocked', 'expired', 'payment_failed'], true)
+        && !$hasCheckedOut;
     $hasPendingCancellationRequest = $hasCancellationRequest && !\in_array($statusKey, ['cancelled', 'completed', 'blocked'], true);
     $canApproveCancellation = !$isProviderBacked && $canCancelReservation && $hasPendingCancellationRequest;
     $canRejectCancellation = $canApproveCancellation;
@@ -287,6 +310,19 @@ if (\is_array($detail)) {
             'badge' => \__('Approval Needed', 'must-hotel-booking'),
         ];
     }
+    if (!empty($cancellationCleanup) && (string) ($cancellationCleanup['clock_charge_cleanup_status'] ?? '') === 'manual_clock_charge_cleanup_required') {
+        $attentionItems[] = [
+            'title' => \__('Clock cancellation financial cleanup required', 'must-hotel-booking'),
+            'message' => \sprintf(
+                \__('Accommodation charges and any retained cancellation fee require manual Clock review. Refundable: %1$s %2$s; retained: %3$s %2$s.', 'must-hotel-booking'),
+                \number_format_i18n((float) ($cancellationSnapshot['refundable_amount'] ?? 0.0), 2),
+                (string) ($cancellationSnapshot['currency'] ?? ''),
+                \number_format_i18n((float) ($cancellationSnapshot['non_refundable_amount'] ?? 0.0), 2)
+            ),
+            'tone' => 'warning',
+            'badge' => \__('Clock Cleanup', 'must-hotel-booking'),
+        ];
+    }
     if ($isProviderBacked) {
         $attentionItems[] = [
             'title' => \__('Provider-backed mirror is read-only', 'must-hotel-booking'),
@@ -355,6 +391,65 @@ if (\is_array($detail)) {
     echo '<article class="must-portal-reservation-status-card"><span>' . \esc_html__('Reservation status', 'must-hotel-booking') . '</span><strong>' . \esc_html((string) ($summary['reservation_status'] ?? '')) . '</strong>';
     PortalRenderer::renderBadge($statusKey, (string) ($summary['reservation_status'] ?? ''));
     echo '</article>';
+    if ($canShowAmendment) {
+        $currentRoomTypeId = (int) ($reservation['room_type_id'] ?? $reservation['room_id'] ?? 0);
+        $currentRatePlanId = (int) ($reservation['rate_plan_id'] ?? 0);
+        $lastAmendment = isset($amendmentState['last']) && \is_array($amendmentState['last']) ? $amendmentState['last'] : [];
+
+        echo '<article class="must-portal-panel"><div class="must-portal-panel-header"><div><h2>' . \esc_html__('Change room type / upgrade / downgrade', 'must-hotel-booking') . '</h2><p>' . \esc_html__('Use this workflow when the accommodation product, rate, dates, or physical room changes together. Use Room assignment above for a same-type physical move only.', 'must-hotel-booking') . '</p></div></div>';
+        echo '<div class="must-portal-definition-list">';
+        PortalRenderer::renderDefinitionRow(\__('Current room type', 'must-hotel-booking'), (string) ($stay['accommodation'] ?? \__('Unassigned', 'must-hotel-booking')));
+        PortalRenderer::renderDefinitionRow(\__('Current physical room', 'must-hotel-booking'), (string) ($stay['assigned_room'] ?? \__('Not assigned', 'must-hotel-booking')));
+        PortalRenderer::renderDefinitionRow(\__('Current dates', 'must-hotel-booking'), (string) ($stay['checkin'] ?? '') . ' - ' . (string) ($stay['checkout'] ?? ''));
+        PortalRenderer::renderDefinitionRow(\__('Old total', 'must-hotel-booking'), \number_format_i18n((float) ($pricing['stored_total'] ?? 0.0), 2) . ' ' . $currency);
+        if (!empty($lastAmendment)) {
+            PortalRenderer::renderDefinitionRow(\__('Provider sync status', 'must-hotel-booking'), (string) ($lastAmendment['status'] ?? ''));
+        }
+        if (!empty($amendmentState['last_error'])) {
+            PortalRenderer::renderDefinitionRow(\__('Last error', 'must-hotel-booking'), (string) $amendmentState['last_error']);
+        }
+        echo '</div>';
+        echo '<form method="post" action="' . \esc_url($detailUrl) . '" class="must-portal-form-grid must-portal-reservation-form must-portal-amendment-form">';
+        \wp_nonce_field('must_portal_reservation_amend_' . $reservationId, 'must_portal_reservation_nonce');
+        echo '<input type="hidden" name="must_portal_action" value="reservation_amend" />';
+        echo '<input type="hidden" name="reservation_id" value="' . \esc_attr((string) $reservationId) . '" />';
+        echo '<label><span>' . \esc_html__('Proposed room type', 'must-hotel-booking') . '</span><select name="target_room_type_id" required>';
+        foreach ($amendmentRoomTypes as $roomType) {
+            if (!\is_array($roomType)) {
+                continue;
+            }
+            $optionId = (int) ($roomType['id'] ?? 0);
+            echo '<option value="' . \esc_attr((string) $optionId) . '"' . \selected($currentRoomTypeId, $optionId, false) . '>' . \esc_html((string) ($roomType['name'] ?? ('#' . $optionId))) . '</option>';
+        }
+        echo '</select></label>';
+        echo '<label><span>' . \esc_html__('Proposed physical room', 'must-hotel-booking') . '</span><select name="target_assigned_room_id" required><option value="0">' . \esc_html__('No physical room', 'must-hotel-booking') . '</option>';
+        foreach ($amendmentRooms as $roomRow) {
+            if (!\is_array($roomRow)) {
+                continue;
+            }
+            $optionId = (int) ($roomRow['id'] ?? 0);
+            $label = \trim((string) ($roomRow['room_number'] ?? ''));
+            $label = $label !== '' ? $label : (string) ($roomRow['title'] ?? ('#' . $optionId));
+            echo '<option value="' . \esc_attr((string) $optionId) . '" data-room-type-id="' . \esc_attr((string) ((int) ($roomRow['room_type_id'] ?? 0))) . '"' . \selected($assignedRoomId, $optionId, false) . '>' . \esc_html($label) . '</option>';
+        }
+        echo '</select></label>';
+        echo '<label><span>' . \esc_html__('Proposed rate plan', 'must-hotel-booking') . '</span><select name="target_rate_plan_id"><option value="0">' . \esc_html__('Default / unchanged rate', 'must-hotel-booking') . '</option>';
+        foreach ($amendmentRatePlans as $ratePlanRow) {
+            if (!\is_array($ratePlanRow)) {
+                continue;
+            }
+            $optionId = (int) ($ratePlanRow['id'] ?? 0);
+            echo '<option value="' . \esc_attr((string) $optionId) . '"' . \selected($currentRatePlanId, $optionId, false) . '>' . \esc_html((string) ($ratePlanRow['name'] ?? ('#' . $optionId))) . '</option>';
+        }
+        echo '</select></label>';
+        echo '<label><span>' . \esc_html__('Proposed check-in', 'must-hotel-booking') . '</span><input type="date" name="target_checkin" value="' . \esc_attr((string) ($stay['checkin'] ?? '')) . '"' . ($hasCheckedIn ? ' readonly' : '') . ' required /></label>';
+        echo '<label><span>' . \esc_html__('Proposed check-out', 'must-hotel-booking') . '</span><input type="date" name="target_checkout" value="' . \esc_attr((string) ($stay['checkout'] ?? '')) . '" required /></label>';
+        echo '<p class="must-portal-form-full must-portal-reservation-note">' . \esc_html($isProviderBacked
+            ? \__('Clock must confirm the mutation by reread. Price increases require additional-payment review; decreases require refund/credit review. No automatic gateway action occurs.', 'must-hotel-booking')
+            : \__('Availability is rechecked under a database lock. Price differences create review state only; payment status is preserved.', 'must-hotel-booking')) . '</p>';
+        echo '<div class="must-portal-form-full must-portal-inline-actions"><button type="submit" class="must-portal-primary-button">' . \esc_html__('Apply accommodation amendment', 'must-hotel-booking') . '</button></div>';
+        echo '</form></article>';
+    }
     if ($canViewPaymentDetails) {
         echo '<article class="must-portal-reservation-status-card"><span>' . \esc_html__('Payment status', 'must-hotel-booking') . '</span><strong>' . \esc_html((string) ($summary['payment_status'] ?? '')) . '</strong>';
         PortalRenderer::renderBadge($paymentStatusKey, (string) ($summary['payment_status'] ?? ''));
@@ -739,6 +834,9 @@ if (\is_array($detail)) {
         echo '<div class="must-portal-definition-list">';
         PortalRenderer::renderDefinitionRow(\__('Assigned room', 'must-hotel-booking'), (string) ($stay['assigned_room'] ?? \__('Not assigned yet', 'must-hotel-booking')));
         echo '</div>';
+        if ($isProviderBacked && $isInHouseReservation) {
+            echo '<p class="must-portal-reservation-note">' . \esc_html__('Checked-in Clock room moves are not exposed because the documented booking update does not create an in-house room-change entry. Move the guest in Clock, then refresh the mirror.', 'must-hotel-booking') . '</p>';
+        }
     }
     echo '</article>';
     if ($canViewPaymentDetails) {

@@ -129,4 +129,4 @@ All tables are created automatically on upgrade via `dbDelta`. No manual SQL is 
 - **Pricing is Clock-delegated.** Local seasonal rules and coupons are not applied to Clock quotes. Discounts shown to guests come from Clock's quote response.
 - **No partial-Clock setup.** The plugin is either fully in Local mode or fully in Clock mode. You cannot route some rooms through Clock and others through Local in the same install.
 - **Rate plan mappings are optional but required for rate-plan-specific quotes.** If a rate plan has no mapping, it is excluded from Clock quote results.
-- **Webhook secret is strongly recommended in production.** Without it, any POST to the webhook URL can update mirror reservation statuses.
+- **Official PUSH does not require the legacy webhook secret.** Amazon SNS signatures are mandatory for official Clock PUSH. If optional Basic authentication is used, both username and password must be configured. Legacy token/HMAC authentication remains only for custom senders.

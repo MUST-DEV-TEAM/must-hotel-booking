@@ -124,8 +124,47 @@ final class ReservationAdminDataProvider
         $assignedRoomId = isset($reservation['assigned_room_id']) ? (int) $reservation['assigned_room_id'] : 0;
         $assignedRoom = $assignedRoomId > 0 ? $this->inventoryRepository->getInventoryRoomById($assignedRoomId) : null;
         $assignableRooms = $roomTypeId > 0 ? $this->inventoryRepository->getRoomsByType($roomTypeId) : [];
+        $amendmentRoomTypes = $this->roomRepository->getRoomSelectorRows(false, true);
+        $amendmentRoomTypeIds = \array_map('intval', \array_column($amendmentRoomTypes, 'id'));
+        if ($roomTypeId > 0 && !\in_array($roomTypeId, $amendmentRoomTypeIds, true)) {
+            $currentRoomType = $this->roomRepository->getRoomById($roomTypeId);
+            if (\is_array($currentRoomType)) {
+                $amendmentRoomTypes[] = $currentRoomType;
+            }
+        }
+        $amendmentRooms = [];
+        foreach ($amendmentRoomTypes as $amendmentRoomType) {
+            if (!\is_array($amendmentRoomType)) {
+                continue;
+            }
+            $candidateRoomTypeId = isset($amendmentRoomType['id']) ? (int) $amendmentRoomType['id'] : 0;
+            if ($candidateRoomTypeId <= 0) {
+                continue;
+            }
+            foreach ($this->inventoryRepository->getRoomsByType($candidateRoomTypeId) as $amendmentRoom) {
+                if (!\is_array($amendmentRoom)) {
+                    continue;
+                }
+                $candidateRoomId = (int) ($amendmentRoom['id'] ?? 0);
+                if (
+                    $candidateRoomId === $assignedRoomId
+                    || (
+                        !empty($amendmentRoom['is_active'])
+                        && !empty($amendmentRoom['is_bookable'])
+                        && \sanitize_key((string) ($amendmentRoom['status'] ?? '')) === 'available'
+                    )
+                ) {
+                    $amendmentRooms[] = $amendmentRoom;
+                }
+            }
+        }
+        $amendmentRatePlans = $this->ratePlanRepository->getRatePlans(false);
         $ratePlanId = isset($reservation['rate_plan_id']) ? (int) $reservation['rate_plan_id'] : 0;
         $ratePlan = $ratePlanId > 0 ? $this->ratePlanRepository->getRatePlanById($ratePlanId) : null;
+        $amendmentRatePlanIds = \array_map('intval', \array_column($amendmentRatePlans, 'id'));
+        if ($ratePlanId > 0 && \is_array($ratePlan) && !\in_array($ratePlanId, $amendmentRatePlanIds, true)) {
+            $amendmentRatePlans[] = $ratePlan;
+        }
         $timelineRows = $this->buildTimelineRows($reservation, $paymentRows);
         $emailRows = [];
 
@@ -207,7 +246,32 @@ final class ReservationAdminDataProvider
             'emails' => $emailRows,
             'timeline' => $timelineRows,
             'assignable_rooms' => $assignableRooms,
+            'amendment_room_types' => $amendmentRoomTypes,
+            'amendment_rooms' => $amendmentRooms,
+            'amendment_rate_plans' => $amendmentRatePlans,
+            'amendment_state' => $this->buildAmendmentState($reservation),
             'provider' => $providerContext,
+        ];
+    }
+
+    /**
+     * @param array<string, mixed> $reservation
+     * @return array<string, mixed>
+     */
+    private function buildAmendmentState(array $reservation): array
+    {
+        $metadata = $this->decodeProviderMetadata($reservation['provider_metadata'] ?? null);
+        $last = isset($metadata['last_reservation_amendment']) && \is_array($metadata['last_reservation_amendment'])
+            ? $metadata['last_reservation_amendment']
+            : [];
+
+        return [
+            'last' => $last,
+            'manual_review_required' => !empty($metadata['manual_review_required']),
+            'additional_payment_review_required' => !empty($metadata['additional_payment_review_required']),
+            'refund_or_credit_review_required' => !empty($metadata['refund_or_credit_review_required']),
+            'provider_amendment_required' => !empty($metadata['provider_amendment_required']),
+            'last_error' => (string) ($last['error'] ?? (string) ($reservation['provider_sync_error'] ?? '')),
         ];
     }
 
@@ -813,15 +877,20 @@ final class ReservationAdminDataProvider
         }
 
         $provider = isset($context['provider']) ? (string) $context['provider'] : '';
+        $metadata = $this->decodeProviderMetadata($reservation['provider_metadata'] ?? null);
         $jobSummary = $this->providerSyncJobRepository->getTargetSummary($provider, 'reservation', $reservationId);
         $context['sync_jobs'] = $this->formatProviderSyncJobSummary($jobSummary);
         $context['payment_sync'] = ProviderReservationView::paymentContext($reservation, $paymentState);
         $context['pricing_sync'] = $this->formatProviderPricingSync(
-            $this->decodeProviderMetadata($reservation['provider_metadata'] ?? null)
+            $metadata
         );
         $context['guest_sync'] = $this->formatProviderGuestSync(
-            $this->decodeProviderMetadata($reservation['provider_metadata'] ?? null)
+            $metadata
         );
+        $context['cancellation_financial_cleanup'] = isset($metadata['cancellation_financial_cleanup'])
+            && \is_array($metadata['cancellation_financial_cleanup'])
+            ? $metadata['cancellation_financial_cleanup']
+            : [];
 
         return $context;
     }

@@ -129,6 +129,41 @@ final class ProviderRequestLogRepository extends AbstractRepository
         return $count > 0;
     }
 
+    public function acquireIdempotencyLock(string $idempotencyKey, int $timeoutSeconds = 2): bool
+    {
+        $idempotencyKey = $this->text($idempotencyKey, 191);
+        if ($idempotencyKey === '') {
+            return false;
+        }
+
+        $lockName = 'mhb_clock_inbound_' . \substr(\hash('sha256', $idempotencyKey), 0, 40);
+        $acquired = $this->wpdb->get_var(
+            $this->wpdb->prepare(
+                'SELECT GET_LOCK(%s, %d)',
+                $lockName,
+                \max(0, \min(5, $timeoutSeconds))
+            )
+        );
+
+        return (string) $acquired === '1';
+    }
+
+    public function releaseIdempotencyLock(string $idempotencyKey): void
+    {
+        $idempotencyKey = $this->text($idempotencyKey, 191);
+        if ($idempotencyKey === '') {
+            return;
+        }
+
+        $lockName = 'mhb_clock_inbound_' . \substr(\hash('sha256', $idempotencyKey), 0, 40);
+        $this->wpdb->get_var(
+            $this->wpdb->prepare(
+                'SELECT RELEASE_LOCK(%s)',
+                $lockName
+            )
+        );
+    }
+
     /**
      * @return array<string, mixed>
      */

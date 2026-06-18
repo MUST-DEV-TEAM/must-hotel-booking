@@ -474,6 +474,33 @@ final class ClockFolioService
             'message' => '',
         ];
     }
+
+    /** @return array{success: bool, balance: float|null, message: string} */
+    public function readFolioBalance(string $folioId, int $reservationId = 0): array
+    {
+        $viewResult = $this->viewFolio($folioId, $reservationId);
+
+        if (empty($viewResult['success'])) {
+            return [
+                'success' => false,
+                'balance' => null,
+                'message' => (string) ($viewResult['message'] ?? \__('Clock folio verification failed.', 'must-hotel-booking')),
+            ];
+        }
+
+        $balance = $this->firstMoneyValue(
+            (array) ($viewResult['folio'] ?? []),
+            ['balance', 'balance_due', 'due', 'open_balance', 'outstanding_balance']
+        );
+
+        return [
+            'success' => $balance !== null,
+            'balance' => $balance,
+            'message' => $balance === null
+                ? \__('Clock folio response did not include a recognizable balance field.', 'must-hotel-booking')
+                : '',
+        ];
+    }
     /** @param mixed $data @return array<int, array<string, mixed>> */
     private function extractFolios($data): array
     {

@@ -48,6 +48,7 @@ final class ProviderReservationActionPolicy
                     'checkout',
                     'assign_room',
                     'update_stay',
+                    'amend_reservation',
                 ],
                 true
             );
@@ -73,6 +74,7 @@ final class ProviderReservationActionPolicy
                     'reservation_checkout',
                     'reservation_assign_room',
                     'reservation_update_stay',
+                    'reservation_amend',
                     'payment_refund',
                 ],
                 true
@@ -102,6 +104,7 @@ final class ProviderReservationActionPolicy
                     'checkout',
                     'assign_room',
                     'update_stay',
+                    'amend_reservation',
                     'resend_guest_email',
                     'resend_admin_email',
                 ],
@@ -119,6 +122,7 @@ final class ProviderReservationActionPolicy
                     'reservation_checkout',
                     'reservation_assign_room',
                     'reservation_update_stay',
+                    'reservation_amend',
                     'reservation_mark_no_show',
                     'reservation_add_note',
                     'reservation_request_cancel',

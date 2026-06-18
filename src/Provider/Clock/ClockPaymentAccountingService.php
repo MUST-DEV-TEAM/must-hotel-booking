@@ -134,6 +134,10 @@ final class ClockPaymentAccountingService
         }
         $folioId = (string) ($folioResult['folio_id'] ?? '');
         $direction = (string) ($postingDecision['mode'] ?? '') === 'deposit' ? 'deposit' : 'payment';
+        $recovered = $this->recoverPostedRetry($accounting, $accountingId, $folioId, $reservationId);
+        if (\is_array($recovered)) {
+            return $recovered;
+        }
         $postResult = $this->postAndRecord($accountingId, $folioId, $gateway, $direction, $amount, $currency, $transactionId, $idempotencyKey, $reservationId);
         if (empty($postResult['success']) && !empty($postResult['retry']) && $enqueueRetry) {
             $this->enqueueRetry($accountingId, $folioId);
@@ -217,6 +221,12 @@ final class ClockPaymentAccountingService
             return $result;
         }
         $reference = $providerRefundId !== '' ? $providerRefundId : $idempotencyKey;
+        $recovered = $this->recoverPostedRetry($accounting, $accountingId, $folioId, $reservationId);
+        if (\is_array($recovered)) {
+            $updated = $this->accounting->get($accountingId);
+            $this->mirrorRefundPosted($refundId, \is_array($updated) ? $updated : []);
+            return $recovered;
+        }
         $postResult = $this->postAndRecord($accountingId, $folioId, $gateway, 'refund', $amount, $currency, $reference, $idempotencyKey, $reservationId);
         if (!empty($postResult['success'])) {
             $updated = $this->accounting->get($accountingId);
@@ -277,6 +287,21 @@ final class ClockPaymentAccountingService
             }
             return $this->result(true, false, 'already_in_progress', ['accounting_id' => $accountingId]);
         }
+        $beforeResult = $this->folios->readFolioBalance($folioId, $reservationId);
+        $balanceBefore = !empty($beforeResult['success']) && isset($beforeResult['balance'])
+            ? \round((float) $beforeResult['balance'], 2)
+            : null;
+        $expectedBalance = $balanceBefore !== null
+            ? \round($balanceBefore + $amount, 2)
+            : null;
+        $this->accounting->update($accountingId, [
+            'clock_folio_id' => $folioId,
+            'balance_before' => $balanceBefore,
+            'expected_balance' => $expectedBalance,
+            'actual_balance' => null,
+            'reconciliation_status' => 'pending_verification',
+            'updated_at' => $this->now(),
+        ]);
         $postResult = $this->folios->postCreditItem(
             $folioId,
             $gateway,
@@ -300,38 +325,95 @@ final class ClockPaymentAccountingService
                 (string) ($postResult['error_code'] ?? '')
             );
         }
-        if ($direction === 'deposit') {
-            /*
-             * selectOrCreateDepositFolio() already verified that this is an open
-             * deposit folio, and postCreditItem() successfully created the payment.
-             * A non-zero deposit-folio balance is expected and must not be reported
-             * as an accounting failure.
-             */
-            $verificationStatus = 'verified_deposit';
-            $verificationMessage = '';
-        } else {
-            $verification = $this->folios->verifyFolioBalance($folioId);
-            $verificationStatus = (string) ($verification['verification_status'] ?? 'unknown');
-            $verificationMessage = (string) ($verification['message'] ?? '');
-        }
+        $afterResult = $this->folios->readFolioBalance($folioId, $reservationId);
+        $actualBalance = !empty($afterResult['success']) && isset($afterResult['balance'])
+            ? \round((float) $afterResult['balance'], 2)
+            : null;
+        $matchesExpected = $expectedBalance !== null
+            && $actualBalance !== null
+            && \abs($actualBalance - $expectedBalance) < 0.01;
+        $verificationStatus = $matchesExpected ? 'verified_expected_balance' : 'balance_review_required';
+        $verificationMessage = $matchesExpected
+            ? ''
+            : (string) ($afterResult['message'] ?? $beforeResult['message'] ?? \__('Clock folio balance could not be reconciled to the expected result.', 'must-hotel-booking'));
         $postedAt = $this->now();
         $this->accounting->update($accountingId, [
             'status' => 'posted',
             'direction' => $direction,
             'clock_credit_item_id' => (string) ($postResult['credit_item_id'] ?? ''),
             'verification_status' => $verificationStatus !== '' ? $verificationStatus : 'unknown',
+            'balance_before' => $balanceBefore,
+            'expected_balance' => $expectedBalance,
+            'actual_balance' => $actualBalance,
+            'reconciliation_status' => $matchesExpected ? 'verified' : 'manual_review',
             'last_error_code' => '',
             'last_error' => $verificationMessage,
             'next_retry_at' => null,
             'posted_at' => $postedAt,
             'verified_at' => \in_array(
                 $verificationStatus,
-                ['verified_paid', 'verified_deposit'],
+                ['verified_paid', 'verified_deposit', 'verified_expected_balance'],
                 true
             ) ? $postedAt : null,
             'updated_at' => $postedAt,
         ]);
         return $this->result(true, false, 'posted', ['accounting_id' => $accountingId]);
+    }
+    /** @param array<string, mixed> $accounting @return array<string, mixed>|null */
+    private function recoverPostedRetry(array $accounting, int $accountingId, string $folioId, int $reservationId): ?array
+    {
+        $status = \sanitize_key((string) ($accounting['status'] ?? ''));
+        if (!\in_array($status, ['failed', 'manual_review', 'retrying'], true)) {
+            return null;
+        }
+
+        if ($folioId === '' || !isset($accounting['expected_balance']) || $accounting['expected_balance'] === '' || $accounting['expected_balance'] === null) {
+            return null;
+        }
+
+        $expectedBalance = \round((float) $accounting['expected_balance'], 2);
+        $balanceResult = $this->folios->readFolioBalance($folioId, $reservationId);
+        if (empty($balanceResult['success']) || !isset($balanceResult['balance'])) {
+            return null;
+        }
+
+        $actualBalance = \round((float) $balanceResult['balance'], 2);
+        if (\abs($actualBalance - $expectedBalance) >= 0.01) {
+            $this->accounting->update($accountingId, [
+                'clock_folio_id' => $folioId,
+                'actual_balance' => $actualBalance,
+                'updated_at' => $this->now(),
+            ]);
+            return null;
+        }
+
+        $postedAt = (string) ($accounting['posted_at'] ?? '');
+        if ($postedAt === '') {
+            $postedAt = $this->now();
+        }
+
+        $clockCreditItemId = (string) ($accounting['clock_credit_item_id'] ?? '');
+        if ($clockCreditItemId === '') {
+            $clockCreditItemId = (string) ($accounting['idempotency_key'] ?? '');
+        }
+
+        $verifiedAt = $this->now();
+        $this->accounting->update($accountingId, [
+            'status' => 'posted',
+            'clock_folio_id' => $folioId,
+            'clock_credit_item_id' => $clockCreditItemId,
+            'verification_status' => 'verified_expected_balance',
+            'actual_balance' => $actualBalance,
+            'reconciliation_status' => 'verified',
+            'last_error_code' => '',
+            'last_error' => '',
+            'next_retry_at' => null,
+            'posted_at' => $postedAt,
+            'verified_at' => $verifiedAt,
+            'updated_at' => $verifiedAt,
+        ]);
+
+        return $this->result(true, false, 'recovered_posted', ['accounting_id' => $accountingId]);
     }
     /** @return array<string, mixed> */
     private function markManualReview(int $accountingId, string $reasonCode, string $message): array

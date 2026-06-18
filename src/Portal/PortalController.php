@@ -454,6 +454,10 @@ final class PortalController
         if ($action === 'reservation_update_stay') {
             return self::handleReservationUpdateStay();
         }
+        if ($action === 'reservation_amend') {
+            self::handleReservationAmendment();
+            return [];
+        }
         if ($action === 'reservation_mark_no_show') {
             self::handleReservationMarkNoShow();
             return [];
@@ -1290,12 +1294,19 @@ final class PortalController
             }
             if ($transition === 'cancel' && !\in_array($status, ['cancelled', 'blocked', 'completed'], true)) {
                 if (!empty($reservation['cancellation_requested'])) {
-                    $notice = self::approveReservationCancellationRequest($reservationId, $reservation)
-                        ? 'cancellation_request_approved'
-                        : 'portal_action_failed';
+                    $notice = self::approveReservationCancellationRequest($reservationId, $reservation);
                 } else {
-                    BookingStatusEngine::updateReservationStatuses([$reservationId], 'cancelled', $paymentStatus);
-                    $notice = 'reservation_cancelled';
+                    $result = (new \MustHotelBooking\Engine\BookingLifecycleSyncService())->applyReservationStatusTransition(
+                        $reservationId,
+                        'cancelled',
+                        $paymentStatus,
+                        [
+                            'source' => 'portal',
+                            'operation' => 'cancel_only',
+                            'reason' => 'portal_cancelled',
+                        ]
+                    );
+                    $notice = !empty($result['success']) ? 'reservation_cancelled' : 'portal_action_failed';
                 }
             }
         }
@@ -3122,100 +3133,73 @@ final class PortalController
         if ($requiresMoveCapability && $newRoomId <= 0) {
             self::redirectAfterReservationAssignRoom($reservationId, 'portal_action_failed');
         }
-        $providerContext = ProviderReservationView::metadata($reservation);
-        if (!empty($providerContext['is_provider_backed'])) {
-            if (!ProviderReservationActionPolicy::supportsProviderAction($providerContext, 'reservation_assign_room', ProviderReservationActionPolicy::SURFACE_PORTAL)) {
-                self::redirectAfterReservationAssignRoom($reservationId, 'provider_backed_read_only');
-            }
-            $result = (new ClockPaymentReconciliationService())->assignRoom($reservationId, $newRoomId, 'portal');
-            if (!empty($result['success'])) {
-                self::logReservationActivity(
-                    $reservationId,
-                    $reservation,
-                    'room_assigned',
-                    'info',
-                    \__('Clock room assignment completed.', 'must-hotel-booking')
-                );
-                self::redirectAfterReservationAssignRoom($reservationId, 'reservation_room_assigned');
-            }
-            if (!empty($result['queued'])) {
-                self::logReservationActivity(
-                    $reservationId,
-                    $reservation,
-                    'reservation_room_assignment_queued',
-                    'warning',
-                    \__('Clock room assignment was queued for provider retry.', 'must-hotel-booking')
-                );
-                self::redirectAfterReservationAssignRoom($reservationId, 'reservation_room_assignment_queued');
-            }
-            self::redirectAfterReservationAssignRoom($reservationId, 'reservation_room_assignment_failed');
+        $result = (new \MustHotelBooking\Engine\ReservationAmendmentService())->amend($reservationId, [
+            'target_room_type_id' => $roomTypeId,
+            'target_assigned_room_id' => $newRoomId,
+        ], 'portal');
+        if (!empty($result['success'])) {
+            self::redirectAfterReservationAssignRoom($reservationId, 'reservation_room_assigned');
         }
-        $inventoryRepository = \MustHotelBooking\Engine\get_inventory_repository();
-        $roomLabel = \__('Unassigned', 'must-hotel-booking');
-        $updated = false;
-        if ($newRoomId > 0) {
-            $inventoryRoom = $inventoryRepository->getInventoryRoomById($newRoomId);
-            if (!\is_array($inventoryRoom)) {
-                self::redirectAfterReservationAssignRoom($reservationId, 'portal_action_failed');
-            }
-            $inventoryRoomTypeId = isset($inventoryRoom['room_type_id']) ? (int) $inventoryRoom['room_type_id'] : 0;
-            if ($roomTypeId > 0 && $inventoryRoomTypeId > 0 && $inventoryRoomTypeId !== $roomTypeId) {
-                self::redirectAfterReservationAssignRoom($reservationId, 'portal_action_failed');
-            }
-            if ($newRoomId !== $currentAssignedRoomId) {
-                $today = \current_time('Y-m-d');
-                $effectiveCheckin = isset($reservation['checkin']) && (string) $reservation['checkin'] > $today
-                    ? (string) $reservation['checkin']
-                    : $today;
-                $effectiveCheckout = isset($reservation['checkout']) ? (string) $reservation['checkout'] : '';
-                if ($effectiveCheckout === '' || $effectiveCheckout <= $effectiveCheckin) {
-                    $timestamp = \strtotime($effectiveCheckin . ' +1 day');
-                    $effectiveCheckout = $timestamp !== false ? \wp_date('Y-m-d', $timestamp) : $effectiveCheckin;
-                }
-                $availableRooms = $inventoryRepository->getAvailableRooms(
-                    $roomTypeId,
-                    $effectiveCheckin,
-                    $effectiveCheckout,
-                    ['cancelled', 'expired', 'payment_failed'],
-                    \current_time('mysql')
-                );
-                $availableRoomIds = [];
-                foreach ($availableRooms as $availableRoom) {
-                    if (!\is_array($availableRoom)) {
-                        continue;
-                    }
-                    $availableRoomIds[] = isset($availableRoom['id']) ? (int) $availableRoom['id'] : 0;
-                }
-                if (!\in_array($newRoomId, $availableRoomIds, true)) {
-                    self::redirectAfterReservationAssignRoom($reservationId, 'portal_action_failed');
-                }
-            }
-            $roomLabel = \trim((string) ($inventoryRoom['room_number'] ?? ''));
-            if ($roomLabel === '') {
-                $roomLabel = \trim((string) ($inventoryRoom['title'] ?? ''));
-            }
-            if ($roomLabel === '') {
-                $roomLabel = (string) $newRoomId;
-            }
-            $updated = $inventoryRepository->assignRoomToReservation($newRoomId, $reservationId, $roomTypeId);
-        } else {
-            $updated = $reservationRepository->updateReservation($reservationId, ['assigned_room_id' => 0]);
+        if (!empty($result['queued'])) {
+            self::redirectAfterReservationAssignRoom($reservationId, 'reservation_room_assignment_queued');
         }
-        if (!$updated) {
-            self::redirectAfterReservationAssignRoom($reservationId, 'portal_action_failed');
+        self::redirectAfterReservationAssignRoom($reservationId, 'reservation_room_assignment_failed');
+    }
+
+    private static function handleReservationAmendment(): void
+    {
+        $reservationId = isset($_POST['reservation_id']) ? \absint(\wp_unslash($_POST['reservation_id'])) : 0;
+        $nonce = isset($_POST['must_portal_reservation_nonce']) ? (string) \wp_unslash($_POST['must_portal_reservation_nonce']) : '';
+
+        if ($reservationId <= 0 || !\wp_verify_nonce($nonce, 'must_portal_reservation_amend_' . $reservationId)) {
+            self::redirectToPortalReservationDetail($reservationId, 'invalid_nonce');
         }
-        self::logReservationActivity(
-            $reservationId,
-            $reservation,
-            'room_assigned',
-            'info',
-            \sprintf(
-                /* translators: %s: room label */
-                \__('Room assignment updated: %s.', 'must-hotel-booking'),
-                $roomLabel
+
+        $reservation = \MustHotelBooking\Engine\get_reservation_repository()->getReservation($reservationId);
+        if (!\is_array($reservation)) {
+            self::redirectToPortalReservationDetail($reservationId, 'reservation_not_found');
+        }
+
+        $checkedInAt = \trim((string) ($reservation['checked_in_at'] ?? ''));
+        $checkedOutAt = \trim((string) ($reservation['checked_out_at'] ?? ''));
+        $isInHouse = $checkedInAt !== ''
+            && $checkedInAt !== '0000-00-00 00:00:00'
+            && ($checkedOutAt === '' || $checkedOutAt === '0000-00-00 00:00:00');
+        $roomCapability = $isInHouse
+            ? StaffAccess::CAP_RESERVATION_MOVE_ROOM
+            : StaffAccess::CAP_RESERVATION_ASSIGN_ROOM;
+
+        if (
+            (
+                !\current_user_can(StaffAccess::CAP_RESERVATION_EDIT_STAY)
+                || !\current_user_can($roomCapability)
             )
-        );
-        self::redirectAfterReservationAssignRoom($reservationId, 'reservation_room_assigned');
+            && !\current_user_can('manage_options')
+        ) {
+            self::redirectToPortalReservationDetail($reservationId, 'access_denied');
+        }
+
+        $result = (new \MustHotelBooking\Engine\ReservationAmendmentService())->amend($reservationId, [
+            'target_room_type_id' => isset($_POST['target_room_type_id']) ? \absint(\wp_unslash($_POST['target_room_type_id'])) : 0,
+            'target_assigned_room_id' => isset($_POST['target_assigned_room_id']) ? \absint(\wp_unslash($_POST['target_assigned_room_id'])) : 0,
+            'target_rate_plan_id' => isset($_POST['target_rate_plan_id']) ? \absint(\wp_unslash($_POST['target_rate_plan_id'])) : 0,
+            'target_checkin' => isset($_POST['target_checkin']) ? \sanitize_text_field((string) \wp_unslash($_POST['target_checkin'])) : '',
+            'target_checkout' => isset($_POST['target_checkout']) ? \sanitize_text_field((string) \wp_unslash($_POST['target_checkout'])) : '',
+        ], 'portal');
+
+        if (!empty($result['success'])) {
+            self::redirectToPortalReservationDetail(
+                $reservationId,
+                !empty($result['manual_review_required']) ? 'reservation_amendment_completed_review' : 'reservation_amendment_completed'
+            );
+        }
+        if (!empty($result['queued'])) {
+            self::redirectToPortalReservationDetail($reservationId, 'reservation_amendment_queued');
+        }
+        if (!empty($result['manual_review_required'])) {
+            self::redirectToPortalReservationDetail($reservationId, 'reservation_amendment_review');
+        }
+        self::redirectToPortalReservationDetail($reservationId, 'reservation_amendment_failed');
     }
     // -------------------------------------------------------------------------
     // Stay change
@@ -3287,12 +3271,10 @@ final class PortalController
             if (!ProviderReservationActionPolicy::supportsProviderAction($providerContext, 'reservation_update_stay', ProviderReservationActionPolicy::SURFACE_PORTAL)) {
                 self::redirectToPortalReservationDetail($reservationId, 'provider_backed_read_only');
             }
-            $result = (new ClockPaymentReconciliationService())->updateStayDates(
-                $reservationId,
-                $form['checkin'],
-                $form['checkout'],
-                'portal'
-            );
+            $result = (new \MustHotelBooking\Engine\ReservationAmendmentService())->amend($reservationId, [
+                'target_checkin' => $form['checkin'],
+                'target_checkout' => $form['checkout'],
+            ], 'portal');
             if (!empty($result['success']) && !empty($result['pricing_pending'])) {
                 self::logReservationActivity(
                     $reservationId,
@@ -3722,22 +3704,48 @@ final class PortalController
         if (!\is_array($reservation)) {
             self::redirectToPortalReservationDetail($reservationId, 'reservation_not_found');
         }
-        if (!self::approveReservationCancellationRequest($reservationId, $reservation)) {
+        $notice = self::approveReservationCancellationRequest($reservationId, $reservation);
+        if ($notice === 'portal_action_failed') {
             self::redirectToPortalReservationDetail($reservationId, 'reservation_wrong_status');
         }
-        self::redirectToPortalReservationDetail($reservationId, 'cancellation_request_approved');
+        self::redirectToPortalReservationDetail($reservationId, $notice);
     }
     /**
      * @param array<string, mixed> $reservation
      */
-    private static function approveReservationCancellationRequest(int $reservationId, array $reservation): bool
+    private static function approveReservationCancellationRequest(int $reservationId, array $reservation): string
     {
         $status = \sanitize_key((string) ($reservation['status'] ?? ''));
         if (empty($reservation['cancellation_requested']) || \in_array($status, ['cancelled', 'blocked', 'completed'], true)) {
-            return false;
+            return 'portal_action_failed';
         }
         $paymentStatus = \sanitize_key((string) ($reservation['payment_status'] ?? ''));
-        BookingStatusEngine::updateReservationStatuses([$reservationId], 'cancelled', $paymentStatus);
+        if (ProviderReservationView::isProviderBacked($reservation)) {
+            $result = (new ClockPaymentReconciliationService())->cancelReservation(
+                $reservationId,
+                'portal_cancellation_approved',
+                'portal'
+            );
+            if (empty($result['success'])) {
+                return !empty($result['queued'])
+                    ? 'reservation_cancellation_queued'
+                    : 'reservation_cancellation_failed';
+            }
+        } else {
+            $result = (new \MustHotelBooking\Engine\BookingLifecycleSyncService())->applyReservationStatusTransition(
+                $reservationId,
+                'cancelled',
+                $paymentStatus,
+                [
+                    'source' => 'portal',
+                    'operation' => 'cancel_only',
+                    'reason' => 'portal_cancellation_approved',
+                ]
+            );
+            if (empty($result['success'])) {
+                return 'portal_action_failed';
+            }
+        }
         self::clearReservationCancellationRequest($reservationId);
         self::logReservationActivity(
             $reservationId,
@@ -3750,7 +3758,7 @@ final class PortalController
                 self::getCurrentPortalActorName()
             )
         );
-        return true;
+        return 'cancellation_request_approved';
     }
     private static function clearReservationCancellationRequest(int $reservationId): void
     {
@@ -6086,6 +6094,11 @@ final class PortalController
             'reservation_stay_pricing_pending' => \__('Clock stay dates were updated, but pricing reconciliation is still pending. Check provider diagnostics before relying on mirror totals.', 'must-hotel-booking'),
             'reservation_stay_update_queued' => \__('Clock stay-date edit could not be completed immediately. A provider sync job was queued for retry.', 'must-hotel-booking'),
             'reservation_stay_update_failed' => \__('Clock stay-date edit could not be completed or queued. Check provider diagnostics before retrying.', 'must-hotel-booking'),
+            'reservation_amendment_completed' => \__('Accommodation amendment completed.', 'must-hotel-booking'),
+            'reservation_amendment_completed_review' => \__('Accommodation amendment completed. A price difference requires manual financial review.', 'must-hotel-booking'),
+            'reservation_amendment_queued' => \__('Clock amendment is awaiting reread-first provider reconciliation.', 'must-hotel-booking'),
+            'reservation_amendment_review' => \__('Accommodation amendment requires manual review. Check the latest provider error before retrying.', 'must-hotel-booking'),
+            'reservation_amendment_failed' => \__('Accommodation amendment failed. The original assignment was preserved unless Clock reread confirmed the change.', 'must-hotel-booking'),
             'reservation_marked_no_show' => \__('Reservation marked as no-show and cancelled.', 'must-hotel-booking'),
             'reservation_note_added' => \__('Internal note added.', 'must-hotel-booking'),
             'reservation_marked_pending' => \__('Reservation moved back to pending.', 'must-hotel-booking'),

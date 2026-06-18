@@ -20,6 +20,12 @@
 - Table: `mhb_inventory_locks`
 - Cron hook: `must_hotel_booking_cleanup_expired_locks`
 
+### Reservation room move or upgrade fails
+- Check the destination physical room is active, bookable, `available`, belongs to the selected accommodation, and has no blocking reservation or live checkout lock for the effective stay.
+- Local amendments serialize by reservation and destination room, then recheck availability inside the lock. A conflict reported at save time means another operation claimed the destination first; the original assignment remains intact.
+- Combined portal amendments require both stay-edit and room assignment/move capabilities. Invalid nonces and missing capabilities redirect without applying the request.
+- Same-type physical moves preserve total and payment status. Room-type, rate, or date changes recalculate pricing and may set manual financial-review metadata.
+
 ## Payment/Webhook/Finalization Issue Areas
 - `src/Engine/PaymentEngine.php`
 - `src/Engine/PaymentStatusService.php`
@@ -57,11 +63,25 @@
 - `src/Provider/Sync/ProviderSyncJobRunner.php`
 - Tables: `mhb_provider_mappings`, `mhb_provider_request_logs`, `mhb_provider_sync_jobs`
 
+### Clock reservation amendment is queued or blocked
+- Confirm room-type, physical-room, and selected rate-plan mappings exist.
+- A safe amendment sequence is booking reread, documented booking update, and booking reread. Do not manually retry a write before checking whether Clock already applied it.
+- `reservation_amendment` jobs are reread-first reconciliation jobs. If Clock already matches, the job updates/reconciles WordPress without another provider mutation.
+- Checked-in room/type changes are blocked because the documented booking update does not create an in-house room-change entry. Perform the move in Clock and refresh the mirror.
+- Price increases set `additional_payment_review_required`; decreases set `refund_or_credit_review_required`. These flags do not execute Stripe/PokPay or Clock accounting actions.
+
 ### Clock cancellation reached the website but no cancellation email sent
 - Check whether the status change passed through `BookingLifecycleSyncService` and `BookingStatusEngine::updateReservationStatuses()`. Clock inbound webhooks, scheduled refresh jobs, booking upserts, and successful outbound Clock cancellation reconciliation should use that path.
 - Duplicate Clock webhooks or refreshes should leave already-cancelled reservations unchanged; `BookingStatusEngine` only fires `must_hotel_booking/reservation_cancelled` when the previous status was not already `cancelled`.
 - If the reservation is cancelled locally but no email was sent, inspect the `must_hotel_booking/email_dispatch_result` hook activity and email template enabled state before retrying financial or provider operations.
 - If the cancelled booking was paid through Stripe/PokPay, check the Payments detail warnings and `must_refunds` for `status=refund_review_required` / `refund_type=clock_cancellation_review`. That row means the cancellation synced, but staff still needs to decide and execute any refund.
+
+### Clock booking is cancelled but financial cleanup is incomplete
+- Check reservation provider metadata `cancellation_financial_cleanup` and the admin/staff warnings.
+- `manual_clock_charge_cleanup_required` means the booking status is cancelled but accommodation/service charges still need staff review in Clock.
+- `manual_clock_cancellation_fee_required` means the retained fee is calculated locally but no documented automatic Clock fee-posting contract is available.
+- Do not retry the gateway refund to fix a Clock accounting error. Retry the specific Clock accounting row instead.
+- Compare `balance_before`, `expected_balance`, and `actual_balance` on the Payments detail screen. Reconciliation is verified only when actual equals expected.
 
 ### Clock future payment appears as manual review
 - Default `clock_payment_posting_mode=auto_detect` posts future Stripe/PokPay website payments to a Clock deposit folio. It creates or reuses a booking folio with `deposit=true`, then posts the external provider payment as a folio `credit_item` on that deposit folio.

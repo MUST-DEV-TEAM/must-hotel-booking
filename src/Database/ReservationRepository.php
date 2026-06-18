@@ -1444,6 +1444,96 @@ final class ReservationRepository extends AbstractRepository
         );
         return $updated !== false;
     }
+
+    /**
+     * Atomically update a reservation only when the requested destination is
+     * still free for the requested stay.
+     *
+     * @param array<string, mixed> $reservationData
+     * @param array<int, string> $nonBlockingStatuses
+     */
+    public function updateReservationIfDestinationAvailable(
+        int $reservationId,
+        int $destinationId,
+        bool $physicalRoom,
+        string $checkin,
+        string $checkout,
+        array $reservationData,
+        array $nonBlockingStatuses = []
+    ): bool {
+        if (
+            $reservationId <= 0
+            || $destinationId <= 0
+            || $checkin === ''
+            || $checkout === ''
+            || empty($reservationData)
+            || !$this->reservationsTableExists()
+        ) {
+            return false;
+        }
+
+        $allowedColumns = [
+            'room_id',
+            'room_type_id',
+            'assigned_room_id',
+            'rate_plan_id',
+            'checkin',
+            'checkout',
+            'total_price',
+            'coupon_id',
+            'coupon_code',
+            'coupon_discount_total',
+            'provider_metadata',
+        ];
+        $data = [];
+
+        foreach ($reservationData as $column => $value) {
+            if (\is_string($column) && \in_array($column, $allowedColumns, true)) {
+                $data[$column] = $value;
+            }
+        }
+
+        if (empty($data)) {
+            return false;
+        }
+
+        $formats = $this->resolveReservationFormats($data);
+        $assignments = [];
+        $params = [];
+        $index = 0;
+
+        foreach ($data as $column => $value) {
+            $assignments[] = 'target.' . $column . ' = ' . $formats[$index];
+            $params[] = $value;
+            $index++;
+        }
+
+        $statuses = $this->normalizeNonBlockingStatuses($nonBlockingStatuses);
+        $destinationColumn = $physicalRoom ? 'assigned_room_id' : 'room_id';
+        $sql = 'UPDATE ' . $this->table('reservations') . ' target
+            LEFT JOIN ' . $this->table('reservations') . ' conflict
+                ON conflict.' . $destinationColumn . ' = %d
+                AND conflict.id <> target.id
+                AND conflict.checkin < %s
+                AND conflict.checkout > %s
+                AND conflict.status NOT IN (%s, %s, %s)
+            SET ' . \implode(', ', $assignments) . '
+            WHERE target.id = %d
+                AND conflict.id IS NULL';
+        $prepareParams = [
+            $destinationId,
+            $checkout,
+            $checkin,
+            $statuses[0],
+            $statuses[1],
+            $statuses[2],
+        ];
+        $prepareParams = \array_merge($prepareParams, $params, [$reservationId]);
+        $prepared = $this->wpdb->prepare($sql, ...$prepareParams);
+        $updated = $this->wpdb->query($prepared);
+
+        return \is_int($updated) && $updated === 1;
+    }
     public function createBlockedReservation(int $roomId, string $checkin, string $checkout, string $createdAt = ''): int
     {
         if ($roomId <= 0 || $checkin === '' || $checkout === '' || !$this->reservationsTableExists()) {

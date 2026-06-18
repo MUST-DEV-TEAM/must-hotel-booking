@@ -12,6 +12,7 @@ This folder is the concise project knowledge base for Codex task navigation. Do 
 - Database task: read `DATABASE.md`, `ARCHITECTURE.md`, and `FILE_MAP.md`.
 - Integration task: read `INTEGRATIONS.md` plus `PAYMENTS.md` if payment-related.
 - Debugging task: read `TROUBLESHOOTING.md` plus the relevant flow doc.
+- Reservation amendment acceptance: read `RESERVATION_AMENDMENT_ACCEPTANCE.md`.
 
 ## Trust And Staleness
 - These docs were generated from targeted current-code inspection on 2026-06-11.

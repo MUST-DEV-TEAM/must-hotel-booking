@@ -81,30 +81,55 @@ final class ClockInboundSyncController
         if (!empty($sns)) {
             $snsType = (string) ($sns['type'] ?? '');
             if ($snsType === 'SubscriptionConfirmation') {
-                $confirmResult = self::confirmSnsSubscription($sns);
                 $dedupeKey = self::dedupeKey($payload, $body, $sns);
-                $logId = self::createInboundLog($logs, $payload, $dedupeKey, $body, $sns);
-                $success = !empty($confirmResult['success']);
-                $logs->complete($logId, [
-                    'success' => $success ? 1 : 0,
-                    'error_code' => $success ? '' : (string) ($confirmResult['code'] ?? 'subscription_confirmation_failed'),
-                    'error_message' => $success ? '' : (string) ($confirmResult['message'] ?? \__('Clock SNS subscription confirmation failed.', 'must-hotel-booking')),
-                    'duration_ms' => self::durationMs($started),
-                    'response_summary' => [
-                        'sns_type' => $snsType,
-                        'subscription_confirmed' => $success,
-                        'status' => (int) ($confirmResult['status'] ?? ($success ? 200 : 403)),
-                    ],
-                ]);
+                if (!$logs->acquireIdempotencyLock($dedupeKey)) {
+                    return self::retryLaterResponse();
+                }
 
-                return new \WP_REST_Response([
-                    'success' => $success,
-                    'subscription_confirmed' => $success,
-                    'message' => (string) ($confirmResult['message'] ?? ''),
-                ], (int) ($confirmResult['status'] ?? ($success ? 200 : 403)));
+                try {
+                    if ($logs->hasSuccessfulLog(ProviderManager::CLOCK_MODE, 'clock.webhook', 'inbound', $dedupeKey)) {
+                        return new \WP_REST_Response([
+                            'success' => true,
+                            'subscription_confirmed' => true,
+                            'duplicate' => true,
+                        ], 200);
+                    }
+
+                    $confirmResult = self::confirmSnsSubscription($sns);
+                    $logId = self::createInboundLog($logs, $payload, $dedupeKey, $body, $sns);
+                    $success = !empty($confirmResult['success']);
+                    $logs->complete($logId, [
+                        'success' => $success ? 1 : 0,
+                        'error_code' => $success ? '' : (string) ($confirmResult['code'] ?? 'subscription_confirmation_failed'),
+                        'error_message' => $success ? '' : (string) ($confirmResult['message'] ?? \__('Clock SNS subscription confirmation failed.', 'must-hotel-booking')),
+                        'duration_ms' => self::durationMs($started),
+                        'response_summary' => [
+                            'sns_type' => $snsType,
+                            'subscription_confirmed' => $success,
+                            'status' => (int) ($confirmResult['status'] ?? ($success ? 200 : 403)),
+                        ],
+                    ]);
+
+                    return new \WP_REST_Response([
+                        'success' => $success,
+                        'subscription_confirmed' => $success,
+                        'message' => (string) ($confirmResult['message'] ?? ''),
+                    ], (int) ($confirmResult['status'] ?? ($success ? 200 : 403)));
+                } finally {
+                    $logs->releaseIdempotencyLock($dedupeKey);
+                }
             }
 
             if ($snsType !== 'Notification') {
+                $dedupeKey = self::dedupeKey($payload, $body, $sns);
+                $logId = self::createInboundLog($logs, $payload, $dedupeKey, $body, $sns);
+                $logs->complete($logId, [
+                    'success' => 0,
+                    'error_code' => 'sns_type_unsupported',
+                    'error_message' => \__('Unsupported Amazon SNS message type.', 'must-hotel-booking'),
+                    'duration_ms' => self::durationMs($started),
+                ]);
+
                 return new \WP_REST_Response([
                     'success' => false,
                     'message' => \__('Unsupported Amazon SNS message type.', 'must-hotel-booking'),
@@ -112,53 +137,83 @@ final class ClockInboundSyncController
             }
         }
 
-        $processPayload = !empty($sns) ? self::payloadFromSnsNotification($payload, $sns) : $payload;
+        if (!empty($sns)) {
+            $decodedNotification = self::payloadFromSnsNotification($sns);
+            if (empty($decodedNotification['success'])) {
+                $dedupeKey = self::dedupeKey($payload, $body, $sns);
+                $logId = self::createInboundLog($logs, $payload, $dedupeKey, $body, $sns);
+                $logs->complete($logId, [
+                    'success' => 0,
+                    'error_code' => 'sns_message_json_invalid',
+                    'error_message' => (string) ($decodedNotification['message'] ?? \__('Amazon SNS Message must contain valid JSON.', 'must-hotel-booking')),
+                    'duration_ms' => self::durationMs($started),
+                ]);
+
+                return new \WP_REST_Response([
+                    'success' => false,
+                    'message' => (string) ($decodedNotification['message'] ?? \__('Amazon SNS Message must contain valid JSON.', 'must-hotel-booking')),
+                ], 400);
+            }
+            $processPayload = (array) ($decodedNotification['payload'] ?? []);
+        } else {
+            $processPayload = $payload;
+        }
         $eventId = self::eventId($processPayload, $sns);
         $dedupeKey = self::dedupeKey($processPayload, $body, $sns);
 
-        if ($logs->hasSuccessfulLog(ProviderManager::CLOCK_MODE, 'clock.webhook', 'inbound', $dedupeKey)) {
+        if (!$logs->acquireIdempotencyLock($dedupeKey)) {
+            return self::retryLaterResponse();
+        }
+
+        try {
+            if ($logs->hasSuccessfulLog(ProviderManager::CLOCK_MODE, 'clock.webhook', 'inbound', $dedupeKey)) {
+                $logId = self::createInboundLog($logs, $processPayload, $dedupeKey, $body, $sns);
+                $logs->complete($logId, [
+                    'success' => 1,
+                    'duration_ms' => self::durationMs($started),
+                    'response_summary' => [
+                        'duplicate' => true,
+                        'payload_type' => self::payloadTransportType($payload, $sns),
+                    ],
+                ]);
+
+                return new \WP_REST_Response([
+                    'success' => true,
+                    'duplicate' => true,
+                ], 200);
+            }
+
             $logId = self::createInboundLog($logs, $processPayload, $dedupeKey, $body, $sns);
+            $result = (new ClockInboundSyncService())->processInboundPayload($processPayload, $eventId);
+            $success = !empty($result['success']);
+            $unsupported = !empty($result['unsupported']);
+            $status = isset($result['status']) ? (int) $result['status'] : ($success ? 200 : 422);
+
             $logs->complete($logId, [
-                'success' => 1,
+                'success' => $success ? 1 : 0,
+                'error_code' => $success ? '' : ($unsupported ? 'unsupported_event' : 'inbound_sync_failed'),
+                'error_message' => $success ? '' : (string) ($result['message'] ?? \__('Clock inbound sync failed.', 'must-hotel-booking')),
                 'duration_ms' => self::durationMs($started),
                 'response_summary' => [
-                    'duplicate' => true,
-                    'payload_type' => self::payloadTransportType($payload, $sns),
+                    'success' => $success,
+                    'unsupported' => $unsupported,
+                    'retryable' => !empty($result['retryable']),
+                    'reservation_ids' => isset($result['reservation_ids']) && \is_array($result['reservation_ids']) ? \array_map('intval', $result['reservation_ids']) : [],
+                    'updated_count' => (int) ($result['updated_count'] ?? 0),
+                    'status' => $status,
                 ],
             ]);
 
             return new \WP_REST_Response([
-                'success' => true,
-                'duplicate' => true,
-            ], 200);
-        }
-
-        $logId = self::createInboundLog($logs, $processPayload, $dedupeKey, $body, $sns);
-        $result = (new ClockInboundSyncService())->processInboundPayload($processPayload, $eventId);
-        $success = !empty($result['success']);
-        $unsupported = !empty($result['unsupported']);
-        $status = isset($result['status']) ? (int) $result['status'] : ($success ? 200 : 422);
-
-        $logs->complete($logId, [
-            'success' => $success ? 1 : 0,
-            'error_code' => $success ? '' : ($unsupported ? 'unsupported_event' : 'inbound_sync_failed'),
-            'error_message' => $success ? '' : (string) ($result['message'] ?? \__('Clock inbound sync failed.', 'must-hotel-booking')),
-            'duration_ms' => self::durationMs($started),
-            'response_summary' => [
                 'success' => $success,
                 'unsupported' => $unsupported,
+                'retryable' => !empty($result['retryable']),
+                'message' => (string) ($result['message'] ?? ''),
                 'reservation_ids' => isset($result['reservation_ids']) && \is_array($result['reservation_ids']) ? \array_map('intval', $result['reservation_ids']) : [],
-                'updated_count' => (int) ($result['updated_count'] ?? 0),
-                'status' => $status,
-            ],
-        ]);
-
-        return new \WP_REST_Response([
-            'success' => $success,
-            'unsupported' => $unsupported,
-            'message' => (string) ($result['message'] ?? ''),
-            'reservation_ids' => isset($result['reservation_ids']) && \is_array($result['reservation_ids']) ? \array_map('intval', $result['reservation_ids']) : [],
-        ], $status);
+            ], $status);
+        } finally {
+            $logs->releaseIdempotencyLock($dedupeKey);
+        }
     }
 
     /**
@@ -175,7 +230,17 @@ final class ClockInboundSyncController
             ];
         }
 
-        $basicConfigured = ClockConfig::webhookBasicUsername() !== '' || ClockConfig::webhookBasicPassword() !== '';
+        $basicUserConfigured = ClockConfig::webhookBasicUsername() !== '';
+        $basicPasswordConfigured = ClockConfig::webhookBasicPassword() !== '';
+        if ($basicUserConfigured !== $basicPasswordConfigured) {
+            return [
+                'success' => false,
+                'status' => 503,
+                'code' => 'basic_config_incomplete',
+                'message' => \__('Clock webhook Basic authentication requires both a username and password.', 'must-hotel-booking'),
+            ];
+        }
+        $basicConfigured = $basicUserConfigured && $basicPasswordConfigured;
         $basicResult = self::validateBasicAuth($request);
         if ($basicConfigured && empty($basicResult['success'])) {
             return $basicResult;
@@ -268,8 +333,8 @@ final class ClockInboundSyncController
         }
 
         [$username, $password] = \explode(':', $decoded, 2);
-        $userOk = $expectedUser === '' || \hash_equals($expectedUser, $username);
-        $passwordOk = $expectedPassword === '' || \hash_equals($expectedPassword, $password);
+        $userOk = $expectedUser !== '' && \hash_equals($expectedUser, $username);
+        $passwordOk = $expectedPassword !== '' && \hash_equals($expectedPassword, $password);
 
         if ($userOk && $passwordOk) {
             return ['success' => true];
@@ -619,11 +684,17 @@ final class ClockInboundSyncController
      * @param array<string, mixed> $sns
      * @return array<string, mixed>
      */
-    private static function payloadFromSnsNotification(array $payload, array $sns): array
+    private static function payloadFromSnsNotification(array $sns): array
     {
         $message = (string) ($sns['message'] ?? '');
         $decoded = \json_decode($message, true);
-        $event = \is_array($decoded) ? $decoded : ['message' => $message];
+        if (!\is_array($decoded) || $decoded === []) {
+            return [
+                'success' => false,
+                'message' => \__('Amazon SNS Message must contain a non-empty JSON object.', 'must-hotel-booking'),
+            ];
+        }
+        $event = $decoded;
         $subject = (string) ($sns['subject'] ?? '');
         if ($subject !== '') {
             $event['Subject'] = $subject;
@@ -635,9 +706,10 @@ final class ClockInboundSyncController
             'message_id' => (string) ($sns['message_id'] ?? ''),
             'topic_arn_present' => (string) ($sns['topic_arn'] ?? '') !== '',
         ];
-        unset($payload);
-
-        return $event;
+        return [
+            'success' => true,
+            'payload' => $event,
+        ];
     }
 
     /**
@@ -647,7 +719,8 @@ final class ClockInboundSyncController
     private static function dedupeKey(array $payload, string $body, array $sns = []): string
     {
         $eventId = self::eventId($payload, $sns);
-        return $eventId !== '' ? 'event-' . $eventId : self::bodyHashKey($body);
+        $type = !empty($sns) ? \sanitize_key((string) ($sns['type'] ?? 'sns')) : 'legacy';
+        return $eventId !== '' ? $type . '-event-' . $eventId : $type . '-' . self::bodyHashKey($body);
     }
 
     /**
@@ -709,9 +782,36 @@ final class ClockInboundSyncController
             if ($value !== '') {
                 return \trim($value);
             }
+
+            if ($name === 'authorization') {
+                foreach (['HTTP_AUTHORIZATION', 'REDIRECT_HTTP_AUTHORIZATION'] as $serverKey) {
+                    if (isset($_SERVER[$serverKey]) && \is_scalar($_SERVER[$serverKey])) {
+                        $value = \trim((string) \wp_unslash($_SERVER[$serverKey]));
+                        if ($value !== '') {
+                            return $value;
+                        }
+                    }
+                }
+                if (isset($_SERVER['PHP_AUTH_USER'], $_SERVER['PHP_AUTH_PW'])) {
+                    return 'Basic ' . \base64_encode(
+                        (string) \wp_unslash($_SERVER['PHP_AUTH_USER'])
+                        . ':'
+                        . (string) \wp_unslash($_SERVER['PHP_AUTH_PW'])
+                    );
+                }
+            }
         }
 
         return '';
+    }
+
+    private static function retryLaterResponse(): \WP_REST_Response
+    {
+        return new \WP_REST_Response([
+            'success' => false,
+            'retryable' => true,
+            'message' => \__('Another delivery of this Clock event is already being processed. Retry later.', 'must-hotel-booking'),
+        ], 503);
     }
 
     private static function bodyHashKey(string $body): string

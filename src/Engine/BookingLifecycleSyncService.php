@@ -52,6 +52,13 @@ final class BookingLifecycleSyncService
         }
         $currentStatus = \sanitize_key((string) ($reservation['status'] ?? ''));
         $currentPaymentStatus = \sanitize_key((string) ($reservation['payment_status'] ?? ''));
+        if ($targetStatus === 'cancelled') {
+            (new CancellationFinancialCleanupService())->captureSnapshot($reservationId, $context);
+            $refreshedReservation = $this->reservations->getReservation($reservationId);
+            if (\is_array($refreshedReservation)) {
+                $reservation = $refreshedReservation;
+            }
+        }
         if ($targetPaymentStatus === '') {
             $targetPaymentStatus = $currentPaymentStatus;
         }
@@ -72,6 +79,7 @@ final class BookingLifecycleSyncService
         ]);
         if ($currentStatus === $targetStatus && $currentPaymentStatus === $targetPaymentStatus) {
             if ($targetStatus === 'cancelled') {
+                (new CancellationFinancialCleanupService())->markReservationCancelled($reservationId, $context);
                 $this->ensureCancellationMoneyReview($reservation, $context);
             }
             return [
@@ -122,6 +130,7 @@ final class BookingLifecycleSyncService
             ];
         }
         if ($targetStatus === 'cancelled') {
+            (new CancellationFinancialCleanupService())->markReservationCancelled($reservationId, $context);
             $this->ensureCancellationMoneyReview(
                 $updatedReservation,
                 $context
@@ -152,8 +161,11 @@ final class BookingLifecycleSyncService
         }
         $paymentRows = $this->payments->getPaymentsForReservation($reservationId);
         $state = PaymentStatusService::buildReservationPaymentState($reservation, $paymentRows);
-        $method = \sanitize_key((string) ($state['method'] ?? ''));
-        $amountPaid = (float) ($state['amount_paid'] ?? 0.0);
+        $snapshot = $this->cancellationSnapshot($reservation);
+        $method = \sanitize_key((string) ($snapshot['payment_method'] ?? ($state['method'] ?? '')));
+        $amountPaid = isset($snapshot['paid_amount'])
+            ? (float) $snapshot['paid_amount']
+            : (float) ($state['amount_paid'] ?? 0.0);
         if ($amountPaid <= 0.0 || !\in_array($method, ['stripe', 'pokpay'], true)) {
             return;
         }
@@ -164,15 +176,31 @@ final class BookingLifecycleSyncService
         $transactionId = \sanitize_text_field((string) ($payment['transaction_id'] ?? ''));
         $paymentId = isset($payment['id']) ? (int) $payment['id'] : 0;
         $feeService = new PaymentProviderFeeService();
-        $penaltyDetails = CancellationEngine::getPenaltyDetails($reservationId, $this->now());
-        $penaltyAmount = isset($penaltyDetails['penalty_amount']) ? (float) $penaltyDetails['penalty_amount'] : 0.0;
-        $breakdown = $feeService->calculateDefaultRefundBreakdown(
-            $paymentRows,
-            $amountPaid,
-            $source !== '' ? $source : 'system',
-            $penaltyAmount,
-            $this->reviewPolicyReason($penaltyDetails)
-        );
+        if (!empty($snapshot)) {
+            $penaltyDetails = isset($snapshot['cancellation_policy']) && \is_array($snapshot['cancellation_policy'])
+                ? $snapshot['cancellation_policy']
+                : [];
+            $breakdown = [
+                'success' => (string) ($snapshot['provider_fee_status'] ?? 'unknown') === 'known' || (float) ($snapshot['provider_fee_retained'] ?? 0.0) > 0.0,
+                'provider_fee_status' => \sanitize_key((string) ($snapshot['provider_fee_status'] ?? 'unknown')),
+                'original_paid_amount' => \round($amountPaid, 2),
+                'provider_fee_retained' => \round((float) ($snapshot['provider_fee_retained'] ?? 0.0), 2),
+                'cancellation_fee_amount' => \round((float) ($snapshot['cancellation_fee_amount'] ?? 0.0), 2),
+                'final_refund_amount' => \round((float) ($snapshot['refundable_amount'] ?? 0.0), 2),
+                'refund_policy_reason' => \sanitize_text_field((string) ($snapshot['refund_policy_reason'] ?? $this->reviewPolicyReason($penaltyDetails))),
+                'calculated_by' => \sanitize_key((string) ($snapshot['calculated_by'] ?? ($source !== '' ? $source : 'system'))),
+            ];
+        } else {
+            $penaltyDetails = CancellationEngine::getPenaltyDetails($reservationId, $this->now());
+            $penaltyAmount = isset($penaltyDetails['penalty_amount']) ? (float) $penaltyDetails['penalty_amount'] : 0.0;
+            $breakdown = $feeService->calculateDefaultRefundBreakdown(
+                $paymentRows,
+                $amountPaid,
+                $source !== '' ? $source : 'system',
+                $penaltyAmount,
+                $this->reviewPolicyReason($penaltyDetails)
+            );
+        }
         $feeKnown = (string) ($breakdown['provider_fee_status'] ?? 'unknown') === 'known';
         $idempotencyKey = 'refund-review-cancel-' . $reservationId . '-' . \sha1($transactionId . '|' . $amountPaid);
         $metadata = [
@@ -195,7 +223,7 @@ final class BookingLifecycleSyncService
             'provider_payment_reference' => $transactionId,
             'raw_provider_status' => 'review_required',
             'amount' => $feeKnown ? (float) ($breakdown['final_refund_amount'] ?? 0.0) : 0.0,
-            'currency' => \strtoupper((string) ($payment['currency'] ?? \MustHotelBooking\Core\MustBookingConfig::get_currency())),
+            'currency' => \strtoupper((string) ($snapshot['currency'] ?? ($payment['currency'] ?? \MustHotelBooking\Core\MustBookingConfig::get_currency()))),
         ] + $feeService->refundBreakdownData($breakdown) + [
             'reason' => \__('Reservation was cancelled before an automatic refund decision was made.', 'must-hotel-booking'),
             'refund_type' => 'clock_cancellation_review',
@@ -268,6 +296,19 @@ final class BookingLifecycleSyncService
             return \__('Clock cancelled this paid booking. The website reservation is cancelled, but the payment still needs a staff refund decision.', 'must-hotel-booking');
         }
         return \__('Paid booking was cancelled without a completed refund. Staff must review held funds.', 'must-hotel-booking');
+    }
+    /** @param array<string, mixed> $reservation @return array<string, mixed> */
+    private function cancellationSnapshot(array $reservation): array
+    {
+        $metadata = $this->decodeMetadata($reservation['provider_metadata'] ?? null);
+        $cleanup = isset($metadata['cancellation_financial_cleanup']) && \is_array($metadata['cancellation_financial_cleanup'])
+            ? $metadata['cancellation_financial_cleanup']
+            : [];
+        $snapshot = isset($cleanup['snapshot']) && \is_array($cleanup['snapshot'])
+            ? $cleanup['snapshot']
+            : [];
+
+        return $snapshot;
     }
     /** @param mixed $metadata @return array<string, mixed> */
     private function decodeMetadata($metadata): array

@@ -1,5 +1,17 @@
 # Decisions
 
+## 2026-06-18 - Reservation amendments use one safe service boundary
+- Decision: Route local room moves and local/Clock accommodation amendments through `ReservationAmendmentService`; use a destination lock plus conflict-aware atomic update locally and GET -> documented PUT -> GET for Clock.
+- Reason: The prior staff move path separated availability validation from assignment, admin lacked a local move path, and Clock retries could repeat mutations without first confirming provider state.
+- Boundaries: Same-type moves preserve pricing/payment state; room-type/date/rate changes reprice; checked-in Clock room/type changes remain blocked; all financial differences require manual review.
+- Schema impact: None. Audit and amendment state use existing reservation metadata, activity, and provider-sync job storage.
+
+## 2026-06-18 - Clock inbound events are acknowledged only after durable processing
+- Decision: Do not mark an SNS `MessageId` successful when the Clock booking fetch or local mirror update failed. Return a retryable response and retain failed attempts for later delivery.
+- Reason: Clock PUSH messages normally carry only a booking ID. A transient API failure previously produced a successful webhook response and permanent deduplication without applying the provider change.
+- Affected areas: Clock inbound controller, booking-event adapter, request-log deduplication, subscription confirmation, diagnostics, replay tests.
+- Implementation note: Documented status-specific subjects may apply a safe status fallback while queuing a detail refresh. Detail-only events require fetched booking data. Database advisory locks serialize concurrent duplicate deliveries.
+
 ## 2026-06-14 - Amendment and accounting financial mismatches require manual review
 - Decision: Stay amendments that change Clock/provider pricing do not automatically create extra charges, partial refunds, or Clock credit items without an explicit business rule.
 - Reason: Production readiness requires cancellation/refund separation and forbids invented automatic financial adjustment policies.
@@ -55,3 +67,9 @@
 - Decision: A paid Stripe/PokPay website booking cancelled from Clock/provider sync creates a single `refund_review_required` row instead of automatically refunding.
 - Reason: Clock status does not prove the desired gateway refund amount/timing, and automatic money movement must remain behind explicit payment/refund workflows. The review row makes held funds visible to staff while preserving idempotent cancellation sync.
 - Affected areas: booking lifecycle sync, refund table, admin payment warnings, Clock inbound/refresh cancellation handling.
+# 2026-06-18 - Cancellation financial cleanup boundaries
+- Cancellation, policy calculation, gateway refund, Clock payment accounting, Clock charge cleanup, cancellation-fee accounting, and refund review remain separate states.
+- Store one immutable cancellation-time financial snapshot in reservation provider metadata and reuse it for operational review.
+- Do not finalize outbound Clock cancellation locally without a provider reread confirming cancelled state.
+- Verify each Clock credit-item operation against `balance before + posted amount`; do not assume the correct final balance is zero.
+- No documented Clock accommodation-charge reversal or cancellation-fee posting contract was found. Keep both operations manual and explicitly blocked rather than inventing provider writes.

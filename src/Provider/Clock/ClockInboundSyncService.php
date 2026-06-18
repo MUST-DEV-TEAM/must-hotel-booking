@@ -23,9 +23,14 @@ final class ClockInboundSyncService
         $source = $this->reservationEventSource($payload);
         $bookingId = $this->firstString($source, ['booking_id', 'id']);
         $reservationId = $this->firstString($source, ['reservation_id']);
-        if (!$this->isBookingEvent($eventType) || ($bookingId === '' && $reservationId === '')) {
-            return $this->result(false, 202, \__('Clock webhook payload was authenticated and logged, but this event type is not handled by the reservation sync adapter.', 'must-hotel-booking'), [
+        if (!$this->isBookingEvent($eventType)) {
+            return $this->result(false, 200, \__('Clock webhook payload was authenticated and logged, but this event type is not handled by the reservation sync adapter.', 'must-hotel-booking'), [
                 'unsupported' => true,
+                'event_type' => $eventType,
+            ]);
+        }
+        if ($bookingId === '' && $reservationId === '') {
+            return $this->result(false, 400, \__('Clock booking event is missing a booking identifier.', 'must-hotel-booking'), [
                 'event_type' => $eventType,
             ]);
         }
@@ -47,8 +52,10 @@ final class ClockInboundSyncService
                     'updated_count' => !empty($upsert['updated']) ? 1 : 0,
                 ]);
             }
-            return $this->result(false, 202, (string) ($upsert['message'] ?? \__('Clock booking event was received, but no local mirror reservation could be created or updated.', 'must-hotel-booking')), [
-                'unsupported' => true,
+            $jobId = $this->enqueueBookingUpsert($externalId, 'webhook_missing_mapping');
+            return $this->result(false, 503, (string) ($upsert['message'] ?? \__('Clock booking event was received, but no local mirror reservation could be created or updated.', 'must-hotel-booking')), [
+                'retryable' => true,
+                'reconciliation_queued' => $jobId > 0,
                 'event_type' => $eventType,
                 'provider_booking_id' => $bookingId,
                 'provider_reservation_id' => $reservationId,
@@ -74,6 +81,32 @@ final class ClockInboundSyncService
                     }
                 }
             }
+        }
+
+        $eventStatus = $this->providerStatusFromEventType($eventType);
+        if (
+            $this->firstString($source, ['provider_status', 'reservation_status', 'booking_status', 'status', 'state']) === ''
+            && $eventStatus !== ''
+        ) {
+            $source['status'] = $eventStatus;
+        }
+        if (
+            $this->firstString($source, ['provider_status', 'reservation_status', 'booking_status', 'status', 'state']) === ''
+            && $this->firstString($source, ['provider_payment_status', 'payment_status', 'payment_state']) === ''
+        ) {
+            foreach ($rows as $row) {
+                $reservationLocalId = isset($row['id']) ? (int) $row['id'] : 0;
+                if ($reservationLocalId > 0 && $fetchPath !== '') {
+                    $this->enqueueReservationRefresh($reservationLocalId, 'webhook_retry');
+                }
+            }
+
+            return $this->result(false, 503, \__('Clock booking details could not be fetched, so the event was not acknowledged as applied.', 'must-hotel-booking'), [
+                'retryable' => true,
+                'event_type' => $eventType,
+                'provider_booking_id' => $bookingId,
+                'provider_reservation_id' => $reservationId,
+            ]);
         }
         $result = $this->applyReservationPayloadToRows($rows, $source, $payload, $eventId, 'webhook');
         foreach ($rows as $row) {
@@ -154,6 +187,54 @@ final class ClockInboundSyncService
             'retry' => empty($result['success']),
             'message' => (string) ($result['message'] ?? ''),
         ];
+    }
+    /**
+     * @param array<string, mixed> $job
+     * @return array{success: bool, retry: bool, message: string}
+     */
+    public function executeBookingUpsertJob(array $job): array
+    {
+        $externalId = isset($job['target_external_id'])
+            ? \sanitize_text_field((string) $job['target_external_id'])
+            : '';
+        if ($externalId === '') {
+            return [
+                'success' => false,
+                'retry' => false,
+                'message' => \__('Clock booking upsert job is missing an external booking ID.', 'must-hotel-booking'),
+            ];
+        }
+
+        $result = (new ClockReservationSyncService($this->client))->refreshBookingById($externalId, 'webhook_reconciliation');
+
+        return [
+            'success' => !empty($result['success']),
+            'retry' => empty($result['success']),
+            'message' => (string) ($result['message'] ?? ''),
+        ];
+    }
+    public function enqueueBookingUpsert(string $externalId, string $source = 'webhook'): int
+    {
+        $externalId = \sanitize_text_field($externalId);
+        if ($externalId === '') {
+            return 0;
+        }
+
+        return $this->syncJobs->enqueueOnce([
+            'provider' => ProviderManager::CLOCK_MODE,
+            'operation' => 'booking_upsert',
+            'target_type' => 'booking',
+            'target_local_id' => 0,
+            'target_external_id' => $externalId,
+            'status' => ProviderSyncJobRepository::STATUS_PENDING,
+            'attempts' => 0,
+            'max_attempts' => 8,
+            'priority' => 8,
+            'payload' => [
+                'source' => \sanitize_key($source),
+                'provider_booking_id' => $externalId,
+            ],
+        ]);
     }
     public function enqueueReservationRefresh(int $reservationId, string $source = 'manual'): int
     {
@@ -351,6 +432,8 @@ final class ClockInboundSyncService
             'confirmed' => 'confirmed',
             'booked' => 'confirmed',
             'active' => 'confirmed',
+            'expected' => 'confirmed',
+            'checked_in' => 'confirmed',
             'completed' => 'completed',
             'checked_out' => 'completed',
             'departed' => 'completed',
@@ -364,11 +447,26 @@ final class ClockInboundSyncService
             'canceled' => 'cancelled',
             'void' => 'cancelled',
             'deleted' => 'cancelled',
+            'no_show' => 'cancelled',
             'expired' => 'expired',
             'payment_failed' => 'payment_failed',
             'failed' => 'payment_failed',
         ];
         return $map[$status] ?? '';
+    }
+    private function providerStatusFromEventType(string $eventType): string
+    {
+        $eventType = $this->normalizeStatus($eventType);
+        $map = [
+            'booking_expected' => 'expected',
+            'booking_checked_in' => 'checked_in',
+            'booking_checked_out' => 'checked_out',
+            'booking_canceled' => 'canceled',
+            'booking_cancelled' => 'cancelled',
+            'booking_no_show' => 'no_show',
+        ];
+
+        return $map[$eventType] ?? '';
     }
     private function mapPaymentStatus(string $providerPaymentStatus): string
     {

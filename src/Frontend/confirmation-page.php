@@ -4,6 +4,7 @@ use MustHotelBooking\Core\ManagedPages;
 use MustHotelBooking\Core\MustBookingConfig;
 use MustHotelBooking\Core\ReservationStatus;
 use MustHotelBooking\Engine\BookingAbuseProtection;
+use MustHotelBooking\Engine\BookingLifecycleSyncService;
 use MustHotelBooking\Engine\BookingStatusEngine;
 use MustHotelBooking\Engine\BookingValidationEngine;
 use MustHotelBooking\Engine\EmailEngine;
@@ -392,26 +393,26 @@ function cancel_confirmation_reservation_without_refund(int $reservationId, arra
                 'message' => (string) ($clockResult['message'] ?? \__('Clock cancellation failed.', 'must-hotel-booking')),
             ];
         }
-        BookingStatusEngine::updateReservationStatuses(
-            [$reservationId],
-            'cancelled',
-            $paymentStatus
-        );
         return [
             'success' => !empty($clockResult['success']),
             'queued' => !empty($clockResult['queued']),
             'message' => (string) ($clockResult['message'] ?? ''),
         ];
     }
-    BookingStatusEngine::updateReservationStatuses(
-        [$reservationId],
+    $transition = (new BookingLifecycleSyncService())->applyReservationStatusTransition(
+        $reservationId,
         'cancelled',
-        $paymentStatus
+        $paymentStatus,
+        [
+            'source' => 'guest',
+            'operation' => 'cancel_only',
+            'reason' => 'guest_cancelled',
+        ]
     );
     return [
-        'success' => true,
+        'success' => !empty($transition['success']),
         'queued' => false,
-        'message' => '',
+        'message' => (string) ($transition['message'] ?? ''),
     ];
 }
 function build_confirmation_contact_hotel_message(): string

@@ -78,6 +78,11 @@ namespace {
         return \strtolower((string) \preg_replace('/[^a-zA-Z0-9_\-]/', '', $value));
     }
 
+    function wp_unslash($value)
+    {
+        return $value;
+    }
+
     function wp_json_encode($value, int $flags = 0): string
     {
         return (string) \json_encode($value, $flags);
@@ -162,6 +167,8 @@ namespace MustHotelBooking\Provider\Clock {
     {
         /** @var array<int, array<string, mixed>> */
         public static $processed = [];
+        /** @var array<int, array<string, mixed>> */
+        public static $results = [];
 
         /** @param array<string, mixed> $payload */
         public function processInboundPayload(array $payload, string $eventId): array
@@ -170,6 +177,10 @@ namespace MustHotelBooking\Provider\Clock {
                 'event_id' => $eventId,
                 'payload' => $payload,
             ];
+
+            if (!empty(self::$results)) {
+                return (array) \array_shift(self::$results);
+            }
 
             return [
                 'success' => true,
@@ -188,6 +199,8 @@ namespace MustHotelBooking\Provider\Storage {
         public static $logs = [];
         /** @var int */
         private static $nextId = 1;
+        /** @var bool */
+        public static $lockAvailable = true;
 
         /** @param array<string, mixed> $data */
         public function create(array $data): int
@@ -221,10 +234,22 @@ namespace MustHotelBooking\Provider\Storage {
             return false;
         }
 
+        public function acquireIdempotencyLock(string $idempotencyKey, int $timeoutSeconds = 2): bool
+        {
+            unset($idempotencyKey, $timeoutSeconds);
+            return self::$lockAvailable;
+        }
+
+        public function releaseIdempotencyLock(string $idempotencyKey): void
+        {
+            unset($idempotencyKey);
+        }
+
         public static function reset(): void
         {
             self::$logs = [];
             self::$nextId = 1;
+            self::$lockAvailable = true;
         }
     }
 }
@@ -304,11 +329,22 @@ namespace {
         {
             $this->validBasicAuth();
             $this->invalidBasicAuth();
+            $this->missingConfiguredBasicAuth();
+            $this->incompleteBasicConfiguration();
             $this->validSnsSignature();
             $this->invalidSnsSignature();
+            $this->unsafeSigningCertificateUrl();
             $this->subscriptionConfirmation();
+            $this->duplicateSubscriptionConfirmation();
+            $this->unsafeSubscribeUrl();
             $this->notificationProcessing();
+            $this->malformedOuterJson();
+            $this->malformedNestedMessageJson();
+            $this->unsupportedSnsMessageType();
             $this->duplicateReplay();
+            $this->failedDeliveryCanRetry();
+            $this->concurrentDeliveryRetriesLater();
+            $this->requestLogsAreSanitized();
         }
 
         private function validBasicAuth(): void
@@ -335,6 +371,25 @@ namespace {
             $this->assertSame(0, \count(ClockInboundSyncService::$processed), 'invalid Basic auth does not process notification');
         }
 
+        private function missingConfiguredBasicAuth(): void
+        {
+            $this->reset();
+            ClockConfig::$basicUsername = 'clock-user';
+            ClockConfig::$basicPassword = 'clock-pass';
+            $response = $this->send($this->signedNotification('basic-missing'));
+            $this->assertSame(401, $response->get_status(), 'configured Basic auth is required');
+            $this->assertSame(0, \count(ClockInboundSyncService::$processed), 'missing configured Basic auth does not process notification');
+        }
+
+        private function incompleteBasicConfiguration(): void
+        {
+            $this->reset();
+            ClockConfig::$basicUsername = 'clock-user';
+            $response = $this->send($this->signedNotification('basic-incomplete'));
+            $this->assertSame(503, $response->get_status(), 'half-configured Basic auth is rejected as an operator configuration error');
+            $this->assertSame(0, \count(ClockInboundSyncService::$processed), 'half-configured Basic auth does not process notification');
+        }
+
         private function validSnsSignature(): void
         {
             $this->reset();
@@ -353,6 +408,16 @@ namespace {
             $this->assertSame(0, \count(ClockInboundSyncService::$processed), 'invalid SNS signature does not process notification');
         }
 
+        private function unsafeSigningCertificateUrl(): void
+        {
+            $this->reset();
+            $payload = $this->signedNotification('unsafe-cert-url');
+            $payload['SigningCertURL'] = 'https://example.com/SimpleNotificationService-test.pem';
+            $response = $this->send($payload);
+            $this->assertSame(403, $response->get_status(), 'unsafe SigningCertURL is rejected');
+            $this->assertSame(0, \count(ClockInboundSyncService::$processed), 'unsafe SigningCertURL does not process notification');
+        }
+
         private function subscriptionConfirmation(): void
         {
             $this->reset();
@@ -363,6 +428,28 @@ namespace {
             $this->assertTrue(!empty($data['subscription_confirmed']), 'valid subscription confirmation is marked confirmed');
             $this->assertSame(1, \count($this->confirmedUrls), 'safe SubscribeURL is fetched once');
             $this->assertSame(0, \count(ClockInboundSyncService::$processed), 'subscription confirmation does not call event processor');
+        }
+
+        private function duplicateSubscriptionConfirmation(): void
+        {
+            $this->reset();
+            $payload = $this->signedSubscriptionConfirmation('subscription-duplicate');
+            $first = $this->send($payload);
+            $second = $this->send($payload);
+            $this->assertSame(200, $first->get_status(), 'first subscription confirmation returns 200');
+            $this->assertSame(200, $second->get_status(), 'duplicate subscription confirmation returns 200');
+            $this->assertSame(1, \count($this->confirmedUrls), 'duplicate subscription confirmation follows SubscribeURL once');
+        }
+
+        private function unsafeSubscribeUrl(): void
+        {
+            $this->reset();
+            $payload = $this->signedSubscriptionConfirmation('subscription-unsafe');
+            $payload['SubscribeURL'] = 'https://example.com/?Action=ConfirmSubscription';
+            $payload['Signature'] = $this->sign($payload);
+            $response = $this->send($payload);
+            $this->assertSame(403, $response->get_status(), 'unsafe SubscribeURL is rejected');
+            $this->assertSame(0, \count($this->confirmedUrls), 'unsafe SubscribeURL is never fetched');
         }
 
         private function notificationProcessing(): void
@@ -378,6 +465,30 @@ namespace {
             $this->assertTrue(isset($payload['_sns']) && \is_array($payload['_sns']), 'SNS metadata is retained in sanitized form');
         }
 
+        private function malformedOuterJson(): void
+        {
+            $this->reset();
+            $response = ClockInboundSyncController::handleWebhookRequest(new WP_REST_Request('{'));
+            $this->assertSame(400, $response->get_status(), 'malformed outer JSON is rejected');
+            $this->assertSame(0, \count(ClockInboundSyncService::$processed), 'malformed outer JSON does not process notification');
+        }
+
+        private function malformedNestedMessageJson(): void
+        {
+            $this->reset();
+            $response = $this->send($this->signedNotificationRaw('nested-invalid', 'booking_update', '{'));
+            $this->assertSame(400, $response->get_status(), 'malformed nested Message JSON is rejected');
+            $this->assertSame(0, \count(ClockInboundSyncService::$processed), 'malformed nested Message JSON does not process notification');
+        }
+
+        private function unsupportedSnsMessageType(): void
+        {
+            $this->reset();
+            $response = $this->send($this->signedUnsubscribeConfirmation('unsubscribe-confirm'));
+            $this->assertSame(400, $response->get_status(), 'unsupported signed SNS message type is rejected');
+            $this->assertSame(0, \count(ClockInboundSyncService::$processed), 'unsupported SNS message type does not process notification');
+        }
+
         private function duplicateReplay(): void
         {
             $this->reset();
@@ -391,6 +502,58 @@ namespace {
             $this->assertSame(1, \count(ClockInboundSyncService::$processed), 'duplicate replay does not process twice');
         }
 
+        private function failedDeliveryCanRetry(): void
+        {
+            $this->reset();
+            ClockInboundSyncService::$results = [
+                [
+                    'success' => false,
+                    'retryable' => true,
+                    'status' => 503,
+                    'message' => 'temporary failure',
+                ],
+            ];
+            $payload = $this->signedNotification('failed-then-success');
+            $first = $this->send($payload);
+            $second = $this->send($payload);
+            $this->assertSame(503, $first->get_status(), 'failed first delivery requests retry');
+            $this->assertSame(200, $second->get_status(), 'successful retry is accepted');
+            $this->assertSame(2, \count(ClockInboundSyncService::$processed), 'failed first delivery does not permanently deduplicate a retry');
+        }
+
+        private function concurrentDeliveryRetriesLater(): void
+        {
+            $this->reset();
+            ProviderRequestLogRepository::$lockAvailable = false;
+            $payload = $this->signedNotification('concurrent-delivery');
+            $first = $this->send($payload);
+            ProviderRequestLogRepository::$lockAvailable = true;
+            $second = $this->send($payload);
+            $this->assertSame(503, $first->get_status(), 'concurrent duplicate receives a retryable response');
+            $this->assertSame(200, $second->get_status(), 'delivery succeeds after the processing lock is released');
+            $this->assertSame(1, \count(ClockInboundSyncService::$processed), 'locked delivery does not process concurrently');
+        }
+
+        private function requestLogsAreSanitized(): void
+        {
+            $this->reset();
+            ClockConfig::$basicUsername = 'clock-user';
+            ClockConfig::$basicPassword = 'clock-pass';
+            $payload = $this->signedNotification(
+                'sanitized-log',
+                'booking_update',
+                ['booking_id' => '36590001', 'guest_email' => 'guest@example.test', 'status' => 'expected']
+            );
+            $response = $this->send($payload, [
+                'Authorization' => 'Basic ' . \base64_encode('clock-user:clock-pass'),
+            ]);
+            $logs = \wp_json_encode(ProviderRequestLogRepository::$logs);
+            $this->assertSame(200, $response->get_status(), 'sanitized log test notification is accepted');
+            $this->assertTrue(\strpos($logs, 'clock-pass') === false, 'request logs do not contain Basic credentials');
+            $this->assertTrue(\strpos($logs, 'guest@example.test') === false, 'request logs do not contain full nested guest payloads');
+            $this->assertTrue(\strpos($logs, (string) $payload['Signature']) === false, 'request logs do not contain SNS signatures');
+        }
+
         /** @param array<string, mixed> $payload @param array<string, string> $headers */
         private function send(array $payload, array $headers = []): WP_REST_Response
         {
@@ -400,12 +563,17 @@ namespace {
         /** @param array<string, mixed> $message */
         private function signedNotification(string $messageId, string $subject = 'booking_status_changed', array $message = ['booking_id' => '36590000', 'status' => 'confirmed']): array
         {
+            return $this->signedNotificationRaw($messageId, $subject, \wp_json_encode($message));
+        }
+
+        private function signedNotificationRaw(string $messageId, string $subject, string $message): array
+        {
             $payload = [
                 'Type' => 'Notification',
                 'MessageId' => $messageId,
                 'TopicArn' => 'arn:aws:sns:us-east-1:123456789012:clock-push',
                 'Subject' => $subject,
-                'Message' => \wp_json_encode($message),
+                'Message' => $message,
                 'Timestamp' => '2026-06-14T12:00:00.000Z',
                 'SignatureVersion' => '2',
                 'SigningCertURL' => 'https://sns.us-east-1.amazonaws.com/SimpleNotificationService-1234567890abcdef.pem',
@@ -422,6 +590,23 @@ namespace {
                 'Token' => 'test-token',
                 'TopicArn' => 'arn:aws:sns:us-east-1:123456789012:clock-push',
                 'Message' => 'You have chosen to subscribe to the topic.',
+                'SubscribeURL' => 'https://sns.us-east-1.amazonaws.com/?Action=ConfirmSubscription&TopicArn=arn%3Aaws%3Asns%3Aus-east-1%3A123456789012%3Aclock-push&Token=test-token',
+                'Timestamp' => '2026-06-14T12:00:00.000Z',
+                'SignatureVersion' => '2',
+                'SigningCertURL' => 'https://sns.us-east-1.amazonaws.com/SimpleNotificationService-1234567890abcdef.pem',
+            ];
+            $payload['Signature'] = $this->sign($payload);
+            return $payload;
+        }
+
+        private function signedUnsubscribeConfirmation(string $messageId): array
+        {
+            $payload = [
+                'Type' => 'UnsubscribeConfirmation',
+                'MessageId' => $messageId,
+                'Token' => 'test-token',
+                'TopicArn' => 'arn:aws:sns:us-east-1:123456789012:clock-push',
+                'Message' => 'You have chosen to unsubscribe from the topic.',
                 'SubscribeURL' => 'https://sns.us-east-1.amazonaws.com/?Action=ConfirmSubscription&TopicArn=arn%3Aaws%3Asns%3Aus-east-1%3A123456789012%3Aclock-push&Token=test-token',
                 'Timestamp' => '2026-06-14T12:00:00.000Z',
                 'SignatureVersion' => '2',
@@ -462,6 +647,7 @@ namespace {
             ClockConfig::$basicUsername = '';
             ClockConfig::$basicPassword = '';
             ClockInboundSyncService::$processed = [];
+            ClockInboundSyncService::$results = [];
             ProviderRequestLogRepository::reset();
             $this->confirmedUrls = [];
         }

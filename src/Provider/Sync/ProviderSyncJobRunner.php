@@ -5,6 +5,7 @@ namespace MustHotelBooking\Provider\Sync;
 use MustHotelBooking\Engine\PaymentRefundService;
 use MustHotelBooking\Provider\Clock\ClockPaymentAccountingService;
 use MustHotelBooking\Provider\Clock\ClockPaymentReconciliationService;
+use MustHotelBooking\Provider\Clock\ClockReservationAmendmentService;
 use MustHotelBooking\Provider\Clock\ClockInboundSyncService;
 use MustHotelBooking\Provider\ProviderManager;
 use MustHotelBooking\Provider\Storage\ProviderSyncJobRepository;
@@ -158,6 +159,10 @@ final class ProviderSyncJobRunner
                 return (new ClockInboundSyncService())->executeRefreshJob($job);
             }
 
+            if ($operation === 'booking_upsert') {
+                return (new ClockInboundSyncService())->executeBookingUpsertJob($job);
+            }
+
             if ($operation === 'refund_clock_sync') {
                 $result = (new PaymentRefundService())->retryClockSync((int) ($job['target_local_id'] ?? 0));
 
@@ -170,6 +175,10 @@ final class ProviderSyncJobRunner
 
             if ($operation === 'clock_folio_accounting_sync') {
                 return (new ClockPaymentAccountingService())->executeSyncJob($job);
+            }
+
+            if ($operation === 'reservation_amendment') {
+                return (new ClockReservationAmendmentService())->executeSyncJob($job);
             }
 
             return (new ClockPaymentReconciliationService())->executeSyncJob($job);

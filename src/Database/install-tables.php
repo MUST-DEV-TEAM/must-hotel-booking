@@ -549,6 +549,10 @@ function install_tables(): void
         currency VARCHAR(10) NOT NULL DEFAULT 'USD',
         status VARCHAR(50) NOT NULL DEFAULT 'pending',
         verification_status VARCHAR(50) NOT NULL DEFAULT '',
+        balance_before DECIMAL(12,2) NULL DEFAULT NULL,
+        expected_balance DECIMAL(12,2) NULL DEFAULT NULL,
+        actual_balance DECIMAL(12,2) NULL DEFAULT NULL,
+        reconciliation_status VARCHAR(50) NOT NULL DEFAULT '',
         idempotency_key VARCHAR(191) NOT NULL DEFAULT '',
         attempts SMALLINT(5) UNSIGNED NOT NULL DEFAULT 0,
         last_error_code VARCHAR(100) NOT NULL DEFAULT '',
@@ -830,6 +834,16 @@ function ensure_payment_release_schema(?\wpdb $wpdb_instance = null): void
             'final_refund_amount' => "DECIMAL(12,2) NOT NULL DEFAULT 0.00",
             'refund_policy_reason' => "VARCHAR(191) NOT NULL DEFAULT ''",
             'calculated_by' => "VARCHAR(50) NOT NULL DEFAULT ''",
+        ]
+    );
+    ensure_table_columns(
+        $db,
+        $db->prefix . 'must_clock_folio_accounting',
+        [
+            'balance_before' => 'DECIMAL(12,2) NULL DEFAULT NULL',
+            'expected_balance' => 'DECIMAL(12,2) NULL DEFAULT NULL',
+            'actual_balance' => 'DECIMAL(12,2) NULL DEFAULT NULL',
+            'reconciliation_status' => "VARCHAR(50) NOT NULL DEFAULT ''",
         ]
     );
 }

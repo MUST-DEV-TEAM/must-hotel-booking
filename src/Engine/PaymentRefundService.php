@@ -37,6 +37,8 @@ final class PaymentRefundService
         $method = \sanitize_key((string) ($state['method'] ?? ''));
         $transactionId = $this->latestPaidTransactionId($paymentRows);
         $currency = \strtoupper(\sanitize_text_field((string) ($options['currency'] ?? MustBookingConfig::get_currency())));
+        $paidPayment = $this->latestPaidPaymentRow($paymentRows, $method, $transactionId);
+        $paymentCurrency = \strtoupper(\sanitize_text_field((string) ($paidPayment['currency'] ?? '')));
         $refundType = \sanitize_key((string) ($options['refund_type'] ?? 'refund_only')) ?: 'refund_only';
         $reason = \sanitize_text_field((string) ($options['reason'] ?? ''));
         $cancelAfterRefund = !empty($options['cancel_reservation']);
@@ -66,8 +68,26 @@ final class PaymentRefundService
         if ($transactionId === '') {
             return $this->failure(\__('This online payment is missing its provider reference.', 'must-hotel-booking'));
         }
+        if ($paymentCurrency !== '' && $currency !== $paymentCurrency) {
+            return $this->failure(\__('Refund currency must match the original payment currency.', 'must-hotel-booking'));
+        }
+        $blockingRefund = $this->refunds->findBlockingProviderRefund($reservationId, $method, $transactionId, $amount);
+        if (\is_array($blockingRefund)) {
+            return $this->failure(\__('A refund for this payment and amount is already recorded or in progress.', 'must-hotel-booking'), [
+                'refund_id' => (int) ($blockingRefund['id'] ?? 0),
+                'status' => (string) ($blockingRefund['status'] ?? ''),
+            ]);
+        }
+        $retryableRefund = $this->refunds->findRetryableProviderRefund($reservationId, $method, $transactionId, $amount);
         if (!empty($options['require_known_provider_fee']) && (string) ($breakdown['provider_fee_status'] ?? 'unknown') !== 'known') {
             return $this->failure(\__('The provider fee is not known yet. Review the payment fee capture before issuing the default refund.', 'must-hotel-booking'));
+        }
+        if ($cancelAfterRefund) {
+            (new CancellationFinancialCleanupService())->captureSnapshot($reservationId, [
+                'source' => (string) ($options['source'] ?? 'refund'),
+                'operation' => 'refund_cancel',
+                'reason' => $reason,
+            ]);
         }
         if ($method === 'pokpay') {
             return $this->requestPokPayRefund($reservation, $paymentRows, $state, $amount, [
@@ -94,7 +114,7 @@ final class PaymentRefundService
                 $folioId = (string) $folioRecovery['folio_id'];
             }
         }
-        $refundId = $this->refunds->createRefund([
+        $refundData = [
             'reservation_id' => $reservationId,
             'booking_id' => (string) ($reservation['booking_id'] ?? ''),
             'payment_id' => $paymentId,
@@ -123,11 +143,30 @@ final class PaymentRefundService
             ]),
             'created_at' => $now,
             'updated_at' => $now,
-        ]);
+        ];
+        $review = $this->refunds->findCancellationReview($reservationId, 'stripe', $transactionId);
+        $refundId = \is_array($review)
+            ? (int) ($review['id'] ?? 0)
+            : (\is_array($retryableRefund) ? (int) ($retryableRefund['id'] ?? 0) : 0);
+        if ($refundId > 0) {
+            unset($refundData['created_at']);
+            $this->refunds->updateRefund($refundId, $refundData);
+        } else {
+            $refundId = $this->refunds->createRefund($refundData);
+        }
         if ($refundId <= 0) {
             return $this->failure(\__('Unable to create the refund record.', 'must-hotel-booking'));
         }
-        $stripeIdempotencyKey = 'soves_refund_' . $refundId;
+        (new CancellationFinancialCleanupService())->updateState($reservationId, [
+            'refund_review_status' => 'approved',
+            'gateway_refund_status' => 'processing',
+        ]);
+        $stripeIdempotencyKey = \is_array($retryableRefund) && (int) ($retryableRefund['id'] ?? 0) === $refundId
+            ? \sanitize_text_field((string) ($retryableRefund['idempotency_key'] ?? ''))
+            : '';
+        if ($stripeIdempotencyKey === '') {
+            $stripeIdempotencyKey = 'soves_refund_' . $refundId;
+        }
         $clockIdempotencyKey = 'SOVES-REFUND-' . $refundId;
         $this->refunds->updateRefund($refundId, [
             'idempotency_key' => $stripeIdempotencyKey,
@@ -160,6 +199,10 @@ final class PaymentRefundService
                 'raw_provider_status' => 'failed',
                 'updated_at' => \current_time('mysql'),
             ]);
+            (new CancellationFinancialCleanupService())->updateState($reservationId, [
+                'gateway_refund_status' => 'failed',
+                'last_error' => $message,
+            ]);
             return $this->failure($message, ['refund_id' => $refundId]);
         }
         $refund = isset($response['body']) && \is_array($response['body']) ? $response['body'] : [];
@@ -177,6 +220,11 @@ final class PaymentRefundService
             'updated_at' => \current_time('mysql'),
         ]);
         if ($stripeStatus === 'succeeded') {
+            (new CancellationFinancialCleanupService())->updateState($reservationId, [
+                'gateway_refund_status' => 'complete',
+                'refund_review_status' => 'complete',
+                'last_error' => '',
+            ]);
             $this->recordLocalRefundLedger($reservation, $state, $amount, $stripeRefundId !== '' ? $stripeRefundId : $transactionId, 'stripe');
             if ($cancelAfterRefund) {
                 $this->cancelReservationAfterRefund($reservation);
@@ -233,6 +281,7 @@ final class PaymentRefundService
         $cancelAfterRefund = !empty($options['cancel_reservation']);
         $amountPaid = (float) ($state['amount_paid'] ?? 0.0);
         $isFullRefund = \abs($amountPaid - $amount) < 0.01;
+        $retryableRefund = $this->refunds->findRetryableProviderRefund($reservationId, 'pokpay', $transactionId, $amount);
         $feeService = new PaymentProviderFeeService($this->payments);
         $breakdown = isset($options['refund_breakdown']) && \is_array($options['refund_breakdown'])
             ? $options['refund_breakdown']
@@ -244,14 +293,6 @@ final class PaymentRefundService
                 \__('PokPay refund amount uses stored provider fee snapshot as the default.', 'must-hotel-booking')
             );
         $breakdown['final_refund_amount'] = $amount;
-
-        $blockingRefund = $this->refunds->findBlockingProviderRefund($reservationId, 'pokpay', $transactionId, $amount);
-        if (\is_array($blockingRefund)) {
-            return $this->failure(\__('A PokPay refund for this payment and amount is already recorded or in progress.', 'must-hotel-booking'), [
-                'refund_id' => (int) ($blockingRefund['id'] ?? 0),
-                'status' => (string) ($blockingRefund['status'] ?? ''),
-            ]);
-        }
 
         $now = \current_time('mysql');
         $paymentId = $this->latestPaymentId($paymentRows, $transactionId);
@@ -268,7 +309,7 @@ final class PaymentRefundService
             }
         }
 
-        $refundId = $this->refunds->createRefund([
+        $refundData = [
             'reservation_id' => $reservationId,
             'booking_id' => (string) ($reservation['booking_id'] ?? ''),
             'payment_id' => $paymentId,
@@ -300,11 +341,25 @@ final class PaymentRefundService
             ]),
             'created_at' => $now,
             'updated_at' => $now,
-        ]);
+        ];
+        $review = $this->refunds->findCancellationReview($reservationId, 'pokpay', $transactionId);
+        $refundId = \is_array($review)
+            ? (int) ($review['id'] ?? 0)
+            : (\is_array($retryableRefund) ? (int) ($retryableRefund['id'] ?? 0) : 0);
+        if ($refundId > 0) {
+            unset($refundData['created_at']);
+            $this->refunds->updateRefund($refundId, $refundData);
+        } else {
+            $refundId = $this->refunds->createRefund($refundData);
+        }
 
         if ($refundId <= 0) {
             return $this->failure(\__('Unable to create the refund record.', 'must-hotel-booking'));
         }
+        (new CancellationFinancialCleanupService())->updateState($reservationId, [
+            'refund_review_status' => 'approved',
+            'gateway_refund_status' => 'processing',
+        ]);
 
         $this->refunds->updateRefund($refundId, [
             'clock_idempotency_key' => 'SOVES-REFUND-' . $refundId,
@@ -326,6 +381,10 @@ final class PaymentRefundService
                 'manual_note' => \__('PokPay API refund failed or is unavailable. Refund from the POK dashboard, then mark this refund completed in the plugin.', 'must-hotel-booking'),
                 'raw_provider_status' => 'manual_pending',
                 'updated_at' => \current_time('mysql'),
+            ]);
+            (new CancellationFinancialCleanupService())->updateState($reservationId, [
+                'gateway_refund_status' => 'manual_pending',
+                'last_error' => $message,
             ]);
 
             return [
@@ -350,6 +409,11 @@ final class PaymentRefundService
             'raw_provider_status' => $rawStatus,
             'completed_at' => \current_time('mysql'),
             'updated_at' => \current_time('mysql'),
+        ]);
+        (new CancellationFinancialCleanupService())->updateState($reservationId, [
+            'gateway_refund_status' => 'complete',
+            'refund_review_status' => 'complete',
+            'last_error' => '',
         ]);
 
         $this->recordLocalRefundLedger($reservation, $state, $amount, $providerRefundId, 'pokpay');
@@ -380,6 +444,9 @@ final class PaymentRefundService
             'clock_refund_item_id' => (string) ($refund['clock_refund_item_id'] ?? '') !== '' ? (string) $refund['clock_refund_item_id'] : 'manual:SOVES-REFUND-' . $refundId,
             'failed_reason' => '',
             'updated_at' => \current_time('mysql'),
+        ]);
+        (new CancellationFinancialCleanupService())->updateState((int) ($refund['reservation_id'] ?? 0), [
+            'clock_payment_accounting_status' => $updated ? 'handled_manually' : 'manual_review',
         ]);
         return [
             'success' => $updated,
@@ -431,6 +498,10 @@ final class PaymentRefundService
             'manual_note' => \sanitize_textarea_field($manualNote),
             'updated_at' => \current_time('mysql'),
         ]);
+        (new CancellationFinancialCleanupService())->updateState((int) ($refund['reservation_id'] ?? 0), [
+            'gateway_refund_status' => $updated ? 'complete' : 'manual_pending',
+            'refund_review_status' => $updated ? 'complete' : 'approved',
+        ]);
 
         if (ProviderReservationView::isProviderBacked($reservation)) {
             $this->syncClockRefund($refundId);
@@ -459,6 +530,12 @@ final class PaymentRefundService
             return $this->failure(\__('Clock payment accounting service is unavailable.', 'must-hotel-booking'));
         }
         $result = (new \MustHotelBooking\Provider\Clock\ClockPaymentAccountingService())->syncRefund($refundId);
+        (new CancellationFinancialCleanupService())->updateState((int) ($refund['reservation_id'] ?? 0), [
+            'clock_payment_accounting_status' => !empty($result['success'])
+                ? 'complete'
+                : (!empty($result['retry']) ? 'pending_retry' : 'manual_review'),
+            'last_error' => !empty($result['success']) ? '' : (string) ($result['message'] ?? ''),
+        ]);
         return $result;
     }
     /** @param array<string, mixed> $refundObject */
@@ -477,17 +554,30 @@ final class PaymentRefundService
             'stripe_refund_id' => $stripeRefundId !== '' ? $stripeRefundId : (string) ($refund['stripe_refund_id'] ?? ''),
             'stripe_charge_id' => $chargeId !== '' ? $chargeId : (string) ($refund['stripe_charge_id'] ?? ''),
             'status' => $status,
+            'raw_provider_status' => $status,
             'completed_at' => $status === 'succeeded' ? \current_time('mysql') : ($refund['completed_at'] ?? null),
             'updated_at' => \current_time('mysql'),
         ]);
         if ($status === 'succeeded') {
+            (new CancellationFinancialCleanupService())->updateState((int) ($refund['reservation_id'] ?? 0), [
+                'gateway_refund_status' => 'complete',
+                'refund_review_status' => 'complete',
+                'last_error' => '',
+            ]);
             $reservation = $this->reservations->getReservation((int) ($refund['reservation_id'] ?? 0));
             if (\is_array($reservation)) {
                 $state = PaymentStatusService::buildReservationPaymentState(
                     $reservation,
                     $this->payments->getPaymentsForReservation((int) ($refund['reservation_id'] ?? 0))
                 );
-                $this->recordLocalRefundLedger($reservation, $state, (float) ($refund['amount'] ?? 0.0), (string) ($refund['stripe_refund_id'] ?? ''), 'stripe');
+                $refundReference = $stripeRefundId !== ''
+                    ? $stripeRefundId
+                    : (string) ($refund['stripe_refund_id'] ?? $paymentIntentId);
+                $this->recordLocalRefundLedger($reservation, $state, (float) ($refund['amount'] ?? 0.0), $refundReference, 'stripe');
+                $metadata = $this->decodeMetadata($refund['metadata'] ?? null);
+                if (!empty($metadata['cancel_reservation'])) {
+                    $this->cancelReservationAfterRefund($reservation);
+                }
             }
             $this->syncClockRefund((int) $refund['id']);
         }
@@ -508,18 +598,25 @@ final class PaymentRefundService
         }
         $now = \current_time('mysql');
         $this->payments->createPayment([
-                'reservation_id' => $reservationId,
-                'amount' => \round($amount, 2),
-                'currency' => MustBookingConfig::get_currency(),
-                'method' => $method,
-                'status' => 'refunded',
-                'transaction_id' => $transactionId,
+            'reservation_id' => $reservationId,
+            'amount' => \round($amount, 2),
+            'currency' => MustBookingConfig::get_currency(),
+            'method' => $method,
+            'status' => 'refunded',
+            'transaction_id' => $transactionId,
             'paid_at' => $now,
             'created_at' => $now,
         ]);
         $amountPaid = \max(0.0, (float) ($state['amount_paid'] ?? 0.0) - $amount);
-        $amountDue = \max(0.0, (float) ($state['total'] ?? 0.0) - $amountPaid);
-        $paymentStatus = $amountPaid <= 0.0 ? 'refunded' : ($amountDue > 0.0 ? 'partially_paid' : 'paid');
+        $expectedRetainedAmount = $this->expectedRetainedAmount($reservation);
+        if ($expectedRetainedAmount !== null) {
+            $paymentStatus = $amountPaid <= 0.0
+                ? 'refunded'
+                : ($amountPaid + 0.01 >= $expectedRetainedAmount ? 'paid' : 'partially_paid');
+        } else {
+            $amountDue = \max(0.0, (float) ($state['total'] ?? 0.0) - $amountPaid);
+            $paymentStatus = $amountPaid <= 0.0 ? 'refunded' : ($amountDue > 0.0 ? 'partially_paid' : 'paid');
+        }
         $this->reservations->updateReservationStatus($reservationId, (string) ($reservation['status'] ?? 'confirmed'), $paymentStatus);
     }
     /** @param array<string, mixed> $reservation */
@@ -534,10 +631,19 @@ final class PaymentRefundService
             return;
         }
         $current = $this->reservations->getReservation($reservationId);
-        $this->reservations->updateReservationStatus(
+        (new BookingLifecycleSyncService(
+            $this->reservations,
+            $this->payments,
+            $this->refunds
+        ))->applyReservationStatusTransition(
             $reservationId,
             'cancelled',
-            \is_array($current) ? (string) ($current['payment_status'] ?? 'refunded') : 'refunded'
+            \is_array($current) ? (string) ($current['payment_status'] ?? 'refunded') : 'refunded',
+            [
+                'source' => 'refund',
+                'operation' => 'refund_cancel',
+                'reason' => 'refund_succeeded',
+            ]
         );
     }
     /** @param array<int, array<string, mixed>> $paymentRows */
@@ -559,6 +665,48 @@ final class PaymentRefundService
             }
         }
         return '';
+    }
+
+    /** @param array<int, array<string, mixed>> $paymentRows @return array<string, mixed> */
+    private function latestPaidPaymentRow(array $paymentRows, string $method, string $transactionId): array
+    {
+        foreach ($paymentRows as $row) {
+            if (
+                \is_array($row)
+                && \sanitize_key((string) ($row['status'] ?? '')) === 'paid'
+                && \sanitize_key((string) ($row['method'] ?? '')) === $method
+                && ($transactionId === '' || (string) ($row['transaction_id'] ?? '') === $transactionId)
+            ) {
+                return $row;
+            }
+        }
+
+        return [];
+    }
+    /** @param array<string, mixed> $reservation */
+    private function expectedRetainedAmount(array $reservation): ?float
+    {
+        $metadata = $this->decodeMetadata($reservation['provider_metadata'] ?? null);
+        $cleanup = isset($metadata['cancellation_financial_cleanup']) && \is_array($metadata['cancellation_financial_cleanup'])
+            ? $metadata['cancellation_financial_cleanup']
+            : [];
+        if (empty($cleanup)) {
+            return null;
+        }
+        if (isset($cleanup['expected_clock_result']) && \is_array($cleanup['expected_clock_result']) && isset($cleanup['expected_clock_result']['expected_retained_amount'])) {
+            return \round(\max(0.0, (float) $cleanup['expected_clock_result']['expected_retained_amount']), 2);
+        }
+        $snapshot = isset($cleanup['snapshot']) && \is_array($cleanup['snapshot'])
+            ? $cleanup['snapshot']
+            : [];
+        if (isset($snapshot['non_refundable_amount'])) {
+            return \round(\max(0.0, (float) $snapshot['non_refundable_amount']), 2);
+        }
+        if (isset($snapshot['paid_amount']) || isset($snapshot['refundable_amount'])) {
+            return \round(\max(0.0, (float) ($snapshot['paid_amount'] ?? 0.0) - (float) ($snapshot['refundable_amount'] ?? 0.0)), 2);
+        }
+
+        return null;
     }
     private function normalizeStripeRefundStatus(string $status): string
     {

@@ -994,6 +994,7 @@ function render_payment_detail(?array $detail): void
         echo '<th>' . \esc_html__('Clock Booking', 'must-hotel-booking') . '</th>';
         echo '<th>' . \esc_html__('Clock Folio', 'must-hotel-booking') . '</th>';
         echo '<th>' . \esc_html__('Clock Item', 'must-hotel-booking') . '</th>';
+        echo '<th>' . \esc_html__('Balance Check', 'must-hotel-booking') . '</th>';
         echo '<th>' . \esc_html__('Attempts', 'must-hotel-booking') . '</th>';
         echo '<th>' . \esc_html__('Provider Reference', 'must-hotel-booking') . '</th>';
         echo '<th>' . \esc_html__('Latest Message', 'must-hotel-booking') . '</th>';
@@ -1030,6 +1031,14 @@ function render_payment_detail(?array $detail): void
             echo '<td>' . \esc_html((string) ($accountingRow['clock_booking_id'] ?? '')) . '</td>';
             echo '<td>' . \esc_html((string) ($accountingRow['clock_folio_id'] ?? '')) . '</td>';
             echo '<td>' . \esc_html((string) ($accountingRow['clock_credit_item_id'] ?? '')) . '</td>';
+            echo '<td>';
+            echo '<span class="must-payments-cell-note">' . \esc_html(\sprintf(__('Before: %s', 'must-hotel-booking'), isset($accountingRow['balance_before']) ? \number_format_i18n((float) $accountingRow['balance_before'], 2) : __('Unknown', 'must-hotel-booking'))) . '</span>';
+            echo '<span class="must-payments-cell-note">' . \esc_html(\sprintf(__('Expected: %s', 'must-hotel-booking'), isset($accountingRow['expected_balance']) ? \number_format_i18n((float) $accountingRow['expected_balance'], 2) : __('Unknown', 'must-hotel-booking'))) . '</span>';
+            echo '<span class="must-payments-cell-note">' . \esc_html(\sprintf(__('Actual: %s', 'must-hotel-booking'), isset($accountingRow['actual_balance']) ? \number_format_i18n((float) $accountingRow['actual_balance'], 2) : __('Unknown', 'must-hotel-booking'))) . '</span>';
+            if ((string) ($accountingRow['reconciliation_status'] ?? '') !== '') {
+                echo render_payments_status_badge((string) $accountingRow['reconciliation_status'], (string) $accountingRow['reconciliation_status']);
+            }
+            echo '</td>';
             echo '<td>' . \esc_html((string) ((int) ($accountingRow['attempts'] ?? 0))) . '<br><span class="description">' . \esc_html($updatedAt) . '</span>';
             if ((string) ($accountingRow['verification_status'] ?? '') !== '') {
                 echo '<br>' . render_payments_status_badge((string) ($accountingRow['verification_status'] ?? ''), (string) ($accountingRow['verification_status'] ?? 'info'));

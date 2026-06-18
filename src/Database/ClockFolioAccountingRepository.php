@@ -333,6 +333,10 @@ final class ClockFolioAccountingRepository extends AbstractRepository
             'currency' => '',
             'status' => 'pending',
             'verification_status' => '',
+            'balance_before' => null,
+            'expected_balance' => null,
+            'actual_balance' => null,
+            'reconciliation_status' => '',
             'idempotency_key' => '',
             'attempts' => 0,
             'last_error_code' => '',
@@ -360,6 +364,10 @@ final class ClockFolioAccountingRepository extends AbstractRepository
 
         if (isset($row['verification_status'])) {
             $row['verification_status'] = \sanitize_key((string) $row['verification_status']);
+        }
+
+        if (isset($row['reconciliation_status'])) {
+            $row['reconciliation_status'] = \sanitize_key((string) $row['reconciliation_status']);
         }
 
         if (isset($row['currency'])) {
@@ -390,7 +398,7 @@ final class ClockFolioAccountingRepository extends AbstractRepository
                 continue;
             }
 
-            if ($key === 'amount') {
+            if (\in_array($key, ['amount', 'balance_before', 'expected_balance', 'actual_balance'], true)) {
                 $formats[] = '%f';
                 continue;
             }

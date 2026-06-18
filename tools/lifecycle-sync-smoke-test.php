@@ -60,6 +60,16 @@ namespace MustHotelBooking\Core {
     }
 }
 
+namespace MustHotelBooking\Provider {
+    final class ProviderReservationView
+    {
+        public static function isProviderBacked(array $reservation): bool
+        {
+            return \sanitize_key((string) ($reservation['provider'] ?? '')) === 'clock';
+        }
+    }
+}
+
 namespace MustHotelBooking\Engine {
     final class PaymentEngine
     {
@@ -201,6 +211,7 @@ namespace {
     require __DIR__ . '/../src/Engine/PaymentStatusService.php';
     require __DIR__ . '/../src/Engine/PaymentProviderFeeService.php';
     require __DIR__ . '/../src/Engine/CancellationEngine.php';
+    require __DIR__ . '/../src/Engine/CancellationFinancialCleanupService.php';
     require __DIR__ . '/../src/Engine/BookingLifecycleSyncService.php';
 
     $failures = [];
@@ -225,6 +236,38 @@ namespace {
             'provider_reservation_id' => 'clock-booking-paid',
             'provider_metadata' => '',
         ],
+        2 => [
+            'id' => 2,
+            'booking_id' => 'TEST-CLOCK-SNAPSHOT',
+            'status' => 'cancelled',
+            'payment_status' => 'paid',
+            'total_price' => 100.00,
+            'rate_plan_id' => 0,
+            'provider' => 'clock',
+            'provider_booking_id' => 'clock-booking-snapshot',
+            'provider_reservation_id' => 'clock-booking-snapshot',
+            'provider_metadata' => \wp_json_encode([
+                'cancellation_financial_cleanup' => [
+                    'reservation_cancellation_status' => 'cancelled',
+                    'snapshot' => [
+                        'paid_amount' => 100.00,
+                        'payment_method' => 'stripe',
+                        'provider_fee_retained' => 3.00,
+                        'provider_fee_status' => 'known',
+                        'cancellation_fee_amount' => 0.00,
+                        'refundable_amount' => 97.00,
+                        'currency' => 'EUR',
+                        'refund_policy_reason' => 'Stored cancellation snapshot.',
+                        'calculated_by' => 'clock_webhook',
+                        'cancellation_policy' => [
+                            'success' => true,
+                            'penalty_amount' => 0.0,
+                            'penalty_applied' => false,
+                        ],
+                    ],
+                ],
+            ]),
+        ],
     ]);
     $GLOBALS['mhb_test_payments'] = new \MustHotelBooking\Engine\FakePaymentRepository([
         1 => [
@@ -240,6 +283,21 @@ namespace {
                 'provider_fee_amount' => 3.00,
                 'paid_at' => '2026-06-13 11:00:00',
                 'created_at' => '2026-06-13 11:00:00',
+            ],
+        ],
+        2 => [
+            [
+                'id' => 11,
+                'reservation_id' => 2,
+                'amount' => 100.00,
+                'currency' => 'EUR',
+                'method' => 'stripe',
+                'status' => 'paid',
+                'transaction_id' => 'pi_snapshot_paid',
+                'provider_fee_status' => 'unknown',
+                'provider_fee_amount' => 0.00,
+                'paid_at' => '2026-06-13 11:30:00',
+                'created_at' => '2026-06-13 11:30:00',
             ],
         ],
     ]);
@@ -258,16 +316,37 @@ namespace {
         'event_id' => 'evt_1',
         'idempotency_key' => 'clock-inbound-evt_1',
     ]);
+    $snapshotReplay = $service->applyReservationStatusTransition(2, 'cancelled', 'paid', [
+        'source' => 'clock_refresh',
+        'operation' => 'cancel_only',
+        'event_id' => 'evt_2',
+        'idempotency_key' => 'clock-inbound-evt_2',
+    ]);
 
     $cancelActions = $GLOBALS['mhb_test_actions']['must_hotel_booking/reservation_cancelled'] ?? [];
     $refunds = $GLOBALS['mhb_test_refunds']->getRefundsForReservation(1);
+    $snapshotRefunds = $GLOBALS['mhb_test_refunds']->getRefundsForReservation(2);
+    $reservation = $GLOBALS['mhb_test_reservations']->getReservation(1);
+    $metadata = \json_decode((string) ($reservation['provider_metadata'] ?? ''), true);
+    $cleanup = \is_array($metadata) && isset($metadata['cancellation_financial_cleanup']) && \is_array($metadata['cancellation_financial_cleanup'])
+        ? $metadata['cancellation_financial_cleanup']
+        : [];
+    $snapshot = isset($cleanup['snapshot']) && \is_array($cleanup['snapshot']) ? $cleanup['snapshot'] : [];
 
     $assert(!empty($first['success']) && !empty($first['changed']), 'First Clock cancellation should change local state.');
     $assert(!empty($second['success']) && empty($second['changed']), 'Duplicate Clock cancellation should be idempotent.');
+    $assert(!empty($snapshotReplay['success']) && empty($snapshotReplay['changed']), 'Snapshot replay on an already cancelled reservation should stay idempotent.');
     $assert(\count($cancelActions) === 1, 'Cancellation action should fire exactly once.');
     $assert(\count($refunds) === 1, 'Paid Clock cancellation should create one refund review record.');
+    $assert(\count($snapshotRefunds) === 1, 'Stored cancellation snapshot should still create one review row when none exists yet.');
     $assert((string) ($refunds[0]['status'] ?? '') === 'refund_review_required', 'Refund review status should be durable.');
+    $assert((string) ($snapshotRefunds[0]['status'] ?? '') === 'refund_review_required', 'Snapshot replay refund review status should be durable.');
     $assert(\abs((float) ($refunds[0]['amount'] ?? 0.0) - 97.00) < 0.01, 'Refund review should preserve calculated refundable amount when fee is known.');
+    $assert(\abs((float) ($snapshotRefunds[0]['amount'] ?? 0.0) - 97.00) < 0.01, 'Stored cancellation snapshot must win over later fee recomputation when creating the review row.');
+    $assert((string) ($cleanup['reservation_cancellation_status'] ?? '') === 'cancelled', 'Cancellation financial state should record the reservation cancellation separately.');
+    $assert((string) ($cleanup['clock_charge_cleanup_status'] ?? '') === 'manual_clock_charge_cleanup_required', 'Clock accommodation charge cleanup should remain an explicit manual-review state.');
+    $assert(\abs((float) ($snapshot['paid_amount'] ?? 0.0) - 100.00) < 0.01, 'Cancellation snapshot should preserve the original paid amount.');
+    $assert(\abs((float) ($snapshot['refundable_amount'] ?? 0.0) - 97.00) < 0.01, 'Cancellation snapshot should preserve the calculated refundable amount.');
 
     if (!empty($failures)) {
         echo "FAIL\n";

@@ -51,9 +51,10 @@ final class PaymentStatusService
         $paidAt = (string) ($latestPayment['paid_at'] ?? '');
         $createdAt = (string) ($latestPayment['created_at'] ?? '');
         $netPaid = \max(0.0, $amountPaid - $amountRefunded);
-        $amountDue = \max(0.0, $total - $netPaid);
-        $derivedStatus = self::deriveStatus($reservationStatus, $storedPaymentStatus, $latestMethod, $latestStatus, $total, $netPaid, $amountDue);
-        $warnings = self::buildWarnings($reservationStatus, $storedPaymentStatus, $latestMethod, $latestStatus, $total, $netPaid, $amountDue, $transactionId, $paidAt, $paymentRows);
+        $effectiveTotal = self::effectiveTotal($reservation, $total);
+        $amountDue = \max(0.0, $effectiveTotal - $netPaid);
+        $derivedStatus = self::deriveStatus($reservationStatus, $storedPaymentStatus, $latestMethod, $latestStatus, $effectiveTotal, $netPaid, $amountDue);
+        $warnings = self::buildWarnings($reservationStatus, $storedPaymentStatus, $latestMethod, $latestStatus, $effectiveTotal, $netPaid, $amountDue, $transactionId, $paidAt, $paymentRows);
 
         return [
             'reservation_id' => $reservationId,
@@ -62,6 +63,7 @@ final class PaymentStatusService
             'payment_rows' => $paymentRows,
             'payment_count' => \count($paymentRows),
             'total' => $total,
+            'effective_total' => \round($effectiveTotal, 2),
             'gross_amount_paid' => \round($amountPaid, 2),
             'amount_refunded' => \round($amountRefunded, 2),
             'amount_paid' => \round($netPaid, 2),
@@ -110,6 +112,47 @@ final class PaymentStatusService
         }
 
         return false;
+    }
+
+    /** @param array<string, mixed> $reservation */
+    private static function effectiveTotal(array $reservation, float $total): float
+    {
+        $metadata = self::decodeMetadata($reservation['provider_metadata'] ?? null);
+        $cleanup = isset($metadata['cancellation_financial_cleanup']) && \is_array($metadata['cancellation_financial_cleanup'])
+            ? $metadata['cancellation_financial_cleanup']
+            : [];
+
+        if (empty($cleanup)) {
+            return \round(\max(0.0, $total), 2);
+        }
+
+        $cancellationStatus = \sanitize_key((string) ($cleanup['reservation_cancellation_status'] ?? ''));
+        $reservationStatus = \sanitize_key((string) ($reservation['status'] ?? ''));
+        if (!\in_array($cancellationStatus, ['pending', 'cancelled'], true) && $reservationStatus !== 'cancelled') {
+            return \round(\max(0.0, $total), 2);
+        }
+
+        $snapshot = isset($cleanup['snapshot']) && \is_array($cleanup['snapshot'])
+            ? $cleanup['snapshot']
+            : [];
+        if (empty($snapshot)) {
+            return \round(\max(0.0, $total), 2);
+        }
+
+        $retained = null;
+        if (isset($cleanup['expected_clock_result']) && \is_array($cleanup['expected_clock_result']) && isset($cleanup['expected_clock_result']['expected_retained_amount'])) {
+            $retained = (float) $cleanup['expected_clock_result']['expected_retained_amount'];
+        } elseif (isset($snapshot['non_refundable_amount'])) {
+            $retained = (float) $snapshot['non_refundable_amount'];
+        } elseif (isset($snapshot['paid_amount']) || isset($snapshot['refundable_amount'])) {
+            $retained = (float) ($snapshot['paid_amount'] ?? 0.0) - (float) ($snapshot['refundable_amount'] ?? 0.0);
+        }
+
+        if ($retained === null) {
+            return \round(\max(0.0, $total), 2);
+        }
+
+        return \round(\max(0.0, $retained), 2);
     }
 
     private static function normalizeMethod(string $method): string
@@ -165,6 +208,22 @@ final class PaymentStatusService
         }
 
         return 'unpaid';
+    }
+
+    /** @param mixed $metadata @return array<string, mixed> */
+    private static function decodeMetadata($metadata): array
+    {
+        if (\is_array($metadata)) {
+            return $metadata;
+        }
+
+        if (!\is_string($metadata) || \trim($metadata) === '') {
+            return [];
+        }
+
+        $decoded = \json_decode($metadata, true);
+
+        return \is_array($decoded) ? $decoded : [];
     }
 
     /**

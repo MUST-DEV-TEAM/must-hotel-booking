@@ -205,6 +205,77 @@ final class RefundRepository extends AbstractRepository
         return \is_array($row) ? $row : null;
     }
 
+    /** @return array<string, mixed>|null */
+    public function findRetryableProviderRefund(int $reservationId, string $gateway, string $providerPaymentReference, float $amount): ?array
+    {
+        $gateway = \sanitize_key($gateway);
+        $providerPaymentReference = \trim($providerPaymentReference);
+        $amount = \round($amount, 2);
+
+        if ($reservationId <= 0 || $gateway === '' || $providerPaymentReference === '' || $amount <= 0.0 || !$this->refundsTableExists()) {
+            return null;
+        }
+
+        $row = $this->wpdb->get_row(
+            $this->wpdb->prepare(
+                'SELECT * FROM ' . $this->table('refunds') . '
+                WHERE reservation_id = %d
+                    AND gateway = %s
+                    AND provider_payment_reference = %s
+                    AND ABS(amount - %f) < 0.01
+                    AND status = %s
+                    AND provider_refund_id = \'\'
+                    AND provider_refund_reference = \'\'
+                ORDER BY id DESC
+                LIMIT 1',
+                $reservationId,
+                $gateway,
+                $providerPaymentReference,
+                $amount,
+                'failed'
+            ),
+            ARRAY_A
+        );
+
+        return \is_array($row) ? $row : null;
+    }
+
+    /** @return array<string, mixed>|null */
+    public function findCancellationReview(int $reservationId, string $gateway, string $providerPaymentReference): ?array
+    {
+        $gateway = \sanitize_key($gateway);
+        $providerPaymentReference = \trim($providerPaymentReference);
+
+        if ($reservationId <= 0 || $gateway === '' || !$this->refundsTableExists()) {
+            return null;
+        }
+
+        $sql = 'SELECT * FROM ' . $this->table('refunds') . '
+            WHERE reservation_id = %d
+                AND gateway = %s
+                AND refund_type = %s
+                AND status = %s';
+        $params = [
+            $reservationId,
+            $gateway,
+            'clock_cancellation_review',
+            'refund_review_required',
+        ];
+
+        if ($providerPaymentReference !== '') {
+            $sql .= ' AND provider_payment_reference = %s';
+            $params[] = $providerPaymentReference;
+        }
+
+        $sql .= ' ORDER BY id DESC LIMIT 1';
+        $row = $this->wpdb->get_row(
+            $this->wpdb->prepare($sql, ...$params),
+            ARRAY_A
+        );
+
+        return \is_array($row) ? $row : null;
+    }
+
     /** @return array<int, array<string, mixed>> */
     public function getRefundsForReservation(int $reservationId): array
     {

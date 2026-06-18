@@ -55,16 +55,21 @@ Managed pages are configured in `src/Core/ManagedPages.php` and installed/synced
 
 ## Cancellation Behavior
 - Cancellation rules and penalties are calculated in `src/Engine/CancellationEngine.php`.
+- `CancellationFinancialCleanupService` stores an immutable cancellation-time financial snapshot in reservation provider metadata before the lifecycle status changes.
 - Admin and portal actions can cancel/update reservations through their respective action handlers.
 - Local reservation status transitions that come from Clock inbound webhooks, scheduled Clock refreshes, Clock booking upserts, or successful outbound Clock cancellation reconciliation go through `src/Engine/BookingLifecycleSyncService.php`. That service delegates to `BookingStatusEngine::updateReservationStatuses()` so `must_hotel_booking/reservation_cancelled` fires exactly once when a reservation first becomes `cancelled`.
 - For paid Stripe/PokPay website bookings cancelled from Clock/provider sync, the lifecycle service creates a single refund-review row when no existing active/completed refund blocks it. Cancellation still releases availability through status change; actual money movement remains a staff/payment workflow.
 - Availability release is tied to reservation status becoming non-blocking; preserve this behavior.
+- Clock-backed outbound cancellation is reread before retry and after a successful write. WordPress is not marked cancelled until the Clock reread confirms a cancelled state.
 
 ## Clock Stay Amendments
-- Admin and staff stay-date amendments for Clock-backed reservations route through `ClockPaymentReconciliationService::updateStayDates()`.
-- The service validates date order, check-in timing, reservation status, provider booking references, and local availability before synchronizing changed dates to Clock.
-- After Clock sync, local pricing is refreshed from Clock/provider data when available. Increased totals are marked `additional_payment_review_required`; reduced totals are marked `refund_or_credit_review_required`. Both use `manual_review_required` and do not automatically charge, refund, or post Clock credit items without an explicit business rule.
-- Duplicate amendment requests use the existing provider sync idempotency key/retry path. Failed Clock sync keeps pricing reconciliation flagged rather than silently treating the local reservation as financially settled.
+- Admin and staff room assignment, stay-date, room-type, rate-plan, and combined accommodation amendments route through `ReservationAmendmentService`.
+- Local physical-room moves acquire reservation/destination advisory locks, revalidate after locking, and use a conflict-aware atomic reservation update. Same-type moves preserve total and payment state; cancellation releases the newly assigned room through existing non-blocking status semantics.
+- Clock pre-arrival amendments resolve required mappings, reread the booking, validate a provider quote, send documented booking fields inside the `booking` wrapper, and reread again before updating WordPress.
+- Clock retries reread before deciding whether another mutation is needed. If Clock confirms a write but the local mirror update fails, a `reservation_amendment` reconciliation job is queued.
+- Checked-in Clock room or room-type changes remain blocked because no documented operation was found for creating an in-house room-change entry.
+- Increased totals are marked `additional_payment_review_required`; reduced totals are marked `refund_or_credit_review_required`. Both use `manual_review_required` and never automatically charge, refund, or post Clock credit items.
+- Date-only, same-type physical-room, room-type, and combined date/accommodation operations remain distinct UI/action paths even though they share the amendment service boundary.
 
 ## Expiration Behavior
 - Expired locks are cleaned by `LockEngine`.

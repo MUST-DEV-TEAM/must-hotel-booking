@@ -2,3 +2,4 @@
 .playwright-cli/
 must-hotel-booking-*.zip
 tools/backups/
+tmp/vendor-docs/clock/

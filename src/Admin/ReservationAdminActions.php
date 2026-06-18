@@ -3,8 +3,10 @@
 namespace MustHotelBooking\Admin;
 
 use MustHotelBooking\Core\ReservationStatus;
+use MustHotelBooking\Engine\BookingLifecycleSyncService;
 use MustHotelBooking\Engine\BookingStatusEngine;
 use MustHotelBooking\Engine\EmailEngine;
+use MustHotelBooking\Engine\ReservationAmendmentService;
 use MustHotelBooking\Provider\Clock\ClockPaymentReconciliationService;
 use MustHotelBooking\Provider\ProviderReservationActionPolicy;
 use MustHotelBooking\Provider\ProviderReservationView;
@@ -117,6 +119,9 @@ final class ReservationAdminActions
                 break;
             case 'update_stay':
                 $notice = $this->updateStayNotice($reservationId);
+                break;
+            case 'amend_reservation':
+                $notice = $this->amendReservationNotice($reservationId);
                 break;
             case 'resend_guest_email':
                 $notice = EmailEngine::resendGuestReservationEmail($reservationId) ? 'reservation_guest_email_resent' : 'action_failed';
@@ -291,13 +296,18 @@ final class ReservationAdminActions
             return false;
         }
 
-        BookingStatusEngine::updateReservationStatuses(
-            [$reservationId],
+        $result = (new BookingLifecycleSyncService())->applyReservationStatusTransition(
+            $reservationId,
             'cancelled',
-            \sanitize_key((string) ($reservation['payment_status'] ?? ''))
+            \sanitize_key((string) ($reservation['payment_status'] ?? '')),
+            [
+                'source' => 'admin',
+                'operation' => 'cancel_only',
+                'reason' => 'admin_cancelled',
+            ]
         );
 
-        return true;
+        return !empty($result['success']);
     }
 
     private function cancelReservationNotice(int $reservationId): string
@@ -433,18 +443,10 @@ final class ReservationAdminActions
             return 'reservation_not_found';
         }
 
-        $providerContext = ProviderReservationView::metadata($reservation);
-
-        if (empty($providerContext['is_provider_backed'])) {
-            return 'action_failed';
-        }
-
-        if (!ProviderReservationActionPolicy::supportsProviderAction($providerContext, 'assign_room', ProviderReservationActionPolicy::SURFACE_ADMIN_POST)) {
-            return 'provider_backed_read_only';
-        }
-
         $roomId = isset($_POST['assigned_room_id']) ? \absint(\wp_unslash($_POST['assigned_room_id'])) : 0;
-        $result = (new ClockPaymentReconciliationService())->assignRoom($reservationId, $roomId, 'admin');
+        $result = (new ReservationAmendmentService())->amend($reservationId, [
+            'target_assigned_room_id' => $roomId,
+        ], 'admin');
 
         if (!empty($result['success'])) {
             $this->logReservationActivity(
@@ -452,7 +454,7 @@ final class ReservationAdminActions
                 $reservation,
                 'room_assigned',
                 'info',
-                \__('Clock room assignment completed.', 'must-hotel-booking')
+                \__('Room assignment completed.', 'must-hotel-booking')
             );
 
             return 'reservation_room_assigned';
@@ -464,13 +466,40 @@ final class ReservationAdminActions
                 $reservation,
                 'reservation_room_assignment_queued',
                 'warning',
-                \__('Clock room assignment was queued for provider retry.', 'must-hotel-booking')
+                \__('Room assignment was queued for provider retry.', 'must-hotel-booking')
             );
 
             return 'reservation_room_assignment_queued';
         }
 
         return 'reservation_room_assignment_failed';
+    }
+
+    private function amendReservationNotice(int $reservationId): string
+    {
+        $result = (new ReservationAmendmentService())->amend($reservationId, [
+            'target_room_type_id' => isset($_POST['target_room_type_id']) ? \absint(\wp_unslash($_POST['target_room_type_id'])) : 0,
+            'target_assigned_room_id' => isset($_POST['target_assigned_room_id']) ? \absint(\wp_unslash($_POST['target_assigned_room_id'])) : 0,
+            'target_rate_plan_id' => isset($_POST['target_rate_plan_id']) ? \absint(\wp_unslash($_POST['target_rate_plan_id'])) : 0,
+            'target_checkin' => isset($_POST['target_checkin']) ? \sanitize_text_field((string) \wp_unslash($_POST['target_checkin'])) : '',
+            'target_checkout' => isset($_POST['target_checkout']) ? \sanitize_text_field((string) \wp_unslash($_POST['target_checkout'])) : '',
+        ], 'admin');
+
+        if (!empty($result['success'])) {
+            return !empty($result['manual_review_required'])
+                ? 'reservation_amendment_completed_review'
+                : 'reservation_amendment_completed';
+        }
+
+        if (!empty($result['queued'])) {
+            return 'reservation_amendment_queued';
+        }
+
+        if (!empty($result['manual_review_required'])) {
+            return 'reservation_amendment_review';
+        }
+
+        return 'reservation_amendment_failed';
     }
 
     private function updateStayNotice(int $reservationId): string
@@ -493,7 +522,10 @@ final class ReservationAdminActions
 
         $checkin = isset($_POST['stay_checkin']) ? \sanitize_text_field((string) \wp_unslash($_POST['stay_checkin'])) : '';
         $checkout = isset($_POST['stay_checkout']) ? \sanitize_text_field((string) \wp_unslash($_POST['stay_checkout'])) : '';
-        $result = (new ClockPaymentReconciliationService())->updateStayDates($reservationId, $checkin, $checkout, 'admin');
+        $result = (new ReservationAmendmentService())->amend($reservationId, [
+            'target_checkin' => $checkin,
+            'target_checkout' => $checkout,
+        ], 'admin');
 
         if (!empty($result['success']) && !empty($result['pricing_pending'])) {
             $this->logReservationActivity(

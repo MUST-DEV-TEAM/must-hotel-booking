@@ -60,6 +60,9 @@ $publicCallbackBase = MustBookingConfig::get_public_callback_base_url();
 $stripeWebhookUrl = PaymentEngine::getStripeWebhookUrl();
 $pokpayWebhookUrl = MustBookingConfig::build_public_rest_url('must-hotel-booking/v1/pokpay/webhook');
 $clockWebhookUrl = MustBookingConfig::build_public_rest_url('must-hotel-booking/v1/clock/webhook');
+$clockBasicUsernameSet = ClockConfig::webhookBasicUsername() !== '';
+$clockBasicPasswordSet = ClockConfig::webhookBasicPassword() !== '';
+$clockBasicAuthIncomplete = $clockBasicUsernameSet !== $clockBasicPasswordSet;
 
 $checks = [];
 $checks[] = check(
@@ -150,13 +153,14 @@ $checks[] = check(
 );
 $checks[] = check(
     'credentials.clock_inbound_auth',
-    true,
+    !$clockBasicAuthIncomplete,
     'BLOCKED',
     'Clock inbound accepts Amazon SNS signatures; optional Basic auth and legacy token/HMAC are configuration choices.',
-    'Clock inbound authentication support is unavailable.',
+    'Clock inbound Basic authentication is half-configured; save both values or clear both.',
     [
         'sns_signature_verification' => true,
-        'basic_auth_set' => ClockConfig::webhookBasicUsername() !== '' || ClockConfig::webhookBasicPassword() !== '',
+        'basic_auth_set' => $clockBasicUsernameSet && $clockBasicPasswordSet,
+        'basic_auth_incomplete' => $clockBasicAuthIncomplete,
         'legacy_token_or_hmac_set' => ClockConfig::webhookSecret() !== '',
     ]
 );

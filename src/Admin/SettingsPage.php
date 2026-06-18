@@ -3438,11 +3438,13 @@ final class SettingsPage
             ],
             [
                 'label' => \__('Inbound webhook sync', 'must-hotel-booking'),
-                'ready' => true,
+                'ready' => empty($summary['clock_webhook_basic_auth_incomplete']),
                 'always_show_note' => true,
-                'note' => !empty($summary['clock_webhook_basic_auth_set'])
+                'note' => !empty($summary['clock_webhook_basic_auth_incomplete'])
+                    ? \__('Clock PUSH Basic authentication is incomplete. Save both the username and password, or clear both values.', 'must-hotel-booking')
+                    : (!empty($summary['clock_webhook_basic_auth_set'])
                     ? \__('Clock PUSH/SNS payloads are verified with Amazon SNS signatures. Optional HTTP Basic authentication is configured for the endpoint URL.', 'must-hotel-booking')
-                    : \__('Clock PUSH/SNS payloads are verified with Amazon SNS signatures. Configure optional HTTP Basic credentials only if the Clock endpoint URL includes them.', 'must-hotel-booking'),
+                    : \__('Clock PUSH/SNS payloads are verified with Amazon SNS signatures. Configure optional HTTP Basic credentials only if the Clock endpoint URL includes them.', 'must-hotel-booking')),
             ],
         ];
         self::renderPanelStart(\__('Clock readiness', 'must-hotel-booking'), \__('Per-capability readiness for direct Clock API mode. WBE Inline readiness is intentionally not counted here.', 'must-hotel-booking'));

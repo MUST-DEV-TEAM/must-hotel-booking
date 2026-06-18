@@ -1,5 +1,33 @@
 # Task Log
 
+## 2026-06-18 - Release candidate preparation for 0.4.82
+- Phase status: READY FOR RELEASE CANDIDATE PACKAGE; not production-ready. Recommend a GitHub pre-release, not a final production release.
+- Files changed: `must-hotel-booking.php`, `readme.txt`, `docs/TASK_LOG.md`.
+- Findings: Latest Git tag is `v0.4.81` and the worktree version before this pass was `0.4.81`. The bundled GitHub updater always skips drafts and, with the current configuration, also skips GitHub pre-releases. The established release asset name remains `must-hotel-booking-{version}.zip`.
+- Fixes completed: Bumped the plugin header, version constant, and readme stable tag to `0.4.82`. Added a `0.4.82` changelog entry covering Clock inbound retry and deduplication hardening, room move and pre-arrival room-type amendments, cancellation/refund lifecycle hardening, Clock payment/refund accounting improvements, and the remaining Clock acceptance limitations. Built a clean release ZIP `must-hotel-booking-0.4.82.zip` with docs, tests, tools, tmp, VCS metadata, local env files, logs, and other development-only artifacts excluded.
+- Commands/tests run: targeted release metadata reads; Git tag inspection; updater library inspection; local package build; ZIP structure and entry verification; package secret scan; `php -l must-hotel-booking.php`; `git diff --check`.
+- Exact results: Release ZIP `must-hotel-booking-0.4.82.zip` contains 339 entries, all under `must-hotel-booking/`, with `must-hotel-booking/must-hotel-booking.php` at the ZIP root. Required new production classes and `includes/autoloader.php` are present. The packaged plugin file reports version `0.4.82` in both the header and `MUST_HOTEL_BOOKING_VERSION`. SHA-256 is `994D3EECE4F4CFFA27E7363BFADD85B1BED60D28CF11243E2A5E1B8380F3FE84`. The staged package secret scan found no literal credentials or private keys.
+- External records created: None.
+- Remaining risks/blockers: Real Clock SNS acceptance is still blocked. Real Clock amendment acceptance is still blocked. Checked-in Clock room moves remain unsupported. Clock accommodation-charge cleanup may still require manual handling. Do not describe this candidate as fully production-ready.
+
+## 2026-06-18 - Room move/upgrade and Clock room-type amendment
+- Phase status: PASS for local physical-room move logic; CODE READY - EXTERNAL ACCEPTANCE BLOCKED for pre-arrival Clock assignment/type/date amendments; BLOCKED for checked-in Clock current-room moves.
+- Fixes completed: Added the shared amendment service, conflict-aware local destination update, local/admin room assignment, combined room/type/rate/date forms, Clock GET -> PUT -> GET confirmation, reread-first retries, reconciliation jobs, manual upgrade/downgrade review, and explicit checked-in Clock blocking.
+- Critical corrections: Restored pre-arrival local unassignment, required both stay and room capabilities for combined staff amendments, hid unsupported checked-in Clock move controls, rejected inactive/unbookable destination rooms, and preserved financial-review metadata on duplicate Clock retries.
+- Checks: Focused amendment tests passed; Clock inbound service/SNS tests passed; lifecycle smoke passed; accounting readiness passed; read-only production lifecycle harness exited `0` with expected write scenarios `BLOCKED`; PHP lint and diff checks passed.
+- Rendered QA: Blocked by the browser security policy for the configured localhost URL; no form submission or browser workaround was attempted.
+- External records/settings changed: None.
+- Acceptance evidence: `docs/RESERVATION_AMENDMENT_ACCEPTANCE.md`.
+
+## 2026-06-18 - Clock inbound PUSH/SNS production audit and retry hardening
+- Phase status: BLOCKED for production acceptance; local code and replay verification passed.
+- Root cause: The inbound adapter could acknowledge and permanently deduplicate a Clock SNS booking event after a transient booking-detail fetch failure without durably applying a local update. The inspected site also generates an ngrok callback while the requested production host timed out.
+- Fixes completed: Added retryable failure semantics, official status-subject fallbacks, database advisory locking, idempotent subscription confirmation, strict complete-pair Basic auth, reverse-proxy auth fallback, explicit nested JSON rejection, sanitized logging assertions, and readiness diagnostics.
+- Checks: PHP lint passed; Clock SNS replay and inbound service tests passed; lifecycle smoke returned `PASS`; read-only E2E exited `0` with `overall_status=BLOCKED` because no real SNS replay was run; diff/ignore/secret scans passed.
+- Public verification: Configured ngrok route returned controlled unsigned `403` with `Allow: POST`; expected production host timed out.
+- External records/settings changed: None.
+- Remaining blocker: Real signed Clock SNS subscription confirmation, notification, duplicate replay, and Clock/WordPress reread comparison on an approved disposable booking.
+
 ## 2026-06-14 - Clock inbound PUSH/SNS compatibility
 - Phase status: PASS for local inbound webhook replay tests; production Clock inbound replay still requires configuring the real Clock PUSH endpoint and replaying production/sandbox Clock SNS notifications.
 - Files changed: `src/Provider/Clock/ClockInboundSyncController.php`, `src/Provider/Clock/ClockConfig.php`, `src/Core/MustBookingConfig.php`, `src/Admin/SettingsPage.php`, `src/Admin/SettingsDiagnostics.php`, `tests/ClockInboundWebhookSnsTest.php`, `tests/E2E/production-lifecycle-harness.php`, `tests/E2E/production-lifecycle-runner.php`, `docs/INTEGRATIONS.md`, `docs/developer/clock-provider-setup.md`, `docs/PROJECT_CONTEXT.md`, `docs/TASK_LOG.md`.
@@ -197,3 +225,12 @@
 - Verified: Active staging PokPay credentials passed auth preflight; one staging SDK order smoke test succeeded without local booking/finalize/refund; DB sanity confirmed payment/refund columns and PokPay finalize/error routes.
 - Notes: Local PokPay fee estimate settings are currently missing, so PokPay payments that do not return an API fee will correctly block automatic customer refund/cancellation pending manual review.
 - Checks: PHP syntax checks on changed PHP files. No full Stripe/Clock browser test or full PokPay payment/refund flow was run.
+# 2026-06-18 - Clock cancellation financial cleanup hardening
+- Added immutable cancellation financial snapshots and separate reservation/refund/Clock cleanup states.
+- Routed local admin, guest, and staff cancellation through the lifecycle service; provider-backed staff approval now uses Clock cancellation instead of a local-only status write.
+- Prevented guest cancellation from marking WordPress cancelled while Clock cancellation is only queued.
+- Added reread-first/re-read-after-write Clock cancellation verification.
+- Added Stripe/PokPay duplicate refund and currency guards, reused cancellation review rows, and completed cancel-after-refund from Stripe webhook recovery.
+- Added expected-versus-actual Clock folio balance fields and verification.
+- Added admin/staff warnings for manual Clock accommodation-charge and cancellation-fee cleanup.
+- Status: local code/tests pass; external provider acceptance not run. Clock accommodation-charge cleanup remains blocked pending an official contract.

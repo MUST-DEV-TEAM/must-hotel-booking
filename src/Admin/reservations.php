@@ -254,6 +254,11 @@ function render_admin_reservations_notice_from_query(): void
         'reservation_stay_pricing_pending' => ['warning', \__('Clock stay dates were updated, but pricing reconciliation is still pending. Check provider diagnostics before relying on mirror totals.', 'must-hotel-booking')],
         'reservation_stay_update_queued' => ['warning', \__('Clock stay-date edit could not be completed immediately. A provider sync job was queued for retry.', 'must-hotel-booking')],
         'reservation_stay_update_failed' => ['error', \__('Clock stay-date edit could not be completed or queued. Check provider diagnostics before retrying.', 'must-hotel-booking')],
+        'reservation_amendment_completed' => ['success', \__('Reservation amendment completed.', 'must-hotel-booking')],
+        'reservation_amendment_completed_review' => ['warning', \__('Reservation amendment completed. A price difference requires manual financial review.', 'must-hotel-booking')],
+        'reservation_amendment_queued' => ['warning', \__('Clock amendment is awaiting reread-first provider reconciliation.', 'must-hotel-booking')],
+        'reservation_amendment_review' => ['warning', \__('The amendment requires manual review. The original local assignment was preserved unless Clock reread confirmed the change.', 'must-hotel-booking')],
+        'reservation_amendment_failed' => ['error', \__('Reservation amendment failed. Review availability, mappings, provider diagnostics, and the latest error.', 'must-hotel-booking')],
         'reservation_guest_update_queued' => ['warning', \__('Clock guest detail edit could not be completed immediately. A provider sync job was queued for retry.', 'must-hotel-booking')],
         'reservation_guest_update_failed' => ['error', \__('Clock guest detail edit could not be completed or queued. Check provider diagnostics before retrying.', 'must-hotel-booking')],
         'reservation_guest_email_resent' => ['success', \__('Guest reservation email resent.', 'must-hotel-booking')],
@@ -1079,6 +1084,10 @@ function render_admin_reservation_detail_page_content(array $detailData): void
     $emails = isset($detailData['emails']) && \is_array($detailData['emails']) ? $detailData['emails'] : [];
     $timeline = isset($detailData['timeline']) && \is_array($detailData['timeline']) ? $detailData['timeline'] : [];
     $assignableRooms = isset($detailData['assignable_rooms']) && \is_array($detailData['assignable_rooms']) ? $detailData['assignable_rooms'] : [];
+    $amendmentRoomTypes = isset($detailData['amendment_room_types']) && \is_array($detailData['amendment_room_types']) ? $detailData['amendment_room_types'] : [];
+    $amendmentRooms = isset($detailData['amendment_rooms']) && \is_array($detailData['amendment_rooms']) ? $detailData['amendment_rooms'] : [];
+    $amendmentRatePlans = isset($detailData['amendment_rate_plans']) && \is_array($detailData['amendment_rate_plans']) ? $detailData['amendment_rate_plans'] : [];
+    $amendmentState = isset($detailData['amendment_state']) && \is_array($detailData['amendment_state']) ? $detailData['amendment_state'] : [];
     $providerContext = isset($detailData['provider']) && \is_array($detailData['provider'])
         ? $detailData['provider']
         : get_admin_reservation_provider_context($reservation);
@@ -1097,6 +1106,7 @@ function render_admin_reservation_detail_page_content(array $detailData): void
     $canProviderCheckOut = $isProviderBacked && ProviderReservationActionPolicy::supportsProviderAction($providerContext, 'checkout', ProviderReservationActionPolicy::SURFACE_ADMIN_POST);
     $canProviderAssignRoom = $isProviderBacked && ProviderReservationActionPolicy::supportsProviderAction($providerContext, 'assign_room', ProviderReservationActionPolicy::SURFACE_ADMIN_POST);
     $canProviderUpdateStay = $isProviderBacked && ProviderReservationActionPolicy::supportsProviderAction($providerContext, 'update_stay', ProviderReservationActionPolicy::SURFACE_ADMIN_POST);
+    $canProviderAmend = $isProviderBacked && ProviderReservationActionPolicy::supportsProviderAction($providerContext, 'amend_reservation', ProviderReservationActionPolicy::SURFACE_ADMIN_POST);
     $canEditClockGuest = $canProviderGuestEdit && !\in_array($statusKey, ['cancelled', 'completed', 'blocked', 'expired', 'payment_failed'], true);
     $currentUrl = $mode === 'edit'
         ? get_admin_reservation_detail_page_url($reservationId, ['mode' => 'edit'])
@@ -1366,6 +1376,12 @@ function render_admin_reservation_detail_page_content(array $detailData): void
         $paymentSync = isset($providerContext['payment_sync']) && \is_array($providerContext['payment_sync']) ? $providerContext['payment_sync'] : [];
         $pricingSync = isset($providerContext['pricing_sync']) && \is_array($providerContext['pricing_sync']) ? $providerContext['pricing_sync'] : [];
         $guestSync = isset($providerContext['guest_sync']) && \is_array($providerContext['guest_sync']) ? $providerContext['guest_sync'] : [];
+        $cancellationCleanup = isset($providerContext['cancellation_financial_cleanup']) && \is_array($providerContext['cancellation_financial_cleanup'])
+            ? $providerContext['cancellation_financial_cleanup']
+            : [];
+        $cancellationSnapshot = isset($cancellationCleanup['snapshot']) && \is_array($cancellationCleanup['snapshot'])
+            ? $cancellationCleanup['snapshot']
+            : [];
         echo '<div class="postbox must-dashboard-panel"><div class="must-dashboard-panel-inner">';
         echo '<h2>' . \esc_html__('Provider Mirror', 'must-hotel-booking') . '</h2>';
         echo '<table class="widefat striped"><tbody>';
@@ -1390,6 +1406,17 @@ function render_admin_reservation_detail_page_content(array $detailData): void
         echo '<tr><th>' . \esc_html__('Last synced', 'must-hotel-booking') . '</th><td>' . \esc_html((string) ($providerContext['provider_synced_at'] ?? '')) . '</td></tr>';
         if (!empty($providerContext['provider_sync_error'])) {
             echo '<tr><th>' . \esc_html__('Last sync error', 'must-hotel-booking') . '</th><td>' . \esc_html((string) $providerContext['provider_sync_error']) . '</td></tr>';
+        }
+        if (!empty($cancellationCleanup)) {
+            echo '<tr><th>' . \esc_html__('Cancellation source', 'must-hotel-booking') . '</th><td>' . \esc_html((string) ($cancellationSnapshot['cancellation_source'] ?? $cancellationCleanup['cancellation_source'] ?? '')) . '</td></tr>';
+            echo '<tr><th>' . \esc_html__('Cancelled at', 'must-hotel-booking') . '</th><td>' . \esc_html((string) ($cancellationCleanup['cancelled_at'] ?? '')) . '</td></tr>';
+            echo '<tr><th>' . \esc_html__('Original total', 'must-hotel-booking') . '</th><td>' . \esc_html(\number_format_i18n((float) ($cancellationSnapshot['original_reservation_total'] ?? 0.0), 2) . ' ' . (string) ($cancellationSnapshot['currency'] ?? '')) . '</td></tr>';
+            echo '<tr><th>' . \esc_html__('Paid / refunded', 'must-hotel-booking') . '</th><td>' . \esc_html(\number_format_i18n((float) ($cancellationSnapshot['paid_amount'] ?? 0.0), 2) . ' / ' . \number_format_i18n((float) ($cancellationSnapshot['previously_refunded_amount'] ?? 0.0), 2)) . '</td></tr>';
+            echo '<tr><th>' . \esc_html__('Cancellation fee', 'must-hotel-booking') . '</th><td>' . \esc_html(\number_format_i18n((float) ($cancellationSnapshot['cancellation_fee_amount'] ?? 0.0), 2)) . '</td></tr>';
+            echo '<tr><th>' . \esc_html__('Refundable amount', 'must-hotel-booking') . '</th><td>' . \esc_html(\number_format_i18n((float) ($cancellationSnapshot['refundable_amount'] ?? 0.0), 2)) . '</td></tr>';
+            echo '<tr><th>' . \esc_html__('Refund review', 'must-hotel-booking') . '</th><td>' . render_admin_reservation_badge((string) ($cancellationCleanup['refund_review_status'] ?? ''), 'warning') . '</td></tr>';
+            echo '<tr><th>' . \esc_html__('Clock charge cleanup', 'must-hotel-booking') . '</th><td>' . render_admin_reservation_badge((string) ($cancellationCleanup['clock_charge_cleanup_status'] ?? ''), 'warning') . '</td></tr>';
+            echo '<tr><th>' . \esc_html__('Clock cancellation fee', 'must-hotel-booking') . '</th><td>' . render_admin_reservation_badge((string) ($cancellationCleanup['clock_cancellation_fee_status'] ?? ''), 'warning') . '</td></tr>';
         }
         if (!empty($pricingSync)) {
             echo '<tr><th>' . \esc_html__('Pricing sync', 'must-hotel-booking') . '</th><td>' . render_admin_reservation_badge((string) ($pricingSync['status_label'] ?? ''), (string) ($pricingSync['status'] ?? 'info')) . '</td></tr>';
@@ -1466,10 +1493,89 @@ function render_admin_reservation_detail_page_content(array $detailData): void
         echo '</div></div>';
     }
 
-    if ($canProviderAssignRoom && !\in_array($statusKey, ['cancelled', 'completed', 'blocked'], true) && !$hasCheckedOut) {
+    if (
+        (!$isProviderBacked || $canProviderAmend)
+        && !($isProviderBacked && $hasCheckedIn)
+        && !\in_array($statusKey, ['cancelled', 'completed', 'blocked', 'expired', 'payment_failed'], true)
+        && !$hasCheckedOut
+    ) {
+        $currentRoomTypeId = (int) ($reservation['room_type_id'] ?? $reservation['room_id'] ?? 0);
+        $currentRatePlanId = (int) ($reservation['rate_plan_id'] ?? 0);
+        $lastAmendment = isset($amendmentState['last']) && \is_array($amendmentState['last']) ? $amendmentState['last'] : [];
+
         echo '<div class="postbox must-dashboard-panel"><div class="must-dashboard-panel-inner">';
-        echo '<h2>' . \esc_html__('Clock Room Assignment', 'must-hotel-booking') . '</h2>';
-        echo '<p class="description">' . \esc_html__('Assign or move the mirrored Clock reservation to a mapped physical room. Clock is updated before the local mirror changes.', 'must-hotel-booking') . '</p>';
+        echo '<h2>' . \esc_html__('Accommodation Amendment', 'must-hotel-booking') . '</h2>';
+        echo '<p class="description">' . \esc_html__('Use this for a room-type change, upgrade, downgrade, or a combined date and room change. Same-type physical moves can continue to use the dedicated room-assignment control.', 'must-hotel-booking') . '</p>';
+        echo '<table class="widefat striped"><tbody>';
+        echo '<tr><th>' . \esc_html__('Current accommodation', 'must-hotel-booking') . '</th><td>' . \esc_html((string) ($stay['accommodation'] ?? '')) . '</td></tr>';
+        echo '<tr><th>' . \esc_html__('Current physical room', 'must-hotel-booking') . '</th><td>' . \esc_html((string) ($stay['assigned_room'] ?? \__('Unassigned', 'must-hotel-booking'))) . '</td></tr>';
+        echo '<tr><th>' . \esc_html__('Current dates', 'must-hotel-booking') . '</th><td>' . \esc_html((string) ($stay['checkin'] ?? '') . ' - ' . (string) ($stay['checkout'] ?? '')) . '</td></tr>';
+        echo '<tr><th>' . \esc_html__('Current total', 'must-hotel-booking') . '</th><td>' . \esc_html(\number_format_i18n((float) ($pricing['stored_total'] ?? 0.0), 2) . ' ' . (string) ($pricing['currency'] ?? '')) . '</td></tr>';
+        if (!empty($lastAmendment)) {
+            echo '<tr><th>' . \esc_html__('Last amendment status', 'must-hotel-booking') . '</th><td>' . render_admin_reservation_badge((string) ($lastAmendment['status'] ?? ''), !empty($amendmentState['manual_review_required']) ? 'warning' : 'info') . '</td></tr>';
+        }
+        if (!empty($amendmentState['last_error'])) {
+            echo '<tr><th>' . \esc_html__('Last error', 'must-hotel-booking') . '</th><td>' . \esc_html((string) $amendmentState['last_error']) . '</td></tr>';
+        }
+        echo '</tbody></table>';
+
+        echo '<form method="post" action="' . \esc_url($currentUrl) . '" class="must-reservation-amendment-form">';
+        \wp_nonce_field('must_reservation_admin_action', 'must_reservation_admin_nonce');
+        echo '<input type="hidden" name="must_reservation_admin_action" value="amend_reservation" />';
+        echo '<input type="hidden" name="reservation_id" value="' . \esc_attr((string) $reservationId) . '" />';
+        echo '<input type="hidden" name="return_url" value="' . \esc_attr($currentUrl) . '" />';
+        echo '<p><label><strong>' . \esc_html__('Proposed room type', 'must-hotel-booking') . '</strong><br /><select name="target_room_type_id" required>';
+        foreach ($amendmentRoomTypes as $roomType) {
+            if (!\is_array($roomType)) {
+                continue;
+            }
+            $optionId = (int) ($roomType['id'] ?? 0);
+            echo '<option value="' . \esc_attr((string) $optionId) . '"' . \selected($currentRoomTypeId, $optionId, false) . '>' . \esc_html((string) ($roomType['name'] ?? ('#' . $optionId))) . '</option>';
+        }
+        echo '</select></label></p>';
+        echo '<p><label><strong>' . \esc_html__('Proposed physical room', 'must-hotel-booking') . '</strong><br /><select name="target_assigned_room_id" required>';
+        echo '<option value="0">' . \esc_html__('No physical room', 'must-hotel-booking') . '</option>';
+        foreach ($amendmentRooms as $room) {
+            if (!\is_array($room)) {
+                continue;
+            }
+            $optionId = (int) ($room['id'] ?? 0);
+            $label = \trim((string) ($room['room_number'] ?? ''));
+            $label = $label !== '' ? $label : (string) ($room['title'] ?? ('#' . $optionId));
+            echo '<option value="' . \esc_attr((string) $optionId) . '" data-room-type-id="' . \esc_attr((string) ((int) ($room['room_type_id'] ?? 0))) . '"' . \selected($assignedRoomId, $optionId, false) . '>' . \esc_html($label) . '</option>';
+        }
+        echo '</select></label></p>';
+        echo '<p><label><strong>' . \esc_html__('Proposed rate plan', 'must-hotel-booking') . '</strong><br /><select name="target_rate_plan_id">';
+        echo '<option value="0">' . \esc_html__('Default / unchanged rate', 'must-hotel-booking') . '</option>';
+        foreach ($amendmentRatePlans as $ratePlanRow) {
+            if (!\is_array($ratePlanRow)) {
+                continue;
+            }
+            $optionId = (int) ($ratePlanRow['id'] ?? 0);
+            echo '<option value="' . \esc_attr((string) $optionId) . '"' . \selected($currentRatePlanId, $optionId, false) . '>' . \esc_html((string) ($ratePlanRow['name'] ?? ('#' . $optionId))) . '</option>';
+        }
+        echo '</select></label></p>';
+        echo '<p><label><strong>' . \esc_html__('Proposed check-in', 'must-hotel-booking') . '</strong><br /><input type="date" name="target_checkin" value="' . \esc_attr((string) ($stay['checkin'] ?? '')) . '"' . ($hasCheckedIn ? ' readonly' : '') . ' required /></label></p>';
+        echo '<p><label><strong>' . \esc_html__('Proposed check-out', 'must-hotel-booking') . '</strong><br /><input type="date" name="target_checkout" value="' . \esc_attr((string) ($stay['checkout'] ?? '')) . '" required /></label></p>';
+        echo '<p class="description">' . \esc_html($isProviderBacked
+            ? \__('Clock availability/quote, booking mutation, and provider reread must all succeed before WordPress is finalized. Price differences create review state only.', 'must-hotel-booking')
+            : \__('Destination availability is rechecked under a database lock. Price differences create review state without charging or refunding automatically.', 'must-hotel-booking')) . '</p>';
+        echo '<p><button type="submit" class="button button-primary">' . \esc_html__('Review and apply amendment', 'must-hotel-booking') . '</button></p>';
+        echo '</form>';
+        echo '</div></div>';
+    }
+
+    if (
+        (!$isProviderBacked || $canProviderAssignRoom)
+        && !($isProviderBacked && $hasCheckedIn)
+        && !\in_array($statusKey, ['cancelled', 'completed', 'blocked'], true)
+        && !$hasCheckedOut
+    ) {
+        echo '<div class="postbox must-dashboard-panel"><div class="must-dashboard-panel-inner">';
+        echo '<h2>' . \esc_html($isProviderBacked ? \__('Clock Room Assignment', 'must-hotel-booking') : \__('Room Assignment', 'must-hotel-booking')) . '</h2>';
+        echo '<p class="description">' . \esc_html($isProviderBacked
+            ? \__('Assign the mirrored Clock reservation to a mapped physical room. Clock is updated before the local mirror changes.', 'must-hotel-booking')
+            : \__('Assign or move this reservation to another physical room of the same accommodation type.', 'must-hotel-booking')) . '</p>';
 
         if (empty($assignableRooms)) {
             echo '<p class="must-dashboard-empty-state">' . \esc_html__('No mapped Clock physical rooms are available for this reservation accommodation.', 'must-hotel-booking') . '</p>';
@@ -1479,7 +1585,7 @@ function render_admin_reservation_detail_page_content(array $detailData): void
             echo '<input type="hidden" name="must_reservation_admin_action" value="assign_room" />';
             echo '<input type="hidden" name="reservation_id" value="' . \esc_attr((string) $reservationId) . '" />';
             echo '<input type="hidden" name="return_url" value="' . \esc_attr($currentUrl) . '" />';
-            echo '<p><label for="must-clock-assigned-room"><strong>' . \esc_html__('Mapped physical room', 'must-hotel-booking') . '</strong></label></p>';
+            echo '<p><label for="must-clock-assigned-room"><strong>' . \esc_html($isProviderBacked ? \__('Mapped physical room', 'must-hotel-booking') : \__('Physical room', 'must-hotel-booking')) . '</strong></label></p>';
             echo '<select id="must-clock-assigned-room" name="assigned_room_id" class="regular-text" required>';
             echo '<option value="">' . \esc_html__('Select room', 'must-hotel-booking') . '</option>';
 
@@ -1497,10 +1603,15 @@ function render_admin_reservation_detail_page_content(array $detailData): void
             }
 
             echo '</select>';
-            echo '<p><button type="submit" class="button button-secondary">' . \esc_html($hasCheckedIn ? __('Move room in Clock', 'must-hotel-booking') : __('Assign room in Clock', 'must-hotel-booking')) . '</button></p>';
+            echo '<p><button type="submit" class="button button-secondary">' . \esc_html($isProviderBacked ? __('Assign room in Clock', 'must-hotel-booking') : __('Save room assignment', 'must-hotel-booking')) . '</button></p>';
             echo '</form>';
         }
 
+        echo '</div></div>';
+    } elseif ($isProviderBacked && $hasCheckedIn && !$hasCheckedOut) {
+        echo '<div class="postbox must-dashboard-panel"><div class="must-dashboard-panel-inner">';
+        echo '<h2>' . \esc_html__('Clock Current-Room Move', 'must-hotel-booking') . '</h2>';
+        echo '<p class="description">' . \esc_html__('Blocked: the documented booking update changes arrival-room fields but does not create an in-house room-change entry. Move the guest in Clock, then refresh the WordPress mirror.', 'must-hotel-booking') . '</p>';
         echo '</div></div>';
     }
 

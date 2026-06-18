@@ -351,6 +351,7 @@ final class SettingsDiagnostics
                 'summary' => $inboundSummary,
                 'webhook_secret_set' => !empty($providerSummary['clock_webhook_secret_set']),
                 'webhook_basic_auth_set' => !empty($providerSummary['clock_webhook_basic_auth_set']),
+                'webhook_basic_auth_incomplete' => !empty($providerSummary['clock_webhook_basic_auth_incomplete']),
                 'sns_signature_verification' => true,
                 'webhook_url' => (string) ($providerSummary['clock_webhook_url'] ?? ''),
                 'reservation_fetch_path' => (string) ($providerSummary['clock_reservation_fetch_path'] ?? ''),
@@ -512,7 +513,7 @@ final class SettingsDiagnostics
         $lines[] = 'Clock Public Booking Paths Configured: ' . (string) ($clock['clock_public_booking_paths_configured'] ?? 0);
         $lines[] = 'Clock Reconciliation Paths Configured: ' . (string) ($clock['clock_reconciliation_paths_configured'] ?? 0);
         $lines[] = 'Clock Inbound Sync Paths Configured: ' . (string) ($clock['clock_inbound_sync_paths_configured'] ?? 0);
-        $lines[] = 'Clock Inbound Auth: SNS signatures supported; Basic auth set: ' . (!empty($clock['clock_webhook_basic_auth_set']) ? 'yes' : 'no') . '; legacy token/HMAC set: ' . (!empty($clock['clock_webhook_secret_set']) ? 'yes' : 'no');
+        $lines[] = 'Clock Inbound Auth: SNS signatures supported; Basic auth set: ' . (!empty($clock['clock_webhook_basic_auth_set']) ? 'yes' : 'no') . '; Basic auth incomplete: ' . (!empty($clock['clock_webhook_basic_auth_incomplete']) ? 'yes' : 'no') . '; legacy token/HMAC set: ' . (!empty($clock['clock_webhook_secret_set']) ? 'yes' : 'no');
         $lines[] = 'Clock Webhook URL: ' . (string) ($clock['clock_webhook_url'] ?? '');
         $lines[] = 'Stripe Webhook URL: ' . (string) ($data['payments']['stripe_webhook_url'] ?? '');
         $lines[] = 'PokPay Webhook URL: ' . (string) ($data['payments']['pokpay_webhook_url'] ?? '');

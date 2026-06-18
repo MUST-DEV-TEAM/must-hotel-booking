@@ -609,6 +609,36 @@ final class ClockPaymentReconciliationService
                 'message' => \__('Clock reservation was already reconciled.', 'must-hotel-booking'),
             ];
         }
+        $isCancellation = (string) ($action['request_operation'] ?? '') === 'clock.reservation_cancel';
+        if ($isCancellation) {
+            $preWriteState = $this->rereadReservationState($row);
+            if (!empty($preWriteState['success']) && $this->isCancelledProviderState((array) ($preWriteState['state'] ?? []))) {
+                $this->updateMetadata(
+                    $reservationId,
+                    $row,
+                    $action,
+                    $idempotencyKey,
+                    true,
+                    'synced',
+                    '',
+                    (array) ($preWriteState['state'] ?? [])
+                );
+                return [
+                    'success' => true,
+                    'queued' => false,
+                    'message' => \__('Clock reservation cancellation was confirmed by reread.', 'must-hotel-booking'),
+                ];
+            }
+            if ((string) ($row['provider_sync_status'] ?? '') === 'pending_retry' && empty($preWriteState['success'])) {
+                $message = (string) ($preWriteState['message'] ?? \__('Clock cancellation retry could not reread the booking.', 'must-hotel-booking'));
+                $this->updateMetadata($reservationId, $row, $action, $idempotencyKey, false, 'pending_retry', $message);
+                return [
+                    'success' => false,
+                    'queued' => true,
+                    'message' => $message,
+                ];
+            }
+        }
         $path = (string) ($action['endpoint_path'] ?? '');
         $payload = $this->payload($row, $action, $idempotencyKey);
         if ($path === '') {
@@ -689,6 +719,22 @@ final class ClockPaymentReconciliationService
             ];
         }
         $providerState = $this->providerState($response->getData());
+        if ($isCancellation) {
+            $postWriteState = $this->rereadReservationState($row);
+            if (empty($postWriteState['success']) || !$this->isCancelledProviderState((array) ($postWriteState['state'] ?? []))) {
+                $message = !empty($postWriteState['message'])
+                    ? (string) $postWriteState['message']
+                    : \__('Clock accepted the cancellation request, but booking reread did not confirm a cancelled state.', 'must-hotel-booking');
+                $this->updateMetadata($reservationId, $row, $action, $idempotencyKey, false, 'pending_retry', $message);
+                $this->enqueueRetry($row, $action, $payload, $message);
+                return [
+                    'success' => false,
+                    'queued' => true,
+                    'message' => $message,
+                ];
+            }
+            $providerState = (array) ($postWriteState['state'] ?? []);
+        }
         $this->updateMetadata($reservationId, $row, $action, $idempotencyKey, true, 'synced', '', $providerState);
         $pricingResult = $this->refreshPricingAfterStayUpdate($reservationId, $row, $action, $idempotencyKey, true);
         return [
@@ -1428,8 +1474,18 @@ final class ClockPaymentReconciliationService
             : [];
         return (string) ($last['idempotency_key'] ?? '') === $idempotencyKey
             && \in_array((string) ($row['provider_sync_status'] ?? ''), ['synced', 'local_only'], true)
-            && ($targetProviderStatus === '' || (string) ($row['provider_status'] ?? '') === $targetProviderStatus)
+            && ($targetProviderStatus === '' || $this->providerStatusesMatch((string) ($row['provider_status'] ?? ''), $targetProviderStatus))
             && ($targetProviderPaymentStatus === '' || (string) ($row['provider_payment_status'] ?? '') === $targetProviderPaymentStatus);
+    }
+    private function providerStatusesMatch(string $actual, string $expected): bool
+    {
+        $actual = \sanitize_key($actual);
+        $expected = \sanitize_key($expected);
+        $cancelled = ['cancelled', 'canceled', 'void', 'voided'];
+        if (\in_array($actual, $cancelled, true) && \in_array($expected, $cancelled, true)) {
+            return true;
+        }
+        return $actual === $expected;
     }
     /**
      * @param array<string, mixed> $row
@@ -1531,6 +1587,51 @@ final class ClockPaymentReconciliationService
             }
         }
         return $data;
+    }
+    /** @param array<string, mixed> $row @return array{success: bool, state: array<string, mixed>, message: string} */
+    private function rereadReservationState(array $row): array
+    {
+        $path = ClockConfig::reservationFetchPath();
+        if ($path === '') {
+            $path = '/bookings/{booking_id}';
+        }
+        $resolvedPath = $this->applyPathTokens($path, $row, []);
+        if ($resolvedPath === '') {
+            return [
+                'success' => false,
+                'state' => [],
+                'message' => \__('Clock booking reread path could not be resolved.', 'must-hotel-booking'),
+            ];
+        }
+        $response = $this->client->request(
+            'GET',
+            $resolvedPath,
+            [
+                'reservation_id' => (int) ($row['id'] ?? 0),
+                'external_id' => $this->externalId($row),
+            ],
+            'clock.reservation_cancel_reread'
+        );
+        if (!$response->isSuccess()) {
+            return [
+                'success' => false,
+                'state' => [],
+                'message' => $response->getErrorMessage() !== ''
+                    ? $response->getErrorMessage()
+                    : \__('Clock booking reread failed.', 'must-hotel-booking'),
+            ];
+        }
+        return [
+            'success' => true,
+            'state' => $this->providerState($response->getData()),
+            'message' => '',
+        ];
+    }
+    /** @param array<string, mixed> $state */
+    private function isCancelledProviderState(array $state): bool
+    {
+        $status = \sanitize_key($this->firstString($state, ['status', 'state', 'reservation_status']));
+        return \in_array($status, ['cancelled', 'canceled', 'void', 'voided'], true);
     }
     /** @param array<string, mixed> $source @param array<int, string> $keys */
     private function firstString(array $source, array $keys, string $fallback = ''): string
