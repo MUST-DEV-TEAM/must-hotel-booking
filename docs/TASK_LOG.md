@@ -1,5 +1,13 @@
 # Task Log
 
+## 2026-06-19 - Clock accommodation-charge cleanup design boundary
+- Phase status: RESEARCH COMPLETE; no production code, tests, database schema, or provider writes changed.
+- Files changed: `docs/CLOCK_ACCOMMODATION_CHARGE_CLEANUP_DESIGN.md`, `docs/DECISIONS.md`, `docs/TASK_LOG.md`.
+- Findings: Investigated the cached Clock contracts for charge delete, folio `charges/bulk`, and booking `charges_by_source`, then cross-checked the current cancellation, refund, folio, accounting, request-log, and amendment code paths. The plugin currently stores payment/refund folio accounting and cancellation snapshots, but not charge-level Clock ids, ownership markers, template ids, or cleanup attempt records needed to prove that an accommodation charge is safe to reverse automatically.
+- Outcome: `BLOCKED - MANUAL CLEANUP MUST REMAIN`. Automatic accommodation-charge cleanup and automatic Clock cancellation-fee posting must stay manual until Clock confirms the missing contract details and the plugin adds a dedicated cleanup persistence layer.
+- Commands/checks run: baseline `git status --short`, `git branch --show-current`, `git rev-parse HEAD`, plugin version read, `git diff --check`, targeted research/code searches, raw local collection extraction, and final doc-only checks.
+- External records created: None. No Clock API requests, provider writes, commits, pushes, tags, packaging, or releases were performed.
+
 ## 2026-06-19 - Clock live public export refresh
 - Phase status: RESEARCH COMPLETE; no Clock API requests were sent and no Postman write operations were performed.
 - Files changed: `tmp/vendor-docs/clock/Clock PMS+ API Docs.postman_collection.json`, `docs/research/clock/postman-endpoint-index.md`, `docs/research/clock/SOURCE_MANIFEST.md`, `docs/INTEGRATIONS.md`, `docs/DECISIONS.md`, `docs/TASK_LOG.md`.

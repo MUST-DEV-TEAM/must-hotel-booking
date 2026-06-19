@@ -1,5 +1,11 @@
 # Decisions
 
+## 2026-06-19 - Clock accommodation-charge cleanup remains manual until charge-level ownership is durable
+- Decision: Keep Clock accommodation-charge cleanup as a manual-only workflow in MUST Hotel Booking.
+- Reason: The published Clock contracts document generic charge voiding and compensating charge creation, but the plugin does not currently persist accommodation charge ids, ownership markers, template ids, or cleanup correlation rows required to prove that a specific charge is eligible for automatic mutation.
+- Affected areas: cancellation financial cleanup, Clock folio operations, future amendment/cancellation accounting automation, admin review workflow.
+- Implementation note: Preserve the existing `manual_clock_charge_cleanup_required` and `manual_clock_cancellation_fee_required` states until Clock confirms safe accommodation-charge reversal rules and the plugin adds a dedicated charge-cleanup persistence layer.
+
 ## 2026-06-19 - Clock public export refresh adds booking-associated bulk charge posting
 - Decision: Treat `POST /pms_api/:subscription_id/:account_id/bookings/:booking_id/charges_by_source/bulk` as documented Clock behavior and update the research cache to prefer the booking-associated bulk posting path for the POS booking-charge guide.
 - Reason: The live public Clock collection now includes `booking_charges_by_source - BULK CREATE` and updates `2. CHARGE BOOKING` to use it. That is a durable accounting contract change, but it still does not document a checked-in room-move write path or coupon-native sync.
