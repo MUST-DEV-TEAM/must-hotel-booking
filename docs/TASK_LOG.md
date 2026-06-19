@@ -1,5 +1,20 @@
 # Task Log
 
+## 2026-06-19 - Clock live public export refresh
+- Phase status: RESEARCH COMPLETE; no Clock API requests were sent and no Postman write operations were performed.
+- Files changed: `tmp/vendor-docs/clock/Clock PMS+ API Docs.postman_collection.json`, `docs/research/clock/postman-endpoint-index.md`, `docs/research/clock/SOURCE_MANIFEST.md`, `docs/INTEGRATIONS.md`, `docs/DECISIONS.md`, `docs/TASK_LOG.md`.
+- Findings: Refreshed the ignored local Clock cache from the live public export (`_postman_id` `d2cd8fbb-53e9-43cd-a4db-5f5757094634`, SHA-256 `32F27C40B444A02EBB576A0D97BE1B5C2B31690B9302EF3499AF333C70535364`). The live changelog is newer (`2026-06-12`) and adds `booking_charges_by_source - BULK CREATE`, with the POS guide updated to use the booking-associated bulk endpoint. Checked-in/current-room and future scheduled room moves remain blocked; accommodation-charge cleanup, cancellation-fee accounting, and discount synchronization remain partially documented.
+- Commands/checks run: SHA-256 validation, BOM-safe JSON parsing, live search-term sweep across request names/folder names/descriptions/URLs/bodies/examples, compare summary, `git status --short`, and `git diff --check`.
+- External records created: None. The refreshed raw Postman export remains in ignored `tmp/` vendor-doc cache only.
+
+## 2026-06-19 - Clock Postman collection indexing and blocker re-evaluation
+- Phase status: RESEARCH COMPLETE; no production code or tests changed.
+- Files changed: `.gitignore`, `docs/research/clock/postman-endpoint-index.md`, `docs/research/clock/SOURCE_MANIFEST.md`, `docs/INTEGRATIONS.md`, `docs/DECISIONS.md`, `docs/TASK_LOG.md`.
+- Findings: Cached the supplied Clock PMS+ Postman collection under ignored `tmp/vendor-docs/clock/`, indexed 192 HTTP requests across 52 folder nodes, and detected 12 deprecated requests plus 25 duplicate method/path signatures that mostly come from guide/example aliases.
+- Clarified support boundaries: Checked-in/current-room moves and future scheduled room changes remain blocked on read-only evidence (`current_room_id`, `booking_room_changes`). The full collection newly documents generic charge voiding, compensating negative-quantity charge writes, booking-associated charge creation, and discount charge examples, so accommodation-charge cleanup, cancellation-fee accounting, and discount mirroring are now tracked as partially documented rather than completely undocumented.
+- Commands/checks run: Collection JSON parse/validity check, SHA-256 hash, recursive endpoint extraction, duplicate/deprecated detection, secret/privacy scan, `git status --short`, and `git diff --check`.
+- External records created: None. The raw Postman export remains in ignored `tmp/` vendor-doc cache only.
+
 ## 2026-06-18 - Release candidate preparation for 0.4.82
 - Phase status: READY FOR RELEASE CANDIDATE PACKAGE; not production-ready. Recommend a GitHub pre-release, not a final production release.
 - Files changed: `must-hotel-booking.php`, `readme.txt`, `docs/TASK_LOG.md`.

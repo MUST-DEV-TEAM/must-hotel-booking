@@ -1,5 +1,17 @@
 # Decisions
 
+## 2026-06-19 - Clock public export refresh adds booking-associated bulk charge posting
+- Decision: Treat `POST /pms_api/:subscription_id/:account_id/bookings/:booking_id/charges_by_source/bulk` as documented Clock behavior and update the research cache to prefer the booking-associated bulk posting path for the POS booking-charge guide.
+- Reason: The live public Clock collection now includes `booking_charges_by_source - BULK CREATE` and updates `2. CHARGE BOOKING` to use it. That is a durable accounting contract change, but it still does not document a checked-in room-move write path or coupon-native sync.
+- Affected areas: Clock research docs, cancellation-fee/accounting notes, integration boundaries.
+- Implementation note: Keep checked-in/current-room and future scheduled room moves blocked; retain partial support for accommodation-charge cleanup, cancellation-fee accounting, and discount synchronization.
+
+## 2026-06-19 - Clock Postman collection narrows, but does not remove, cancellation/accounting blockers
+- Decision: Keep checked-in/current-room moves and future scheduled room changes blocked, but treat Clock accommodation-charge cleanup, cancellation-fee accounting, and discount mirroring as partially documented through generic charge contracts rather than as completely undocumented.
+- Reason: The full cached Clock Postman collection documents `charge - DELETE`, a compensating negative-quantity `charges/bulk` pattern, and generic booking/folio charge creation, but it still does not document a provider write for `booking_room_changes`, `current_room_id`, or coupon-native synchronization.
+- Affected areas: Clock cancellation/review metadata, integration docs, future accounting automation, amendment support boundaries.
+- Implementation note: Continue requiring manual review flags until business rules define eligible charge IDs, folio targeting, and closed-folio handling for any future automatic cleanup/posting flow.
+
 ## 2026-06-18 - Reservation amendments use one safe service boundary
 - Decision: Route local room moves and local/Clock accommodation amendments through `ReservationAmendmentService`; use a destination lock plus conflict-aware atomic update locally and GET -> documented PUT -> GET for Clock.
 - Reason: The prior staff move path separated availability validation from assignment, admin lacked a local move path, and Clock retries could repeat mutations without first confirming provider state.
@@ -72,4 +84,4 @@
 - Store one immutable cancellation-time financial snapshot in reservation provider metadata and reuse it for operational review.
 - Do not finalize outbound Clock cancellation locally without a provider reread confirming cancelled state.
 - Verify each Clock credit-item operation against `balance before + posted amount`; do not assume the correct final balance is zero.
-- No documented Clock accommodation-charge reversal or cancellation-fee posting contract was found. Keep both operations manual and explicitly blocked rather than inventing provider writes.
+- Generic Clock charge void/create contracts are now documented in the cached Postman collection, but automatic accommodation-charge cleanup and cancellation-fee posting remain manual until the project has an approved charge-selection and folio-targeting policy.
