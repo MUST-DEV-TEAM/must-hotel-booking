@@ -131,6 +131,42 @@ final class ClockFolioAccountingRepository extends AbstractRepository
         return $id > 0 ? (array) $this->get($id) : [];
     }
 
+    /** @return array<string, mixed>|null */
+    public function findPaymentByProviderTransaction(
+        string $gateway,
+        int $reservationId,
+        string $providerTransactionId
+    ): ?array {
+        if (
+            !$this->accountingTableExists()
+            || $reservationId <= 0
+            || \trim($gateway) === ''
+            || \trim($providerTransactionId) === ''
+        ) {
+            return null;
+        }
+
+        $row = $this->wpdb->get_row(
+            $this->wpdb->prepare(
+                'SELECT * FROM ' . $this->table('clock_folio_accounting') . '
+                WHERE gateway = %s
+                    AND reservation_id = %d
+                    AND provider_transaction_id = %s
+                    AND direction IN (%s, %s)
+                ORDER BY id DESC
+                LIMIT 1',
+                \sanitize_key($gateway),
+                $reservationId,
+                \sanitize_text_field($providerTransactionId),
+                'payment',
+                'deposit'
+            ),
+            ARRAY_A
+        );
+
+        return \is_array($row) ? $row : null;
+    }
+
     /** @return array{success: bool, message: string} */
     public function markHandledManually(int $id, int $userId, string $note = ''): array
     {

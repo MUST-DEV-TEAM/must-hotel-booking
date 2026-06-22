@@ -123,6 +123,9 @@ function render_payments_admin_notice_from_query(): void
         'payment_marked_failed' => ['success', \__('Reservation payment marked failed.', 'must-hotel-booking')],
         'payment_refunded' => ['success', \__('Refund issued successfully.', 'must-hotel-booking')],
         'pokpay_refund_manual_pending' => ['success', \__('PokPay did not confirm the automatic refund. Refund or verify it in the POK dashboard, then mark it completed here.', 'must-hotel-booking')],
+        'pokpay_credentials_verified' => ['success', \__('PokPay credentials authenticated successfully. No charge, capture, refund, or Clock booking was created.', 'must-hotel-booking')],
+        'pokpay_credentials_rejected' => ['error', \__('PokPay rejected the active credentials or returned malformed authentication data. PokPay checkout is disabled for that environment until verification succeeds.', 'must-hotel-booking')],
+        'pokpay_provider_unavailable' => ['warning', \__('PokPay credential verification could not complete because the provider was unavailable or rate-limited. Existing credentials were not marked invalid.', 'must-hotel-booking')],
         'refund_manual_completed' => ['success', \__('Manual refund marked completed and recorded in the local ledger.', 'must-hotel-booking')],
         'refund_manual_done' => ['success', \__('Refund marked as manually reconciled in Clock.', 'must-hotel-booking')],
         'clock_accounting_retry_success' => ['success', \__('Clock folio accounting retry completed.', 'must-hotel-booking')],
@@ -1141,6 +1144,42 @@ function render_payment_detail(?array $detail): void
         echo '</div>';
     }
 
+    if (!empty($detail['provider_summaries'])) {
+        echo '<div class="must-payments-subsection">';
+        echo '<div class="must-payments-subsection-heading"><h3>' . \esc_html__('Provider Diagnostic Summary', 'must-hotel-booking') . '</h3><p>' . \esc_html__('Latest provider-specific success and error states remain separate.', 'must-hotel-booking') . '</p></div>';
+        echo '<div class="must-payments-table-wrap"><table class="widefat striped must-payments-data-table"><thead><tr>';
+        echo '<th>' . \esc_html__('Provider', 'must-hotel-booking') . '</th><th>' . \esc_html__('Latest Success', 'must-hotel-booking') . '</th><th>' . \esc_html__('Latest Error', 'must-hotel-booking') . '</th><th>' . \esc_html__('Credential State', 'must-hotel-booking') . '</th>';
+        echo '</tr></thead><tbody>';
+        foreach ((array) $detail['provider_summaries'] as $provider => $providerSummary) {
+            if (!\is_array($providerSummary)) {
+                continue;
+            }
+            echo '<tr><td>' . \esc_html(\ucfirst((string) $provider)) . '</td>';
+            echo '<td>' . \esc_html((string) ($providerSummary['latest_success'] ?? '')) . '<br><span class="description">' . \esc_html((string) ($providerSummary['latest_success_at'] ?? '')) . '</span></td>';
+            echo '<td>' . \esc_html((string) ($providerSummary['latest_error_operation'] ?? '')) . '<br><span class="description">' . \esc_html((string) ($providerSummary['latest_error'] ?? '')) . '</span><br><span class="description">' . \esc_html((string) ($providerSummary['latest_error_at'] ?? '')) . '</span></td>';
+            echo '<td>' . \esc_html((string) ($providerSummary['credential_status'] ?? '')) . '<br><span class="description">' . \esc_html((string) ($providerSummary['credential_verified_at'] ?? '')) . '</span></td></tr>';
+        }
+        echo '</tbody></table></div></div>';
+    }
+
+    if (!empty($detail['diagnostic_timeline'])) {
+        echo '<div class="must-payments-subsection">';
+        echo '<div class="must-payments-subsection-heading"><h3>' . \esc_html__('Provider Operation Timeline', 'must-hotel-booking') . '</h3><p>' . \esc_html__('Booking, provider, payment, and Clock accounting states are shown independently.', 'must-hotel-booking') . '</p></div>';
+        echo '<div class="must-payments-table-wrap"><table class="widefat striped must-payments-data-table"><thead><tr>';
+        echo '<th>' . \esc_html__('Stage', 'must-hotel-booking') . '</th><th>' . \esc_html__('Status', 'must-hotel-booking') . '</th><th>' . \esc_html__('Detail', 'must-hotel-booking') . '</th><th>' . \esc_html__('When', 'must-hotel-booking') . '</th>';
+        echo '</tr></thead><tbody>';
+        foreach ((array) $detail['diagnostic_timeline'] as $stage) {
+            if (!\is_array($stage)) {
+                continue;
+            }
+            echo '<tr><td>' . \esc_html((string) ($stage['stage'] ?? '')) . '</td>';
+            echo '<td>' . render_payments_status_badge((string) ($stage['status'] ?? ''), (string) ($stage['status'] ?? '')) . '</td>';
+            echo '<td>' . \esc_html((string) ($stage['detail'] ?? '')) . '</td>';
+            echo '<td>' . \esc_html((string) ($stage['created_at'] ?? '')) . '</td></tr>';
+        }
+        echo '</tbody></table></div></div>';
+    }
+
     echo '<div class="must-payments-subsection">';
     echo '<div class="must-payments-subsection-heading"><h3>' . \esc_html__('Activity Timeline', 'must-hotel-booking') . '</h3><p>' . \esc_html__('Payment-related activity, gateway follow-up, and reservation events captured for this booking.', 'must-hotel-booking') . '</p></div>';
 
@@ -1187,6 +1226,9 @@ function render_payment_settings_panel(array $settings): void
     $webhookUrl = isset($settings['webhook_url']) ? (string) $settings['webhook_url'] : '';
     $pokpayWebhookUrl = isset($settings['pokpay_webhook_url']) ? (string) $settings['pokpay_webhook_url'] : '';
     $pokpayEnvironment = isset($settings['pokpay_environment']) ? (string) $settings['pokpay_environment'] : 'staging';
+    $pokpayCredentialStates = isset($settings['pokpay_credential_states']) && \is_array($settings['pokpay_credential_states'])
+        ? $settings['pokpay_credential_states']
+        : [];
     $pokpayCheckoutMode = isset($settings['pokpay_checkout_mode']) ? \sanitize_key((string) $settings['pokpay_checkout_mode']) : 'sdk_confirm_url_redirect';
     if (!\in_array($pokpayCheckoutMode, ['embedded_sdk', 'sdk_confirm_url_redirect'], true)) {
         $pokpayCheckoutMode = 'sdk_confirm_url_redirect';
@@ -1205,6 +1247,7 @@ function render_payment_settings_panel(array $settings): void
     echo '</div>';
     echo '<form method="post" action="' . \esc_url(get_admin_payments_page_url()) . '" class="must-payments-settings-form">';
     \wp_nonce_field('must_payment_settings_save', 'must_payment_settings_nonce');
+    \wp_nonce_field('must_payment_pokpay_test', 'must_pokpay_test_nonce');
     echo '<input type="hidden" name="must_payments_action" value="save_payment_settings" />';
     echo '<div class="must-payments-method-grid">';
 
@@ -1250,8 +1293,8 @@ function render_payment_settings_panel(array $settings): void
 
         echo '<div class="must-payments-credential-grid">';
         echo '<label class="must-payments-field"><span>' . \esc_html__('Publishable key', 'must-hotel-booking') . '</span><input id="must-stripe-' . \esc_attr($environmentKey) . '-publishable-key" type="text" name="stripe_' . \esc_attr($environmentKey) . '_publishable_key" value="' . \esc_attr((string) ($credentials['publishable_key'] ?? '')) . '" autocomplete="off" /></label>';
-        echo '<label class="must-payments-field"><span>' . \esc_html__('Secret key', 'must-hotel-booking') . '</span><input id="must-stripe-' . \esc_attr($environmentKey) . '-secret-key" type="password" name="stripe_' . \esc_attr($environmentKey) . '_secret_key" value="' . \esc_attr((string) ($credentials['secret_key'] ?? '')) . '" autocomplete="new-password" /></label>';
-        echo '<label class="must-payments-field"><span>' . \esc_html__('Webhook signing secret', 'must-hotel-booking') . '</span><input id="must-stripe-' . \esc_attr($environmentKey) . '-webhook-secret" type="password" name="stripe_' . \esc_attr($environmentKey) . '_webhook_secret" value="' . \esc_attr((string) ($credentials['webhook_secret'] ?? '')) . '" autocomplete="new-password" /></label>';
+        echo '<label class="must-payments-field"><span>' . \esc_html__('Secret key', 'must-hotel-booking') . '</span><input id="must-stripe-' . \esc_attr($environmentKey) . '-secret-key" type="password" name="stripe_' . \esc_attr($environmentKey) . '_secret_key" value="" placeholder="' . \esc_attr__('Leave blank to keep saved secret', 'must-hotel-booking') . '" autocomplete="new-password" /></label>';
+        echo '<label class="must-payments-field"><span>' . \esc_html__('Webhook signing secret', 'must-hotel-booking') . '</span><input id="must-stripe-' . \esc_attr($environmentKey) . '-webhook-secret" type="password" name="stripe_' . \esc_attr($environmentKey) . '_webhook_secret" value="" placeholder="' . \esc_attr__('Leave blank to keep saved secret', 'must-hotel-booking') . '" autocomplete="new-password" /></label>';
         echo '</div>';
         echo '</section>';
     }
@@ -1292,6 +1335,10 @@ function render_payment_settings_panel(array $settings): void
         }
 
         $credentials = PaymentEngine::getPokPayEnvironmentCredentials($environmentKey);
+        $credentialState = isset($pokpayCredentialStates[$environmentKey]) && \is_array($pokpayCredentialStates[$environmentKey])
+            ? $pokpayCredentialStates[$environmentKey]
+            : [];
+        $credentialStatus = \sanitize_key((string) ($credentialState['status'] ?? 'unverified'));
         $isActive = $environmentKey === $activeEnvironment;
         $apiEnvironment = PaymentEngine::getPokPayApiEnvironment($environmentKey);
         echo '<section class="must-payments-environment-card' . ($isActive ? ' is-active' : '') . '">';
@@ -1300,13 +1347,31 @@ function render_payment_settings_panel(array $settings): void
         echo '<h4>' . \esc_html((string) ($environmentMeta['label'] ?? $environmentKey)) . '</h4>';
         echo '<p>' . \esc_html(\sprintf(__('PokPay API environment: %s', 'must-hotel-booking'), \ucfirst($apiEnvironment))) . '</p>';
         echo '</div>';
-        echo '<div class="must-payments-pill-stack">' . render_payments_badge($isActive ? __('Active', 'must-hotel-booking') : __('Inactive', 'must-hotel-booking'), $isActive ? 'ok' : 'muted') . '</div>';
+        $credentialTone = $credentialStatus === 'verified'
+            ? 'ok'
+            : (\in_array($credentialStatus, ['rejected', 'malformed', 'missing'], true) ? 'error' : 'warning');
+        echo '<div class="must-payments-pill-stack">';
+        echo render_payments_badge($isActive ? __('Active', 'must-hotel-booking') : __('Inactive', 'must-hotel-booking'), $isActive ? 'ok' : 'muted');
+        echo render_payments_badge(\ucwords(\str_replace('_', ' ', $credentialStatus)), $credentialTone);
+        echo '</div>';
         echo '</div>';
 
         echo '<div class="must-payments-credential-grid">';
         echo '<label class="must-payments-field"><span>' . \esc_html__('Merchant ID', 'must-hotel-booking') . '</span><input id="must-pokpay-' . \esc_attr($environmentKey) . '-merchant-id" type="text" name="pokpay_' . \esc_attr($environmentKey) . '_merchant_id" value="' . \esc_attr((string) ($credentials['merchant_id'] ?? '')) . '" autocomplete="off" /></label>';
         echo '<label class="must-payments-field"><span>' . \esc_html__('Key ID', 'must-hotel-booking') . '</span><input id="must-pokpay-' . \esc_attr($environmentKey) . '-key-id" type="text" name="pokpay_' . \esc_attr($environmentKey) . '_key_id" value="' . \esc_attr((string) ($credentials['key_id'] ?? '')) . '" autocomplete="off" /></label>';
-        echo '<label class="must-payments-field"><span>' . \esc_html__('Key Secret', 'must-hotel-booking') . '</span><input id="must-pokpay-' . \esc_attr($environmentKey) . '-key-secret" type="password" name="pokpay_' . \esc_attr($environmentKey) . '_key_secret" value="' . \esc_attr((string) ($credentials['key_secret'] ?? '')) . '" autocomplete="new-password" /></label>';
+        echo '<label class="must-payments-field"><span>' . \esc_html__('Key Secret', 'must-hotel-booking') . '</span><input id="must-pokpay-' . \esc_attr($environmentKey) . '-key-secret" type="password" name="pokpay_' . \esc_attr($environmentKey) . '_key_secret" value="" placeholder="' . \esc_attr__('Leave blank to keep saved secret', 'must-hotel-booking') . '" autocomplete="new-password" /></label>';
+        echo '</div>';
+        echo '<div class="must-payments-form-actions">';
+        echo '<button type="submit" class="button button-secondary" name="pokpay_test_environment" value="' . \esc_attr($environmentKey) . '">' . \esc_html__('Test PokPay credentials', 'must-hotel-booking') . '</button>';
+        echo '<span class="description">' . \esc_html(\sprintf(
+            __('Merchant %1$s · Key %2$s · Last verified %3$s', 'must-hotel-booking'),
+            (string) ($credentialState['merchant_id_masked'] ?? ''),
+            (string) ($credentialState['key_id_masked'] ?? ''),
+            (string) ($credentialState['verified_at'] ?? __('Never', 'must-hotel-booking'))
+        )) . '</span>';
+        if ((string) ($credentialState['error_message'] ?? '') !== '') {
+            echo '<span class="description">' . \esc_html((string) $credentialState['error_message']) . '</span>';
+        }
         echo '</div>';
         echo '</section>';
     }

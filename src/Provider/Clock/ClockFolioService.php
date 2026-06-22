@@ -74,7 +74,12 @@ final class ClockFolioService
         ];
     }
     /** @return array{success: bool, folio: array<string, mixed>, folio_id: string, message: string} */
-    public function validateRefundFolio(string $clockBookingId, string $folioId, int $reservationId = 0): array
+    public function validateRefundFolio(
+        string $clockBookingId,
+        string $folioId,
+        int $reservationId = 0,
+        bool $requireUnusedDeposit = false
+    ): array
     {
         $folioId = \sanitize_text_field($folioId);
         if ($folioId === '') {
@@ -118,6 +123,22 @@ final class ClockFolioService
                     'message' => \__('The original Clock folio is closed, voided, correction-only, or otherwise not postable.', 'must-hotel-booking'),
                 ];
             }
+            if ($requireUnusedDeposit && !$this->isDepositFolio($folio)) {
+                return [
+                    'success' => false,
+                    'folio' => [],
+                    'folio_id' => '',
+                    'message' => \__('Automatic refund accounting is allowed only while the original website payment remains on an open Clock deposit folio.', 'must-hotel-booking'),
+                ];
+            }
+            if ($requireUnusedDeposit && $this->hasDepositApplicationMarker($folio)) {
+                return [
+                    'success' => false,
+                    'folio' => [],
+                    'folio_id' => '',
+                    'message' => \__('The Clock deposit appears transferred, deducted, or applied. Automatic refund accounting stopped for manual review.', 'must-hotel-booking'),
+                ];
+            }
             return [
                 'success' => true,
                 'folio' => $folio,
@@ -130,6 +151,58 @@ final class ClockFolioService
             'folio' => [],
             'folio_id' => '',
             'message' => \__('The original Clock payment folio was not returned by booking_folios LIST VIEW.', 'must-hotel-booking'),
+        ];
+    }
+
+    /** @return array{success: bool, balances: array<string, float|null>, message: string} */
+    public function readStandardFolioBalances(
+        string $clockBookingId,
+        int $reservationId = 0,
+        string $excludeFolioId = ''
+    ): array {
+        $foliosResult = $this->listBookingFolios($clockBookingId, $reservationId);
+
+        if (empty($foliosResult['success'])) {
+            return [
+                'success' => false,
+                'balances' => [],
+                'message' => (string) ($foliosResult['message'] ?? \__('Unable to list Clock booking folios.', 'must-hotel-booking')),
+            ];
+        }
+
+        $resolved = $this->resolveListedFolios((array) ($foliosResult['folios'] ?? []), $reservationId);
+
+        if (empty($resolved['success'])) {
+            return [
+                'success' => false,
+                'balances' => [],
+                'message' => (string) ($resolved['message'] ?? \__('Unable to resolve Clock booking folios.', 'must-hotel-booking')),
+            ];
+        }
+
+        $balances = [];
+
+        foreach ((array) ($resolved['folios'] ?? []) as $folio) {
+            if (!\is_array($folio) || $this->isDepositFolio($folio)) {
+                continue;
+            }
+
+            $folioId = $this->folioId($folio);
+
+            if ($folioId === '' || $folioId === $excludeFolioId) {
+                continue;
+            }
+
+            $balances[$folioId] = $this->firstMoneyValue(
+                $folio,
+                ['balance', 'balance_due', 'due', 'open_balance', 'outstanding_balance']
+            );
+        }
+
+        return [
+            'success' => true,
+            'balances' => $balances,
+            'message' => '',
         ];
     }
     /** @return array{success: bool, folio: array<string, mixed>, folio_id: string, message: string} */
@@ -391,7 +464,6 @@ final class ClockFolioService
         $direction = \sanitize_key($direction);
         $gatewayLabel = $gateway === 'pokpay' ? 'PokPay' : ($gateway === 'stripe' ? 'Stripe' : 'Gateway');
         $paymentSubType = $this->paymentSubType($gateway);
-        $this->paymentSubTypes();
         $description = $direction === 'refund'
             ? 'Website ' . $gatewayLabel . ' refund'
             : ($direction === 'deposit' ? 'Website booking deposit via ' . $gatewayLabel : 'Website booking payment via ' . $gatewayLabel);
@@ -664,6 +736,31 @@ final class ClockFolioService
                 return true;
             }
         }
+        return false;
+    }
+
+    /** @param array<string, mixed> $folio */
+    private function hasDepositApplicationMarker(array $folio): bool
+    {
+        foreach ($folio as $key => $value) {
+            $normalizedKey = \strtolower((string) $key);
+
+            if (
+                \preg_match('/(transfer(_to)?_id|credit_amount_transfer_id|advance_deduction|deposit_applied|applied_at|consumed_at)/', $normalizedKey) === 1
+                && $value !== null
+                && $value !== ''
+                && $value !== false
+                && $value !== 0
+                && $value !== '0'
+            ) {
+                return true;
+            }
+
+            if (\is_array($value) && $this->hasDepositApplicationMarker($value)) {
+                return true;
+            }
+        }
+
         return false;
     }
     /** @param array<string, mixed> $folio */

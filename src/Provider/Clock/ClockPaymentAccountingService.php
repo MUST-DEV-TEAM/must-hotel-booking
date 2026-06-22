@@ -67,12 +67,14 @@ final class ClockPaymentAccountingService
             return $this->result(true, false, 'not_clock_reservation');
         }
         $transactionId = \sanitize_text_field((string) ($payment['transaction_id'] ?? ''));
-        $idempotencyKey = $this->paymentIdempotencyKey($paymentId, $transactionId);
         $amount = \round((float) ($payment['amount'] ?? 0.0), 2);
         $currency = $this->currency((string) ($payment['currency'] ?? ''));
         $clockBookingId = $this->clockBookingId($reservation);
         $clockReservationId = $this->clockReservationId($reservation);
-        $accounting = $this->accounting->getOrCreateByIdempotencyKey($idempotencyKey, [
+        $idempotencyKey = $this->paymentIdempotencyKey($gateway, $reservationId, $transactionId);
+        $accounting = $this->accounting->findPaymentByProviderTransaction($gateway, $reservationId, $transactionId);
+        if (!\is_array($accounting)) {
+            $accounting = $this->accounting->getOrCreateByIdempotencyKey($idempotencyKey, [
             'payment_id' => $paymentId,
             'reservation_id' => $reservationId,
             'booking_id' => (string) ($reservation['booking_id'] ?? ''),
@@ -87,12 +89,13 @@ final class ClockPaymentAccountingService
             'status' => 'pending',
             'created_at' => $this->now(),
             'updated_at' => $this->now(),
-        ]);
+            ]);
+        }
         if (empty($accounting)) {
             return $this->result(false, false, \__('Unable to create Clock accounting row.', 'must-hotel-booking'));
         }
         $accountingId = (int) ($accounting['id'] ?? 0);
-        if ((string) ($accounting['status'] ?? '') === 'posted' && (string) ($accounting['idempotency_key'] ?? '') === $idempotencyKey) {
+        if ((string) ($accounting['status'] ?? '') === 'posted') {
             return $this->result(true, false, 'already_posted', ['accounting_id' => $accountingId]);
         }
         if ((string) ($accounting['status'] ?? '') === 'handled_manually') {
@@ -134,11 +137,43 @@ final class ClockPaymentAccountingService
         }
         $folioId = (string) ($folioResult['folio_id'] ?? '');
         $direction = (string) ($postingDecision['mode'] ?? '') === 'deposit' ? 'deposit' : 'payment';
+        $standardBalancesBefore = ['success' => true, 'balances' => [], 'message' => ''];
+        if ($direction === 'deposit') {
+            $standardBalancesBefore = $this->folios->readStandardFolioBalances($clockBookingId, $reservationId, $folioId);
+            if (empty($standardBalancesBefore['success'])) {
+                return $this->markManualReview(
+                    $accountingId,
+                    ClockAccountingReason::CLOCK_REQUEST_FAILED,
+                    (string) ($standardBalancesBefore['message'] ?? \__('Unable to snapshot the standard Clock folio before deposit posting.', 'must-hotel-booking'))
+                );
+            }
+        }
+        $this->persistAccountingMetadata($reservation, [
+            'status' => 'folio_selected',
+            'gateway' => $gateway,
+            'provider_transaction_id' => $transactionId,
+            'clock_folio_id' => $folioId,
+            'direction' => $direction,
+            'standard_folio_balances_before' => $standardBalancesBefore['balances'] ?? [],
+            'updated_at' => $this->now(),
+        ]);
         $recovered = $this->recoverPostedRetry($accounting, $accountingId, $folioId, $reservationId);
         if (\is_array($recovered)) {
             return $recovered;
         }
-        $postResult = $this->postAndRecord($accountingId, $folioId, $gateway, $direction, $amount, $currency, $transactionId, $idempotencyKey, $reservationId);
+        $postResult = $this->postAndRecord(
+            $accountingId,
+            $folioId,
+            $gateway,
+            $direction,
+            $amount,
+            $currency,
+            $transactionId,
+            $idempotencyKey,
+            $reservationId,
+            $clockBookingId,
+            \is_array($standardBalancesBefore['balances'] ?? null) ? $standardBalancesBefore['balances'] : []
+        );
         if (empty($postResult['success']) && !empty($postResult['retry']) && $enqueueRetry) {
             $this->enqueueRetry($accountingId, $folioId);
         }
@@ -213,7 +248,14 @@ final class ClockPaymentAccountingService
             return $result;
         }
         $folioId = \sanitize_text_field((string) ($originalAccounting['clock_folio_id'] ?? ''));
-        $folioResult = $this->folios->validateRefundFolio($clockBookingId, $folioId, $reservationId);
+        $originalDirection = \sanitize_key((string) ($originalAccounting['direction'] ?? ''));
+        if ($originalDirection !== 'deposit') {
+            $message = \__('The original website payment was not recorded on a verified Clock deposit folio. Automatic refund accounting stopped for manual review.', 'must-hotel-booking');
+            $result = $this->markManualReview($accountingId, ClockAccountingReason::REFUND_REQUIRES_MANUAL_CLOCK_ACTION, $message);
+            $this->mirrorRefundFailure($refundId, 'manual_review', $message);
+            return $result;
+        }
+        $folioResult = $this->folios->validateRefundFolio($clockBookingId, $folioId, $reservationId, true);
         if (empty($folioResult['success'])) {
             $message = (string) ($folioResult['message'] ?? \__('Unable to validate original Clock payment folio.', 'must-hotel-booking'));
             $result = $this->markManualReview($accountingId, ClockAccountingReason::forFolioMessage($message), $message);
@@ -227,7 +269,19 @@ final class ClockPaymentAccountingService
             $this->mirrorRefundPosted($refundId, \is_array($updated) ? $updated : []);
             return $recovered;
         }
-        $postResult = $this->postAndRecord($accountingId, $folioId, $gateway, 'refund', $amount, $currency, $reference, $idempotencyKey, $reservationId);
+        $postResult = $this->postAndRecord(
+            $accountingId,
+            $folioId,
+            $gateway,
+            'refund',
+            $amount,
+            $currency,
+            $reference,
+            $idempotencyKey,
+            $reservationId,
+            $clockBookingId,
+            []
+        );
         if (!empty($postResult['success'])) {
             $updated = $this->accounting->get($accountingId);
             $this->mirrorRefundPosted($refundId, \is_array($updated) ? $updated : []);
@@ -278,7 +332,9 @@ final class ClockPaymentAccountingService
         string $currency,
         string $reference,
         string $idempotencyKey,
-        int $reservationId
+        int $reservationId,
+        string $clockBookingId,
+        array $standardBalancesBefore
     ): array {
         if (!$this->accounting->claimPostingAttempt($accountingId, $folioId)) {
             $current = $this->accounting->get($accountingId);
@@ -332,10 +388,24 @@ final class ClockPaymentAccountingService
         $matchesExpected = $expectedBalance !== null
             && $actualBalance !== null
             && \abs($actualBalance - $expectedBalance) < 0.01;
-        $verificationStatus = $matchesExpected ? 'verified_expected_balance' : 'balance_review_required';
-        $verificationMessage = $matchesExpected
-            ? ''
-            : (string) ($afterResult['message'] ?? $beforeResult['message'] ?? \__('Clock folio balance could not be reconciled to the expected result.', 'must-hotel-booking'));
+        $standardIsolation = ['verified' => true, 'message' => '', 'after' => []];
+        if ($direction === 'deposit') {
+            $standardIsolation = $this->verifyStandardFolioIsolation(
+                $clockBookingId,
+                $reservationId,
+                $folioId,
+                $standardBalancesBefore
+            );
+        }
+        $isolationVerified = !empty($standardIsolation['verified']);
+        $verificationStatus = $direction === 'deposit' && $isolationVerified
+            ? 'verified_deposit_isolated'
+            : ($matchesExpected ? 'verified_expected_balance' : 'balance_review_required');
+        $verificationMessage = !$isolationVerified
+            ? (string) ($standardIsolation['message'] ?? '')
+            : ($matchesExpected || $direction === 'deposit'
+                ? ''
+                : (string) ($afterResult['message'] ?? $beforeResult['message'] ?? \__('Clock folio balance could not be reconciled to the expected result.', 'must-hotel-booking')));
         $postedAt = $this->now();
         $this->accounting->update($accountingId, [
             'status' => 'posted',
@@ -345,18 +415,33 @@ final class ClockPaymentAccountingService
             'balance_before' => $balanceBefore,
             'expected_balance' => $expectedBalance,
             'actual_balance' => $actualBalance,
-            'reconciliation_status' => $matchesExpected ? 'verified' : 'manual_review',
-            'last_error_code' => '',
+            'reconciliation_status' => ($matchesExpected || ($direction === 'deposit' && $isolationVerified)) ? 'verified' : 'manual_review',
+            'last_error_code' => $isolationVerified ? '' : 'standard_folio_modified',
             'last_error' => $verificationMessage,
             'next_retry_at' => null,
             'posted_at' => $postedAt,
             'verified_at' => \in_array(
                 $verificationStatus,
-                ['verified_paid', 'verified_deposit', 'verified_expected_balance'],
+                ['verified_paid', 'verified_deposit', 'verified_expected_balance', 'verified_deposit_isolated'],
                 true
             ) ? $postedAt : null,
             'updated_at' => $postedAt,
         ]);
+        $reservation = $this->reservations->getReservation($reservationId);
+        if (\is_array($reservation)) {
+            $this->persistAccountingMetadata($reservation, [
+                'status' => 'posted',
+                'gateway' => $gateway,
+                'provider_transaction_id' => $reference,
+                'clock_folio_id' => $folioId,
+                'clock_credit_item_id' => (string) ($postResult['credit_item_id'] ?? ''),
+                'direction' => $direction,
+                'standard_folio_unchanged' => $isolationVerified,
+                'standard_folio_balances_before' => $standardBalancesBefore,
+                'standard_folio_balances_after' => $standardIsolation['after'] ?? [],
+                'updated_at' => $postedAt,
+            ]);
+        }
         return $this->result(true, false, 'posted', ['accounting_id' => $accountingId]);
     }
     /** @param array<string, mixed> $accounting @return array<string, mixed>|null */
@@ -460,19 +545,10 @@ final class ClockPaymentAccountingService
             ];
         }
         /*
-         * This is an explicit legacy mode only.
-         * It is the only mode allowed to post a website payment to the
-         * normal accommodation folio.
-         */
-        if ($configuredMode === 'folio_payment_only') {
-            return [
-                'mode' => 'folio',
-                'message' => '',
-            ];
-        }
-        /*
          * Stripe and PokPay payments are advance deposits regardless of whether
          * the booking is future, same-day, or currently staying.
+         * Legacy folio_payment_only configuration is intentionally treated as
+         * deposit mode so online payments cannot settle the accommodation folio.
          */
         if (ClockConfig::hasVerifiedDepositPaymentEndpoint()) {
             return [
@@ -488,16 +564,6 @@ final class ClockPaymentAccountingService
                 'must-hotel-booking'
             ),
         ];
-    }
-    /** @param array<string, mixed> $reservation */
-    private function isFutureReservation(array $reservation): bool
-    {
-        $checkin = \trim((string) ($reservation['checkin'] ?? ''));
-        if ($checkin === '') {
-            return true;
-        }
-        $today = \function_exists('current_time') ? \current_time('Y-m-d') : \gmdate('Y-m-d');
-        return $checkin > $today;
     }
     private function enqueueRetry(int $accountingId, string $folioId): void
     {
@@ -542,6 +608,83 @@ final class ClockPaymentAccountingService
             'clock_sync_status' => $status,
             'failed_reason' => $message,
             'updated_at' => $this->now(),
+        ]);
+    }
+
+    /**
+     * @param array<string, float|null> $before
+     * @return array{verified: bool, message: string, after: array<string, float|null>}
+     */
+    private function verifyStandardFolioIsolation(
+        string $clockBookingId,
+        int $reservationId,
+        string $depositFolioId,
+        array $before
+    ): array {
+        $afterResult = $this->folios->readStandardFolioBalances($clockBookingId, $reservationId, $depositFolioId);
+
+        if (empty($afterResult['success'])) {
+            return [
+                'verified' => false,
+                'message' => (string) ($afterResult['message'] ?? \__('Unable to verify that the standard Clock folio remained unchanged.', 'must-hotel-booking')),
+                'after' => [],
+            ];
+        }
+
+        $after = \is_array($afterResult['balances'] ?? null) ? $afterResult['balances'] : [];
+
+        foreach ($before as $folioId => $balanceBefore) {
+            if (!\array_key_exists($folioId, $after)) {
+                return [
+                    'verified' => false,
+                    'message' => \__('A standard Clock folio disappeared during deposit verification. Manual accounting review is required.', 'must-hotel-booking'),
+                    'after' => $after,
+                ];
+            }
+
+            $balanceAfter = $after[$folioId];
+
+            if ($balanceBefore === null || $balanceAfter === null) {
+                continue;
+            }
+
+            if (\abs((float) $balanceBefore - (float) $balanceAfter) >= 0.01) {
+                return [
+                    'verified' => false,
+                    'message' => \__('The standard Clock accommodation folio changed while posting the website deposit. Manual accounting review is required.', 'must-hotel-booking'),
+                    'after' => $after,
+                ];
+            }
+        }
+
+        return [
+            'verified' => true,
+            'message' => '',
+            'after' => $after,
+        ];
+    }
+
+    /** @param array<string, mixed> $reservation @param array<string, mixed> $entry */
+    private function persistAccountingMetadata(array $reservation, array $entry): void
+    {
+        $reservationId = (int) ($reservation['id'] ?? 0);
+
+        if ($reservationId <= 0) {
+            return;
+        }
+
+        $metadata = $this->decodeMetadata($reservation['provider_metadata'] ?? null);
+        $transactionId = \sanitize_text_field((string) ($entry['provider_transaction_id'] ?? ''));
+        $metadataKey = $transactionId !== '' ? \sha1($transactionId) : 'latest';
+        $metadata['clock_deposit_accounting'] = isset($metadata['clock_deposit_accounting']) && \is_array($metadata['clock_deposit_accounting'])
+            ? $metadata['clock_deposit_accounting']
+            : [];
+        $metadata['clock_deposit_accounting'][$metadataKey] = $entry;
+        $metadata['clock_folio_id'] = (string) ($entry['clock_folio_id'] ?? ($metadata['clock_folio_id'] ?? ''));
+        $metadata['clock_credit_item_id'] = (string) ($entry['clock_credit_item_id'] ?? ($metadata['clock_credit_item_id'] ?? ''));
+
+        $this->reservations->updateProviderMetadata($reservationId, [
+            'provider_metadata' => $metadata,
         ]);
     }
     /** @param array<string, mixed> $reservation */
@@ -590,9 +733,14 @@ final class ClockPaymentAccountingService
         }
         return '';
     }
-    private function paymentIdempotencyKey(int $paymentId, string $transactionId): string
+    private function paymentIdempotencyKey(string $gateway, int $reservationId, string $transactionId): string
     {
-        return 'clock-accounting-payment-' . $paymentId . '-' . \sha1($transactionId);
+        return 'clock-accounting-v2-payment-'
+            . \sanitize_key($gateway)
+            . '-'
+            . $reservationId
+            . '-'
+            . \sha1($transactionId);
     }
     private function refundIdempotencyKey(int $refundId, string $providerRefundId): string
     {

@@ -16,6 +16,8 @@
 ## PokPay
 - Main code: `src/Engine/PaymentEngine.php`, `src/Engine/Payment/PokPayPayment.php`, `src/Engine/PaymentRefundService.php`.
 - Settings include environment-specific merchant/key fields in `MustBookingConfig`.
+- Payments -> Payment Settings provides a safe PokPay credential test that authenticates only. It stores masked verification evidence and never creates an SDK order, charge, refund, or Clock booking.
+- Credential state is fingerprinted to the saved merchant/key values. Editing credentials invalidates old verification, and known rejected/malformed credentials are gated before Clock reservation creation.
 - API base can be production or staging; JS SDK URL is `https://static.pokpay.io/public/dist/pokpayments/pok-payment.js`.
 - PokPay checkout mode is configured in the admin Payments page under Payment Settings -> PokPay Checkout -> PokPay checkout mode. Allowed values are `embedded_sdk` and `sdk_confirm_url_redirect`; both use SDK orders.
 - SDK order creation posts to `merchants/{merchantId}/sdk-orders` with `amount`, `currencyCode`, `autoCapture`, `description`, `webhookUrl`, `redirectUrl`, `failRedirectUrl`, and `products`; do not add unsupported top-level `currency` or `email` fields.
@@ -50,6 +52,7 @@
 - Clock inbound webhooks, scheduled refresh jobs, Clock booking upserts, and successful outbound Clock cancellation reconciliation apply local status changes through `BookingLifecycleSyncService`, not direct repository status writes. This keeps Clock-originated cancellations separate from automatic refunds while still firing the standard cancellation domain event and email hooks once.
 - For paid Stripe/PokPay website bookings cancelled from Clock/provider sync, `BookingLifecycleSyncService` creates a `refund_review_required` row for staff decision when no active/completed refund already exists. Do not replace this with automatic refund behavior unless the provider/refund policy is explicitly verified.
 - Stripe/PokPay paid rows trigger `ClockPaymentAccountingService` through `must_hotel_booking/payment_recorded`; the service creates/reuses `must_clock_folio_accounting` and guards duplicate posts by idempotency key and posting claim.
+- Clock deposit idempotency uses gateway + provider transaction ID + reservation ID + accounting operation, not the local payment-row ID.
 - Provider sync jobs use `mhb_provider_sync_jobs` with atomic claim, stale-lock release, backoff, max attempts, and admin-triggered manual runs from Settings. A stale running job consumes an attempt before it is requeued or exhausted so repeated worker crashes cannot retry forever without reaching a terminal state.
 - Clock payment posting mode is configured by `clock_payment_posting_mode`: `auto_detect`, `deposit_for_future_bookings`, `folio_payment_only`, or `manual_clock_accounting`. Default `auto_detect` posts future Stripe/PokPay website payments to a Clock deposit folio, not to the normal folio.
 - A centralized endpoint registry lives in `src/Provider/Clock/ClockEndpointRegistry.php`. Existing folio endpoints now resolve through the registry and advanced provider settings can override endpoint templates.
@@ -59,7 +62,7 @@
 - Official Clock docs verified on 2026-06-13 support `POST /bookings/{booking_id}/folios/` with `booking_folio.deposit=true`, followed by `POST /folios/{folio_id}/credit_items` to record the website payment on the open deposit folio. Clock support docs state payments in open deposit folios are treated as deposits; deposit refund is a negative payment in the deposit folio.
 - Clock sandbox verified on 2026-06-13: deposit folio `71442250` was created for booking `36591448`, payment credit item `60052192` posted, duplicate sync returned `already_posted`, refund/reversal credit item `60052222` posted, and the deposit folio balance returned to zero.
 - Clock sandbox write E2E on 2026-06-14 verified Stripe and PokPay future-stay deposit folios with positive provider payment credit items, negative refund credit items, duplicate replay idempotency, and final folio balances returning to zero.
-- Same-day/current-stay website payments may still post to folio credit items when `clock_same_day_folio_payment_enabled` is enabled or when `clock_payment_posting_mode` is `folio_payment_only`.
+- Normal Stripe/PokPay website payments always use deposit folios. A saved legacy `folio_payment_only` value is treated as deposit mode and cannot target the standard accommodation folio.
 - Refunds use the actual refunded amount from the refund row, post one negative Clock `credit_item` to the original posted payment folio when available, and guard duplicate negative posts through `must_clock_folio_accounting`.
 - Ambiguous Clock folio/payment targets, missing original refund folios, or unverifiable accounting targets must go to `manual_review` rather than auto-posting or silently repairing financial state.
 - Customer cancellation sync changes the Clock booking status only. Room charge reversal, cancellation-fee accounting, or folio closure remain separate hotel accounting policy tasks unless a safe Clock charge-reversal flow is implemented.
@@ -68,6 +71,9 @@
 - Outbound Clock cancellation performs a booking reread before a retry and after a successful cancellation request. Local cancellation is finalized only when reread confirms `canceled`/`cancelled`.
 - Booking folio list responses can be scalar IDs such as `[71355568]`, string IDs, full folio objects, or wrappers like `data`, `folios`, `booking_folios`, `items`, and `records`.
 - Folio verification reads `GET /folios/{folio_id}` and Clock may return money values as nested objects like `balance.cents`.
+- Deposit posting verifies that standard non-deposit folio balances did not change and records `verified_deposit_isolated`. Clock's booking header may still display aggregate `Balance 0`/deposit summary values even when the standard folio has not received a payment or transfer; do not create compensating entries to alter that native presentation.
+- `ClockApiClient` deduplicates identical GETs within one request, caches safe catalogue/config reads briefly, and uses a shared four-requests-per-second limiter. Digest-auth challenge and authenticated calls share the same limiter. HTTP 429 honors `Retry-After` and retries with exponential backoff plus jitter.
+- Provider request summaries use recursive redaction for tokens, authorization headers, secrets, card data, self-service keys/PINs, door codes, and unnecessary contact data.
 - Some Clock payment/refund accounting may require manual review if API rights or folio IDs are missing.
 
 ## Elementor Widgets

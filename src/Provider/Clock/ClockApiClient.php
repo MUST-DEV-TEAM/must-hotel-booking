@@ -2,6 +2,7 @@
 
 namespace MustHotelBooking\Provider\Clock;
 
+use MustHotelBooking\Provider\ProviderDataSanitizer;
 use MustHotelBooking\Provider\ProviderManager;
 use MustHotelBooking\Provider\Storage\ProviderRequestLogRepository;
 
@@ -13,10 +14,21 @@ final class ClockApiClient
     /** @var ClockDigestTransport */
     private $transport;
 
-    public function __construct(?ProviderRequestLogRepository $logs = null, ?ClockDigestTransport $transport = null)
+    /** @var ClockRateLimiter */
+    private $rateLimiter;
+
+    /** @var array<string, ClockApiResponse> */
+    private static $requestCache = [];
+
+    public function __construct(
+        ?ProviderRequestLogRepository $logs = null,
+        ?ClockDigestTransport $transport = null,
+        ?ClockRateLimiter $rateLimiter = null
+    )
     {
         $this->logs = $logs ?: new ProviderRequestLogRepository();
-        $this->transport = $transport ?: new ClockDigestTransport();
+        $this->rateLimiter = $rateLimiter ?: new ClockRateLimiter();
+        $this->transport = $transport ?: new ClockDigestTransport($this->rateLimiter);
     }
 
     /**
@@ -43,19 +55,38 @@ final class ClockApiClient
         $apiType = isset($options['api_type']) ? ClockEndpointResolver::normalizeApiType((string) $options['api_type']) : ClockConfig::apiType();
         $endpointName = isset($options['endpoint_name']) ? \sanitize_key((string) $options['endpoint_name']) : $operation;
         $url = $this->buildUrl($path, isset($options['query']) && \is_array($options['query']) ? $options['query'] : [], $apiType);
+        $cacheKey = $this->requestCacheKey($method, $url, $options);
+        $cacheTtl = $method === 'GET' ? $this->cacheTtl($endpointName, $options) : 0;
+
+        if ($method === 'GET') {
+            $cached = $this->cachedResponse($cacheKey, $cacheTtl);
+
+            if ($cached instanceof ClockApiResponse) {
+                return $cached;
+            }
+        } else {
+            self::$requestCache = [];
+        }
+
         $requestSummary = [
             'method' => $method,
             'url' => $this->redactUrl($url),
+            'environment' => ClockConfig::environment(),
             'api_type' => $apiType,
             'endpoint_name' => $endpointName,
             'path' => $path,
             'has_body' => isset($options['body']),
             'subscription_id_set' => ClockConfig::subscriptionId() !== '',
             'account_id_set' => ClockConfig::accountId() !== '',
+            'attempt' => 1,
+            'booking_reference' => isset($options['booking_reference']) ? (string) $options['booking_reference'] : '',
+            'payment_id' => isset($options['payment_id']) ? \max(0, (int) $options['payment_id']) : 0,
+            'provider_transaction_id' => isset($options['provider_transaction_id']) ? (string) $options['provider_transaction_id'] : '',
+            'clock_folio_id' => isset($options['clock_folio_id']) ? (string) $options['clock_folio_id'] : '',
         ];
         if (isset($options['body'])) {
-    $requestSummary['body'] = $this->redact($options['body']);
-}
+            $requestSummary['body'] = $this->redact($options['body']);
+        }
         $logId = $this->logs->create([
             'provider' => ProviderManager::CLOCK_MODE,
             'operation' => $operation,
@@ -71,7 +102,7 @@ final class ClockApiClient
 
         if (!empty($errors)) {
             $response = new ClockApiResponse(0, '', null, 'config_missing', \implode(' ', $errors), $this->durationMs($started));
-            $this->completeLog($logId, $response);
+            $this->completeLog($logId, $response, 0, []);
 
             return $response;
         }
@@ -90,36 +121,61 @@ final class ClockApiClient
 
         if (!\function_exists('wp_remote_request')) {
             $response = new ClockApiResponse(0, '', null, 'wordpress_http_missing', 'WordPress HTTP API is unavailable.', $this->durationMs($started));
-            $this->completeLog($logId, $response);
+            $this->completeLog($logId, $response, 0, []);
 
             return $response;
         }
 
-        $raw = $this->transport->request($url, $args);
-        $duration = $this->durationMs($started);
+        $attempt = 0;
+        $rateLimitEvents = [];
+        $response = new ClockApiResponse(0, '', null, 'request_not_attempted', 'Clock request was not attempted.', 0);
 
-        if (\is_wp_error($raw)) {
-            $response = new ClockApiResponse(0, '', null, $raw->get_error_code(), $raw->get_error_message(), $duration);
-            $this->completeLog($logId, $response);
+        while ($attempt < 3) {
+            $attempt++;
+            $throttleWait = 0;
+            $raw = $this->transport->request($url, $args);
+            $duration = $this->durationMs($started);
 
-            return $response;
-        }
-
-        $statusCode = (int) \wp_remote_retrieve_response_code($raw);
-        $body = (string) \wp_remote_retrieve_body($raw);
-        $data = $this->decodeJson($body);
-
-        if ($body !== '' && $data === null && $statusCode >= 200 && $statusCode < 300 && $this->isJsonDecodeFailure($body)) {
-            $response = new ClockApiResponse($statusCode, $body, null, 'bad_response_body', \__('Clock returned a non-JSON response body.', 'must-hotel-booking'), $duration);
-        } else {
-            $response = new ClockApiResponse($statusCode, $body, $data, '', '', $duration);
-
-            if (!$response->isSuccess() && $statusCode >= 400) {
-                $response = new ClockApiResponse($statusCode, $body, $data, $this->errorCodeForStatus($statusCode), $this->extractErrorMessage($data, $body), $duration);
+            if (\is_wp_error($raw)) {
+                $response = new ClockApiResponse(0, '', null, $raw->get_error_code(), $raw->get_error_message(), $duration);
+                break;
             }
+
+            $statusCode = (int) \wp_remote_retrieve_response_code($raw);
+            $body = (string) \wp_remote_retrieve_body($raw);
+            $data = $this->decodeJson($body);
+
+            if ($body !== '' && $data === null && $statusCode >= 200 && $statusCode < 300 && $this->isJsonDecodeFailure($body)) {
+                $response = new ClockApiResponse($statusCode, $body, null, 'bad_response_body', \__('Clock returned a non-JSON response body.', 'must-hotel-booking'), $duration);
+            } else {
+                $response = new ClockApiResponse($statusCode, $body, $data, '', '', $duration);
+
+                if (!$response->isSuccess() && $statusCode >= 400) {
+                    $response = new ClockApiResponse($statusCode, $body, $data, $this->errorCodeForStatus($statusCode), $this->extractErrorMessage($data, $body), $duration);
+                }
+            }
+
+            if ($statusCode !== 429 || $attempt >= 3) {
+                break;
+            }
+
+            $retryAfter = (string) \wp_remote_retrieve_header($raw, 'retry-after');
+            $retryDelay = $this->rateLimiter->retryDelayMicroseconds($attempt, $retryAfter);
+            $rateLimitEvents[] = [
+                'attempt' => $attempt,
+                'http_status' => 429,
+                'retry_after' => $retryAfter,
+                'backoff_ms' => (int) \round($retryDelay / 1000),
+                'throttle_wait_ms' => (int) \round($throttleWait / 1000),
+            ];
+            $this->rateLimiter->sleep($retryDelay);
         }
 
-        $this->completeLog($logId, $response);
+        $this->completeLog($logId, $response, $attempt, $rateLimitEvents);
+
+        if ($method === 'GET' && $response->isSuccess()) {
+            $this->storeCachedResponse($cacheKey, $response, $cacheTtl);
+        }
 
         return $response;
     }
@@ -156,7 +212,8 @@ final class ClockApiClient
         return $headers;
     }
 
-    private function completeLog(int $logId, ClockApiResponse $response): void
+    /** @param array<int, array<string, mixed>> $rateLimitEvents */
+    private function completeLog(int $logId, ClockApiResponse $response, int $attempts, array $rateLimitEvents): void
     {
         if ($logId <= 0) {
             return;
@@ -170,6 +227,8 @@ final class ClockApiClient
             'body_preview' => $this->bodyPreview($response->getBody()),
             'decoded_type' => \gettype($data),
             'decoded_keys' => \is_array($data) ? \array_slice(\array_keys($data), 0, 20) : [],
+            'attempts' => $attempts,
+            'rate_limit_events' => $rateLimitEvents,
         ];
 
         if (!$response->isSuccess()) {
@@ -241,9 +300,7 @@ final class ClockApiClient
             }
         }
 
-        $body = (string) \preg_replace('/("(?:authorization|token|secret|password|api[_-]?key|key)"\s*:\s*")[^"]+(")/i', '$1[redacted]$2', $body);
-
-        return \substr($body, 0, 1000);
+        return \substr(ProviderDataSanitizer::sanitizeText($body), 0, 1000);
     }
 
     private function bodyForLog(string $body): string
@@ -264,7 +321,7 @@ final class ClockApiClient
             return \is_string($encoded) ? $encoded : '';
         }
 
-        return (string) \preg_replace('/("(?:authorization|token|secret|password|api[_-]?key|key)"\s*:\s*")[^"]+(")/i', '$1[redacted]$2', $body);
+        return ProviderDataSanitizer::sanitizeText($body);
     }
 
     /**
@@ -273,25 +330,88 @@ final class ClockApiClient
      */
     private function redact($value)
     {
-        if (!\is_array($value)) {
-            return $value;
-        }
-
-        $redacted = [];
-
-        foreach ($value as $key => $item) {
-            $keyString = \is_string($key) ? \strtolower($key) : '';
-            $redacted[$key] = \preg_match('/(authorization|token|secret|password|api[_-]?key|key)$/i', $keyString) === 1
-                ? '[redacted]'
-                : $this->redact($item);
-        }
-
-        return $redacted;
+        return ProviderDataSanitizer::sanitize($value);
     }
 
     private function redactUrl(string $url): string
     {
         return (string) \preg_replace('/([?&](?:api[_-]?key|key|token|password|secret)=)[^&]+/i', '$1[redacted]', $url);
+    }
+
+    /** @param array<string, mixed> $options */
+    private function requestCacheKey(string $method, string $url, array $options): string
+    {
+        $body = isset($options['body']) ? $options['body'] : null;
+        $encoded = \function_exists('wp_json_encode')
+            ? \wp_json_encode([$method, $url, $body])
+            : \json_encode([$method, $url, $body]);
+
+        return 'mhb_clock_request_' . \sha1(\is_string($encoded) ? $encoded : $method . '|' . $url);
+    }
+
+    /** @param array<string, mixed> $options */
+    private function cacheTtl(string $endpointName, array $options): int
+    {
+        if (isset($options['cache_ttl'])) {
+            return \max(0, \min(900, (int) $options['cache_ttl']));
+        }
+
+        return \in_array(
+            $endpointName,
+            ['room_types', 'rooms', 'rates', 'rate_plans', 'wbe_room_type_rates', 'payment_sub_types'],
+            true
+        ) ? 60 : 0;
+    }
+
+    private function cachedResponse(string $cacheKey, int $cacheTtl): ?ClockApiResponse
+    {
+        if (isset(self::$requestCache[$cacheKey])) {
+            return self::$requestCache[$cacheKey];
+        }
+
+        if ($cacheTtl <= 0 || !\function_exists('get_transient')) {
+            return null;
+        }
+
+        $cached = \get_transient($cacheKey);
+
+        if (!\is_array($cached)) {
+            return null;
+        }
+
+        $response = new ClockApiResponse(
+            (int) ($cached['status_code'] ?? 0),
+            (string) ($cached['body'] ?? ''),
+            $cached['data'] ?? null,
+            (string) ($cached['error_code'] ?? ''),
+            (string) ($cached['error_message'] ?? ''),
+            (int) ($cached['duration_ms'] ?? 0)
+        );
+        self::$requestCache[$cacheKey] = $response;
+
+        return $response;
+    }
+
+    private function storeCachedResponse(string $cacheKey, ClockApiResponse $response, int $cacheTtl): void
+    {
+        self::$requestCache[$cacheKey] = $response;
+
+        if ($cacheTtl <= 0 || !\function_exists('set_transient')) {
+            return;
+        }
+
+        \set_transient(
+            $cacheKey,
+            [
+                'status_code' => $response->getStatusCode(),
+                'body' => $response->getBody(),
+                'data' => $response->getData(),
+                'error_code' => $response->getErrorCode(),
+                'error_message' => $response->getErrorMessage(),
+                'duration_ms' => $response->getDurationMs(),
+            ],
+            $cacheTtl
+        );
     }
 
     private function errorCodeForStatus(int $statusCode): string

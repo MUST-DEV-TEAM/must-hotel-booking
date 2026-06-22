@@ -1,5 +1,11 @@
 # Decisions
 
+## 2026-06-19 - Clock cancellation-fee accounting remains manual until fee ownership and cleanup prerequisites are durable
+- Decision: Keep retained cancellation-fee accounting in Clock as a manual-only workflow in MUST Hotel Booking.
+- Reason: The cached Clock collection documents generic charge-create and reread contracts, but the current plugin cannot prove that accommodation revenue is absent, cannot identify an existing fee row safely, and does not persist the charge-level ids, idempotency, or prerequisite confirmation required to prevent duplicate revenue.
+- Affected areas: cancellation financial cleanup, admin review workflow, future Clock charge-accounting automation, refund/payment separation.
+- Implementation note: Preserve `manual_clock_cancellation_fee_required`; keep reservation cancellation, gateway refund, Clock payment/refund credit-item accounting, accommodation-charge cleanup, and future fee-charge posting as separate states.
+
 ## 2026-06-19 - Clock accommodation-charge cleanup remains manual until charge-level ownership is durable
 - Decision: Keep Clock accommodation-charge cleanup as a manual-only workflow in MUST Hotel Booking.
 - Reason: The published Clock contracts document generic charge voiding and compensating charge creation, but the plugin does not currently persist accommodation charge ids, ownership markers, template ids, or cleanup correlation rows required to prove that a specific charge is eligible for automatic mutation.
@@ -91,3 +97,14 @@
 - Do not finalize outbound Clock cancellation locally without a provider reread confirming cancelled state.
 - Verify each Clock credit-item operation against `balance before + posted amount`; do not assume the correct final balance is zero.
 - Generic Clock charge void/create contracts are now documented in the cached Postman collection, but automatic accommodation-charge cleanup and cancellation-fee posting remain manual until the project has an approved charge-selection and folio-targeting policy.
+
+## 2026-06-22 - Online payments require verified Clock deposit isolation
+- Decision: In normal modes, Stripe/PokPay website payments post only to an open `deposit=true` Clock folio. The standard folio is snapshotted before/after and must remain unchanged.
+- Idempotency: Use gateway + provider transaction ID + reservation ID + accounting operation, independent of duplicate local payment rows.
+- Refund boundary: Automatically post a negative item only when the original payment remains on an open, unused deposit folio; transferred/applied or legacy standard-folio payments require manual review.
+- Diagnostics: Persist folio/item IDs in accounting plus reservation metadata and report `verified_deposit_isolated` instead of inferring readiness from reservation metadata alone.
+
+## 2026-06-22 - PokPay validity requires authentication evidence
+- Decision: Populated merchant/key fields are `unverified`, not valid. A safe token-auth test stores masked per-environment verification state.
+- Checkout boundary: Known rejected or malformed credentials disable PokPay before Clock booking creation. Provider-unavailable results remain retryable warnings.
+- Security: Secret inputs preserve saved values when blank and provider logs use recursive redaction.

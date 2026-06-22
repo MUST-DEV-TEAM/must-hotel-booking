@@ -52,6 +52,12 @@
 - Staff portal payment/refund actions in `src/Portal/PortalController.php`
 - Clock refund sync: `src/Provider/Clock/ClockFolioRefundSyncService.php`
 
+### PokPay credentials are present but checkout is unavailable
+- Open Payments -> Payment Settings and run `Test PokPay credentials` for the active site environment.
+- `verified` means the token endpoint authenticated without creating an order or charge. `rejected`/`malformed` disables PokPay before Clock booking creation; `provider_unavailable` remains a retryable warning.
+- Local and staging site profiles both use the PokPay staging API URL but retain separate credential slots. Confirm the active General -> Site environment matches the slot where credentials were saved.
+- Secret inputs are intentionally blank on reload. Leaving them blank preserves the saved secret.
+
 ## Clock Reconciliation Issue Areas
 - `src/Provider/Clock/ClockPaymentReconciliationService.php`
 - `src/Provider/Clock/ClockFolioPaymentSyncService.php`
@@ -86,10 +92,17 @@
 ### Clock future payment appears as manual review
 - Default `clock_payment_posting_mode=auto_detect` posts future Stripe/PokPay website payments to a Clock deposit folio. It creates or reuses a booking folio with `deposit=true`, then posts the external provider payment as a folio `credit_item` on that deposit folio.
 - Check Settings -> Provider -> Advanced Clock endpoint paths for `Clock payment posting mode`, `booking_deposit_folio_create`, and `booking_deposit_payment_create`.
-- If the hotel wants legacy behavior for testing, set `folio_payment_only`, but this is not recommended for future reservations because it may settle/affect the folio balance before arrival.
+- A saved legacy `folio_payment_only` value no longer posts online payments to the standard folio; runtime accounting still requires the deposit-folio endpoints.
 - If deposit posting enters manual review, check the Clock API user has rights to create booking folios and folio credit items, and confirm the booking ID has not been cancelled/voided in Clock.
 - Clock endpoint overrides in Settings -> Provider must be relative paths beginning with `/` and can only use placeholders allowed by the endpoint registry. Unsafe values are rejected instead of saved.
 - Clock accounting reason codes appear in the Payments detail screen from `must_clock_folio_accounting.last_error_code`. `handled_manually` means staff recorded or reviewed the accounting in Clock outside the plugin; it is not a successful API post.
+- `verified_deposit_isolated` means the payment was posted to a `deposit=true` folio and the standard folio balances were unchanged.
+- A booking header that still shows `Balance 0` can be Clock's aggregate booking presentation. Check the Payment Detail folio ID, deposit flag, credit-item ID, and isolation status before assuming the standard folio was modified.
+
+### Clock reports HTTP 429
+- The shared limiter allows at most four physical Clock HTTP requests per second, including Digest authentication calls.
+- Identical availability/quote/config GETs are deduplicated during one PHP request; safe catalogue/config reads use short transient caching.
+- 429 responses honor `Retry-After` and retry with exponential backoff and jitter. A later successful request clears the aggregate active-error state, so a historical 429 is not a permanent production blocker.
 
 ## Admin/Staff Portal Issue Areas
 - Admin menu and dashboard: `src/Admin/dashboard.php`.

@@ -1,5 +1,13 @@
 # Task Log
 
+## 2026-06-19 - Clock cancellation-fee accounting design boundary
+- Phase status: RESEARCH COMPLETE; no production code, tests, database schema, or provider writes changed.
+- Files changed: `docs/CLOCK_CANCELLATION_FEE_ACCOUNTING_DESIGN.md`, `docs/DECISIONS.md`, `docs/TASK_LOG.md`.
+- Findings: Investigated the cached Clock charge-create and reread contracts for booking `charges_by_source`, generic folio charges, booking/folio rereads, and the current cancellation, refund, folio, accounting, pricing-reconciliation, provider-log, admin, and focused test paths. The plugin currently stores immutable cancellation snapshots plus payment/refund credit-item accounting evidence, but it does not store the retained-fee charge id, ownership markers, folio-selection decision, cleanup prerequisite confirmation, or charge-level idempotency required to post a retained cancellation fee safely.
+- Outcome: `BLOCKED — CANCELLATION-FEE ACCOUNTING MUST REMAIN MANUAL`. There are no safe automatic retained-fee posting cases with the current documented Clock contracts and current stored data because duplicate accommodation revenue cannot be ruled out.
+- Commands/checks run: baseline `git status --short`, `git branch --show-current`, `git rev-parse HEAD`, plugin version read, `git diff --check`, targeted docs/code searches, raw local collection extraction, and final doc-only checks.
+- External records created: None. No Clock API requests, provider writes, commits, pushes, tags, packaging, or releases were performed.
+
 ## 2026-06-19 - Clock accommodation-charge cleanup design boundary
 - Phase status: RESEARCH COMPLETE; no production code, tests, database schema, or provider writes changed.
 - Files changed: `docs/CLOCK_ACCOMMODATION_CHARGE_CLEANUP_DESIGN.md`, `docs/DECISIONS.md`, `docs/TASK_LOG.md`.
@@ -257,3 +265,11 @@
 - Added expected-versus-actual Clock folio balance fields and verification.
 - Added admin/staff warnings for manual Clock accommodation-charge and cancellation-fee cleanup.
 - Status: local code/tests pass; external provider acceptance not run. Clock accommodation-charge cleanup remains blocked pending an official contract.
+
+## 2026-06-22 - PokPay diagnostics, Clock deposit isolation, and rate limiting
+- Changed: Added no-charge PokPay credential verification/readiness states, masked admin reporting, secret preservation, provider-specific logs/timelines, and separation from Stripe errors.
+- Changed: Hardened Clock deposit tuple idempotency, durable folio/item metadata, standard-folio isolation verification, and manual review for transferred/applied or legacy-folio refunds.
+- Changed: Added recursive provider redaction, four-per-second Clock throttling including Digest calls, `Retry-After`/backoff/jitter, GET deduplication, and short safe catalogue caching.
+- Evidence: Sanitized June 14 backup shows historical Stripe folio `71355798` had `deposit=false` and received the payment directly; later deposit flow created `deposit=true` folio `71442250` and posted credit item `60052192` there while the original standard folio ID remained separate.
+- Blocked: Current local WordPress DB was unavailable on 2026-06-22, so current saved PokPay credentials and live Clock folio state could not be re-read. No real provider write was performed.
+- Checks: PHP lint and standalone mocked tests cover PokPay environment/auth states, redaction, Clock deposit isolation/idempotency/refund review, 429 backoff, and duplicate GET suppression.

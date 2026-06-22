@@ -93,6 +93,10 @@ final class PaymentAdminActions
 
         $action = isset($_POST['must_payments_action']) ? \sanitize_key((string) \wp_unslash($_POST['must_payments_action'])) : '';
 
+        if (isset($_POST['pokpay_test_environment']) && !\is_array($_POST['pokpay_test_environment'])) {
+            $action = 'test_pokpay_credentials';
+        }
+
         if ($action !== '' && !$this->currentUserCanManagePayments()) {
             return [
                 'errors' => [\__('You do not have permission to manage payments.', 'must-hotel-booking')],
@@ -214,6 +218,28 @@ final class PaymentAdminActions
                 'notice' => !empty($result['success']) ? 'clock_accounting_manual_done' : 'clock_accounting_manual_done_failed',
                 'action' => 'view',
                 'reservation_id' => $reservationId,
+            ]));
+        }
+
+        if ($action === 'test_pokpay_credentials') {
+            $nonce = isset($_POST['must_pokpay_test_nonce']) ? (string) \wp_unslash($_POST['must_pokpay_test_nonce']) : '';
+
+            if (!\wp_verify_nonce($nonce, 'must_payment_pokpay_test')) {
+                $this->redirectToPaymentsPage($query->buildUrlArgs(['notice' => 'invalid_nonce']));
+            }
+
+            $environment = isset($_POST['pokpay_test_environment']) && !\is_array($_POST['pokpay_test_environment'])
+                ? PaymentEngine::normalizeStripeEnvironment((string) \wp_unslash($_POST['pokpay_test_environment']))
+                : PaymentEngine::getActiveSiteEnvironment();
+            $result = PaymentEngine::verifyPokPayCredentials($environment);
+            $status = \sanitize_key((string) ($result['status'] ?? ''));
+            $notice = $status === 'verified'
+                ? 'pokpay_credentials_verified'
+                : ($status === 'provider_unavailable' ? 'pokpay_provider_unavailable' : 'pokpay_credentials_rejected');
+
+            $this->redirectToPaymentsPage($query->buildUrlArgs([
+                'notice' => $notice,
+                'pokpay_environment' => $environment,
             ]));
         }
 
@@ -599,6 +625,11 @@ final class PaymentAdminActions
                     $value = isset($_POST[$postedFieldKey])
                         ? \sanitize_text_field((string) \wp_unslash($_POST[$postedFieldKey]))
                         : '';
+
+                    if (\in_array($fieldKey, ['secret_key', 'webhook_secret'], true) && $value === '') {
+                        continue;
+                    }
+
                     MustBookingConfig::set_setting($settingKey, $value);
                 }
             }
@@ -616,6 +647,11 @@ final class PaymentAdminActions
                     $value = isset($_POST[$postedFieldKey])
                         ? \sanitize_text_field((string) \wp_unslash($_POST[$postedFieldKey]))
                         : '';
+
+                    if ($fieldKey === 'key_secret' && $value === '') {
+                        continue;
+                    }
+
                     MustBookingConfig::set_setting($settingKey, $value);
                 }
             }

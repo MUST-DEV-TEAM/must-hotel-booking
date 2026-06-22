@@ -127,6 +127,17 @@ final class PokPayPayment implements PaymentInterface
                 'message' => \__('PokPay checkout is not configured.', 'must-hotel-booking'),
             ];
         }
+        $credentialState = PaymentEngine::getPokPayCredentialState();
+        if ((string) ($credentialState['status'] ?? '') === 'unverified') {
+            $credentialState = PaymentEngine::verifyPokPayCredentials();
+        }
+        if (\in_array((string) ($credentialState['status'] ?? ''), ['missing', 'rejected', 'malformed'], true)) {
+            return [
+                'success' => false,
+                'method' => $this->method,
+                'message' => \__('PokPay checkout is disabled because the active credentials were rejected or are malformed. Ask an administrator to verify the PokPay configuration.', 'must-hotel-booking'),
+            ];
+        }
         $reservationIds = $this->extractReservationIds($paymentData);
         if (isset($paymentData['reservation_ids']) && empty($reservationIds)) {
             return [

@@ -6,8 +6,12 @@ use MustHotelBooking\Core\PaymentMethodRegistry;
 use MustHotelBooking\Core\ReservationStatus;
 use MustHotelBooking\Engine\Payment\PaymentFactory;
 use MustHotelBooking\Engine\Payment\PaymentInterface;
+use MustHotelBooking\Provider\ProviderDataSanitizer;
+use MustHotelBooking\Provider\Storage\ProviderRequestLogRepository;
 final class PaymentEngine
 {
+    private const POKPAY_VERIFICATION_OPTION = 'must_hotel_booking_pokpay_credential_verification';
+
     /**
      * @return array<string, mixed>
      */
@@ -346,6 +350,136 @@ final class PaymentEngine
         $credentials = self::getPokPayEnvironmentCredentials();
         return $credentials['merchant_id'] !== '' && $credentials['key_id'] !== '' && $credentials['key_secret'] !== '';
     }
+
+    /** @return array<string, mixed> */
+    public static function getPokPayCredentialState(string $environment = ''): array
+    {
+        $environment = $environment !== '' ? self::normalizeStripeEnvironment($environment) : self::getActiveSiteEnvironment();
+        $credentials = self::getPokPayEnvironmentCredentials($environment);
+        $present = $credentials['merchant_id'] !== '' && $credentials['key_id'] !== '' && $credentials['key_secret'] !== '';
+        $default = [
+            'environment' => self::getPokPayApiEnvironment($environment),
+            'site_environment' => $environment,
+            'status' => $present ? 'unverified' : 'missing',
+            'authentication_success' => false,
+            'http_status' => 0,
+            'error_code' => '',
+            'error_message' => '',
+            'verified_at' => '',
+            'merchant_id_masked' => ProviderDataSanitizer::maskIdentifier($credentials['merchant_id']),
+            'key_id_masked' => ProviderDataSanitizer::maskIdentifier($credentials['key_id']),
+        ];
+
+        if (!$present || !\function_exists('get_option')) {
+            return $default;
+        }
+
+        $saved = \get_option(self::POKPAY_VERIFICATION_OPTION, []);
+        $entry = \is_array($saved) && isset($saved[$environment]) && \is_array($saved[$environment])
+            ? $saved[$environment]
+            : [];
+
+        if (
+            empty($entry)
+            || !isset($entry['credential_fingerprint'])
+            || !\hash_equals((string) $entry['credential_fingerprint'], self::pokPayCredentialFingerprint($credentials))
+        ) {
+            return $default;
+        }
+
+        unset($entry['credential_fingerprint']);
+
+        return \array_merge($default, ProviderDataSanitizer::sanitize($entry));
+    }
+
+    /** @return array<string, mixed> */
+    public static function verifyPokPayCredentials(string $environment = ''): array
+    {
+        $environment = $environment !== '' ? self::normalizeStripeEnvironment($environment) : self::getActiveSiteEnvironment();
+        $credentials = self::getPokPayEnvironmentCredentials($environment);
+        $base = [
+            'environment' => self::getPokPayApiEnvironment($environment),
+            'site_environment' => $environment,
+            'authentication_success' => false,
+            'http_status' => 0,
+            'error_code' => '',
+            'error_message' => '',
+            'verified_at' => \current_time('mysql'),
+            'merchant_id_masked' => ProviderDataSanitizer::maskIdentifier($credentials['merchant_id']),
+            'key_id_masked' => ProviderDataSanitizer::maskIdentifier($credentials['key_id']),
+        ];
+
+        if ($credentials['merchant_id'] === '' || $credentials['key_id'] === '' || $credentials['key_secret'] === '') {
+            $result = \array_merge($base, [
+                'status' => 'missing',
+                'error_code' => 'credentials_missing',
+                'error_message' => \__('PokPay credentials are missing for this environment.', 'must-hotel-booking'),
+            ]);
+            self::savePokPayCredentialState($environment, $credentials, $result);
+            return $result;
+        }
+
+        $response = self::performPokPayApiRequest(
+            'POST',
+            'auth/sdk/login',
+            [
+                'keyId' => $credentials['key_id'],
+                'keySecret' => $credentials['key_secret'],
+            ],
+            false,
+            [
+                'environment' => $environment,
+                'operation' => 'pokpay.authentication',
+                'endpoint_name' => 'auth_sdk_login',
+                'merchant_id' => $credentials['merchant_id'],
+                'key_id' => $credentials['key_id'],
+            ]
+        );
+        $statusCode = (int) ($response['status_code'] ?? 0);
+        $body = isset($response['body']) && \is_array($response['body']) ? $response['body'] : [];
+        $data = self::extractPokPayResponseData($body);
+        $accessToken = isset($data['accessToken']) && \is_scalar($data['accessToken'])
+            ? \trim((string) $data['accessToken'])
+            : '';
+        $errorCode = self::extractPokPayErrorCode($body);
+        $errorMessage = isset($response['message']) ? (string) $response['message'] : '';
+        $success = !empty($response['success']) && $accessToken !== '';
+
+        if ($success) {
+            self::cachePokPayAccessToken($environment, $credentials, $accessToken, $data);
+            $status = 'verified';
+        } elseif (\in_array($statusCode, [400, 401, 403], true)) {
+            $status = 'rejected';
+        } elseif ($statusCode === 0 || $statusCode === 429 || $statusCode >= 500) {
+            $status = 'provider_unavailable';
+        } else {
+            $status = 'malformed';
+        }
+
+        if (!$success && \function_exists('delete_transient')) {
+            \delete_transient(self::getPokPayAccessTokenCacheKey($environment));
+        }
+
+        $result = \array_merge($base, [
+            'status' => $status,
+            'authentication_success' => $success,
+            'http_status' => $statusCode,
+            'error_code' => $errorCode,
+            'error_message' => ProviderDataSanitizer::sanitizeText($errorMessage),
+            'correlation_id' => (string) ($response['correlation_id'] ?? ''),
+            'duration_ms' => (int) ($response['duration_ms'] ?? 0),
+        ]);
+        self::savePokPayCredentialState($environment, $credentials, $result);
+
+        return $result;
+    }
+
+    public static function isPokPayCheckoutBlocked(): bool
+    {
+        $state = self::getPokPayCredentialState();
+
+        return \in_array((string) ($state['status'] ?? ''), ['missing', 'rejected', 'malformed'], true);
+    }
     public static function getStripeCheckoutExpiryMinutes(): int
     {
         return 30;
@@ -594,14 +728,44 @@ final class PaymentEngine
      */
     public static function performStripeApiRequest(string $method, string $path, array $body = [], array $options = []): array
     {
+        $started = \microtime(true);
+        $correlationId = self::providerCorrelationId();
+        $operation = isset($options['operation'])
+            ? \sanitize_text_field((string) $options['operation'])
+            : 'stripe.' . \strtolower($method) . '.' . \trim((string) \preg_replace('/[^a-z0-9]+/i', '_', \strtolower($path)), '_');
+        $logs = new ProviderRequestLogRepository();
+        $logId = $logs->create([
+            'provider' => 'stripe',
+            'operation' => $operation,
+            'direction' => 'outbound',
+            'correlation_id' => $correlationId,
+            'idempotency_key' => isset($options['idempotency_key']) ? (string) $options['idempotency_key'] : '',
+            'reservation_id' => isset($options['reservation_id']) ? (int) $options['reservation_id'] : 0,
+            'external_id' => isset($options['external_id']) ? (string) $options['external_id'] : '',
+            'request_summary' => [
+                'environment' => self::getActiveSiteEnvironment() === 'production' ? 'production' : 'test',
+                'endpoint_name' => \trim($path, '/'),
+                'http_method' => \strtoupper($method),
+                'attempt' => 1,
+                'booking_reference' => isset($options['booking_reference']) ? (string) $options['booking_reference'] : '',
+                'payment_id' => isset($options['payment_id']) ? (int) $options['payment_id'] : 0,
+                'body' => ProviderDataSanitizer::sanitize($body),
+            ],
+        ]);
         $secretKey = self::getStripeSecretKey();
         if ($secretKey === '') {
-            return [
+            $result = [
                 'success' => false,
                 'status_code' => 0,
                 'body' => [],
+                'error_code' => 'credentials_missing',
                 'message' => \__('Stripe secret key is missing.', 'must-hotel-booking'),
+                'retryable' => false,
+                'correlation_id' => $correlationId,
+                'duration_ms' => self::providerDurationMs($started),
             ];
+            self::completeProviderLog($logs, $logId, $result, []);
+            return $result;
         }
         $endpoint = 'https://api.stripe.com/v1/' . \ltrim($path, '/');
         $args = [
@@ -619,23 +783,36 @@ final class PaymentEngine
         }
         $response = \wp_remote_request($endpoint, $args);
         if (\is_wp_error($response)) {
-            return [
+            $result = [
                 'success' => false,
                 'status_code' => 0,
                 'body' => [],
+                'error_code' => (string) $response->get_error_code(),
                 'message' => (string) $response->get_error_message(),
+                'retryable' => true,
+                'correlation_id' => $correlationId,
+                'duration_ms' => self::providerDurationMs($started),
             ];
+            self::completeProviderLog($logs, $logId, $result, []);
+            return $result;
         }
         $statusCode = (int) \wp_remote_retrieve_response_code($response);
         $decodedBody = \json_decode((string) \wp_remote_retrieve_body($response), true);
-        return [
+        $bodyArray = \is_array($decodedBody) ? $decodedBody : [];
+        $result = [
             'success' => $statusCode >= 200 && $statusCode < 300 && \is_array($decodedBody),
             'status_code' => $statusCode,
-            'body' => \is_array($decodedBody) ? $decodedBody : [],
-            'message' => \is_array($decodedBody) && isset($decodedBody['error']['message'])
-                ? (string) $decodedBody['error']['message']
+            'body' => $bodyArray,
+            'error_code' => isset($bodyArray['error']['code']) ? \sanitize_text_field((string) $bodyArray['error']['code']) : '',
+            'message' => isset($bodyArray['error']['message'])
+                ? ProviderDataSanitizer::sanitizeText((string) $bodyArray['error']['message'])
                 : '',
+            'retryable' => $statusCode === 429 || $statusCode >= 500,
+            'correlation_id' => $correlationId,
+            'duration_ms' => self::providerDurationMs($started),
         ];
+        self::completeProviderLog($logs, $logId, $result, []);
+        return $result;
     }
     /**
      * @param array<int, int> $reservationIds
@@ -714,7 +891,10 @@ final class PaymentEngine
             'metadata[source]' => 'must-hotel-booking',
             'expires_at' => (string) $expiresAt,
         ];
-        $response = self::performStripeApiRequest('POST', 'checkout/sessions', $payload);
+        $response = self::performStripeApiRequest('POST', 'checkout/sessions', $payload, [
+            'operation' => 'stripe.checkout_session_create',
+            'reservation_id' => (int) ($reservationIds[0] ?? 0),
+        ]);
         if (empty($response['success'])) {
             return [
                 'success' => false,
@@ -818,11 +998,24 @@ final class PaymentEngine
         $response = self::performPokPayApiRequest(
             'POST',
             'merchants/' . \rawurlencode($merchantId) . '/sdk-orders',
-            $payload
+            $payload,
+            true,
+            [
+                'operation' => 'pokpay.sdk_order_create',
+                'endpoint_name' => 'sdk_orders_create',
+                'reservation_id' => (int) ($reservationIds[0] ?? 0),
+                'merchant_id' => $merchantId,
+                'key_id' => $credentials['key_id'],
+            ]
         );
         if (empty($response['success'])) {
             return [
                 'success' => false,
+                'status_code' => (int) ($response['status_code'] ?? 0),
+                'error_code' => (string) ($response['error_code'] ?? ''),
+                'correlation_id' => (string) ($response['correlation_id'] ?? ''),
+                'duration_ms' => (int) ($response['duration_ms'] ?? 0),
+                'retryable' => !empty($response['retryable']),
                 'message' => isset($response['message']) && (string) $response['message'] !== ''
                     ? (string) $response['message']
                     : \__('Unable to create the PokPay payment order.', 'must-hotel-booking'),
@@ -864,7 +1057,17 @@ final class PaymentEngine
                 'message' => \__('PokPay order id is missing.', 'must-hotel-booking'),
             ];
         }
-        $response = self::performPokPayApiRequest('GET', 'sdk-orders/' . \rawurlencode($orderId));
+        $response = self::performPokPayApiRequest(
+            'GET',
+            'sdk-orders/' . \rawurlencode($orderId),
+            [],
+            true,
+            [
+                'operation' => 'pokpay.sdk_order_fetch',
+                'endpoint_name' => 'sdk_order_fetch',
+                'external_id' => $orderId,
+            ]
+        );
         if (empty($response['success'])) {
             return [
                 'success' => false,
@@ -914,7 +1117,12 @@ final class PaymentEngine
             $body['refundAmount'] = self::convertAmountToMinorUnits($amount, $currency);
         }
         $path = 'merchants/' . \rawurlencode($merchantId) . '/sdk-orders/' . \rawurlencode($orderId) . '/refund';
-        $response = self::performPokPayApiRequest('POST', $path, $body);
+        $response = self::performPokPayApiRequest('POST', $path, $body, true, [
+            'operation' => 'pokpay.refund_create',
+            'endpoint_name' => 'sdk_order_refund',
+            'external_id' => $orderId,
+            'merchant_id' => $merchantId,
+        ]);
         if (empty($response['success'])) {
             return [
                 'success' => false,
@@ -1252,20 +1460,33 @@ final class PaymentEngine
         }
         return '';
     }
-    private static function getPokPayAccessTokenCacheKey(): string
+    private static function getPokPayAccessTokenCacheKey(string $environment = ''): string
     {
-        $credentials = self::getPokPayEnvironmentCredentials();
+        $environment = $environment !== '' ? self::normalizeStripeEnvironment($environment) : self::getActiveSiteEnvironment();
+        $credentials = self::getPokPayEnvironmentCredentials($environment);
         return 'must_hotel_booking_pokpay_token_' . \md5(
-            self::getPokPayApiEnvironment() . '|' . $credentials['merchant_id'] . '|' . $credentials['key_id']
+            self::getPokPayApiEnvironment($environment)
+            . '|'
+            . $credentials['merchant_id']
+            . '|'
+            . $credentials['key_id']
+            . '|'
+            . self::pokPayCredentialFingerprint($credentials)
         );
     }
     /**
      * @param array<string, mixed> $body
      * @return array<string, mixed>
      */
-    public static function performPokPayApiRequest(string $method, string $path, array $body = [], bool $authenticate = true): array
+    public static function performPokPayApiRequest(
+        string $method,
+        string $path,
+        array $body = [],
+        bool $authenticate = true,
+        array $options = []
+    ): array
     {
-        return self::performPokPayApiRequestOnce($method, $path, $body, $authenticate, true);
+        return self::performPokPayApiRequestOnce($method, $path, $body, $authenticate, true, $options);
     }
     /**
      * @param array<string, mixed> $body
@@ -1276,16 +1497,54 @@ final class PaymentEngine
         string $path,
         array $body = [],
         bool $authenticate = true,
-        bool $allowTokenRetry = true
+        bool $allowTokenRetry = true,
+        array $options = []
     ): array {
+        $started = \microtime(true);
+        $environment = isset($options['environment'])
+            ? self::normalizeStripeEnvironment((string) $options['environment'])
+            : self::getActiveSiteEnvironment();
+        $apiEnvironment = self::getPokPayApiEnvironment($environment);
+        $credentials = self::getPokPayEnvironmentCredentials($environment);
+        $operation = isset($options['operation'])
+            ? \sanitize_text_field((string) $options['operation'])
+            : self::pokPayOperationName($method, $path);
+        $correlationId = self::providerCorrelationId();
+        $logs = new ProviderRequestLogRepository();
+        $logId = $logs->create([
+            'provider' => 'pokpay',
+            'operation' => $operation,
+            'direction' => 'outbound',
+            'correlation_id' => $correlationId,
+            'idempotency_key' => isset($options['idempotency_key']) ? (string) $options['idempotency_key'] : '',
+            'reservation_id' => isset($options['reservation_id']) ? (int) $options['reservation_id'] : 0,
+            'external_id' => isset($options['external_id']) ? (string) $options['external_id'] : '',
+            'request_summary' => [
+                'environment' => $apiEnvironment,
+                'site_environment' => $environment,
+                'endpoint_name' => isset($options['endpoint_name']) ? (string) $options['endpoint_name'] : \trim($path, '/'),
+                'http_method' => \strtoupper($method),
+                'attempt' => $allowTokenRetry ? 1 : 2,
+                'merchant_id_masked' => ProviderDataSanitizer::maskIdentifier((string) ($options['merchant_id'] ?? $credentials['merchant_id'])),
+                'key_id_masked' => ProviderDataSanitizer::maskIdentifier((string) ($options['key_id'] ?? $credentials['key_id'])),
+                'booking_reference' => isset($options['booking_reference']) ? (string) $options['booking_reference'] : '',
+                'payment_id' => isset($options['payment_id']) ? (int) $options['payment_id'] : 0,
+                'body' => ProviderDataSanitizer::sanitize($body),
+            ],
+        ]);
         $headers = [
             'Accept' => 'application/json',
             'Content-Type' => 'application/json',
         ];
         if ($authenticate) {
-            $tokenResult = self::getPokPayAccessToken();
+            $tokenResult = self::getPokPayAccessToken($environment);
             if (empty($tokenResult['success'])) {
-                return $tokenResult;
+                $result = \array_merge($tokenResult, [
+                    'correlation_id' => $correlationId,
+                    'duration_ms' => self::providerDurationMs($started),
+                ]);
+                self::completeProviderLog($logs, $logId, $result, []);
+                return $result;
             }
             $headers['Authorization'] = 'Bearer ' . (string) ($tokenResult['access_token'] ?? '');
         }
@@ -1297,19 +1556,26 @@ final class PaymentEngine
         if (!empty($body)) {
             $args['body'] = \wp_json_encode($body);
         }
-        $response = \wp_remote_request(self::getPokPayBaseUrl() . '/' . \ltrim($path, '/'), $args);
+        $response = \wp_remote_request(self::getPokPayBaseUrl($environment) . '/' . \ltrim($path, '/'), $args);
         if (\is_wp_error($response)) {
-            return [
+            $result = [
                 'success' => false,
                 'status_code' => 0,
                 'body' => [],
+                'error_code' => (string) $response->get_error_code(),
                 'message' => (string) $response->get_error_message(),
+                'retryable' => true,
+                'correlation_id' => $correlationId,
+                'duration_ms' => self::providerDurationMs($started),
             ];
+            self::completeProviderLog($logs, $logId, $result, []);
+            return $result;
         }
         $statusCode = (int) \wp_remote_retrieve_response_code($response);
         $decodedBody = \json_decode((string) \wp_remote_retrieve_body($response), true);
         $bodyArray = \is_array($decodedBody) ? $decodedBody : [];
         $message = self::extractPokPayErrorMessage($bodyArray);
+        $errorCode = self::extractPokPayErrorCode($bodyArray);
         $messageLower = \strtolower($message);
         if (
             $authenticate
@@ -1322,35 +1588,61 @@ final class PaymentEngine
                 || \str_contains($messageLower, 'unauthorized')
             )
         ) {
-            \delete_transient(self::getPokPayAccessTokenCacheKey());
-            return self::performPokPayApiRequestOnce(
+            \delete_transient(self::getPokPayAccessTokenCacheKey($environment));
+            $result = self::performPokPayApiRequestOnce(
                 $method,
                 $path,
                 $body,
                 $authenticate,
-                false
+                false,
+                $options
             );
+            self::completeProviderLog(
+                $logs,
+                $logId,
+                [
+                    'success' => !empty($result['success']),
+                    'status_code' => (int) ($result['status_code'] ?? 0),
+                    'error_code' => (string) ($result['error_code'] ?? ''),
+                    'message' => (string) ($result['message'] ?? ''),
+                    'retryable' => !empty($result['retryable']),
+                    'duration_ms' => self::providerDurationMs($started),
+                ],
+                ['token_retry' => true]
+            );
+            return $result;
         }
-        return [
+        $result = [
             'success' => $statusCode >= 200 && $statusCode < 300 && \is_array($decodedBody),
             'status_code' => $statusCode,
             'body' => $bodyArray,
-            'message' => $message,
+            'error_code' => $errorCode,
+            'message' => ProviderDataSanitizer::sanitizeText($message),
+            'retryable' => $statusCode === 429 || $statusCode >= 500,
+            'correlation_id' => $correlationId,
+            'duration_ms' => self::providerDurationMs($started),
         ];
+        self::completeProviderLog($logs, $logId, $result, [
+            'environment' => $apiEnvironment,
+            'merchant_id_masked' => ProviderDataSanitizer::maskIdentifier($credentials['merchant_id']),
+            'key_id_masked' => ProviderDataSanitizer::maskIdentifier($credentials['key_id']),
+        ]);
+        return $result;
     }
     /**
      * @return array<string, mixed>
      */
-    private static function getPokPayAccessToken(): array
+    private static function getPokPayAccessToken(string $environment = ''): array
     {
-        $credentials = self::getPokPayEnvironmentCredentials();
+        $environment = $environment !== '' ? self::normalizeStripeEnvironment($environment) : self::getActiveSiteEnvironment();
+        $credentials = self::getPokPayEnvironmentCredentials($environment);
         if ($credentials['key_id'] === '' || $credentials['key_secret'] === '') {
             return [
                 'success' => false,
                 'message' => \__('PokPay key id or key secret is missing.', 'must-hotel-booking'),
             ];
         }
-        $cacheKey = self::getPokPayAccessTokenCacheKey();
+        $cacheKey = self::getPokPayAccessTokenCacheKey($environment);
         $cachedToken = \get_transient($cacheKey);
         if (\is_string($cachedToken) && $cachedToken !== '') {
             return [
@@ -1365,11 +1657,37 @@ final class PaymentEngine
                 'keyId' => $credentials['key_id'],
                 'keySecret' => $credentials['key_secret'],
             ],
-            false
+            false,
+            [
+                'environment' => $environment,
+                'operation' => 'pokpay.authentication',
+                'endpoint_name' => 'auth_sdk_login',
+                'merchant_id' => $credentials['merchant_id'],
+                'key_id' => $credentials['key_id'],
+            ]
         );
         if (empty($response['success'])) {
+            $statusCode = (int) ($response['status_code'] ?? 0);
+            $status = \in_array($statusCode, [400, 401, 403], true)
+                ? 'rejected'
+                : (($statusCode === 0 || $statusCode === 429 || $statusCode >= 500) ? 'provider_unavailable' : 'malformed');
+            self::savePokPayCredentialState($environment, $credentials, [
+                'environment' => self::getPokPayApiEnvironment($environment),
+                'site_environment' => $environment,
+                'status' => $status,
+                'authentication_success' => false,
+                'http_status' => $statusCode,
+                'error_code' => (string) ($response['error_code'] ?? ''),
+                'error_message' => (string) ($response['message'] ?? ''),
+                'verified_at' => \current_time('mysql'),
+                'merchant_id_masked' => ProviderDataSanitizer::maskIdentifier($credentials['merchant_id']),
+                'key_id_masked' => ProviderDataSanitizer::maskIdentifier($credentials['key_id']),
+            ]);
             return [
                 'success' => false,
+                'status_code' => $statusCode,
+                'error_code' => (string) ($response['error_code'] ?? ''),
+                'retryable' => !empty($response['retryable']),
                 'message' => isset($response['message']) && (string) $response['message'] !== ''
                     ? (string) $response['message']
                     : \__('PokPay authentication failed.', 'must-hotel-booking'),
@@ -1378,28 +1696,36 @@ final class PaymentEngine
         $data = self::extractPokPayResponseData(isset($response['body']) && \is_array($response['body']) ? $response['body'] : []);
         $accessToken = isset($data['accessToken']) ? \trim((string) $data['accessToken']) : '';
         if ($accessToken === '') {
+            self::savePokPayCredentialState($environment, $credentials, [
+                'environment' => self::getPokPayApiEnvironment($environment),
+                'site_environment' => $environment,
+                'status' => 'malformed',
+                'authentication_success' => false,
+                'http_status' => (int) ($response['status_code'] ?? 0),
+                'error_code' => 'access_token_missing',
+                'error_message' => \__('PokPay authentication returned no access token.', 'must-hotel-booking'),
+                'verified_at' => \current_time('mysql'),
+                'merchant_id_masked' => ProviderDataSanitizer::maskIdentifier($credentials['merchant_id']),
+                'key_id_masked' => ProviderDataSanitizer::maskIdentifier($credentials['key_id']),
+            ]);
             return [
                 'success' => false,
                 'message' => \__('PokPay authentication returned no access token.', 'must-hotel-booking'),
             ];
         }
-        $expiresIn = isset($data['expiresIn']) ? (int) $data['expiresIn'] : 300;
-        /*
-         * PokPay staging returns expiresIn like 600000, which is milliseconds.
-         * Convert large values to seconds.
-         */
-        if ($expiresIn > 86400) {
-            $expiresIn = (int) \floor($expiresIn / 1000);
-        }
-        if ($expiresIn <= 0 && isset($data['expiresAt'])) {
-            $expiresAt = \strtotime((string) $data['expiresAt']);
-            $expiresIn = $expiresAt !== false ? \max(60, $expiresAt - \time()) : 300;
-        }
-        /*
-         * Cache for slightly less than provider expiry.
-         * Example: 600 seconds from PokPay becomes 540 seconds locally.
-         */
-        \set_transient($cacheKey, $accessToken, \max(60, $expiresIn - 60));
+        self::cachePokPayAccessToken($environment, $credentials, $accessToken, $data);
+        self::savePokPayCredentialState($environment, $credentials, [
+            'environment' => self::getPokPayApiEnvironment($environment),
+            'site_environment' => $environment,
+            'status' => 'verified',
+            'authentication_success' => true,
+            'http_status' => (int) ($response['status_code'] ?? 0),
+            'error_code' => '',
+            'error_message' => '',
+            'verified_at' => \current_time('mysql'),
+            'merchant_id_masked' => ProviderDataSanitizer::maskIdentifier($credentials['merchant_id']),
+            'key_id_masked' => ProviderDataSanitizer::maskIdentifier($credentials['key_id']),
+        ]);
         return [
             'success' => true,
             'access_token' => $accessToken,
@@ -1420,6 +1746,133 @@ final class PaymentEngine
             return (string) $body['error'];
         }
         return '';
+    }
+
+    /**
+     * @param array<string, mixed> $body
+     */
+    private static function extractPokPayErrorCode(array $body): string
+    {
+        foreach (['code', 'errorCode', 'error_code', 'type'] as $key) {
+            if (isset($body[$key]) && \is_scalar($body[$key])) {
+                return \sanitize_text_field((string) $body[$key]);
+            }
+        }
+
+        if (isset($body['error']) && \is_array($body['error'])) {
+            return self::extractPokPayErrorCode($body['error']);
+        }
+
+        return '';
+    }
+
+    /**
+     * @param array{merchant_id:string,key_id:string,key_secret:string} $credentials
+     * @param array<string, mixed> $data
+     */
+    private static function cachePokPayAccessToken(
+        string $environment,
+        array $credentials,
+        string $accessToken,
+        array $data
+    ): void {
+        if ($accessToken === '' || !\function_exists('set_transient')) {
+            return;
+        }
+
+        $expiresIn = isset($data['expiresIn']) ? (int) $data['expiresIn'] : 300;
+
+        if ($expiresIn > 86400) {
+            $expiresIn = (int) \floor($expiresIn / 1000);
+        }
+
+        if ($expiresIn <= 0 && isset($data['expiresAt'])) {
+            $expiresAt = \strtotime((string) $data['expiresAt']);
+            $expiresIn = $expiresAt !== false ? \max(60, $expiresAt - \time()) : 300;
+        }
+
+        unset($credentials);
+        \set_transient(self::getPokPayAccessTokenCacheKey($environment), $accessToken, \max(60, $expiresIn - 60));
+    }
+
+    /**
+     * @param array{merchant_id:string,key_id:string,key_secret:string} $credentials
+     * @param array<string, mixed> $state
+     */
+    private static function savePokPayCredentialState(string $environment, array $credentials, array $state): void
+    {
+        if (!\function_exists('get_option') || !\function_exists('update_option')) {
+            return;
+        }
+
+        $saved = \get_option(self::POKPAY_VERIFICATION_OPTION, []);
+        $saved = \is_array($saved) ? $saved : [];
+        $saved[$environment] = ProviderDataSanitizer::sanitize($state);
+        $saved[$environment]['credential_fingerprint'] = self::pokPayCredentialFingerprint($credentials);
+        \update_option(self::POKPAY_VERIFICATION_OPTION, $saved, false);
+    }
+
+    /** @param array{merchant_id:string,key_id:string,key_secret:string} $credentials */
+    private static function pokPayCredentialFingerprint(array $credentials): string
+    {
+        $material = $credentials['merchant_id'] . '|' . $credentials['key_id'] . '|' . $credentials['key_secret'];
+        $salt = \function_exists('wp_salt') ? \wp_salt('auth') : __FILE__;
+
+        return \hash_hmac('sha256', $material, $salt);
+    }
+
+    private static function pokPayOperationName(string $method, string $path): string
+    {
+        $normalized = \trim((string) \preg_replace('/[^a-z0-9]+/i', '_', \strtolower($path)), '_');
+
+        return 'pokpay.' . \strtolower($method) . ($normalized !== '' ? '.' . $normalized : '');
+    }
+
+    private static function providerCorrelationId(): string
+    {
+        if (\function_exists('wp_generate_uuid4')) {
+            return \wp_generate_uuid4();
+        }
+
+        return \bin2hex(\random_bytes(16));
+    }
+
+    private static function providerDurationMs(float $started): int
+    {
+        return \max(0, (int) \round((\microtime(true) - $started) * 1000));
+    }
+
+    /**
+     * @param array<string, mixed> $result
+     * @param array<string, mixed> $responseSummary
+     */
+    private static function completeProviderLog(
+        ProviderRequestLogRepository $logs,
+        int $logId,
+        array $result,
+        array $responseSummary
+    ): void {
+        if ($logId <= 0) {
+            return;
+        }
+
+        $body = isset($result['body']) && \is_array($result['body']) ? $result['body'] : [];
+        $logs->complete($logId, [
+            'http_status' => (int) ($result['status_code'] ?? 0),
+            'success' => !empty($result['success']) ? 1 : 0,
+            'error_code' => (string) ($result['error_code'] ?? ''),
+            'error_message' => (string) ($result['message'] ?? ''),
+            'duration_ms' => (int) ($result['duration_ms'] ?? 0),
+            'response_summary' => \array_merge(
+                [
+                    'retryable' => !empty($result['retryable']),
+                    'provider_error_code' => (string) ($result['error_code'] ?? ''),
+                    'provider_error_message' => (string) ($result['message'] ?? ''),
+                    'body' => ProviderDataSanitizer::sanitize($body),
+                ],
+                $responseSummary
+            ),
+        ]);
     }
     /**
      * @return array<string, mixed>

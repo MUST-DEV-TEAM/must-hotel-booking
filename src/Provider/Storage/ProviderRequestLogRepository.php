@@ -3,6 +3,7 @@
 namespace MustHotelBooking\Provider\Storage;
 
 use MustHotelBooking\Database\AbstractRepository;
+use MustHotelBooking\Provider\ProviderDataSanitizer;
 
 final class ProviderRequestLogRepository extends AbstractRepository
 {
@@ -235,6 +236,67 @@ final class ProviderRequestLogRepository extends AbstractRepository
         return $summary;
     }
 
+    /** @return array<int, array<string, mixed>> */
+    public function getForReservation(int $reservationId, int $limit = 50): array
+    {
+        if ($reservationId <= 0 || !$this->providerRequestLogsTableExists()) {
+            return [];
+        }
+
+        $limit = \max(1, \min(100, $limit));
+        $rows = $this->wpdb->get_results(
+            $this->wpdb->prepare(
+                'SELECT *
+                FROM ' . $this->tableName() . '
+                WHERE reservation_id = %d
+                ORDER BY created_at ASC, id ASC
+                LIMIT %d',
+                $reservationId,
+                $limit
+            ),
+            ARRAY_A
+        );
+
+        return \is_array($rows) ? $rows : [];
+    }
+
+    /** @return array<string, mixed> */
+    public function getLatestProviderResult(string $provider, ?bool $success = null, string $operationPrefix = ''): array
+    {
+        if (!$this->providerRequestLogsTableExists()) {
+            return [];
+        }
+
+        $provider = $this->key($provider, 50);
+        $operationPrefix = $this->text($operationPrefix, 100);
+        $where = 'provider = %s';
+        $params = [$provider];
+
+        if ($success !== null) {
+            $where .= ' AND success = %d';
+            $params[] = $success ? 1 : 0;
+        }
+
+        if ($operationPrefix !== '') {
+            $where .= ' AND operation LIKE %s';
+            $params[] = $operationPrefix . '%';
+        }
+
+        $row = $this->wpdb->get_row(
+            $this->wpdb->prepare(
+                'SELECT *
+                FROM ' . $this->tableName() . '
+                WHERE ' . $where . '
+                ORDER BY created_at DESC, id DESC
+                LIMIT 1',
+                ...$params
+            ),
+            ARRAY_A
+        );
+
+        return \is_array($row) ? $row : [];
+    }
+
     /**
      * @return array<string, mixed>
      */
@@ -299,7 +361,7 @@ final class ProviderRequestLogRepository extends AbstractRepository
 
         $lastErrorRow = $this->wpdb->get_row(
             $this->wpdb->prepare(
-                'SELECT operation, http_status, error_message
+                'SELECT id, operation, http_status, error_message
                 FROM ' . $this->tableName() . '
                 WHERE ' . $lastErrorWhere . '
                 ORDER BY created_at DESC, id DESC
@@ -309,7 +371,26 @@ final class ProviderRequestLogRepository extends AbstractRepository
             ARRAY_A
         );
 
-        if (\is_array($lastErrorRow)) {
+        $latestSuccessParams = [$direction];
+        $latestSuccessWhere = 'direction = %s AND success = 1';
+
+        if ($provider !== '') {
+            $latestSuccessWhere .= ' AND provider = %s';
+            $latestSuccessParams[] = $provider;
+        }
+
+        $latestSuccessId = (int) $this->wpdb->get_var(
+            $this->wpdb->prepare(
+                'SELECT id
+                FROM ' . $this->tableName() . '
+                WHERE ' . $latestSuccessWhere . '
+                ORDER BY created_at DESC, id DESC
+                LIMIT 1',
+                ...$latestSuccessParams
+            )
+        );
+
+        if (\is_array($lastErrorRow) && (int) ($lastErrorRow['id'] ?? 0) > $latestSuccessId) {
             $summary['last_error'] = (string) ($lastErrorRow['error_message'] ?? '');
             $summary['last_error_operation'] = (string) ($lastErrorRow['operation'] ?? '');
             $summary['last_error_http_status'] = (int) ($lastErrorRow['http_status'] ?? 0);
@@ -410,6 +491,7 @@ final class ProviderRequestLogRepository extends AbstractRepository
     private function nullableText($value): ?string
     {
         $value = \is_scalar($value) ? \trim((string) $value) : '';
+        $value = ProviderDataSanitizer::sanitizeText($value);
 
         return $value !== '' ? $value : null;
     }
@@ -422,10 +504,17 @@ final class ProviderRequestLogRepository extends AbstractRepository
         }
 
         if (\is_string($value)) {
-            return $value;
+            $decoded = \json_decode($value, true);
+
+            if (\json_last_error() === \JSON_ERROR_NONE) {
+                $value = $decoded;
+            } else {
+                return ProviderDataSanitizer::sanitizeText($value);
+            }
         }
 
-        $json = \function_exists('wp_json_encode') ? \wp_json_encode($value) : \json_encode($value);
+        $sanitized = ProviderDataSanitizer::sanitize($value);
+        $json = \function_exists('wp_json_encode') ? \wp_json_encode($sanitized) : \json_encode($sanitized);
 
         return \is_string($json) ? $json : null;
     }

@@ -7,6 +7,7 @@ use MustHotelBooking\Core\PaymentMethodRegistry;
 use MustHotelBooking\Engine\PaymentEngine;
 use MustHotelBooking\Engine\PaymentStatusService;
 use MustHotelBooking\Provider\ProviderReservationView;
+use MustHotelBooking\Provider\Storage\ProviderRequestLogRepository;
 
 final class PaymentAdminDataProvider
 {
@@ -15,6 +16,7 @@ final class PaymentAdminDataProvider
     private \MustHotelBooking\Database\ClockFolioAccountingRepository $clockFolioAccountingRepository;
     private \MustHotelBooking\Database\ReservationRepository $reservationRepository;
     private \MustHotelBooking\Database\ActivityRepository $activityRepository;
+    private ProviderRequestLogRepository $providerRequestLogRepository;
 
     public function __construct()
     {
@@ -23,6 +25,7 @@ final class PaymentAdminDataProvider
         $this->clockFolioAccountingRepository = \MustHotelBooking\Engine\get_clock_folio_accounting_repository();
         $this->reservationRepository = \MustHotelBooking\Engine\get_reservation_repository();
         $this->activityRepository = \MustHotelBooking\Engine\get_activity_repository();
+        $this->providerRequestLogRepository = new ProviderRequestLogRepository();
     }
 
     /**
@@ -402,6 +405,7 @@ final class PaymentAdminDataProvider
         }
 
         $activityRows = $this->activityRepository->getRecentActivitiesForReservation($reservationId, $this->formatReservationReference($reservation), 20);
+        $providerLogs = $this->providerRequestLogRepository->getForReservation($reservationId, 60);
         $timeline = [];
 
         foreach ($activityRows as $activityRow) {
@@ -433,6 +437,8 @@ final class PaymentAdminDataProvider
             'refunds' => $refundRows,
             'clock_accounting' => $clockAccountingRows,
             'timeline' => $timeline,
+            'diagnostic_timeline' => $this->buildDiagnosticTimeline($reservation, $paymentRows, $clockAccountingRows, $providerLogs, $activityRows),
+            'provider_summaries' => $this->buildProviderSummaries($providerLogs),
             'provider' => $providerContext,
             'provider_payment' => $providerPayment,
             'reservation_url' => get_admin_reservation_detail_page_url($reservationId),
@@ -445,6 +451,12 @@ final class PaymentAdminDataProvider
      */
     private function getSettingsData(): array
     {
+        $pokpayCredentialStates = [];
+
+        foreach (\array_keys(PaymentEngine::getStripeEnvironmentCatalog()) as $environment) {
+            $pokpayCredentialStates[$environment] = PaymentEngine::getPokPayCredentialState((string) $environment);
+        }
+
         return [
             'catalog' => PaymentMethodRegistry::getCatalog(),
             'states' => PaymentMethodRegistry::getStates(),
@@ -455,7 +467,125 @@ final class PaymentAdminDataProvider
             'pokpay_webhook_url' => MustBookingConfig::build_public_rest_url('must-hotel-booking/v1/pokpay/webhook'),
             'pokpay_environment' => PaymentEngine::getPokPayApiEnvironment(),
             'pokpay_checkout_mode' => MustBookingConfig::get_pokpay_checkout_mode(),
+            'pokpay_credential_states' => $pokpayCredentialStates,
         ];
+    }
+
+    /**
+     * @param array<string, mixed> $reservation
+     * @param array<int, array<string, mixed>> $paymentRows
+     * @param array<int, array<string, mixed>> $accountingRows
+     * @param array<int, array<string, mixed>> $providerLogs
+     * @param array<int, array<string, mixed>> $activityRows
+     * @return array<int, array<string, string>>
+     */
+    private function buildDiagnosticTimeline(
+        array $reservation,
+        array $paymentRows,
+        array $accountingRows,
+        array $providerLogs,
+        array $activityRows
+    ): array {
+        $latestPayment = !empty($paymentRows) && \is_array($paymentRows[0]) ? $paymentRows[0] : [];
+        $paidPayment = [];
+        foreach ($paymentRows as $paymentRow) {
+            if (\is_array($paymentRow) && \sanitize_key((string) ($paymentRow['status'] ?? '')) === 'paid') {
+                $paidPayment = $paymentRow;
+                break;
+            }
+        }
+        $accounting = [];
+        foreach ($accountingRows as $accountingRow) {
+            if (
+                \is_array($accountingRow)
+                && \in_array(\sanitize_key((string) ($accountingRow['direction'] ?? '')), ['deposit', 'payment'], true)
+            ) {
+                $accounting = $accountingRow;
+                break;
+            }
+        }
+        $method = \sanitize_key((string) (($paidPayment['method'] ?? '') ?: ($latestPayment['method'] ?? '')));
+        $operationLog = static function (array $logs, array $operations): array {
+            foreach (\array_reverse($logs) as $log) {
+                if (\is_array($log) && \in_array((string) ($log['operation'] ?? ''), $operations, true)) {
+                    return $log;
+                }
+            }
+            return [];
+        };
+        $authLog = $operationLog($providerLogs, ['pokpay.authentication']);
+        $sessionLog = $operationLog($providerLogs, ['pokpay.sdk_order_create', 'stripe.checkout_session_create']);
+        $webhookActivity = [];
+        foreach (\array_reverse($activityRows) as $activity) {
+            if (!\is_array($activity)) {
+                continue;
+            }
+            $eventType = \sanitize_key((string) ($activity['event_type'] ?? ''));
+            if (\strpos($eventType, 'webhook') !== false || \strpos($eventType, 'payment') !== false) {
+                $webhookActivity = $activity;
+                break;
+            }
+        }
+
+        return [
+            $this->diagnosticStage('Local booking created', !empty($reservation['id']) ? 'completed' : 'missing', (string) ($reservation['booking_id'] ?? ''), (string) ($reservation['created_at'] ?? '')),
+            $this->diagnosticStage('Clock booking created', (string) ($reservation['provider_booking_id'] ?? '') !== '' ? 'completed' : 'not_applicable', (string) ($reservation['provider_booking_id'] ?? ''), (string) ($reservation['created_at'] ?? '')),
+            $this->diagnosticStage('Payment-provider authentication', $method === 'pokpay' ? (!empty($authLog['success']) ? 'completed' : (empty($authLog) ? 'unknown' : 'failed')) : 'not_applicable', $method === 'pokpay' ? (string) ($authLog['error_message'] ?? '') : 'Stripe authenticates each API request.', (string) ($authLog['created_at'] ?? '')),
+            $this->diagnosticStage('Payment session/order created', !empty($sessionLog['success']) ? 'completed' : (empty($sessionLog) ? 'unknown' : 'failed'), (string) ($latestPayment['transaction_id'] ?? ''), (string) ($sessionLog['created_at'] ?? ($latestPayment['created_at'] ?? ''))),
+            $this->diagnosticStage('Payment callback/webhook received', !empty($webhookActivity) ? 'completed' : 'unknown', (string) ($webhookActivity['message'] ?? ''), (string) ($webhookActivity['created_at'] ?? '')),
+            $this->diagnosticStage('Local payment confirmed', !empty($paidPayment) ? 'completed' : 'pending', (string) ($paidPayment['transaction_id'] ?? ''), (string) ($paidPayment['paid_at'] ?? '')),
+            $this->diagnosticStage('Clock deposit folio found/created', (string) ($accounting['clock_folio_id'] ?? '') !== '' ? 'completed' : 'pending', (string) ($accounting['clock_folio_id'] ?? ''), (string) ($accounting['updated_at'] ?? '')),
+            $this->diagnosticStage('Deposit payment posted', (string) ($accounting['clock_credit_item_id'] ?? '') !== '' ? 'completed' : 'pending', (string) ($accounting['clock_credit_item_id'] ?? ''), (string) ($accounting['posted_at'] ?? ($accounting['updated_at'] ?? ''))),
+            $this->diagnosticStage('Accounting verified', (string) ($accounting['reconciliation_status'] ?? '') === 'verified' ? 'completed' : ((string) ($accounting['status'] ?? '') === 'posted' ? 'review' : 'pending'), (string) ($accounting['verification_status'] ?? ''), (string) ($accounting['verified_at'] ?? ($accounting['updated_at'] ?? ''))),
+            $this->diagnosticStage('Compensation or cancellation', \in_array(\sanitize_key((string) ($reservation['status'] ?? '')), ['cancelled', 'expired', 'payment_failed'], true) ? 'completed' : 'not_required', (string) ($reservation['status'] ?? ''), (string) ($reservation['updated_at'] ?? '')),
+        ];
+    }
+
+    /** @return array<string, string> */
+    private function diagnosticStage(string $stage, string $status, string $detail, string $timestamp): array
+    {
+        return [
+            'stage' => $stage,
+            'status' => $status,
+            'detail' => $detail,
+            'created_at' => $this->formatDateTime($timestamp),
+        ];
+    }
+
+    /**
+     * @param array<int, array<string, mixed>> $providerLogs
+     * @return array<string, array<string, string>>
+     */
+    private function buildProviderSummaries(array $providerLogs): array
+    {
+        $summary = [];
+        foreach (['stripe', 'pokpay', 'clock'] as $provider) {
+            $success = [];
+            $error = [];
+            foreach (\array_reverse($providerLogs) as $log) {
+                if (!\is_array($log) || (string) ($log['provider'] ?? '') !== $provider) {
+                    continue;
+                }
+                if (empty($success) && !empty($log['success'])) {
+                    $success = $log;
+                }
+                if (empty($error) && empty($log['success'])) {
+                    $error = $log;
+                }
+            }
+            $summary[$provider] = [
+                'latest_success' => (string) ($success['operation'] ?? ''),
+                'latest_success_at' => $this->formatDateTime((string) ($success['created_at'] ?? '')),
+                'latest_error' => (string) ($error['error_message'] ?? ''),
+                'latest_error_operation' => (string) ($error['operation'] ?? ''),
+                'latest_error_at' => $this->formatDateTime((string) ($error['created_at'] ?? '')),
+            ];
+        }
+        $pokpayState = PaymentEngine::getPokPayCredentialState();
+        $summary['pokpay']['credential_status'] = (string) ($pokpayState['status'] ?? '');
+        $summary['pokpay']['credential_verified_at'] = $this->formatDateTime((string) ($pokpayState['verified_at'] ?? ''));
+
+        return $summary;
     }
 
     /**

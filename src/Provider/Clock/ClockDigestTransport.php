@@ -4,6 +4,14 @@ namespace MustHotelBooking\Provider\Clock;
 
 final class ClockDigestTransport
 {
+    /** @var ClockRateLimiter */
+    private $rateLimiter;
+
+    public function __construct(?ClockRateLimiter $rateLimiter = null)
+    {
+        $this->rateLimiter = $rateLimiter ?: new ClockRateLimiter();
+    }
+
     /**
      * WordPress HTTP API has no portable first-class Digest Auth abstraction, so this helper
      * performs the standard two-step challenge flow and only adds the computed Digest header.
@@ -22,6 +30,7 @@ final class ClockDigestTransport
         unset($probeArgs['body']);
         $probeArgs['method'] = $method;
 
+        $this->rateLimiter->acquire();
         $probe = \wp_remote_request($url, $probeArgs);
         $status = \is_wp_error($probe) ? 0 : (int) \wp_remote_retrieve_response_code($probe);
 
@@ -50,6 +59,7 @@ final class ClockDigestTransport
 
         $args['headers'] = $headers;
 
+        $this->rateLimiter->acquire();
         return \wp_remote_request($url, $args);
     }
 

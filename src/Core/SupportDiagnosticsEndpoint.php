@@ -4,6 +4,7 @@ use MustHotelBooking\Admin\SettingsDiagnostics;
 use MustHotelBooking\Engine\PaymentEngine;
 use MustHotelBooking\Provider\Clock\ClockApiClient;
 use MustHotelBooking\Provider\Clock\ClockConfig;
+use MustHotelBooking\Provider\ProviderDataSanitizer;
 use MustHotelBooking\Provider\ProviderManager;
 final class SupportDiagnosticsEndpoint
 {
@@ -307,6 +308,7 @@ final class SupportDiagnosticsEndpoint
         $settings = MustBookingConfig::get_all_settings();
         $checks = [
             'stripe' => self::getStripeReadiness($diagnostics),
+            'pokpay' => self::getPokPayReadiness($diagnostics),
             'clock' => self::getClockReadiness($diagnostics, $clockSummary, $clockRequestSummary),
             'inventory' => self::getInventoryReadiness($diagnostics),
             'email' => self::getEmailReadiness($diagnostics),
@@ -317,6 +319,45 @@ final class SupportDiagnosticsEndpoint
             $checks['clock']['clock_folio_payment_mode'] = 'automatic';
         }
         return self::buildProductionReadinessStatus($checks) + ['checks' => $checks];
+    }
+
+    /**
+     * @param array<string, mixed> $diagnostics
+     * @return array<string, mixed>
+     */
+    private static function getPokPayReadiness(array $diagnostics): array
+    {
+        $payments = isset($diagnostics['payments']) && \is_array($diagnostics['payments']) ? $diagnostics['payments'] : [];
+        $enabled = !empty($payments['pokpay_enabled']);
+        $state = PaymentEngine::getPokPayCredentialState();
+        $status = (string) ($state['status'] ?? 'missing');
+        $blockers = [];
+        $warnings = [];
+
+        if ($enabled && \in_array($status, ['missing', 'rejected', 'malformed'], true)) {
+            $blockers[] = 'PokPay is enabled but the active credentials are missing, rejected, or malformed.';
+        } elseif ($enabled && $status === 'unverified') {
+            $warnings[] = 'PokPay credentials are present but have not been authenticated by the credential test.';
+        } elseif ($enabled && $status === 'provider_unavailable') {
+            $warnings[] = 'The latest PokPay credential verification was inconclusive because the provider was unavailable.';
+        }
+
+        return [
+            'pokpay_enabled' => $enabled,
+            'environment' => (string) ($state['environment'] ?? ''),
+            'credential_status' => $status,
+            'authentication_success' => !empty($state['authentication_success']),
+            'http_status' => (int) ($state['http_status'] ?? 0),
+            'provider_error_code' => (string) ($state['error_code'] ?? ''),
+            'provider_error_message' => (string) ($state['error_message'] ?? ''),
+            'verified_at' => (string) ($state['verified_at'] ?? ''),
+            'merchant_id_masked' => (string) ($state['merchant_id_masked'] ?? ''),
+            'key_id_masked' => (string) ($state['key_id_masked'] ?? ''),
+            'blockers' => $blockers,
+            'warnings' => $warnings,
+            'manual_operations' => [],
+            'check_status' => !empty($blockers) ? 'blocked' : (!empty($warnings) ? 'warning' : 'ready'),
+        ];
     }
     /**
      * @param array<string, mixed> $diagnostics
@@ -1320,6 +1361,7 @@ final class SupportDiagnosticsEndpoint
             : '';
         $row = $wpdb->get_row(
             "SELECT
+            p.id AS payment_id,
             r.id AS reservation_id,
             {$bookingReferenceSelect} AS booking_reference,
             {$providerSelect} AS provider,
@@ -1356,6 +1398,37 @@ final class SupportDiagnosticsEndpoint
         $provider = (string) ($row['provider'] ?? '');
         $metadata = self::decodeJsonObject((string) ($row['provider_metadata'] ?? ''));
         $folio = self::findClockFolioIdInMetadata($metadata);
+        $accountingTable = $wpdb->prefix . 'must_clock_folio_accounting';
+        $accountingFolioId = '';
+        if (
+            self::tableExists($accountingTable)
+            && self::columnExists($accountingTable, 'payment_id')
+            && self::columnExists($accountingTable, 'clock_folio_id')
+            && self::columnExists($accountingTable, 'status')
+        ) {
+            $accountingFolioId = (string) $wpdb->get_var(
+                $wpdb->prepare(
+                    "SELECT clock_folio_id
+                    FROM `{$accountingTable}`
+                    WHERE payment_id = %d
+                        AND status = %s
+                        AND direction IN (%s, %s)
+                        AND clock_folio_id <> ''
+                    ORDER BY id DESC
+                    LIMIT 1",
+                    (int) ($row['payment_id'] ?? 0),
+                    'posted',
+                    'deposit',
+                    'payment'
+                )
+            );
+        }
+        if ($accountingFolioId !== '') {
+            $folio = [
+                'value' => \sanitize_text_field($accountingFolioId),
+                'source' => 'must_clock_folio_accounting.clock_folio_id',
+            ];
+        }
         $isClockBooking = $provider === ProviderManager::CLOCK_MODE;
         $localFolioPresent = (string) ($folio['value'] ?? '') !== '';
         $clockFetch = [
@@ -1385,7 +1458,8 @@ final class SupportDiagnosticsEndpoint
             'latest_paid_reservation_id' => $reservationId,
             'latest_booking_reference' => $bookingReference,
             'provider' => $provider,
-            'local_provider_metadata_folio_id_present' => $localFolioPresent,
+            'local_provider_metadata_folio_id_present' => $localFolioPresent && (string) ($folio['source'] ?? '') !== 'must_clock_folio_accounting.clock_folio_id',
+            'clock_accounting_folio_id_present' => $accountingFolioId !== '',
             'clock_folio_id_present' => $ready || $readyAfterClockFetch,
             'clock_folio_id_source' => (string) ($folio['source'] ?? ''),
             'clock_folio_id_value_masked' => $ready || $readyAfterClockFetch ? '[present]' : '',
@@ -1489,7 +1563,7 @@ final class SupportDiagnosticsEndpoint
     }
     private static function getLatestStripeError(): string
     {
-        $activity = self::getLatestActivityMessage(['stripe_webhook_failed', 'payment_failed']);
+        $activity = self::getLatestActivityMessage(['stripe_webhook_failed']);
         if ((string) ($activity['message'] ?? '') !== '') {
             return (string) $activity['message'];
         }
@@ -1861,6 +1935,12 @@ final class SupportDiagnosticsEndpoint
             'guest_phone',
             'customer_phone',
             'mobile',
+            'pin',
+            'self_service_key',
+            'self_service_pin',
+            'door_code',
+            'door_codes',
+            'common_door_codes',
         ];
         if (\in_array($key, $blockedExact, true)) {
             return true;
@@ -1895,12 +1975,7 @@ final class SupportDiagnosticsEndpoint
     }
     private static function maskSensitiveText(string $value): string
     {
-        $value = \sanitize_text_field($value);
-        $value = (string) \preg_replace('/[A-Z0-9._%+\-]+@[A-Z0-9.\-]+\.[A-Z]{2,}/i', '[email-redacted]', $value);
-        $value = (string) \preg_replace('/\b(phone|tel|mobile|whatsapp)\s*[:=]\s*\+?\d[\d\s().\-]{7,}\d\b/i', '$1: [phone-redacted]', $value);
-        $value = (string) \preg_replace('/(?<![\d:])\+\d[\d\s().\-]{7,}\d(?![\d:])/', '[phone-redacted]', $value);
-        $value = (string) \preg_replace('/(sk_live_|sk_test_|whsec_|pk_live_|pk_test_)[A-Za-z0-9_]+/', '[key-redacted]', $value);
-        return $value;
+        return ProviderDataSanitizer::sanitizeText(\sanitize_text_field($value));
     }
     private static function tableExists(string $table): bool
     {
