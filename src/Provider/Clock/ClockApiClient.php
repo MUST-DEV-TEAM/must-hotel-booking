@@ -2,6 +2,7 @@
 
 namespace MustHotelBooking\Provider\Clock;
 
+use MustHotelBooking\Core\BookingPerformanceMonitor;
 use MustHotelBooking\Provider\ProviderDataSanitizer;
 use MustHotelBooking\Provider\ProviderManager;
 use MustHotelBooking\Provider\Storage\ProviderRequestLogRepository;
@@ -19,6 +20,9 @@ final class ClockApiClient
 
     /** @var array<string, ClockApiResponse> */
     private static $requestCache = [];
+
+    /** @var string */
+    private $lastCacheStatus = 'miss';
 
     public function __construct(
         ?ProviderRequestLogRepository $logs = null,
@@ -56,12 +60,14 @@ final class ClockApiClient
         $endpointName = isset($options['endpoint_name']) ? \sanitize_key((string) $options['endpoint_name']) : $operation;
         $url = $this->buildUrl($path, isset($options['query']) && \is_array($options['query']) ? $options['query'] : [], $apiType);
         $cacheKey = $this->requestCacheKey($method, $url, $options);
-        $cacheTtl = $method === 'GET' ? $this->cacheTtl($endpointName, $options) : 0;
+        $bypassCache = $method === 'GET' && (!empty($options['bypass_cache']) || !empty($options['force_refresh']));
+        $cacheTtl = $method === 'GET' && !$bypassCache ? $this->cacheTtl($endpointName, $options) : 0;
 
-        if ($method === 'GET') {
+        if ($method === 'GET' && !$bypassCache) {
             $cached = $this->cachedResponse($cacheKey, $cacheTtl);
 
             if ($cached instanceof ClockApiResponse) {
+                $this->recordPerformance($endpointName, $operation, $cached, $this->lastCacheStatus, 0, 0);
                 return $cached;
             }
         } else {
@@ -79,6 +85,7 @@ final class ClockApiClient
             'subscription_id_set' => ClockConfig::subscriptionId() !== '',
             'account_id_set' => ClockConfig::accountId() !== '',
             'attempt' => 1,
+            'cache_mode' => $bypassCache ? 'bypass' : ($cacheTtl > 0 ? 'enabled' : 'request_only'),
             'booking_reference' => isset($options['booking_reference']) ? (string) $options['booking_reference'] : '',
             'payment_id' => isset($options['payment_id']) ? \max(0, (int) $options['payment_id']) : 0,
             'provider_transaction_id' => isset($options['provider_transaction_id']) ? (string) $options['provider_transaction_id'] : '',
@@ -87,29 +94,37 @@ final class ClockApiClient
         if (isset($options['body'])) {
             $requestSummary['body'] = $this->redact($options['body']);
         }
-        $logId = $this->logs->create([
-            'provider' => ProviderManager::CLOCK_MODE,
-            'operation' => $operation,
-            'direction' => 'outbound',
-            'correlation_id' => $correlationId,
-            'idempotency_key' => isset($options['idempotency_key']) ? (string) $options['idempotency_key'] : '',
-            'reservation_id' => isset($options['reservation_id']) ? \max(0, (int) $options['reservation_id']) : 0,
-            'external_id' => isset($options['external_id']) ? (string) $options['external_id'] : '',
-            'request_summary' => $requestSummary,
-        ]);
+        $logId = $this->measurePerformance(
+            'provider_log_write',
+            function () use ($operation, $correlationId, $options, $requestSummary): int {
+                return $this->logs->create([
+                    'provider' => ProviderManager::CLOCK_MODE,
+                    'operation' => $operation,
+                    'direction' => 'outbound',
+                    'correlation_id' => $correlationId,
+                    'idempotency_key' => isset($options['idempotency_key']) ? (string) $options['idempotency_key'] : '',
+                    'reservation_id' => isset($options['reservation_id']) ? \max(0, (int) $options['reservation_id']) : 0,
+                    'external_id' => isset($options['external_id']) ? (string) $options['external_id'] : '',
+                    'request_summary' => $requestSummary,
+                ]);
+            }
+        );
 
         $errors = ClockConfig::configurationErrors();
 
         if (!empty($errors)) {
             $response = new ClockApiResponse(0, '', null, 'config_missing', \implode(' ', $errors), $this->durationMs($started));
             $this->completeLog($logId, $response, 0, []);
+            $this->recordPerformance($endpointName, $operation, $response, 'miss', 0);
 
             return $response;
         }
 
         $args = [
             'method' => $method,
-            'timeout' => ClockConfig::timeoutSeconds(),
+            'timeout' => isset($options['timeout'])
+                ? \max(1, \min(ClockConfig::timeoutSeconds(), (int) $options['timeout']))
+                : ClockConfig::timeoutSeconds(),
             'headers' => $this->headers($correlationId),
         ];
 
@@ -122,6 +137,7 @@ final class ClockApiClient
         if (!\function_exists('wp_remote_request')) {
             $response = new ClockApiResponse(0, '', null, 'wordpress_http_missing', 'WordPress HTTP API is unavailable.', $this->durationMs($started));
             $this->completeLog($logId, $response, 0, []);
+            $this->recordPerformance($endpointName, $operation, $response, 'miss', 0);
 
             return $response;
         }
@@ -130,7 +146,9 @@ final class ClockApiClient
         $rateLimitEvents = [];
         $response = new ClockApiResponse(0, '', null, 'request_not_attempted', 'Clock request was not attempted.', 0);
 
-        while ($attempt < 3) {
+        $maxAttempts = $method === 'GET' ? 2 : 1;
+
+        while ($attempt < $maxAttempts) {
             $attempt++;
             $throttleWait = 0;
             $raw = $this->transport->request($url, $args);
@@ -155,7 +173,7 @@ final class ClockApiClient
                 }
             }
 
-            if ($statusCode !== 429 || $attempt >= 3) {
+            if ($statusCode !== 429 || $attempt >= $maxAttempts) {
                 break;
             }
 
@@ -173,9 +191,11 @@ final class ClockApiClient
 
         $this->completeLog($logId, $response, $attempt, $rateLimitEvents);
 
-        if ($method === 'GET' && $response->isSuccess()) {
+        if ($method === 'GET' && !$bypassCache && $response->isSuccess()) {
             $this->storeCachedResponse($cacheKey, $response, $cacheTtl);
         }
+
+        $this->recordPerformance($endpointName, $operation, $response, $bypassCache ? 'bypass' : 'miss', \max(0, $attempt - 1));
 
         return $response;
     }
@@ -235,14 +255,19 @@ final class ClockApiClient
             $responseSummary['body'] = $this->bodyForLog($response->getBody());
         }
 
-        $this->logs->complete($logId, [
-            'http_status' => $response->getStatusCode(),
-            'success' => $response->isSuccess() ? 1 : 0,
-            'error_code' => $response->getErrorCode(),
-            'error_message' => $response->getErrorMessage(),
-            'duration_ms' => $response->getDurationMs(),
-            'response_summary' => $responseSummary,
-        ]);
+        $this->measurePerformance(
+            'provider_log_write',
+            function () use ($logId, $response, $responseSummary): void {
+                $this->logs->complete($logId, [
+                    'http_status' => $response->getStatusCode(),
+                    'success' => $response->isSuccess() ? 1 : 0,
+                    'error_code' => $response->getErrorCode(),
+                    'error_message' => $response->getErrorMessage(),
+                    'duration_ms' => $response->getDurationMs(),
+                    'response_summary' => $responseSummary,
+                ]);
+            }
+        );
     }
 
     /** @return mixed */
@@ -358,14 +383,17 @@ final class ClockApiClient
 
         return \in_array(
             $endpointName,
-            ['room_types', 'rooms', 'rates', 'rate_plans', 'wbe_room_type_rates', 'payment_sub_types'],
+            ['room_types', 'rooms', 'rates', 'rate_plans', 'wbe_room_type_rates', 'payment_sub_types', 'rates_availability', 'products'],
             true
-        ) ? 60 : 0;
+        ) ? (\in_array($endpointName, ['rates_availability', 'products'], true) ? 45 : 60) : 0;
     }
 
     private function cachedResponse(string $cacheKey, int $cacheTtl): ?ClockApiResponse
     {
+        $this->lastCacheStatus = 'miss';
+
         if (isset(self::$requestCache[$cacheKey])) {
+            $this->lastCacheStatus = 'request_hit';
             return self::$requestCache[$cacheKey];
         }
 
@@ -388,6 +416,7 @@ final class ClockApiClient
             (int) ($cached['duration_ms'] ?? 0)
         );
         self::$requestCache[$cacheKey] = $response;
+        $this->lastCacheStatus = 'transient_hit';
 
         return $response;
     }
@@ -450,11 +479,52 @@ final class ClockApiClient
 
     private function correlationId(): string
     {
+        if (\class_exists(BookingPerformanceMonitor::class)) {
+            return BookingPerformanceMonitor::getCorrelationId();
+        }
+
         if (\function_exists('wp_generate_uuid4')) {
             return \wp_generate_uuid4();
         }
 
         return \bin2hex(\random_bytes(16));
+    }
+
+    private function recordPerformance(
+        string $endpointName,
+        string $operation,
+        ClockApiResponse $response,
+        string $cacheStatus,
+        int $retryCount,
+        ?int $durationOverride = null
+    ): void {
+        if (!\class_exists(BookingPerformanceMonitor::class)) {
+            return;
+        }
+
+        $errorCode = \strtolower($response->getErrorCode());
+        BookingPerformanceMonitor::recordClockRequest(
+            $endpointName,
+            $operation,
+            $durationOverride !== null ? $durationOverride : $response->getDurationMs(),
+            $cacheStatus,
+            $response->getStatusCode(),
+            $retryCount,
+            \strpos($errorCode, 'timeout') !== false || \strpos($errorCode, 'timed_out') !== false
+        );
+    }
+
+    /**
+     * @param callable $callback
+     * @return mixed
+     */
+    private function measurePerformance(string $label, callable $callback)
+    {
+        if (\class_exists(BookingPerformanceMonitor::class)) {
+            return BookingPerformanceMonitor::measure($label, $callback);
+        }
+
+        return $callback();
     }
 
     private function durationMs(float $started): int

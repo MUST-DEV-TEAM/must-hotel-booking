@@ -1782,8 +1782,8 @@ final class SettingsPage
             $form['clock_webhook_basic_password'] = $posted_webhook_basic_password;
         }
         $form['clock_auto_sync_enabled'] = self::parseBool($source, 'clock_auto_sync_enabled');
-        $form['clock_auto_sync_interval_minutes'] = ClockConfig::normalizeAutoSyncInterval((int) \absint(\wp_unslash($source['clock_auto_sync_interval_minutes'] ?? ($form['clock_auto_sync_interval_minutes'] ?? 15))));
-        $form['clock_auto_sync_batch_size'] = \max(10, \min(100, (int) \absint(\wp_unslash($source['clock_auto_sync_batch_size'] ?? ($form['clock_auto_sync_batch_size'] ?? 25)))));
+        $form['clock_auto_sync_interval_minutes'] = ClockConfig::normalizeAutoSyncInterval((int) \absint(\wp_unslash($source['clock_auto_sync_interval_minutes'] ?? ($form['clock_auto_sync_interval_minutes'] ?? 60))));
+        $form['clock_auto_sync_batch_size'] = \max(1, \min(100, (int) \absint(\wp_unslash($source['clock_auto_sync_batch_size'] ?? ($form['clock_auto_sync_batch_size'] ?? 1)))));
         $form['clock_auto_sync_past_days'] = \max(0, \min(90, (int) \absint(\wp_unslash($source['clock_auto_sync_past_days'] ?? ($form['clock_auto_sync_past_days'] ?? 2)))));
         $form['clock_auto_sync_future_days'] = \max(1, \min(1095, (int) \absint(\wp_unslash($source['clock_auto_sync_future_days'] ?? ($form['clock_auto_sync_future_days'] ?? 365)))));
         $form['clock_timeout_seconds'] = (int) \absint(\wp_unslash($source['clock_timeout_seconds'] ?? $form['clock_timeout_seconds']));
@@ -3108,23 +3108,25 @@ final class SettingsPage
                 'label' => __('Automatic sync interval', 'must-hotel-booking'),
                 'name' => 'clock_auto_sync_interval_minutes',
                 'type' => 'select',
-                'value' => (string) ($form['clock_auto_sync_interval_minutes'] ?? 15),
+                'value' => (string) ($form['clock_auto_sync_interval_minutes'] ?? 60),
                 'options' => [
                     '5' => __('Every 5 minutes', 'must-hotel-booking'),
                     '10' => __('Every 10 minutes', 'must-hotel-booking'),
-                    '15' => __('Every 15 minutes - recommended', 'must-hotel-booking'),
+                    '15' => __('Every 15 minutes', 'must-hotel-booking'),
                     '30' => __('Every 30 minutes', 'must-hotel-booking'),
-                    '60' => __('Every 60 minutes', 'must-hotel-booking'),
+                    '60' => __('Every 60 minutes - recommended', 'must-hotel-booking'),
                 ],
             ]);
             self::renderField([
                 'label' => __('Max reservations per sync run', 'must-hotel-booking'),
                 'name' => 'clock_auto_sync_batch_size',
                 'type' => 'select',
-                'value' => (string) ($form['clock_auto_sync_batch_size'] ?? 25),
+                'value' => (string) ($form['clock_auto_sync_batch_size'] ?? 1),
                 'options' => [
+                    '1' => __('1 reservation - recommended', 'must-hotel-booking'),
+                    '5' => __('5 reservations', 'must-hotel-booking'),
                     '10' => __('10 reservations', 'must-hotel-booking'),
-                    '25' => __('25 reservations - recommended', 'must-hotel-booking'),
+                    '25' => __('25 reservations', 'must-hotel-booking'),
                     '50' => __('50 reservations', 'must-hotel-booking'),
                     '100' => __('100 reservations', 'must-hotel-booking'),
                 ],
@@ -3345,8 +3347,8 @@ final class SettingsPage
                 }
             }
             $hidden['clock_auto_sync_enabled'] = !empty($form['clock_auto_sync_enabled']) ? '1' : '';
-            $hidden['clock_auto_sync_interval_minutes'] = (string) ($form['clock_auto_sync_interval_minutes'] ?? 15);
-            $hidden['clock_auto_sync_batch_size'] = (string) ($form['clock_auto_sync_batch_size'] ?? 25);
+            $hidden['clock_auto_sync_interval_minutes'] = (string) ($form['clock_auto_sync_interval_minutes'] ?? 60);
+            $hidden['clock_auto_sync_batch_size'] = (string) ($form['clock_auto_sync_batch_size'] ?? 1);
             $hidden['clock_auto_sync_past_days'] = (string) ($form['clock_auto_sync_past_days'] ?? 2);
             $hidden['clock_auto_sync_future_days'] = (string) ($form['clock_auto_sync_future_days'] ?? 365);
             $hidden['clock_timeout_seconds'] = (string) ($form['clock_timeout_seconds'] ?? 15);
@@ -4138,6 +4140,7 @@ final class SettingsPage
         echo '<article class="must-settings-summary-card"><span class="must-settings-summary-label">' . \esc_html__('Booking protection', 'must-hotel-booking') . '</span><strong>' . \esc_html(!empty($antiAbuse['enabled']) ? __('Enabled', 'must-hotel-booking') : __('Disabled', 'must-hotel-booking')) . '</strong></article>';
         echo '<article class="must-settings-summary-card"><span class="must-settings-summary-label">' . \esc_html__('Recent blocked attempts', 'must-hotel-booking') . '</span><strong>' . \esc_html((string) ($antiAbuse['recent_blocked_total'] ?? 0)) . '</strong></article>';
         echo '</div>';
+        self::renderBookingPerformanceTimeline();
         echo '<div class="must-settings-status-columns">';
         echo '<div class="must-settings-status-column">';
         self::renderSectionIntro(\__('System checks', 'must-hotel-booking'));
@@ -4306,6 +4309,67 @@ final class SettingsPage
             ? $form['dangerous_reset']
             : DangerousResetService::getFormState()
         );
+    }
+
+    private static function renderBookingPerformanceTimeline(): void
+    {
+        $rows = \MustHotelBooking\Core\BookingPerformanceMonitor::getSlowRequests(20);
+        self::renderSectionIntro(\__('Slow booking request timeline', 'must-hotel-booking'));
+        echo '<p class="description">' . \esc_html__('Shows sanitized slow public booking requests. No guest details, credentials, card data, or provider payloads are stored.', 'must-hotel-booking') . '</p>';
+
+        if (empty($rows)) {
+            echo '<div class="must-dashboard-health-item"><div class="must-dashboard-health-header"><strong>' . \esc_html__('No slow booking requests recorded yet', 'must-hotel-booking') . '</strong>';
+            self::renderBadge('ok');
+            echo '</div><p>' . \esc_html__('Requests slower than 1.5 seconds will appear after this plugin version is deployed.', 'must-hotel-booking') . '</p></div>';
+            return;
+        }
+
+        echo '<div class="must-dashboard-table-wrap"><table class="widefat striped"><thead><tr>';
+        foreach ([
+            __('Recorded', 'must-hotel-booking'),
+            __('Route', 'must-hotel-booking'),
+            __('Total', 'must-hotel-booking'),
+            __('Clock', 'must-hotel-booking'),
+            __('DB', 'must-hotel-booking'),
+            __('Cache', 'must-hotel-booking'),
+            __('Status', 'must-hotel-booking'),
+            __('Correlation', 'must-hotel-booking'),
+        ] as $heading) {
+            echo '<th>' . \esc_html($heading) . '</th>';
+        }
+        echo '</tr></thead><tbody>';
+
+        foreach ($rows as $row) {
+            if (!\is_array($row)) {
+                continue;
+            }
+
+            $correlation = (string) ($row['correlation_id'] ?? '');
+            echo '<tr>';
+            echo '<td>' . \esc_html((string) ($row['recorded_at'] ?? '')) . '</td>';
+            echo '<td><code>' . \esc_html((string) ($row['route'] ?? '')) . '</code></td>';
+            echo '<td>' . \esc_html((string) ($row['total_ms'] ?? 0)) . ' ms</td>';
+            echo '<td>' . \esc_html(\sprintf(
+                '%1$d ms / %2$d calls',
+                (int) ($row['clock_total_ms'] ?? 0),
+                (int) ($row['clock_call_count'] ?? 0)
+            )) . '</td>';
+            echo '<td>' . \esc_html(\sprintf(
+                '%1$d queries / %2$d ms',
+                (int) ($row['database_query_count'] ?? 0),
+                (int) ($row['database_query_time_ms'] ?? 0)
+            )) . '</td>';
+            echo '<td>' . \esc_html(\sprintf(
+                '%1$d hit / %2$d miss',
+                (int) ($row['clock_cache_hits'] ?? 0),
+                (int) ($row['clock_cache_misses'] ?? 0)
+            )) . '</td>';
+            echo '<td>' . \esc_html((string) ($row['http_status'] ?? 0)) . '</td>';
+            echo '<td><code>' . \esc_html(\substr($correlation, 0, 12)) . '</code></td>';
+            echo '</tr>';
+        }
+
+        echo '</tbody></table></div>';
     }
     /**
      * @param array<string, mixed> $form

@@ -193,6 +193,7 @@ final class SupportDiagnosticsEndpoint
             'clock_folio_payment_accounting_notice' => self::getClockFolioPaymentAccountingNotice($clockRequestSummary),
             'provider_fee_capture_readiness' => self::getProviderFeeCaptureReadiness(),
             'clock_request_summary' => $clockRequestSummary,
+            'booking_performance' => BookingPerformanceMonitor::getSlowRequests(25),
             'phase1_trial_summary' => $phase1TrialSummary,
             'production_readiness' => self::getProductionReadiness($diagnostics, $clockSummary, $clockRequestSummary, $phase1TrialSummary),
         ];

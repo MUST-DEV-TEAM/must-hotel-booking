@@ -2,6 +2,7 @@
 
 namespace MustHotelBooking\Provider\Clock;
 
+use MustHotelBooking\Core\BookingPerformanceMonitor;
 use MustHotelBooking\Provider\ProviderManager;
 use MustHotelBooking\Provider\Storage\ProviderMappingRepository;
 
@@ -21,6 +22,21 @@ final class ClockRoomSelection
 
     /** @return array<string, mixed>|null */
     public function resolve(int $roomId): ?array
+    {
+        if (\class_exists(BookingPerformanceMonitor::class)) {
+            return BookingPerformanceMonitor::measure(
+                'accommodation_lookup',
+                function () use ($roomId): ?array {
+                    return $this->resolveSelection($roomId);
+                }
+            );
+        }
+
+        return $this->resolveSelection($roomId);
+    }
+
+    /** @return array<string, mixed>|null */
+    private function resolveSelection(int $roomId): ?array
     {
         if ($roomId <= 0) {
             return null;
@@ -87,12 +103,30 @@ final class ClockRoomSelection
     private function physicalRoomSelection(int $physicalRoomId): ?array
     {
         $inventory = \MustHotelBooking\Engine\get_inventory_repository();
+        if (\class_exists(BookingPerformanceMonitor::class)) {
+            $lookup = BookingPerformanceMonitor::measure(
+                'inventory_lookup',
+                static function () use ($inventory, $physicalRoomId): array {
+                    $exists = $inventory->inventoryRoomsTableExists();
+                    return [
+                        'exists' => $exists,
+                        'room' => $exists ? $inventory->getInventoryRoomById($physicalRoomId) : null,
+                    ];
+                }
+            );
+        } else {
+            $exists = $inventory->inventoryRoomsTableExists();
+            $lookup = [
+                'exists' => $exists,
+                'room' => $exists ? $inventory->getInventoryRoomById($physicalRoomId) : null,
+            ];
+        }
 
-        if (!$inventory->inventoryRoomsTableExists()) {
+        if (empty($lookup['exists'])) {
             return null;
         }
 
-        $physicalRoom = $inventory->getInventoryRoomById($physicalRoomId);
+        $physicalRoom = $lookup['room'] ?? null;
 
         if (!\is_array($physicalRoom)) {
             return null;

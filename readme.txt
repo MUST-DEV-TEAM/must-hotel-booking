@@ -4,7 +4,7 @@ Tags: hotel, booking, reservation, accommodation
 Requires at least: 5.0
 Tested up to: 6.0
 Requires PHP: 7.4
-Stable tag: 0.4.83
+Stable tag: 0.4.85
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -31,6 +31,14 @@ Main features include:
 5. When updating, upload the new release ZIP or use the configured updater, then review **Diagnostics & Maintenance** after the update completes.
 
 == Changelog ==
+
+= 0.4.85 =
+* Fix booking flow performance and final Clock revalidation
+
+= 0.4.84 =
+* Added booking-flow performance timing, a sanitized slow-request admin timeline, and correlation IDs.
+* Prevented Clock auto-sync from draining large remote batches in one WP-Cron request.
+* Added signed server-side booking quote drafts and short safe caches for Clock availability and product reads.
 
 = 0.4.83 =
 * Fix PokPay deposit folio and payment diagnostics

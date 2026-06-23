@@ -102,6 +102,12 @@
 ### Clock reports HTTP 429
 - The shared limiter allows at most four physical Clock HTTP requests per second, including Digest authentication calls.
 - Identical availability/quote/config GETs are deduplicated during one PHP request; safe catalogue/config reads use short transient caching.
+- Intermediate public availability/product quote reads can use a 45-second cache. Final reservation logs should show `clock.rates_availability.final_revalidation` and `clock.products.final_revalidation` with cache mode `bypass`.
+- If final submission reports an expired or changed quote, return to checkout and refresh. This is intentional: availability, total/currency, and guarantee terms are re-read from Clock before the reservation write.
+- Slow booking diagnostics are retained as a bounded 40-row option timeline. Authorized administrators can request diagnostic mode with `?mhb_performance=1`; only then is `Server-Timing` emitted.
+- For production mitigation, set Clock auto-sync to batch size `1` and interval `60` minutes. The code does not overwrite existing saved values during upgrade.
+- Auto-sync queueing and the provider worker use separate atomic option locks with stale-lock recovery. The queueing cron performs no remote refresh batch; the worker handles one due job and reschedules remaining work.
+- If checkout remains slow after deployment, inspect the performance timeline for Clock call count/duration, cache hit/miss, provider-log write time, database query count/time, lock wait, HTTP status, retries, and timeouts. Customer-facing rendering must not run credential probes, support reports, reconciliation, or reservation-refresh batches.
 - 429 responses honor `Retry-After` and retry with exponential backoff and jitter. A later successful request clears the aggregate active-error state, so a historical 429 is not a permanent production blocker.
 
 ## Admin/Staff Portal Issue Areas

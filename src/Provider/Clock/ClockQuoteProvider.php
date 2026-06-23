@@ -35,6 +35,45 @@ final class ClockQuoteProvider implements QuoteProviderInterface
         string $couponCode = '',
         int $ratePlanId = 0
     ): array {
+        return $this->calculateTotalWithCacheMode(
+            $roomId,
+            $checkin,
+            $checkout,
+            $guests,
+            $couponCode,
+            $ratePlanId,
+            false
+        );
+    }
+
+    public function calculateTotalFresh(
+        int $roomId,
+        string $checkin,
+        string $checkout,
+        int $guests = 1,
+        string $couponCode = '',
+        int $ratePlanId = 0
+    ): array {
+        return $this->calculateTotalWithCacheMode(
+            $roomId,
+            $checkin,
+            $checkout,
+            $guests,
+            $couponCode,
+            $ratePlanId,
+            true
+        );
+    }
+
+    private function calculateTotalWithCacheMode(
+        int $roomId,
+        string $checkin,
+        string $checkout,
+        int $guests,
+        string $couponCode,
+        int $ratePlanId,
+        bool $bypassCache
+    ): array {
         unset($couponCode);
 
         if (!$this->isConfiguredForProducts() || !$this->isValidStay($checkin, $checkout) || $roomId <= 0) {
@@ -89,7 +128,16 @@ final class ClockQuoteProvider implements QuoteProviderInterface
             ];
         }
 
-        $response = $this->productsRequest($checkin, $checkout, \max(1, $guests), 0, $rateIds, [(string) ($roomMapping['external_id'] ?? '')], 'clock.products.quote');
+        $response = $this->productsRequest(
+            $checkin,
+            $checkout,
+            \max(1, $guests),
+            0,
+            $rateIds,
+            [(string) ($roomMapping['external_id'] ?? '')],
+            $bypassCache ? 'clock.products.final_revalidation' : 'clock.products.quote',
+            $bypassCache
+        );
 
         if (!$response->isSuccess()) {
             return [
@@ -133,7 +181,8 @@ final class ClockQuoteProvider implements QuoteProviderInterface
             $checkin,
             $checkout,
             $providerRateId,
-            $providerRoomTypeId
+            $providerRoomTypeId,
+            $bypassCache
         );
 
         if ($guaranteePolicyId > 0) {
@@ -383,7 +432,16 @@ final class ClockQuoteProvider implements QuoteProviderInterface
      * @param array<int, string> $rateIds
      * @param array<int, string> $roomTypeIds
      */
-    private function productsRequest(string $arrival, string $departure, int $adults, int $children, array $rateIds, array $roomTypeIds, string $operation): ClockApiResponse
+    private function productsRequest(
+        string $arrival,
+        string $departure,
+        int $adults,
+        int $children,
+        array $rateIds,
+        array $roomTypeIds,
+        string $operation,
+        bool $bypassCache = false
+    ): ClockApiResponse
     {
         return $this->client->get(
             $this->productsPathWithQuery($arrival, $departure, $adults, $children, $rateIds, $roomTypeIds),
@@ -392,6 +450,9 @@ final class ClockQuoteProvider implements QuoteProviderInterface
             [
                 'api_type' => 'pms_api',
                 'endpoint_name' => 'products',
+                'cache_ttl' => 45,
+                'timeout' => 8,
+                'bypass_cache' => $bypassCache,
             ]
         );
     }
@@ -1016,7 +1077,8 @@ final class ClockQuoteProvider implements QuoteProviderInterface
         string $checkin,
         string $checkout,
         string $rateId,
-        string $roomTypeId
+        string $roomTypeId,
+        bool $bypassCache = false
     ): int {
         $rateId = \trim($rateId);
         $roomTypeId = \trim($roomTypeId);
@@ -1048,6 +1110,9 @@ final class ClockQuoteProvider implements QuoteProviderInterface
             [
                 'api_type' => 'pms_api',
                 'endpoint_name' => 'rates_availability',
+                'cache_ttl' => 45,
+                'timeout' => 8,
+                'bypass_cache' => $bypassCache,
             ]
         );
 

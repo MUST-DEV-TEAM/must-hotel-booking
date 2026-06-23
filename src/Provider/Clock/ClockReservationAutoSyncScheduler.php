@@ -1,11 +1,11 @@
 <?php
 namespace MustHotelBooking\Provider\Clock;
 use MustHotelBooking\Provider\ProviderManager;
-use MustHotelBooking\Provider\Sync\ProviderSyncJobRunner;
 final class ClockReservationAutoSyncScheduler
 {
     private const CRON_HOOK = 'must_hotel_booking_clock_auto_reservation_sync';
     private const LOCK_KEY = 'must_hotel_booking_clock_auto_sync_lock';
+    private const LOCK_TTL_SECONDS = 600;
     public static function getCronHook(): string
     {
         return self::CRON_HOOK;
@@ -78,21 +78,14 @@ final class ClockReservationAutoSyncScheduler
         if (!self::isRunnable()) {
             return;
         }
-        if (\get_transient(self::LOCK_KEY)) {
+        $lockToken = self::acquireLock();
+        if ($lockToken === '') {
             return;
         }
-        $minute = \defined('MINUTE_IN_SECONDS')
-            ? (int) MINUTE_IN_SECONDS
-            : 60;
-        \set_transient(
-            self::LOCK_KEY,
-            (string) \time(),
-            10 * $minute
-        );
         try {
             (new self())->runScheduledSync();
         } finally {
-            \delete_transient(self::LOCK_KEY);
+            self::releaseLock($lockToken);
         }
     }
     /**
@@ -102,14 +95,20 @@ final class ClockReservationAutoSyncScheduler
     {
         $batchSize = ClockConfig::autoSyncBatchSize();
         $queued = $this->queueRefreshJobs($batchSize);
-        $processed = (new ProviderSyncJobRunner())->runDueJobs($batchSize);
+
+        /*
+         * Queue only. Processing a full remote refresh batch inside the same
+         * cron request can occupy PHP workers and the shared Clock limiter for
+         * several seconds while a customer request is rendering.
+         * ProviderSyncJobRunner drains the queue separately in small slices.
+         */
         return [
             'selected' => $queued['selected'],
             'queued' => $queued['queued'],
-            'processed' => (int) ($processed['processed'] ?? 0),
-            'succeeded' => (int) ($processed['succeeded'] ?? 0),
-            'retryable' => (int) ($processed['retryable'] ?? 0),
-            'failed' => (int) ($processed['failed'] ?? 0),
+            'processed' => 0,
+            'succeeded' => 0,
+            'retryable' => 0,
+            'failed' => 0,
         ];
     }
     /**
@@ -146,6 +145,32 @@ final class ClockReservationAutoSyncScheduler
             && ClockConfig::isEnabled()
             && ClockConfig::isDirectApiConfigured()
             && ClockConfig::reservationFetchPath() !== '';
+    }
+    private static function acquireLock(): string
+    {
+        $now = \time();
+        $token = $now . ':' . (\function_exists('wp_generate_uuid4') ? \wp_generate_uuid4() : \uniqid('mhb_', true));
+
+        if (\add_option(self::LOCK_KEY, $token, '', false)) {
+            return $token;
+        }
+
+        $existing = (string) \get_option(self::LOCK_KEY, '');
+        $createdAt = (int) \strtok($existing, ':');
+
+        if ($createdAt > 0 && $createdAt > ($now - self::LOCK_TTL_SECONDS)) {
+            return '';
+        }
+
+        \delete_option(self::LOCK_KEY);
+
+        return \add_option(self::LOCK_KEY, $token, '', false) ? $token : '';
+    }
+    private static function releaseLock(string $token): void
+    {
+        if ($token !== '' && \hash_equals($token, (string) \get_option(self::LOCK_KEY, ''))) {
+            \delete_option(self::LOCK_KEY);
+        }
     }
     private static function scheduleName(int $minutes): string
     {

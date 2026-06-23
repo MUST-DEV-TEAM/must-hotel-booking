@@ -219,11 +219,11 @@ final class ClockConfig
     }
     public static function autoSyncIntervalMinutes(): int
     {
-        return self::normalizeAutoSyncInterval((int) (self::settings()['clock_auto_sync_interval_minutes'] ?? 15));
+        return self::normalizeAutoSyncInterval((int) (self::settings()['clock_auto_sync_interval_minutes'] ?? 60));
     }
     public static function autoSyncBatchSize(): int
     {
-        return \max(10, \min(100, (int) (self::settings()['clock_auto_sync_batch_size'] ?? 25)));
+        return \max(1, \min(100, (int) (self::settings()['clock_auto_sync_batch_size'] ?? 1)));
     }
     public static function autoSyncPastDays(): int
     {
@@ -235,7 +235,7 @@ final class ClockConfig
     }
     public static function normalizeAutoSyncInterval(int $minutes): int
     {
-        return \in_array($minutes, [5, 10, 15, 30, 60], true) ? $minutes : 15;
+        return \in_array($minutes, [5, 10, 15, 30, 60], true) ? $minutes : 60;
     }
     public static function wbeHotelId(): string
     {

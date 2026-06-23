@@ -3,12 +3,12 @@ namespace MustHotelBooking\Provider\Clock;
 use MustHotelBooking\Core\ManagedPages;
 use MustHotelBooking\Core\BookingRules;
 use MustHotelBooking\Engine\BookingAbuseProtection;
+use MustHotelBooking\Engine\BookingQuoteDraft;
 use MustHotelBooking\Engine\BookingValidationEngine;
 use MustHotelBooking\Engine\LockEngine;
 use MustHotelBooking\Engine\ReservationEngine;
 use MustHotelBooking\Engine\RatePlanEngine;
 use MustHotelBooking\Provider\Contracts\ReservationProviderInterface;
-use MustHotelBooking\Provider\Dto\QuoteRequest;
 use MustHotelBooking\Provider\Dto\ReservationCreateRequest;
 final class ClockReservationProvider implements ReservationProviderInterface
 {
@@ -85,6 +85,24 @@ final class ClockReservationProvider implements ReservationProviderInterface
             }
         }
         return true;
+    }
+    private function ensureLocalRoomLock(int $roomId, string $checkin, string $checkout): bool
+    {
+        $sessionId = LockEngine::getOrCreateSessionId();
+        $selection = $this->roomSelection->resolve($roomId);
+        if (\is_array($selection) && !empty($selection['is_physical'])) {
+            if (LockEngine::hasExactLock($roomId, $checkin, $checkout, $sessionId)) {
+                return true;
+            }
+            return \MustHotelBooking\Engine\get_availability_repository()->upsertRoomLock(
+                $roomId,
+                $checkin,
+                $checkout,
+                $sessionId,
+                LockEngine::getExpiryDatetime()
+            );
+        }
+        return ReservationEngine::ensureRoomLock($roomId, $checkin, $checkout);
     }
     public function releaseRoomSelectionLock(int $roomId, string $checkin, string $checkout): bool
     {
@@ -460,7 +478,13 @@ final class ClockReservationProvider implements ReservationProviderInterface
                 'redirect_url' => '',
             ];
         }
-        $roomItemsPreview = $this->quote->buildCheckoutRoomItems(new QuoteRequest($context, $couponCode, $guestForm, true));
+        $roomItemsPreview = \MustHotelBooking\Frontend\get_or_create_booking_quote_room_items(
+            $context,
+            $couponCode,
+            $guestForm,
+            true,
+            'confirmation'
+        );
         if (!empty($roomItemsPreview['errors'])) {
             return [
                 'success' => false,
@@ -545,10 +569,26 @@ final class ClockReservationProvider implements ReservationProviderInterface
         if (!empty($validationErrors)) {
             return $this->errorResult($validationErrors);
         }
-        $roomItemsPreview = $this->quote->buildCheckoutRoomItems(new QuoteRequest($context, $couponCode, $guestForm, true));
-        if (!empty($roomItemsPreview['errors'])) {
-            return $this->errorResult((array) $roomItemsPreview['errors']);
+        $selectedRooms = \MustHotelBooking\Frontend\get_booking_selected_rooms();
+        $flowData = \MustHotelBooking\Frontend\get_booking_selection_flow_data();
+        $quoteDraft = isset($flowData['quote_draft']) && \is_array($flowData['quote_draft'])
+            ? $flowData['quote_draft']
+            : [];
+        if (!BookingQuoteDraft::isValidFor($quoteDraft, $context, $selectedRooms, $couponCode, $guestForm)) {
+            $reason = BookingQuoteDraft::validationFailureReason($quoteDraft, $context, $selectedRooms, $couponCode, $guestForm);
+            $message = $reason === 'expired'
+                ? \__('Your booking quote expired. Return to checkout to refresh availability and pricing before trying again. No reservation or payment was created.', 'must-hotel-booking')
+                : \__('Your saved booking quote is missing, changed, or could not be verified. Return to checkout and review a fresh quote. No reservation or payment was created.', 'must-hotel-booking');
+            return $this->errorResult([$message]);
         }
+        $quoteDraft = BookingQuoteDraft::normalize($quoteDraft);
+        $context['checkin'] = (string) ($quoteDraft['checkin'] ?? '');
+        $context['checkout'] = (string) ($quoteDraft['checkout'] ?? '');
+        $context['guests'] = (int) ($quoteDraft['guests'] ?? 1);
+        $context['room_count'] = (int) ($quoteDraft['room_count'] ?? \count($selectedRoomIds));
+        $context['accommodation_type'] = (string) ($quoteDraft['accommodation_type'] ?? '');
+        $couponCode = (string) ($quoteDraft['coupon_code'] ?? '');
+        $roomItemsPreview = BookingQuoteDraft::roomItems($quoteDraft);
         $roomGuestCounts = isset($roomItemsPreview['room_guest_counts']) && \is_array($roomItemsPreview['room_guest_counts'])
             ? $roomItemsPreview['room_guest_counts']
             : [];
@@ -558,13 +598,13 @@ final class ClockReservationProvider implements ReservationProviderInterface
             $roomId = (int) $roomId;
             $ratePlanId = isset($selectedRatePlanMap[$roomId]) ? (int) $selectedRatePlanMap[$roomId] : 0;
             $selection = $this->roomSelection->resolve($roomId);
-            if (!$this->ensureRoomLock($roomId, (string) $context['checkin'], (string) $context['checkout'])) {
+            if (!$this->ensureLocalRoomLock($roomId, (string) $context['checkin'], (string) $context['checkout'])) {
                 return $this->errorResult([\__('One of your selected room locks has expired. Please return to accommodation and confirm your selection again.', 'must-hotel-booking')]);
             }
-            if (!$this->availability->checkAvailability($roomId, (string) $context['checkin'], (string) $context['checkout'], LockEngine::getOrCreateSessionId())) {
-                return $this->errorResult([\__('One of your selected rooms is no longer available in Clock for the selected dates.', 'must-hotel-booking')]);
+            if (!$this->availability->checkAvailabilityFresh($roomId, (string) $context['checkin'], (string) $context['checkout'], LockEngine::getOrCreateSessionId())) {
+                return $this->errorResult([\__('One of your selected rooms is no longer available. Return to checkout and choose an available room. No reservation or payment was created.', 'must-hotel-booking')]);
             }
-            $pricing = $this->quote->calculateTotal(
+            $pricing = $this->quote->calculateTotalFresh(
                 $roomId,
                 (string) $context['checkin'],
                 (string) $context['checkout'],
@@ -574,6 +614,12 @@ final class ClockReservationProvider implements ReservationProviderInterface
             );
             if (empty($pricing['success']) || !isset($pricing['total_price'])) {
                 return $this->errorResult([\__('Unable to calculate final Clock booking total for one of the selected rooms.', 'must-hotel-booking')]);
+            }
+            if (!BookingQuoteDraft::pricingMatches($quoteDraft, $roomId, $ratePlanId, $pricing)) {
+                return $this->errorResult([\__('The price changed since you reviewed the booking. Return to checkout to review the latest total before continuing. No reservation or payment was created.', 'must-hotel-booking')]);
+            }
+            if (!BookingQuoteDraft::guaranteePolicyMatches($quoteDraft, $roomId, $pricing)) {
+                return $this->errorResult([\__('The payment or guarantee terms changed since you reviewed the booking. Return to checkout to review the latest terms. No reservation or payment was created.', 'must-hotel-booking')]);
             }
             /*
              * Online Stripe/PokPay reservations require a verified Clock guarantee

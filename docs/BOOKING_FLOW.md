@@ -20,6 +20,15 @@ Managed pages are configured in `src/Core/ManagedPages.php` and installed/synced
 6. Confirmation/payment creates reservations through `ReservationEngine::createReservations()` or provider-backed equivalents.
 7. Reservation rows get a generated `booking_id`, guest ID, room/listing ID, optional assigned inventory room, status, payment status, and pricing data.
 
+## Server-Side Quote Draft
+- Checkout stores a signed quote draft inside the visitor's booking-selection transient, which is bound to the unpredictable lock-session cookie.
+- The draft includes a random token, room/accommodation IDs, dates, room count, guest composition, selected rates, availability, price/tax/fee, guarantee/cancellation policy snapshots, creation/expiry times, and current flow step.
+- Refresh and back navigation normally restore this draft without repeating Clock availability, product-price, and guarantee-policy reads.
+- Changing dates, occupancy, coupon, selected room/rate, guest allocation, expiry, or any signed value invalidates the draft and requires a refreshed quote.
+- The current public form has total guests only, so its normalized composition is all adults with zero children/child ages until separate child fields are introduced.
+- Final Clock reservation submission validates the server draft, restores trusted context from it, then performs fresh uncached availability, pricing, and guarantee-policy reads.
+- Changed room availability, total/currency, or guarantee policy stops before guest persistence, Clock reservation creation, or payment creation and sends the guest back to review a fresh quote.
+
 ## Room/Date/Guest Selection
 - Public flow code lives in `src/Frontend/booking-page.php`, `src/Frontend/accommodation-page.php`, `src/Frontend/checkout-page.php`, and `src/Frontend/confirmation-page.php`.
 - Templates live in `frontend/templates/booking.php`, `booking-accommodation.php`, `checkout.php`, and `booking-confirmation.php`.
@@ -103,6 +112,7 @@ Managed pages are configured in `src/Core/ManagedPages.php` and installed/synced
 - Do not confirm unpaid online bookings without verified gateway/provider logic.
 - Do not release availability except through cancellation, expiration, payment failure, or existing non-blocking status transitions.
 - Keep business logic in engines/providers/repositories, not templates.
+- Intermediate quote display may use a 45-second Clock read cache; final pre-reservation availability, price, and guarantee-policy validation must always bypass request-local and persistent caches.
 
 ## Targeted Search Recipes
 ```bash

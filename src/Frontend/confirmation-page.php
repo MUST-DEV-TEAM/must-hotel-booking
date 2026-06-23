@@ -1,5 +1,6 @@
 <?php
 namespace MustHotelBooking\Frontend;
+use MustHotelBooking\Core\BookingPerformanceMonitor;
 use MustHotelBooking\Core\ManagedPages;
 use MustHotelBooking\Core\MustBookingConfig;
 use MustHotelBooking\Core\ReservationStatus;
@@ -484,7 +485,12 @@ function get_pending_confirmation_page_view_data(): array
         : 0;
     $flow_data = get_booking_selection_flow_data();
     $pending_payment = PaymentEngine::normalizePendingPaymentFlowData($flow_data['pending_payment'] ?? []);
-    $context = BookingValidationEngine::parseRequestContext($selection_context, true);
+    $context = BookingPerformanceMonitor::measure(
+        'booking_validation',
+        static function () use ($selection_context): array {
+            return BookingValidationEngine::parseRequestContext($selection_context, true);
+        }
+    );
     $selected_room_ids = get_booking_selected_room_ids();
     $stored_guest_form_source = isset($flow_data['guest_form']) && \is_array($flow_data['guest_form']) ? $flow_data['guest_form'] : [];
     $guest_form = BookingValidationEngine::getCheckoutGuestFormValues($stored_guest_form_source);
@@ -494,9 +500,20 @@ function get_pending_confirmation_page_view_data(): array
         $request_method === 'POST' && \is_array($_POST) ? $_POST : $billing_seed,
         $billing_seed
     );
-    $payment_method = PaymentEngine::getSelectedCheckoutPaymentMethod($request_source, $flow_data);
-    $payment_methods = PaymentEngine::getCheckoutPaymentMethods();
-    $confirmation_cta_label = PaymentEngine::getCheckoutPaymentCtaLabel($payment_method);
+    $payment_state = BookingPerformanceMonitor::measure(
+        'payment_provider_initialization',
+        static function () use ($request_source, $flow_data): array {
+            $method = PaymentEngine::getSelectedCheckoutPaymentMethod($request_source, $flow_data);
+            return [
+                'method' => $method,
+                'methods' => PaymentEngine::getCheckoutPaymentMethods(),
+                'cta' => PaymentEngine::getCheckoutPaymentCtaLabel($method),
+            ];
+        }
+    );
+    $payment_method = (string) $payment_state['method'];
+    $payment_methods = (array) $payment_state['methods'];
+    $confirmation_cta_label = (string) $payment_state['cta'];
     $request_action = isset($request_source['must_confirmation_action']) ? \sanitize_key((string) \wp_unslash($request_source['must_confirmation_action'])) : '';
     $submitted_coupon_code = isset($request_source['coupon_code']) ? \sanitize_text_field((string) \wp_unslash($request_source['coupon_code'])) : '';
     $persisted_coupon_code = isset($request_source['applied_coupon_code']) ? \sanitize_text_field((string) \wp_unslash($request_source['applied_coupon_code'])) : '';
@@ -551,6 +568,9 @@ function get_pending_confirmation_page_view_data(): array
         foreach ((array) $room_items['errors'] as $room_item_error) {
             $messages[] = (string) $room_item_error;
         }
+    }
+    if (!empty($room_items['quote_notice'])) {
+        $messages[] = (string) $room_items['quote_notice'];
     }
     if ($request_method === 'GET' && !empty($context['is_valid'])) {
         BookingAbuseProtection::markConfirmationStepStarted($context);
@@ -818,7 +838,7 @@ function get_pending_confirmation_page_view_data(): array
  *
  * @return array<string, mixed>
  */
-function get_confirmation_page_view_data(): array
+function build_confirmation_page_view_data(): array
 {
     $cancellationResult = handle_confirmation_cancellation_request();
     $reservation_ids = !empty($cancellationResult['reservation_ids'])
@@ -966,6 +986,18 @@ function get_confirmation_page_view_data(): array
         return get_pending_confirmation_page_view_data();
     }
     return get_pending_confirmation_page_view_data();
+}
+/**
+ * @return array<string, mixed>
+ */
+function get_confirmation_page_view_data(): array
+{
+    return BookingPerformanceMonitor::measure(
+        'confirmation_controller',
+        static function (): array {
+            return build_confirmation_page_view_data();
+        }
+    );
 }
 /**
  * Enqueue shared booking-process styles for confirmation.

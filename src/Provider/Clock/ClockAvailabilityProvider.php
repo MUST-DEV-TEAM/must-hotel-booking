@@ -223,6 +223,22 @@ public function getDisabledDates(DisabledDatesRequest $request): array
 }
     public function checkAvailability(int $roomId, string $checkin, string $checkout, string $excludeSessionId = ''): bool
     {
+        return $this->checkAvailabilityWithCacheMode($roomId, $checkin, $checkout, $excludeSessionId, false);
+    }
+
+    public function checkAvailabilityFresh(int $roomId, string $checkin, string $checkout, string $excludeSessionId = ''): bool
+    {
+        return $this->checkAvailabilityWithCacheMode($roomId, $checkin, $checkout, $excludeSessionId, true);
+    }
+
+    private function checkAvailabilityWithCacheMode(
+        int $roomId,
+        string $checkin,
+        string $checkout,
+        string $excludeSessionId,
+        bool $bypassCache
+    ): bool
+    {
         if (!$this->isConfiguredForRatesAvailability() || !$this->isValidStay($checkin, $checkout)) {
             return false;
         }
@@ -240,7 +256,10 @@ public function getDisabledDates(DisabledDatesRequest $request): array
             $checkout,
             $rateIds,
             [(string) ($mapping['external_id'] ?? '')],
-            'clock.rates_availability.check'
+            $bypassCache
+                ? 'clock.rates_availability.final_revalidation'
+                : 'clock.rates_availability.check',
+            $bypassCache
         );
 
         if (!$response->isSuccess()) {
@@ -567,7 +586,14 @@ public function getDisabledDates(DisabledDatesRequest $request): array
      * @param array<int, string> $rateIds
      * @param array<int, string> $roomTypeIds
      */
-    private function ratesAvailabilityRequest(string $from, string $to, array $rateIds, array $roomTypeIds, string $operation): ClockApiResponse
+    private function ratesAvailabilityRequest(
+        string $from,
+        string $to,
+        array $rateIds,
+        array $roomTypeIds,
+        string $operation,
+        bool $bypassCache = false
+    ): ClockApiResponse
     {
         return $this->client->get(
             $this->ratesAvailabilityPathWithQuery($from, $to, $rateIds, $roomTypeIds),
@@ -576,6 +602,9 @@ public function getDisabledDates(DisabledDatesRequest $request): array
             [
                 'api_type' => 'pms_api',
                 'endpoint_name' => 'rates_availability',
+                'cache_ttl' => 45,
+                'timeout' => 8,
+                'bypass_cache' => $bypassCache,
             ]
         );
     }

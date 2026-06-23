@@ -4,6 +4,7 @@ namespace MustHotelBooking\Frontend;
 
 use MustHotelBooking\Core\BookingRules;
 use MustHotelBooking\Core\ManagedPages;
+use MustHotelBooking\Core\BookingPerformanceMonitor;
 use MustHotelBooking\Core\MustBookingConfig;
 use MustHotelBooking\Core\RoomCatalog;
 use MustHotelBooking\Core\RoomData;
@@ -475,7 +476,12 @@ function get_booking_results_room_view_data(array $room): ?array
  */
 function get_provider_booking_room_pricing(int $room_id, string $checkin, string $checkout, int $guests = 1): array
 {
-    return ProviderManager::active()->quote()->calculateTotal($room_id, $checkin, $checkout, $guests);
+    return BookingPerformanceMonitor::measure(
+        'pricing_calculation',
+        static function () use ($room_id, $checkin, $checkout, $guests): array {
+            return ProviderManager::active()->quote()->calculateTotal($room_id, $checkin, $checkout, $guests);
+        }
+    );
 }
 
 /**
@@ -528,7 +534,7 @@ function format_booking_results_selection_summary(string $accommodation_type, in
  *
  * @return array<string, mixed>
  */
-function get_booking_page_view_data(): array
+function build_booking_page_view_data(): array
 {
     $messages = [];
     $selection_error = maybe_process_booking_room_selection();
@@ -542,7 +548,12 @@ function get_booking_page_view_data(): array
     $requested_room_id = get_requested_booking_room_id($raw_get);
     $fixed_room = get_requested_booking_room_data($raw_get);
     $fixed_room_mode = \is_array($fixed_room);
-    $context = BookingValidationEngine::parseRequestContext($raw_get, false);
+    $context = BookingPerformanceMonitor::measure(
+        'booking_validation',
+        static function () use ($raw_get): array {
+            return BookingValidationEngine::parseRequestContext($raw_get, false);
+        }
+    );
 
     if ($requested_room_id > 0 && !$fixed_room_mode) {
         $messages[] = \__('The selected room could not be found.', 'must-hotel-booking');
@@ -635,6 +646,19 @@ function get_booking_page_view_data(): array
         'messages' => $messages,
         'rooms' => $rooms,
     ];
+}
+
+/**
+ * @return array<string, mixed>
+ */
+function get_booking_page_view_data(): array
+{
+    return BookingPerformanceMonitor::measure(
+        'booking_controller',
+        static function (): array {
+            return build_booking_page_view_data();
+        }
+    );
 }
 
 /**
@@ -752,8 +776,13 @@ function get_initial_booking_disabled_dates_payload(array $context, bool $fixed_
     $requested_checkin = (string) ($context['checkin'] ?? '');
 
     try {
-        $base_disabled_dates = ProviderManager::active()->availability()->getDisabledDates(
-            new DisabledDatesRequest('', $guests, $room_count, $room_id, $accommodation_type, $window_days)
+        $base_disabled_dates = BookingPerformanceMonitor::measure(
+            'availability_calculation',
+            static function () use ($guests, $room_count, $room_id, $accommodation_type, $window_days): array {
+                return ProviderManager::active()->availability()->getDisabledDates(
+                    new DisabledDatesRequest('', $guests, $room_count, $room_id, $accommodation_type, $window_days)
+                );
+            }
         );
     } catch (\Throwable $throwable) {
         return [
@@ -786,8 +815,13 @@ function get_initial_booking_disabled_dates_payload(array $context, bool $fixed_
 
     if ($selected_checkin !== '') {
         try {
-            $checkout_disabled_dates = ProviderManager::active()->availability()->getDisabledDates(
-                new DisabledDatesRequest($selected_checkin, $guests, $room_count, $room_id, $accommodation_type, $window_days)
+            $checkout_disabled_dates = BookingPerformanceMonitor::measure(
+                'availability_calculation',
+                static function () use ($selected_checkin, $guests, $room_count, $room_id, $accommodation_type, $window_days): array {
+                    return ProviderManager::active()->availability()->getDisabledDates(
+                        new DisabledDatesRequest($selected_checkin, $guests, $room_count, $room_id, $accommodation_type, $window_days)
+                    );
+                }
             );
 
             $disabled_checkout_dates = isset($checkout_disabled_dates['disabled_checkout_dates']) && \is_array($checkout_disabled_dates['disabled_checkout_dates'])
@@ -826,7 +860,12 @@ function enqueue_booking_page_assets(): void
     $raw_get = \is_array($_GET) ? $_GET : [];
     $fixed_room = get_requested_booking_room_data($raw_get);
     $fixed_room_mode = \is_array($fixed_room);
-    $context = BookingValidationEngine::parseRequestContext($raw_get, false);
+    $context = BookingPerformanceMonitor::measure(
+        'booking_validation',
+        static function () use ($raw_get): array {
+            return BookingValidationEngine::parseRequestContext($raw_get, false);
+        }
+    );
 
     if ($fixed_room_mode) {
         $context = apply_fixed_room_booking_context($context, $fixed_room);

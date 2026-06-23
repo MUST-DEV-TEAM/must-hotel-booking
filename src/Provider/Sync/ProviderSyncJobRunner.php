@@ -13,6 +13,8 @@ use MustHotelBooking\Provider\Storage\ProviderSyncJobRepository;
 final class ProviderSyncJobRunner
 {
     private const CRON_HOOK = 'must_hotel_booking_process_provider_sync_jobs';
+    private const CRON_LOCK_KEY = 'must_hotel_booking_provider_sync_worker_lock';
+    private const CRON_LOCK_TTL_SECONDS = 300;
 
     /** @var ProviderSyncJobRepository */
     private $jobs;
@@ -70,7 +72,24 @@ final class ProviderSyncJobRunner
 
     public static function runCron(): void
     {
-        (new self())->runDueJobs(10);
+        /*
+         * Keep each WP-Cron request bounded. One Clock read normally takes
+         * hundreds of milliseconds; draining ten sequentially can starve the
+         * PHP-FPM pool and delay public checkout requests.
+         */
+        $lockToken = self::acquireCronLock();
+
+        if ($lockToken === '') {
+            return;
+        }
+
+        try {
+            $runner = new self();
+            $runner->runDueJobs(1);
+            $runner->scheduleFollowUpIfDue();
+        } finally {
+            self::releaseCronLock($lockToken);
+        }
     }
 
     public static function registerHooks(): void
@@ -142,6 +161,43 @@ final class ProviderSyncJobRunner
         }
 
         return $summary;
+    }
+
+    private function scheduleFollowUpIfDue(): void
+    {
+        if (empty($this->jobs->getDueJobs(1)) || !\function_exists('wp_schedule_single_event')) {
+            return;
+        }
+
+        \wp_schedule_single_event(\time() + 60, self::CRON_HOOK);
+    }
+
+    private static function acquireCronLock(): string
+    {
+        $now = \time();
+        $token = $now . ':' . (\function_exists('wp_generate_uuid4') ? \wp_generate_uuid4() : \uniqid('mhb_', true));
+
+        if (\add_option(self::CRON_LOCK_KEY, $token, '', false)) {
+            return $token;
+        }
+
+        $existing = (string) \get_option(self::CRON_LOCK_KEY, '');
+        $createdAt = (int) \strtok($existing, ':');
+
+        if ($createdAt > 0 && $createdAt > ($now - self::CRON_LOCK_TTL_SECONDS)) {
+            return '';
+        }
+
+        \delete_option(self::CRON_LOCK_KEY);
+
+        return \add_option(self::CRON_LOCK_KEY, $token, '', false) ? $token : '';
+    }
+
+    private static function releaseCronLock(string $token): void
+    {
+        if ($token !== '' && \hash_equals($token, (string) \get_option(self::CRON_LOCK_KEY, ''))) {
+            \delete_option(self::CRON_LOCK_KEY);
+        }
     }
 
     /**

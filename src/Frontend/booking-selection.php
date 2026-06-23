@@ -3,9 +3,12 @@
 namespace MustHotelBooking\Frontend;
 
 use MustHotelBooking\Core\BookingRules;
+use MustHotelBooking\Core\BookingPerformanceMonitor;
 use MustHotelBooking\Core\RoomViewBuilder;
+use MustHotelBooking\Engine\BookingQuoteDraft;
 use MustHotelBooking\Engine\LockEngine;
 use MustHotelBooking\Engine\PaymentEngine;
+use MustHotelBooking\Provider\Dto\QuoteRequest;
 use MustHotelBooking\Provider\ProviderManager;
 
 /**
@@ -44,6 +47,7 @@ function get_empty_booking_selection(): array
             'coupon_code' => '',
             'payment_method' => '',
             'pending_payment' => PaymentEngine::getEmptyPendingPaymentFlowData(),
+            'quote_draft' => [],
             'booking_mode' => '',
             'fixed_room_id' => 0,
             'anti_abuse_context_hash' => '',
@@ -68,6 +72,7 @@ function normalize_booking_selection_flow_data($flow_data): array
             'coupon_code' => '',
             'payment_method' => '',
             'pending_payment' => PaymentEngine::getEmptyPendingPaymentFlowData(),
+            'quote_draft' => [],
             'booking_mode' => '',
             'fixed_room_id' => 0,
             'anti_abuse_context_hash' => '',
@@ -98,6 +103,7 @@ function normalize_booking_selection_flow_data($flow_data): array
             ? \sanitize_key((string) $flow_data['payment_method'])
             : '',
         'pending_payment' => PaymentEngine::normalizePendingPaymentFlowData($flow_data['pending_payment'] ?? []),
+        'quote_draft' => BookingQuoteDraft::normalize($flow_data['quote_draft'] ?? []),
         'booking_mode' => $booking_mode,
         'fixed_room_id' => isset($flow_data['fixed_room_id'])
             ? \absint($flow_data['fixed_room_id'])
@@ -249,7 +255,12 @@ function get_booking_selected_room_rate_plan_id(int $room_id): int
  */
 function get_booking_selection(): array
 {
-    $selection = \get_transient(get_booking_selection_transient_key());
+    $selection = BookingPerformanceMonitor::measure(
+        'booking_draft_load',
+        static function () {
+            return \get_transient(get_booking_selection_transient_key());
+        }
+    );
     $defaults = get_empty_booking_selection();
 
     if (!\is_array($selection)) {
@@ -284,10 +295,15 @@ function save_booking_selection(array $selection): void
         'flow_data' => normalize_booking_selection_flow_data($selection['flow_data'] ?? []),
     ];
 
-    \set_transient(
-        get_booking_selection_transient_key(),
-        $normalized,
-        \defined('DAY_IN_SECONDS') ? DAY_IN_SECONDS : 86400
+    BookingPerformanceMonitor::measure(
+        'booking_draft_save',
+        static function () use ($normalized): void {
+            \set_transient(
+                get_booking_selection_transient_key(),
+                $normalized,
+                \defined('DAY_IN_SECONDS') ? DAY_IN_SECONDS : 86400
+            );
+        }
     );
 }
 
@@ -408,6 +424,99 @@ function update_booking_selection_flow_data(array $flow_data): array
 }
 
 /**
+ * Return a valid local quote draft or build and store a fresh provider quote.
+ *
+ * @param array<string, mixed> $context
+ * @param array<string, mixed> $guest_form
+ * @return array<string, mixed>
+ */
+function get_or_create_booking_quote_room_items(
+    array $context,
+    string $coupon_code = '',
+    array $guest_form = [],
+    bool $strict_room_guests = false,
+    string $step = 'checkout'
+): array {
+    $flow_data = get_booking_selection_flow_data();
+    $stored_draft = isset($flow_data['quote_draft']) && \is_array($flow_data['quote_draft'])
+        ? $flow_data['quote_draft']
+        : [];
+    $selected_rooms = get_booking_selected_rooms();
+
+    if (BookingQuoteDraft::isValidFor($stored_draft, $context, $selected_rooms, $coupon_code, $guest_form)) {
+        $stored_draft = BookingQuoteDraft::withStep($stored_draft, $step);
+        update_booking_selection_flow_data(['quote_draft' => $stored_draft]);
+        BookingPerformanceMonitor::recordCache('booking_quote', true);
+        $cached = BookingQuoteDraft::roomItems($stored_draft);
+        $cached['quote_notice'] = '';
+
+        return $cached;
+    }
+
+    $failure_reason = BookingQuoteDraft::validationFailureReason(
+        $stored_draft,
+        $context,
+        $selected_rooms,
+        $coupon_code,
+        $guest_form
+    );
+    BookingPerformanceMonitor::recordCache('booking_quote', false);
+    BookingPerformanceMonitor::setMetadata('booking_quote_refresh_reason', $failure_reason);
+    $previous_summary = isset($stored_draft['pricing_snapshot']['summary']) && \is_array($stored_draft['pricing_snapshot']['summary'])
+        ? $stored_draft['pricing_snapshot']['summary']
+        : [];
+    $room_items = BookingPerformanceMonitor::measure(
+        'pricing_calculation',
+        static function () use ($context, $coupon_code, $guest_form, $strict_room_guests): array {
+            return ProviderManager::active()->quote()->buildCheckoutRoomItems(
+                new QuoteRequest($context, $coupon_code, $guest_form, $strict_room_guests)
+            );
+        }
+    );
+
+    if (!empty($room_items['errors'])) {
+        return $room_items;
+    }
+
+    $draft = BookingQuoteDraft::create(
+        $context,
+        $selected_rooms,
+        $room_items,
+        $coupon_code,
+        $guest_form,
+        $step
+    );
+    update_booking_selection_flow_data(['quote_draft' => $draft]);
+    $room_items['quote_token'] = (string) ($draft['token'] ?? '');
+    $room_items['quote_expires_at'] = (int) ($draft['expires_at'] ?? 0);
+    $room_items['quote_cache'] = 'miss';
+    $old_total = (float) ($previous_summary['total_price'] ?? 0.0);
+    $new_total = (float) ($room_items['summary']['total_price'] ?? 0.0);
+    $price_changed = $old_total > 0.0 && \abs($old_total - $new_total) >= 0.01;
+
+    if ($price_changed) {
+        $room_items['quote_notice'] = \__(
+            'Availability or pricing changed while you were booking. The latest total is shown below; please review it before continuing.',
+            'must-hotel-booking'
+        );
+    } elseif ($failure_reason === 'expired') {
+        $room_items['quote_notice'] = \__(
+            'Your booking quote expired and was refreshed with the latest availability and pricing.',
+            'must-hotel-booking'
+        );
+    } elseif ($failure_reason === 'tampered') {
+        $room_items['quote_notice'] = \__(
+            'The saved booking quote could not be verified and was safely refreshed.',
+            'must-hotel-booking'
+        );
+    } else {
+        $room_items['quote_notice'] = '';
+    }
+
+    return $room_items;
+}
+
+/**
  * Get selected room ids for the current visitor.
  *
  * @return array<int, int>
@@ -455,6 +564,7 @@ function add_room_to_booking_selection(int $room_id, array $context, int $rate_p
         if ((int) ($selected_room['room_id'] ?? 0) === $room_id) {
             $selected_rooms[$index]['rate_plan_id'] = $rate_plan_id;
             $selection['selected_rooms'] = $selected_rooms;
+            $selection['flow_data']['quote_draft'] = [];
             save_booking_selection($selection);
 
             return true;
@@ -466,6 +576,7 @@ function add_room_to_booking_selection(int $room_id, array $context, int $rate_p
         'rate_plan_id' => $rate_plan_id,
         'added_at' => \current_time('mysql'),
     ];
+    $selection['flow_data']['quote_draft'] = [];
 
     save_booking_selection($selection);
 
@@ -503,6 +614,7 @@ function remove_room_from_booking_selection(int $room_id): bool
     }
 
     $selection['selected_rooms'] = $updated_rooms;
+    $selection['flow_data']['quote_draft'] = [];
     save_booking_selection($selection);
 
     if (

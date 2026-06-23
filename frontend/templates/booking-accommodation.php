@@ -4,6 +4,7 @@ if (!\defined('ABSPATH')) {
     exit;
 }
 
+$must_accommodation_template_span = \MustHotelBooking\Core\BookingPerformanceMonitor::startSpan('template_render');
 $view = \must_hotel_booking\get_accommodation_page_view_data();
 $messages = isset($view['messages']) && \is_array($view['messages']) ? $view['messages'] : [];
 $rooms = isset($view['rooms']) && \is_array($view['rooms']) ? $view['rooms'] : [];
@@ -543,3 +544,4 @@ $continue_label = \function_exists('\must_hotel_booking\get_accommodation_contin
     </div>
 </main>
 <?php \get_footer(); ?>
+<?php \MustHotelBooking\Core\BookingPerformanceMonitor::stopSpan($must_accommodation_template_span); ?>

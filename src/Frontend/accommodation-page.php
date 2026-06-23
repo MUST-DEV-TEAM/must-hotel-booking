@@ -2,6 +2,7 @@
 
 namespace MustHotelBooking\Frontend;
 
+use MustHotelBooking\Core\BookingPerformanceMonitor;
 use MustHotelBooking\Engine\AvailabilityEngine;
 use MustHotelBooking\Engine\BookingValidationEngine;
 use MustHotelBooking\Provider\Dto\AvailabilitySearchRequest;
@@ -125,8 +126,13 @@ function get_accommodation_room_selection_state(array $context, array $messages 
  */
 function get_provider_available_accommodation_rooms(string $checkin, string $checkout, int $guests = 1, string $category = 'standard-rooms'): array
 {
-    return ProviderManager::active()->availability()->getAvailableRooms(
-        new AvailabilitySearchRequest($checkin, $checkout, $guests, $category)
+    return BookingPerformanceMonitor::measure(
+        'availability_calculation',
+        static function () use ($checkin, $checkout, $guests, $category): array {
+            return ProviderManager::active()->availability()->getAvailableRooms(
+                new AvailabilitySearchRequest($checkin, $checkout, $guests, $category)
+            );
+        }
     );
 }
 
@@ -137,7 +143,12 @@ function get_provider_available_accommodation_rooms(string $checkin, string $che
  */
 function get_provider_accommodation_room_pricing(int $room_id, string $checkin, string $checkout, int $guests = 1, string $coupon_code = '', int $rate_plan_id = 0): array
 {
-    return ProviderManager::active()->quote()->calculateTotal($room_id, $checkin, $checkout, $guests, $coupon_code, $rate_plan_id);
+    return BookingPerformanceMonitor::measure(
+        'pricing_calculation',
+        static function () use ($room_id, $checkin, $checkout, $guests, $coupon_code, $rate_plan_id): array {
+            return ProviderManager::active()->quote()->calculateTotal($room_id, $checkin, $checkout, $guests, $coupon_code, $rate_plan_id);
+        }
+    );
 }
 
 /**
@@ -263,12 +274,17 @@ function handle_accommodation_room_selection_ajax(): void
  *
  * @return array<string, mixed>
  */
-function get_accommodation_page_view_data(): array
+function build_accommodation_page_view_data(): array
 {
     $messages = maybe_process_accommodation_room_selection();
     /** @var array<string, mixed> $raw_get */
     $raw_get = \is_array($_GET) ? $_GET : [];
-    $context = BookingValidationEngine::parseRequestContext($raw_get, false);
+    $context = BookingPerformanceMonitor::measure(
+        'booking_validation',
+        static function () use ($raw_get): array {
+            return BookingValidationEngine::parseRequestContext($raw_get, false);
+        }
+    );
     $selection = get_booking_selection();
     $selection_context = normalize_booking_selection_context($selection['context'] ?? []);
     $was_fixed_room_flow = \function_exists(__NAMESPACE__ . '\is_fixed_room_booking_flow') && is_fixed_room_booking_flow();
@@ -471,6 +487,19 @@ function get_accommodation_page_view_data(): array
         'checkout_url' => $has_context ? get_checkout_context_url($context) : get_checkout_page_url(),
         'accommodation_url' => $has_context ? get_booking_accommodation_context_url($context) : get_booking_accommodation_page_url(),
     ];
+}
+
+/**
+ * @return array<string, mixed>
+ */
+function get_accommodation_page_view_data(): array
+{
+    return BookingPerformanceMonitor::measure(
+        'accommodation_controller',
+        static function (): array {
+            return build_accommodation_page_view_data();
+        }
+    );
 }
 
 /**

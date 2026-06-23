@@ -4,6 +4,7 @@ if (!\defined('ABSPATH')) {
     exit;
 }
 
+$must_checkout_template_span = \MustHotelBooking\Core\BookingPerformanceMonitor::startSpan('template_render');
 $view = \must_hotel_booking\get_checkout_page_view_data();
 $messages = isset($view['messages']) && \is_array($view['messages']) ? $view['messages'] : [];
 $is_valid_context = !empty($view['is_valid_context']);
@@ -620,3 +621,4 @@ $format_display_date = static function (string $date): string {
     </div>
 </main>
 <?php \get_footer(); ?>
+<?php \MustHotelBooking\Core\BookingPerformanceMonitor::stopSpan($must_checkout_template_span); ?>

@@ -1,5 +1,15 @@
 # Task Log
 
+## 2026-06-23 - Live booking-flow performance fix prepared for deployment
+- Status: BLOCKED pending manual deployment and live timing verification.
+- Root cause: The temporary live site measured about 5.85-6.32 seconds for booking and 10.52 seconds for checkout. Checkout made foreground Clock availability, product-price, and guarantee-policy reads while WP-Cron processed 12 sequential reservation refresh jobs.
+- Changed: Added bounded booking performance instrumentation, signed session-bound quote drafts, intermediate Clock read deduplication/45-second caching, strict final cache bypass, fresh availability/price/guarantee comparison, controlled stale-quote errors, queue-only auto-sync, one-job provider worker slices, atomic expiring cron locks, and safe defaults of batch `1` every `60` minutes for new installs.
+- Safety: Final reservation submission restores booking inputs from the verified server draft and stops before guest persistence, Clock reservation creation, or payment creation when the draft is expired/tampered, availability changed, total/currency changed, or guarantee terms changed.
+- Database: No schema changes or indexes.
+- Checks: PHP lint passed for all 29 changed PHP files. All 17 standalone PHP tests passed, including new quote, final revalidation cache, final reservation safety, cron safety, payment/refund, Clock accounting, rate-limit, inbound sync, and amendment tests.
+- Environment limitation: The local WordPress database was unavailable, so browser/local HTTP flow and after-change response timings were not run. No live reservation, payment, refund, cancellation, provider write, deployment, commit, push, tag, or release was performed.
+- Rollback: Restore plugin `0.4.83`; no database rollback is required. Quote transients expire automatically. Existing saved auto-sync settings are not changed by the code update.
+
 ## 2026-06-19 - Clock cancellation-fee accounting design boundary
 - Phase status: RESEARCH COMPLETE; no production code, tests, database schema, or provider writes changed.
 - Files changed: `docs/CLOCK_CANCELLATION_FEE_ACCOUNTING_DESIGN.md`, `docs/DECISIONS.md`, `docs/TASK_LOG.md`.

@@ -730,7 +730,13 @@ final class ReservationEngine
             ];
         }
 
-        $roomItemsPreview = PricingEngine::buildCheckoutRoomItems($context, $couponCode, $guestForm, true);
+        $roomItemsPreview = \MustHotelBooking\Frontend\get_or_create_booking_quote_room_items(
+            $context,
+            $couponCode,
+            $guestForm,
+            true,
+            'confirmation'
+        );
 
         if (!empty($roomItemsPreview['errors'])) {
             return [

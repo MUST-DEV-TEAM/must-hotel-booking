@@ -3,6 +3,7 @@
 namespace MustHotelBooking\Frontend;
 
 use MustHotelBooking\Core\ManagedPages;
+use MustHotelBooking\Core\BookingPerformanceMonitor;
 use MustHotelBooking\Engine\BookingValidationEngine;
 use MustHotelBooking\Engine\BookingAbuseProtection;
 use MustHotelBooking\Engine\CouponService;
@@ -96,7 +97,12 @@ function build_checkout_reservation_note(int $room_id, array $guest_form): strin
  */
 function get_checkout_room_data(int $room_id): ?array
 {
-    return ProviderManager::active()->reservations()->getCheckoutRoomData($room_id);
+    return BookingPerformanceMonitor::measure(
+        'accommodation_lookup',
+        static function () use ($room_id): ?array {
+            return ProviderManager::active()->reservations()->getCheckoutRoomData($room_id);
+        }
+    );
 }
 
 /**
@@ -126,7 +132,12 @@ function ensure_checkout_room_lock(int $room_id, string $checkin, string $checko
  */
 function ensure_checkout_room_locks(array $room_ids, string $checkin, string $checkout): bool
 {
-    return ProviderManager::active()->reservations()->ensureRoomLocks($room_ids, $checkin, $checkout);
+    return BookingPerformanceMonitor::measure(
+        'lock_acquisition',
+        static function () use ($room_ids, $checkin, $checkout): bool {
+            return ProviderManager::active()->reservations()->ensureRoomLocks($room_ids, $checkin, $checkout);
+        }
+    );
 }
 
 /**
@@ -181,8 +192,12 @@ function maybe_bootstrap_checkout_selection_from_request(array $source): array
  */
 function get_checkout_selected_room_items(array $context, string $coupon_code = '', array $guest_form = [], bool $strict_room_guests = false): array
 {
-    return ProviderManager::active()->quote()->buildCheckoutRoomItems(
-        new QuoteRequest($context, $coupon_code, $guest_form, $strict_room_guests)
+    return get_or_create_booking_quote_room_items(
+        $context,
+        $coupon_code,
+        $guest_form,
+        $strict_room_guests,
+        'checkout'
     );
 }
 
@@ -322,7 +337,7 @@ function maybe_process_checkout_submit(array $context, array $guest_form, string
  *
  * @return array<string, mixed>
  */
-function get_checkout_page_view_data(): array
+function build_checkout_page_view_data(): array
 {
     /** @var array<string, mixed> $request_source */
     $request_source = \is_array($_GET) ? $_GET : [];
@@ -345,7 +360,12 @@ function get_checkout_page_view_data(): array
     $fixed_room_id = $fixed_room_mode && \function_exists(__NAMESPACE__ . '\get_fixed_room_booking_room_id')
         ? get_fixed_room_booking_room_id()
         : 0;
-    $context = BookingValidationEngine::parseRequestContext($selection_context, true);
+    $context = BookingPerformanceMonitor::measure(
+        'booking_validation',
+        static function () use ($selection_context): array {
+            return BookingValidationEngine::parseRequestContext($selection_context, true);
+        }
+    );
     $selected_room_ids = get_booking_selected_room_ids();
     $request_action = isset($request_source['must_checkout_action']) ? \sanitize_key((string) \wp_unslash($request_source['must_checkout_action'])) : '';
     $submitted_coupon_code = isset($request_source['coupon_code']) ? \sanitize_text_field((string) \wp_unslash($request_source['coupon_code'])) : '';
@@ -413,6 +433,10 @@ function get_checkout_page_view_data(): array
         foreach ((array) $room_items['errors'] as $room_item_error) {
             $messages[] = (string) $room_item_error;
         }
+    }
+
+    if (!empty($room_items['quote_notice'])) {
+        $messages[] = (string) $room_items['quote_notice'];
     }
 
     if (!empty($room_items['room_guest_counts']) && \is_array($room_items['room_guest_counts'])) {
@@ -485,6 +509,19 @@ function get_checkout_page_view_data(): array
         'country_options' => get_checkout_country_options(),
         'phone_country_code_options' => get_checkout_phone_code_options(),
     ];
+}
+
+/**
+ * @return array<string, mixed>
+ */
+function get_checkout_page_view_data(): array
+{
+    return BookingPerformanceMonitor::measure(
+        'checkout_controller',
+        static function (): array {
+            return build_checkout_page_view_data();
+        }
+    );
 }
 
 /**

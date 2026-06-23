@@ -2,7 +2,7 @@
 /**
  * Plugin Name: MUST Hotel Booking
  * Description: Manage hotel accommodations, rooms, availability, reservations, pricing, checkout, and daily operations directly in WordPress.
- * Version: 0.4.83
+ * Version: 0.4.85
  * Author: MUST
  * Author URI: https://must.al/
  * Requires at least: 5.0
@@ -17,7 +17,7 @@ if (!\defined('ABSPATH')) {
     exit;
 }
 
-\define('MUST_HOTEL_BOOKING_VERSION', '0.4.83');
+\define('MUST_HOTEL_BOOKING_VERSION', '0.4.85');
 \define('MUST_HOTEL_BOOKING_FILE', __FILE__);
 \define('MUST_HOTEL_BOOKING_PATH', \plugin_dir_path(__FILE__));
 \define('MUST_HOTEL_BOOKING_URL', \plugin_dir_url(__FILE__));
@@ -53,6 +53,8 @@ if (!\defined('MUST_HOTEL_BOOKING_GITHUB_TOKEN')) {
 
 require_once MUST_HOTEL_BOOKING_PATH . 'includes/autoloader.php';
 require_once MUST_HOTEL_BOOKING_PATH . 'includes/config.php';
+
+\MustHotelBooking\Core\BookingPerformanceMonitor::bootstrap();
 
 \register_activation_hook(MUST_HOTEL_BOOKING_FILE, [\MustHotelBooking\Core\Plugin::class, 'activate']);
 \register_deactivation_hook(MUST_HOTEL_BOOKING_FILE, [\MustHotelBooking\Core\Plugin::class, 'deactivate']);

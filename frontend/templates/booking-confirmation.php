@@ -2,6 +2,7 @@
 if (!\defined('ABSPATH')) {
     exit;
 }
+$must_confirmation_template_span = \MustHotelBooking\Core\BookingPerformanceMonitor::startSpan('template_render');
 $view = \must_hotel_booking\get_confirmation_page_view_data();
 $success = !empty($view['success']);
 $is_form_mode = !empty($view['is_form_mode']);
@@ -760,3 +761,4 @@ $render_payment_method_icon = static function (string $payment_method_key, strin
     </div>
 </main>
 <?php \get_footer(); ?>
+<?php \MustHotelBooking\Core\BookingPerformanceMonitor::stopSpan($must_confirmation_template_span); ?>

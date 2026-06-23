@@ -1,5 +1,12 @@
 # Decisions
 
+## 2026-06-23 - Booking quote cache and final Clock revalidation boundary
+- Decision: Cache intermediate public Clock availability/product quote reads for at most 45 seconds, but explicitly bypass request-local and transient caches for final availability, price, and guarantee-policy validation immediately before reservation creation.
+- Reason: The temporary live site showed 5.85-6.32 second booking responses and a 10.52 second checkout response, with foreground Clock reads overlapping a 12-job reservation refresh batch. Reusing an intermediate cached response during final reservation validation would improve speed at the cost of oversell or stale-price risk.
+- Decision: Store a signed, expiring quote draft in the session-bound booking-selection transient and compare fresh final total/currency and guarantee policy against it. Any mismatch requires customer review and stops before provider/payment writes.
+- Decision: Clock auto-sync queues only; the provider worker runs one job per locked cron slice. New-install defaults are batch `1`, interval `60` minutes, while existing saved production settings remain unchanged.
+- Rollback: Restore plugin `0.4.83`. No schema rollback is required; quote transients expire and performance/lock options are safe to delete if needed.
+
 ## 2026-06-19 - Clock cancellation-fee accounting remains manual until fee ownership and cleanup prerequisites are durable
 - Decision: Keep retained cancellation-fee accounting in Clock as a manual-only workflow in MUST Hotel Booking.
 - Reason: The cached Clock collection documents generic charge-create and reread contracts, but the current plugin cannot prove that accommodation revenue is absent, cannot identify an existing fee row safely, and does not persist the charge-level ids, idempotency, or prerequisite confirmation required to prevent duplicate revenue.
