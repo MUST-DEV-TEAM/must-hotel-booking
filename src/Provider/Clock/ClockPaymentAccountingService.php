@@ -347,9 +347,9 @@ final class ClockPaymentAccountingService
         $balanceBefore = !empty($beforeResult['success']) && isset($beforeResult['balance'])
             ? \round((float) $beforeResult['balance'], 2)
             : null;
-        $expectedBalance = $balanceBefore !== null
-            ? \round($balanceBefore + $amount, 2)
-            : null;
+        $isDepositAccountingTarget = $direction === 'deposit'
+            || ($direction === 'refund' && !empty($beforeResult['deposit']));
+        $expectedBalance = $this->expectedRawBalance($balanceBefore, $amount, $isDepositAccountingTarget);
         $this->accounting->update($accountingId, [
             'clock_folio_id' => $folioId,
             'balance_before' => $balanceBefore,
@@ -385,9 +385,19 @@ final class ClockPaymentAccountingService
         $actualBalance = !empty($afterResult['success']) && isset($afterResult['balance'])
             ? \round((float) $afterResult['balance'], 2)
             : null;
-        $matchesExpected = $expectedBalance !== null
-            && $actualBalance !== null
-            && \abs($actualBalance - $expectedBalance) < 0.01;
+        $depositBalanceVerification = $this->verifyDepositFolioBalance(
+            $direction,
+            $amount,
+            $balanceBefore,
+            $actualBalance,
+            $beforeResult,
+            $afterResult
+        );
+        $matchesExpected = $depositBalanceVerification['applicable']
+            ? !empty($depositBalanceVerification['verified'])
+            : ($expectedBalance !== null
+                && $actualBalance !== null
+                && \abs($actualBalance - $expectedBalance) < 0.01);
         $standardIsolation = ['verified' => true, 'message' => '', 'after' => []];
         if ($direction === 'deposit') {
             $standardIsolation = $this->verifyStandardFolioIsolation(
@@ -398,14 +408,19 @@ final class ClockPaymentAccountingService
             );
         }
         $isolationVerified = !empty($standardIsolation['verified']);
-        $verificationStatus = $direction === 'deposit' && $isolationVerified
-            ? 'verified_deposit_isolated'
-            : ($matchesExpected ? 'verified_expected_balance' : 'balance_review_required');
-        $verificationMessage = !$isolationVerified
-            ? (string) ($standardIsolation['message'] ?? '')
-            : ($matchesExpected || $direction === 'deposit'
-                ? ''
-                : (string) ($afterResult['message'] ?? $beforeResult['message'] ?? \__('Clock folio balance could not be reconciled to the expected result.', 'must-hotel-booking')));
+        $creditItemConfirmed = (string) ($postResult['credit_item_id'] ?? '') !== '';
+        $verification = $this->accountingVerificationResult(
+            $direction,
+            $matchesExpected,
+            $isolationVerified,
+            $creditItemConfirmed,
+            $depositBalanceVerification,
+            (string) ($standardIsolation['message'] ?? ''),
+            (string) ($afterResult['message'] ?? $beforeResult['message'] ?? '')
+        );
+        $verificationStatus = $verification['status'];
+        $verificationMessage = $verification['message'];
+        $reconciliationStatus = !empty($verification['verified']) ? 'verified' : 'manual_review';
         $postedAt = $this->now();
         $this->accounting->update($accountingId, [
             'status' => 'posted',
@@ -415,8 +430,8 @@ final class ClockPaymentAccountingService
             'balance_before' => $balanceBefore,
             'expected_balance' => $expectedBalance,
             'actual_balance' => $actualBalance,
-            'reconciliation_status' => ($matchesExpected || ($direction === 'deposit' && $isolationVerified)) ? 'verified' : 'manual_review',
-            'last_error_code' => $isolationVerified ? '' : 'standard_folio_modified',
+            'reconciliation_status' => $reconciliationStatus,
+            'last_error_code' => !empty($verification['verified']) ? '' : $verificationStatus,
             'last_error' => $verificationMessage,
             'next_retry_at' => null,
             'posted_at' => $postedAt,
@@ -439,11 +454,194 @@ final class ClockPaymentAccountingService
                 'standard_folio_unchanged' => $isolationVerified,
                 'standard_folio_balances_before' => $standardBalancesBefore,
                 'standard_folio_balances_after' => $standardIsolation['after'] ?? [],
+                'deposit_balance_verification' => $depositBalanceVerification['diagnostics'] ?? [],
                 'updated_at' => $postedAt,
             ]);
         }
         return $this->result(true, false, 'posted', ['accounting_id' => $accountingId]);
     }
+    private function isDepositAccountingDirection(string $direction): bool
+    {
+        return \in_array($direction, ['deposit', 'refund'], true);
+    }
+
+    private function expectedRawBalance(?float $balanceBefore, float $amount, bool $depositAccountingTarget): ?float
+    {
+        if ($balanceBefore === null) {
+            return null;
+        }
+
+        return $depositAccountingTarget
+            ? \round($balanceBefore - $amount, 2)
+            : \round($balanceBefore + $amount, 2);
+    }
+
+    private function normalizedDepositHeld(float $rawBalance): float
+    {
+        return \round(\max(0.0, -$rawBalance), 2);
+    }
+
+    /**
+     * @param array<string, mixed> $beforeResult
+     * @param array<string, mixed> $afterResult
+     * @return array{applicable: bool, verified: bool, status: string, message: string, diagnostics: array<string, mixed>}
+     */
+    private function verifyDepositFolioBalance(
+        string $direction,
+        float $amount,
+        ?float $balanceBefore,
+        ?float $actualBalance,
+        array $beforeResult,
+        array $afterResult
+    ): array {
+        if (!$this->isDepositAccountingDirection($direction)) {
+            return [
+                'applicable' => false,
+                'verified' => false,
+                'status' => '',
+                'message' => '',
+                'diagnostics' => [],
+            ];
+        }
+        if ($direction === 'refund' && empty($beforeResult['deposit']) && empty($afterResult['deposit'])) {
+            return [
+                'applicable' => false,
+                'verified' => false,
+                'status' => '',
+                'message' => '',
+                'diagnostics' => [],
+            ];
+        }
+
+        $expectedRawBalance = $this->expectedRawBalance($balanceBefore, $amount, true);
+        $diagnostics = [
+            'clock_deposit_raw_balance_before' => $balanceBefore,
+            'clock_deposit_expected_raw_balance' => $expectedRawBalance,
+            'clock_deposit_raw_balance_after' => $actualBalance,
+            'expected_deposit_amount' => $balanceBefore !== null ? \round($this->normalizedDepositHeld($balanceBefore) + $amount, 2) : null,
+            'normalized_deposit_amount_held' => $actualBalance !== null ? $this->normalizedDepositHeld($actualBalance) : null,
+            'folio_deposit_before' => !empty($beforeResult['deposit']),
+            'folio_deposit_after' => !empty($afterResult['deposit']),
+            'folio_postable_before' => !empty($beforeResult['postable']),
+            'folio_postable_after' => !empty($afterResult['postable']),
+        ];
+
+        if (empty($beforeResult['success']) || empty($afterResult['success']) || $balanceBefore === null || $actualBalance === null || $expectedRawBalance === null) {
+            return [
+                'applicable' => true,
+                'verified' => false,
+                'status' => 'manual_review_deposit_balance_mismatch',
+                'message' => \__('Clock deposit folio balance could not be read before and after posting. Manual accounting review is required.', 'must-hotel-booking'),
+                'diagnostics' => $diagnostics,
+            ];
+        }
+
+        if (empty($beforeResult['deposit']) || empty($afterResult['deposit'])) {
+            return [
+                'applicable' => true,
+                'verified' => false,
+                'status' => 'manual_review_deposit_folio_invalid',
+                'message' => \__('Clock did not confirm the accounting target as a deposit folio before and after posting. Manual accounting review is required.', 'must-hotel-booking'),
+                'diagnostics' => $diagnostics,
+            ];
+        }
+
+        $expectedDepositHeld = (float) $diagnostics['expected_deposit_amount'];
+        $actualDepositHeld = (float) $diagnostics['normalized_deposit_amount_held'];
+
+        if ($expectedDepositHeld < -0.005 || $actualBalance > 0.005) {
+            return [
+                'applicable' => true,
+                'verified' => false,
+                'status' => 'manual_review_deposit_balance_mismatch',
+                'message' => \__('Clock returned an unsupported deposit-folio balance sign for the website accounting entry. Manual accounting review is required.', 'must-hotel-booking'),
+                'diagnostics' => $diagnostics,
+            ];
+        }
+
+        if (\abs($actualBalance - $expectedRawBalance) >= 0.01 || \abs($actualDepositHeld - $expectedDepositHeld) >= 0.01) {
+            return [
+                'applicable' => true,
+                'verified' => false,
+                'status' => 'manual_review_deposit_balance_mismatch',
+                'message' => \__('Clock deposit folio balance did not match the expected signed raw balance and normalized deposit amount. Manual accounting review is required.', 'must-hotel-booking'),
+                'diagnostics' => $diagnostics,
+            ];
+        }
+
+        return [
+            'applicable' => true,
+            'verified' => true,
+            'status' => 'verified_deposit_balance',
+            'message' => '',
+            'diagnostics' => $diagnostics,
+        ];
+    }
+
+    /**
+     * @param array{applicable: bool, verified: bool, status: string, message: string, diagnostics: array<string, mixed>} $depositBalanceVerification
+     * @return array{verified: bool, status: string, message: string}
+     */
+    private function accountingVerificationResult(
+        string $direction,
+        bool $matchesExpected,
+        bool $isolationVerified,
+        bool $creditItemConfirmed,
+        array $depositBalanceVerification,
+        string $isolationMessage,
+        string $balanceMessage
+    ): array {
+        if ($direction === 'deposit') {
+            if (empty($depositBalanceVerification['verified'])) {
+                return [
+                    'verified' => false,
+                    'status' => (string) ($depositBalanceVerification['status'] ?: 'manual_review_deposit_balance_mismatch'),
+                    'message' => (string) ($depositBalanceVerification['message'] ?: $balanceMessage),
+                ];
+            }
+
+            if (!$isolationVerified) {
+                return [
+                    'verified' => false,
+                    'status' => 'manual_review_normal_folio_changed',
+                    'message' => $isolationMessage !== ''
+                        ? $isolationMessage
+                        : \__('The standard Clock accommodation folio changed during deposit posting. Manual accounting review is required.', 'must-hotel-booking'),
+                ];
+            }
+
+            if (!$creditItemConfirmed) {
+                return [
+                    'verified' => false,
+                    'status' => 'manual_review_credit_item_unconfirmed',
+                    'message' => \__('Clock accepted the deposit posting but did not return a durable credit-item reference. Manual accounting review is required.', 'must-hotel-booking'),
+                ];
+            }
+
+            return [
+                'verified' => true,
+                'status' => 'verified_deposit_isolated',
+                'message' => '',
+            ];
+        }
+
+        if (!empty($depositBalanceVerification['applicable']) && empty($depositBalanceVerification['verified'])) {
+            return [
+                'verified' => false,
+                'status' => (string) ($depositBalanceVerification['status'] ?: 'manual_review_deposit_balance_mismatch'),
+                'message' => (string) ($depositBalanceVerification['message'] ?: $balanceMessage),
+            ];
+        }
+
+        return [
+            'verified' => $matchesExpected,
+            'status' => $matchesExpected ? 'verified_expected_balance' : 'balance_review_required',
+            'message' => $matchesExpected
+                ? ''
+                : ($balanceMessage !== '' ? $balanceMessage : \__('Clock folio balance could not be reconciled to the expected result.', 'must-hotel-booking')),
+        ];
+    }
+
     /** @param array<string, mixed> $accounting @return array<string, mixed>|null */
     private function recoverPostedRetry(array $accounting, int $accountingId, string $folioId, int $reservationId): ?array
     {

@@ -58,7 +58,14 @@ namespace MustHotelBooking\Provider\Clock {
     {
         public int $postCalls = 0;
         public bool $transferred = false;
+        public bool $depositFlag = true;
+        public float $balanceBefore = 0.0;
+        public float $balanceAfter = -150.0;
+        public float $paymentAmount = 150.0;
+        public float $standardAfter = 150.0;
+        public string $creditItemId = 'credit-1';
         private int $depositBalanceReads = 0;
+        private int $standardBalanceReads = 0;
 
         public function selectOrCreateDepositFolio(string $bookingId, string $currency, int $reservationId = 0, string $preferred = ''): array
         {
@@ -75,21 +82,30 @@ namespace MustHotelBooking\Provider\Clock {
         public function readStandardFolioBalances(string $bookingId, int $reservationId = 0, string $exclude = ''): array
         {
             unset($bookingId, $reservationId, $exclude);
-            return ['success' => true, 'balances' => ['standard-1' => 150.0], 'message' => ''];
+            $this->standardBalanceReads++;
+            return ['success' => true, 'balances' => ['standard-1' => $this->standardBalanceReads === 1 ? 150.0 : $this->standardAfter], 'message' => ''];
         }
 
         public function readFolioBalance(string $folioId, int $reservationId = 0): array
         {
             unset($folioId, $reservationId);
             $this->depositBalanceReads++;
-            return ['success' => true, 'balance' => $this->depositBalanceReads === 1 ? 0.0 : 150.0, 'message' => ''];
+            return [
+                'success' => true,
+                'balance' => $this->depositBalanceReads === 1 ? $this->balanceBefore : $this->balanceAfter,
+                'raw_balance' => $this->depositBalanceReads === 1 ? $this->balanceBefore : $this->balanceAfter,
+                'deposit' => $this->depositFlag,
+                'postable' => true,
+                'currency' => 'EUR',
+                'message' => '',
+            ];
         }
 
         public function postCreditItem(string $folioId, string $gateway, string $direction, float $amount, string $currency, string $reference, string $idempotencyKey, int $reservationId = 0): array
         {
             unset($folioId, $gateway, $direction, $amount, $currency, $reference, $idempotencyKey, $reservationId);
             $this->postCalls++;
-            return ['success' => true, 'credit_item_id' => 'credit-1'];
+            return ['success' => true, 'credit_item_id' => $this->creditItemId];
         }
 
         public function validateRefundFolio(string $bookingId, string $folioId, int $reservationId = 0, bool $requireUnusedDeposit = false): array
@@ -192,6 +208,41 @@ namespace MustHotelBooking\Database {
 namespace {
     require __DIR__ . '/../src/Provider/Clock/ClockPaymentAccountingService.php';
 
+    function run_clock_payment_scenario(
+        float $balanceAfter,
+        bool $depositFlag = true,
+        float $standardAfter = 150.0,
+        string $creditItemId = 'credit-1',
+        float $balanceBefore = 0.0,
+        float $paymentAmount = 150.0
+    ): array {
+        $paymentRepository = new \MustHotelBooking\Database\PaymentRepository([
+            1 => ['id' => 1, 'reservation_id' => 10, 'amount' => $paymentAmount, 'currency' => 'EUR', 'method' => 'stripe', 'status' => 'paid', 'transaction_id' => 'pi_case_' . \str_replace(['-', '.'], ['neg', '_'], (string) $balanceAfter) . ($depositFlag ? '_deposit' : '_standard') . '_' . $creditItemId . '_' . (string) $paymentAmount],
+        ]);
+        $refundRepository = new \MustHotelBooking\Database\RefundRepository([]);
+        $reservationRepository = new \MustHotelBooking\Database\ReservationRepository([
+            10 => ['id' => 10, 'provider' => 'clock', 'booking_id' => 'BOOK-10', 'provider_booking_id' => 'clock-10', 'provider_reservation_id' => 'clock-10', 'provider_metadata' => '{}'],
+        ]);
+        $accountingRepository = new \MustHotelBooking\Database\ClockFolioAccountingRepository();
+        $folioService = new \MustHotelBooking\Provider\Clock\ClockFolioService();
+        $folioService->balanceBefore = $balanceBefore;
+        $folioService->balanceAfter = $balanceAfter;
+        $folioService->paymentAmount = $paymentAmount;
+        $folioService->depositFlag = $depositFlag;
+        $folioService->standardAfter = $standardAfter;
+        $folioService->creditItemId = $creditItemId;
+        $service = new \MustHotelBooking\Provider\Clock\ClockPaymentAccountingService(
+            $accountingRepository,
+            $paymentRepository,
+            $refundRepository,
+            $reservationRepository,
+            $folioService,
+            new \MustHotelBooking\Provider\Storage\ProviderSyncJobRepository()
+        );
+        $result = $service->syncPaidPayment(1, false);
+        return [$result, $accountingRepository->get(1), $reservationRepository->reservations[10] ?? [], $folioService];
+    }
+
     $paymentRepository = new \MustHotelBooking\Database\PaymentRepository([
         1 => ['id' => 1, 'reservation_id' => 10, 'amount' => 150.0, 'currency' => 'EUR', 'method' => 'stripe', 'status' => 'paid', 'transaction_id' => 'pi_same'],
         2 => ['id' => 2, 'reservation_id' => 10, 'amount' => 150.0, 'currency' => 'EUR', 'method' => 'stripe', 'status' => 'paid', 'transaction_id' => 'pi_same'],
@@ -235,6 +286,51 @@ namespace {
     }
     if ((string) ($paymentAccounting['verification_status'] ?? '') !== 'verified_deposit_isolated') {
         $failures[] = 'Deposit accounting must verify that the standard folio remained unchanged.';
+    }
+    if ((float) ($paymentAccounting['expected_balance'] ?? 0.0) !== -150.0 || (float) ($paymentAccounting['actual_balance'] ?? 0.0) !== -150.0) {
+        $failures[] = 'Deposit accounting must store Clock raw signed expected/actual balances, not the normalized deposit amount.';
+    }
+
+    $negativeScenario = run_clock_payment_scenario(-150.0);
+    $negativeRow = $negativeScenario[1] ?? [];
+    if ((string) ($negativeRow['verification_status'] ?? '') !== 'verified_deposit_isolated') {
+        $failures[] = 'Clock raw deposit balance 0 -> -150 must verify as an isolated 150 EUR deposit.';
+    }
+
+    $partialScenario = run_clock_payment_scenario(-150.0, true, 150.0, 'credit-1', -75.0, 75.0);
+    $partialRow = $partialScenario[1] ?? [];
+    if ((string) ($partialRow['verification_status'] ?? '') !== 'verified_deposit_isolated') {
+        $failures[] = 'A second partial deposit must verify when Clock raw balance moves from -75 to -150.';
+    }
+
+    $positiveScenario = run_clock_payment_scenario(150.0);
+    $positiveRow = $positiveScenario[1] ?? [];
+    if ((string) ($positiveRow['verification_status'] ?? '') !== 'manual_review_deposit_balance_mismatch') {
+        $failures[] = 'Clock raw deposit balance 0 -> +150 must require manual review unless Clock documents that sign convention.';
+    }
+
+    $mismatchScenario = run_clock_payment_scenario(-140.0);
+    $mismatchRow = $mismatchScenario[1] ?? [];
+    if ((string) ($mismatchRow['verification_status'] ?? '') !== 'manual_review_deposit_balance_mismatch') {
+        $failures[] = 'A deposit folio balance that holds only 140 EUR must require manual review.';
+    }
+
+    $invalidFolioScenario = run_clock_payment_scenario(-150.0, false);
+    $invalidFolioRow = $invalidFolioScenario[1] ?? [];
+    if ((string) ($invalidFolioRow['verification_status'] ?? '') !== 'manual_review_deposit_folio_invalid') {
+        $failures[] = 'A selected folio that is not deposit=true must require manual review.';
+    }
+
+    $changedStandardScenario = run_clock_payment_scenario(-150.0, true, 0.0);
+    $changedStandardRow = $changedStandardScenario[1] ?? [];
+    if ((string) ($changedStandardRow['verification_status'] ?? '') !== 'manual_review_normal_folio_changed') {
+        $failures[] = 'Deposit verification must not pass when the normal accommodation folio changes.';
+    }
+
+    $missingCreditScenario = run_clock_payment_scenario(-150.0, true, 150.0, '');
+    $missingCreditRow = $missingCreditScenario[1] ?? [];
+    if ((string) ($missingCreditRow['verification_status'] ?? '') !== 'manual_review_credit_item_unconfirmed') {
+        $failures[] = 'Deposit verification must require a durable Clock credit-item reference when Clock exposes one.';
     }
 
     $folioService->transferred = true;

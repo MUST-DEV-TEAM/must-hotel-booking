@@ -96,7 +96,8 @@
 - If deposit posting enters manual review, check the Clock API user has rights to create booking folios and folio credit items, and confirm the booking ID has not been cancelled/voided in Clock.
 - Clock endpoint overrides in Settings -> Provider must be relative paths beginning with `/` and can only use placeholders allowed by the endpoint registry. Unsafe values are rejected instead of saved.
 - Clock accounting reason codes appear in the Payments detail screen from `must_clock_folio_accounting.last_error_code`. `handled_manually` means staff recorded or reviewed the accounting in Clock outside the plugin; it is not a successful API post.
-- `verified_deposit_isolated` means the payment was posted to a `deposit=true` folio and the standard folio balances were unchanged.
+- `verified_deposit_isolated` means the payment was posted to a `deposit=true` folio, Clock's raw signed deposit-folio balance and normalized held amount matched the expected deposit, the credit-item reference was recorded, and the standard folio balances were unchanged.
+- A Clock deposit folio can show a negative raw balance for money held as a deposit. Treat `actual_balance=-150` on a `deposit=true` folio as a held `150` deposit when the signed expected balance and normalized diagnostics agree.
 - A booking header that still shows `Balance 0` can be Clock's aggregate booking presentation. Check the Payment Detail folio ID, deposit flag, credit-item ID, and isolation status before assuming the standard folio was modified.
 
 ### Clock reports HTTP 429

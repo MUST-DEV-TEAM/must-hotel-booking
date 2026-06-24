@@ -547,7 +547,7 @@ final class ClockFolioService
         ];
     }
 
-    /** @return array{success: bool, balance: float|null, message: string} */
+    /** @return array{success: bool, balance: float|null, raw_balance: float|null, deposit: bool, postable: bool, currency: string, message: string} */
     public function readFolioBalance(string $folioId, int $reservationId = 0): array
     {
         $viewResult = $this->viewFolio($folioId, $reservationId);
@@ -556,18 +556,27 @@ final class ClockFolioService
             return [
                 'success' => false,
                 'balance' => null,
+                'raw_balance' => null,
+                'deposit' => false,
+                'postable' => false,
+                'currency' => '',
                 'message' => (string) ($viewResult['message'] ?? \__('Clock folio verification failed.', 'must-hotel-booking')),
             ];
         }
 
+        $folio = (array) ($viewResult['folio'] ?? []);
         $balance = $this->firstMoneyValue(
-            (array) ($viewResult['folio'] ?? []),
+            $folio,
             ['balance', 'balance_due', 'due', 'open_balance', 'outstanding_balance']
         );
 
         return [
             'success' => $balance !== null,
             'balance' => $balance,
+            'raw_balance' => $balance,
+            'deposit' => $this->isDepositFolio($folio),
+            'postable' => $this->isPostableFolio($folio),
+            'currency' => $this->folioCurrency($folio),
             'message' => $balance === null
                 ? \__('Clock folio response did not include a recognizable balance field.', 'must-hotel-booking')
                 : '',
@@ -786,6 +795,16 @@ final class ClockFolioService
             }
         }
         return false;
+    }
+    /** @param array<string, mixed> $folio */
+    private function folioCurrency(array $folio): string
+    {
+        foreach (['currency', 'currency_code'] as $key) {
+            if (isset($folio[$key]) && \is_scalar($folio[$key])) {
+                return \strtoupper(\sanitize_text_field((string) $folio[$key]));
+            }
+        }
+        return '';
     }
     /** @param array<string, mixed> $source @param array<int, string> $keys */
     private function firstMoneyValue(array $source, array $keys): ?float

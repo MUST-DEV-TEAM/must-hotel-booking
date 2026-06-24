@@ -1,5 +1,11 @@
 # Decisions
 
+## 2026-06-24 - Clock deposit verification uses signed raw balance plus normalized held amount
+- Decision: Verify website deposits on Clock `deposit=true` folios by comparing Clock's signed raw balance movement and a normalized deposit-held amount, while still requiring the target folio to remain `deposit=true`, the credit-item reference to be recorded when exposed, and the standard accommodation folio to remain unchanged.
+- Reason: Live read-only evidence for reservation 136 / Clock booking 120 showed the correct isolated deposit flow produced raw deposit-folio balance `-150` for a held `150 EUR` deposit while the booking header displayed aggregate `Balance 0`. The previous verifier could mark a row `verified_deposit_isolated` solely from standard-folio isolation even when raw deposit balance comparison failed.
+- Affected areas: Clock payment accounting verification, deposit diagnostics, payment/admin troubleshooting.
+- Schema impact: None. Existing numeric columns continue storing raw Clock balances; normalized deposit diagnostics are stored in existing reservation provider metadata for new accounting attempts.
+
 ## 2026-06-23 - Booking quote cache and final Clock revalidation boundary
 - Decision: Cache intermediate public Clock availability/product quote reads for at most 45 seconds, but explicitly bypass request-local and transient caches for final availability, price, and guarantee-policy validation immediately before reservation creation.
 - Reason: The temporary live site showed 5.85-6.32 second booking responses and a 10.52 second checkout response, with foreground Clock reads overlapping a 12-job reservation refresh batch. Reusing an intermediate cached response during final reservation validation would improve speed at the cost of oversell or stale-price risk.

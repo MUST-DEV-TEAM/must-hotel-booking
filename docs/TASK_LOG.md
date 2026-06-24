@@ -1,5 +1,11 @@
 # Task Log
 
+## 2026-06-24 - Clock deposit-folio balance verification hardening
+- Status: PASS for local mocked verification; no live database, provider, payment, refund, Clock folio, transfer, deployment, commit, or historical-row repair was performed.
+- Changed: Hardened Clock payment accounting verification so deposit postings require a `deposit=true` target, signed raw Clock deposit-folio balance movement, normalized deposit-held amount match, unchanged standard folio balances, and a returned credit-item reference before `verified_deposit_isolated`.
+- Diagnostics: New attempts keep raw Clock balances in `balance_before`, `expected_balance`, and `actual_balance`; normalized deposit diagnostics are stored in existing reservation provider metadata. Existing rows such as the live reservation 136 accounting row are not rewritten and should be manually re-evaluated if staff need refreshed status.
+- Checks: PHP lint passed for the changed Clock service and tests. `php tests/ClockDepositIsolationTest.php`, `php tests/ClockPaymentAccountingRetryTest.php`, and `php tests/CancellationPaymentStateTest.php` passed locally.
+
 ## 2026-06-23 - Live booking-flow performance fix prepared for deployment
 - Status: BLOCKED pending manual deployment and live timing verification.
 - Root cause: The temporary live site measured about 5.85-6.32 seconds for booking and 10.52 seconds for checkout. Checkout made foreground Clock availability, product-price, and guarantee-policy reads while WP-Cron processed 12 sequential reservation refresh jobs.
