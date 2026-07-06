@@ -57,6 +57,9 @@ namespace {
                     'fees_total' => 5,
                     'total_price' => 115,
                     'nights' => 1,
+                    'nightly_rates' => [
+                        ['date' => '2026-09-15', 'rate' => 100.0],
+                    ],
                     'currency' => 'EUR',
                     'guarantee_policy_id' => 9,
                 ],
@@ -147,6 +150,9 @@ namespace {
     $cachedItems = \MustHotelBooking\Engine\BookingQuoteDraft::roomItems($draft);
     if ((float) ($cachedItems['summary']['total_price'] ?? 0) !== 115.0 || (string) ($cachedItems['quote_cache'] ?? '') !== 'hit') {
         $failures[] = 'A valid quote should restore the local pricing snapshot without a provider call.';
+    }
+    if ((float) ($cachedItems['items'][0]['pricing']['nightly_rates'][0]['rate'] ?? 0) !== 100.0) {
+        $failures[] = 'A valid quote should retain nightly rate rows for checkout and email display.';
     }
 
     if ($failures) {

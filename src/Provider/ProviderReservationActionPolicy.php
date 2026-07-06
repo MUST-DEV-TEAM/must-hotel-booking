@@ -49,6 +49,7 @@ final class ProviderReservationActionPolicy
                     'assign_room',
                     'update_stay',
                     'amend_reservation',
+                    'sync_clock_website_reference',
                 ],
                 true
             );
@@ -107,6 +108,7 @@ final class ProviderReservationActionPolicy
                     'amend_reservation',
                     'resend_guest_email',
                     'resend_admin_email',
+                    'sync_clock_website_reference',
                 ],
                 true
             );

@@ -334,6 +334,7 @@ final class EmailEngine
             $meta = [
                 'reservation_id' => isset($reservation['id']) ? (int) $reservation['id'] : 0,
                 'booking_id' => (string) ($reservation['booking_id'] ?? ''),
+                'provider_metadata' => (string) ($reservation['provider_metadata'] ?? ''),
             ];
         } else {
             $placeholders = self::buildTestPlaceholders($templateKey, $recipientEmail !== '' ? $recipientEmail : 'preview@example.com');
@@ -422,6 +423,7 @@ final class EmailEngine
             [
                 'reservation_id' => isset($reservation['id']) ? (int) $reservation['id'] : 0,
                 'booking_id' => (string) ($reservation['booking_id'] ?? ''),
+                'provider_metadata' => (string) ($reservation['provider_metadata'] ?? ''),
             ]
         );
         $sent = self::dispatchEmail($recipientEmail, $rendered['subject'], $rendered['html']);
@@ -496,7 +498,7 @@ final class EmailEngine
             'email_subject' => $subject,
             'email_heading' => $heading !== '' ? $heading : $subject,
             'email_content' => self::renderTemplateBody((string) ($template['body'] ?? ''), $placeholders),
-            'email_summary_rows' => EmailLayoutEngine::renderSummaryRows(self::buildSummaryRows($placeholders)),
+            'email_summary_rows' => EmailLayoutEngine::renderSummaryRows(self::buildSummaryRows($placeholders, $meta)),
             'email_cta_url' => (string) ($cta['url'] ?? ''),
             'email_cta_label' => (string) ($cta['label'] ?? ''),
             'email_logo_url' => $logoUrl,
@@ -643,15 +645,18 @@ final class EmailEngine
      * @param array<string, string> $placeholders
      * @return array<int, array<string, string>>
      */
-    private static function buildSummaryRows(array $placeholders): array
+    private static function buildSummaryRows(array $placeholders, array $meta = []): array
     {
+        $currency = (string) ($placeholders['{currency}'] ?? MustBookingConfig::get_currency());
+        $priceBreakdownRows = self::renderEmailPriceBreakdownRows($meta, $currency);
         $rows = [
             ['label' => \__('Booking ID', 'must-hotel-booking'), 'value' => (string) ($placeholders['{booking_id}'] ?? '')],
             ['label' => \__('Guest', 'must-hotel-booking'), 'value' => (string) ($placeholders['{guest_name}'] ?? '')],
             ['label' => \__('Room', 'must-hotel-booking'), 'value' => (string) ($placeholders['{room_name}'] ?? '')],
             ['label' => \__('Check-in', 'must-hotel-booking'), 'value' => (string) ($placeholders['{checkin}'] ?? '')],
             ['label' => \__('Check-out', 'must-hotel-booking'), 'value' => (string) ($placeholders['{checkout}'] ?? '')],
-            ['label' => \__('Total', 'must-hotel-booking'), 'value' => \trim((string) ($placeholders['{total_price}'] ?? '') . ' ' . (string) ($placeholders['{currency}'] ?? ''))],
+            ...$priceBreakdownRows,
+            ['label' => \__('Total', 'must-hotel-booking'), 'value' => \trim((string) ($placeholders['{total_price}'] ?? '') . ' ' . $currency)],
             ['label' => \__('Payment Method', 'must-hotel-booking'), 'value' => (string) ($placeholders['{payment_method}'] ?? '')],
             ['label' => \__('Payment Status', 'must-hotel-booking'), 'value' => (string) ($placeholders['{payment_status}'] ?? '')],
         ];
@@ -661,6 +666,42 @@ final class EmailEngine
                 return \trim((string) ($row['value'] ?? '')) !== '';
             }
         ));
+    }
+    /**
+     * @param array<string, mixed> $meta
+     * @return array<int, array<string, string>>
+     */
+    private static function renderEmailPriceBreakdownRows(array $meta, string $currency): array
+    {
+        if (MustBookingConfig::get_email_price_breakdown_mode() !== 'date_price_rows') {
+            return [];
+        }
+
+        $metadata = \function_exists('MustHotelBooking\\Frontend\\get_reservation_provider_metadata')
+            ? \MustHotelBooking\Frontend\get_reservation_provider_metadata([
+                'provider_metadata' => (string) ($meta['provider_metadata'] ?? ''),
+            ])
+            : [];
+        $rows = \function_exists('MustHotelBooking\\Frontend\\get_price_breakdown_rows_from_metadata')
+            ? \MustHotelBooking\Frontend\get_price_breakdown_rows_from_metadata($metadata)
+            : [];
+
+        if (empty($rows)) {
+            return [];
+        }
+
+        $summaryRows = [
+            ['label' => \__('Nightly Prices', 'must-hotel-booking'), 'value' => \__('Stored reservation snapshot', 'must-hotel-booking')],
+        ];
+
+        foreach ($rows as $row) {
+            $summaryRows[] = [
+                'label' => self::formatBookingDate((string) ($row['date'] ?? '')),
+                'value' => self::formatAmount((float) ($row['amount'] ?? 0.0)) . ' ' . $currency,
+            ];
+        }
+
+        return $summaryRows;
     }
     /**
      * @param array<string, scalar> $meta

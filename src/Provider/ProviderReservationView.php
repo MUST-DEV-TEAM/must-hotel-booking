@@ -13,15 +13,35 @@ final class ProviderReservationView
         $providerStatus = self::cleanText((string) ($reservation['provider_status'] ?? ''));
         $providerPaymentStatus = self::cleanText((string) ($reservation['provider_payment_status'] ?? ''));
         $providerSyncStatus = self::normalizeProviderKey((string) ($reservation['provider_sync_status'] ?? ''));
+        $metadata = self::decodeMetadata($reservation['provider_metadata'] ?? null);
+        $providerBookingId = self::cleanText((string) ($reservation['provider_booking_id'] ?? ''));
+        $clockBookingId = self::cleanText((string) ($metadata['clock_booking_id'] ?? $providerBookingId));
+        $clockBookingReference = self::cleanText((string) ($metadata['clock_booking_reference'] ?? ''));
+        $websiteReferenceSent = isset($metadata['website_reference_sent_to_clock'])
+            ? (bool) $metadata['website_reference_sent_to_clock']
+            : false;
+        $lastReferenceSync = isset($metadata['last_clock_reference_sync']) && \is_array($metadata['last_clock_reference_sync'])
+            ? $metadata['last_clock_reference_sync']
+            : [];
         return [
             'provider' => $provider,
             'provider_label' => self::providerLabel($provider),
             'is_provider_backed' => $isProviderBacked,
             'is_clock' => $provider === ProviderManager::CLOCK_MODE,
             'is_mirror' => $isProviderBacked,
-            'provider_booking_id' => self::cleanText((string) ($reservation['provider_booking_id'] ?? '')),
+            'provider_booking_id' => $providerBookingId,
             'provider_reservation_id' => self::cleanText((string) ($reservation['provider_reservation_id'] ?? '')),
             'provider_payload_ref' => self::cleanText((string) ($reservation['provider_payload_ref'] ?? '')),
+            'website_booking_reference' => self::cleanText((string) ($metadata['website_booking_reference'] ?? (string) ($reservation['booking_id'] ?? ''))),
+            'clock_booking_id' => $clockBookingId,
+            'clock_booking_reference' => $clockBookingReference,
+            'website_reference_sent_to_clock' => $websiteReferenceSent,
+            'website_reference_sent_to_clock_label' => $websiteReferenceSent ? \__('Yes', 'must-hotel-booking') : \__('No', 'must-hotel-booking'),
+            'clock_reference_storage_field' => self::cleanText((string) ($metadata['clock_reference_storage_field'] ?? '')),
+            'clock_reference_fallback_fields' => isset($metadata['clock_reference_fallback_fields']) && \is_array($metadata['clock_reference_fallback_fields'])
+                ? \array_map('strval', $metadata['clock_reference_fallback_fields'])
+                : [],
+            'last_clock_reference_sync' => $lastReferenceSync,
             'provider_status' => $providerStatus,
             'provider_status_label' => self::formatStatusLabel($providerStatus),
             'provider_payment_status' => $providerPaymentStatus,

@@ -615,6 +615,16 @@ final class PaymentAdminActions
         }
 
         $saved = PaymentMethodRegistry::saveStates($states);
+        if (\class_exists(MustBookingConfig::class)) {
+            MustBookingConfig::set_setting('pay_at_hotel_enabled', !empty($states['pay_at_hotel']));
+            MustBookingConfig::set_setting(
+                'default_payment_mode',
+                PaymentEngine::normalizeDefaultPaymentMode(
+                    (string) MustBookingConfig::get_setting('default_payment_mode', 'pokpay'),
+                    $states
+                )
+            );
+        }
 
         if (\class_exists(MustBookingConfig::class)) {
             foreach (\array_keys(PaymentEngine::getStripeEnvironmentCatalog()) as $environmentKey) {

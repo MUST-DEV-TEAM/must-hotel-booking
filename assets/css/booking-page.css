@@ -1,4 +1,6 @@
 .must-hotel-booking-page-booking {
+    --must-booking-calendar-day-gap: 8px;
+    --must-booking-calendar-day-size: 75px;
     background: #f5f3ec;
     color: #141414;
     font-family: 'PP Neue Montreal', sans-serif;
@@ -216,6 +218,10 @@ body.must-hotel-booking-flow-page {
     background: #fff;
 }
 
+.must-hotel-booking-page-booking.is-one-calendar .must-booking-calendars-body {
+    grid-template-columns: minmax(0, 1fr);
+}
+
 .must-hotel-booking-page-booking .must-booking-calendar-shell {
     position: relative;
     padding: 35px;
@@ -228,6 +234,14 @@ body.must-hotel-booking-flow-page {
 .must-hotel-booking-page-booking .must-booking-calendar-shell.is-checkin {
     padding-top: 55px;
     border-right: 1px solid #000;
+}
+
+.must-hotel-booking-page-booking.is-one-calendar .must-booking-calendar-shell.is-checkin {
+    border-right: 0;
+}
+
+.must-hotel-booking-page-booking.is-one-calendar .must-booking-calendar-shell.is-checkout {
+    display: none;
 }
 
 .must-hotel-booking-page-booking .must-booking-calendar-meta-row {
@@ -275,6 +289,12 @@ body.must-hotel-booking-flow-page {
     visibility: hidden;
 }
 
+.must-hotel-booking-page-booking.is-one-calendar .must-booking-cal-shift-prev.is-disabled {
+    visibility: visible;
+    opacity: 0.6;
+    pointer-events: none;
+}
+
 .must-hotel-booking-page-booking .must-booking-cal-shift-prev {
     grid-column: 1;
     justify-self: start;
@@ -285,6 +305,14 @@ body.must-hotel-booking-flow-page {
     grid-column: 3;
     justify-self: end;
     right: auto;
+}
+
+.must-hotel-booking-page-booking .must-booking-cal-next-inline {
+    display: none;
+}
+
+.must-hotel-booking-page-booking.is-one-calendar .must-booking-cal-next-inline {
+    display: inline-flex;
 }
 
 .must-hotel-booking-page-booking .must-booking-calendar-meta {
@@ -369,7 +397,9 @@ body.must-hotel-booking-flow-page {
     max-width: 100%;
     display: grid;
     grid-template-columns: repeat(7, minmax(0, 1fr));
-    gap: 8px;
+    grid-template-columns: repeat(7, minmax(0, var(--must-booking-calendar-day-size)));
+    gap: var(--must-booking-calendar-day-gap);
+    justify-content: space-between;
 }
 
 .must-hotel-booking-page-booking .must-booking-flatpickr-instance span.flatpickr-weekday,
@@ -402,14 +432,19 @@ body.must-hotel-booking-flow-page {
 
 .must-hotel-booking-page-booking .must-booking-flatpickr-instance .flatpickr-day,
 .must-hotel-booking-page-booking .must-booking-inline-calendar .flatpickr-day {
-    width: auto;
-    max-width: none;
+    width: 100%;
+    max-width: 75px;
     min-width: 0;
-    height: 44px;
-    line-height: 44px;
+    height: auto;
+    aspect-ratio: 1 / 1;
+    line-height: 1;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
     border-radius: 0 !important;
     border: 0;
     margin: 0;
+    box-sizing: border-box;
     font-family: 'PP Neue Montreal', sans-serif;
     font-size: 18px;
     font-weight: 400;
@@ -422,7 +457,9 @@ body.must-hotel-booking-flow-page {
 .must-hotel-booking-page-booking .must-booking-inline-calendar .dayContainer {
     display: grid;
     grid-template-columns: repeat(7, minmax(0, 1fr));
-    gap: 8px;
+    grid-template-columns: repeat(7, minmax(0, var(--must-booking-calendar-day-size)));
+    gap: var(--must-booking-calendar-day-gap);
+    justify-content: space-between;
     padding: 0;
 }
 
@@ -524,12 +561,14 @@ body.must-hotel-booking-flow-page {
 .must-hotel-booking-page-booking .must-booking-flatpickr-instance .flatpickr-day.must-booking-day-unavailable,
 .must-hotel-booking-page-booking .must-booking-inline-calendar .flatpickr-day.must-booking-day-unavailable {
     --must-button-bg: #fff;
-    --must-button-border: #fff;
+    --must-button-border: #141414;
     --must-button-color: rgba(31, 31, 31, 0.46);
     position: relative;
     color: rgba(31, 31, 31, 0.46);
     background: #fff;
+    border: 1px solid #141414;
     border-radius: 6px !important;
+    overflow: hidden;
     box-shadow: 0 1px 1px rgba(0, 14, 51, 0.05);
 }
 
@@ -537,19 +576,20 @@ body.must-hotel-booking-flow-page {
 .must-hotel-booking-page-booking .must-booking-inline-calendar .flatpickr-day.must-booking-day-unavailable::after {
     content: '';
     position: absolute;
-    left: 8px;
-    right: 8px;
+    left: 6px;
+    right: 6px;
     top: 50%;
     border-top: 1px solid #141414;
     transform: rotate(-35deg);
     transform-origin: center;
+    pointer-events: none;
 }
 
 .must-hotel-booking-page-booking .must-booking-flatpickr-instance .flatpickr-day.must-booking-day-unavailable.must-booking-day-start::after,
 .must-hotel-booking-page-booking .must-booking-flatpickr-instance .flatpickr-day.must-booking-day-unavailable.must-booking-day-end::after,
 .must-hotel-booking-page-booking .must-booking-inline-calendar .flatpickr-day.must-booking-day-unavailable.must-booking-day-start::after,
 .must-hotel-booking-page-booking .must-booking-inline-calendar .flatpickr-day.must-booking-day-unavailable.must-booking-day-end::after {
-    display: none;
+    display: block;
 }
 
 .must-hotel-booking-page-booking .must-booking-flatpickr-instance .flatpickr-day.prevMonthDay,
@@ -2463,6 +2503,20 @@ body .must-booking-room-modal .must-booking-room-modal-close:active {
     gap: 11px;
 }
 
+.must-hotel-booking-page-checkout .must-checkout-price-breakdown-rows {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.must-hotel-booking-page-checkout .must-checkout-price-line.is-breakdown-heading span {
+    font-weight: 700;
+}
+
+.must-hotel-booking-page-checkout .must-checkout-price-line.is-nightly-rate span {
+    font-size: 15px;
+}
+
 .must-hotel-booking-page-checkout .must-checkout-price-line span {
     font-family: 'PP Neue Montreal', sans-serif;
     font-weight: 500;
@@ -4247,6 +4301,10 @@ div.must-confirmation-picker:nth-child(1) > div:nth-child(3) > div:nth-child(1) 
 }
 
 @media (max-width: 1024px) {
+    .must-hotel-booking-page-booking {
+        --must-booking-calendar-day-gap: 6px;
+    }
+
     .must-booking-process-page .must-hotel-booking-container {
         grid-template-columns: 1fr;
     }
@@ -4290,7 +4348,7 @@ div.must-confirmation-picker:nth-child(1) > div:nth-child(3) > div:nth-child(1) 
     .must-hotel-booking-page-booking .must-booking-inline-calendar .dayContainer,
     .must-hotel-booking-page-booking .must-booking-flatpickr-instance .flatpickr-weekdaycontainer,
     .must-hotel-booking-page-booking .must-booking-inline-calendar .flatpickr-weekdaycontainer {
-        gap: 6px;
+        gap: var(--must-booking-calendar-day-gap);
     }
 
     .must-hotel-booking-page-booking .must-booking-step-summary {
@@ -4375,6 +4433,10 @@ div.must-confirmation-picker:nth-child(1) > div:nth-child(3) > div:nth-child(1) 
 }
 
 @media (max-width: 767px) {
+    .must-hotel-booking-page-booking {
+        --must-booking-calendar-day-gap: 4px;
+    }
+
     body.must-hotel-booking-flow-page #page,
     body.must-hotel-booking-flow-page .site,
     body.must-hotel-booking-flow-page #content,
@@ -4554,8 +4616,8 @@ div.must-confirmation-picker:nth-child(1) > div:nth-child(3) > div:nth-child(1) 
 
     .must-hotel-booking-page-booking .must-booking-flatpickr-instance .flatpickr-day,
     .must-hotel-booking-page-booking .must-booking-inline-calendar .flatpickr-day {
-        height: 34px;
-        line-height: 34px;
+        height: auto;
+        line-height: 1;
         font-size: 14px;
     }
 
@@ -4568,7 +4630,7 @@ div.must-confirmation-picker:nth-child(1) > div:nth-child(3) > div:nth-child(1) 
     .must-hotel-booking-page-booking .must-booking-inline-calendar .dayContainer,
     .must-hotel-booking-page-booking .must-booking-flatpickr-instance .flatpickr-weekdaycontainer,
     .must-hotel-booking-page-booking .must-booking-inline-calendar .flatpickr-weekdaycontainer {
-        gap: 4px;
+        gap: var(--must-booking-calendar-day-gap);
     }
 
     .must-hotel-booking-page-booking .must-booking-calendar-legend {

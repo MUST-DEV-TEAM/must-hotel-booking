@@ -1265,6 +1265,9 @@ function render_payment_settings_panel(array $settings): void
         if (!empty($meta['description'])) {
             echo '<small>' . \esc_html((string) $meta['description']) . '</small>';
         }
+        if ((string) $method === 'pay_at_hotel') {
+            echo '<small>' . \esc_html__('Pay at hotel allows confirmed bookings without online payment. Enable only if the hotel accepts manual payment collection.', 'must-hotel-booking') . '</small>';
+        }
         echo '</span>';
         echo '</label>';
     }

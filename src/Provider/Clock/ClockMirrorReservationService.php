@@ -31,7 +31,10 @@ final class ClockMirrorReservationService
         $noteRoomId = $roomTypeId > 0 ? $roomTypeId : $roomId;
         $ratePlanId = isset($validatedRoom['rate_plan_id']) ? (int) $validatedRoom['rate_plan_id'] : 0;
         $pricing = isset($validatedRoom['pricing']) && \is_array($validatedRoom['pricing']) ? $validatedRoom['pricing'] : [];
-        $bookingId = $this->generateBookingId();
+        $bookingId = isset($options['booking_id']) ? \sanitize_text_field((string) $options['booking_id']) : '';
+        if ($bookingId === '') {
+            $bookingId = $this->generateBookingReference();
+        }
         $bookingSource = isset($options['booking_source']) ? \sanitize_key((string) $options['booking_source']) : 'website';
         $extraNotes = isset($options['notes']) ? \trim(\sanitize_textarea_field((string) $options['notes'])) : '';
         $note = ReservationEngine::buildReservationNote($noteRoomId, $guestForm);
@@ -52,14 +55,25 @@ final class ClockMirrorReservationService
                 );
         }
 
-        $providerBookingId = $this->firstString($providerReservation, ['booking_id', 'provider_booking_id', 'reservation_id', 'id', 'confirmation_number', 'reference']);
+        $clockIdentifiers = ClockBookingReferenceMapper::extractClockIdentifiers($providerReservation);
+        $providerBookingId = (string) ($clockIdentifiers['clock_booking_id'] ?? '');
         $providerReservationId = $this->firstString($providerReservation, ['reservation_id', 'provider_reservation_id', 'id', 'booking_id']);
+        if ($providerReservationId === '') {
+            $providerReservationId = $providerBookingId;
+        }
         $providerStatus = $this->firstString($providerReservation, ['status', 'state', 'reservation_status']);
         $providerPaymentStatus = $this->firstString($providerReservation, ['payment_status', 'payment_state']);
+        $referenceMapping = isset($providerReservation['_mhb_reference_mapping']) && \is_array($providerReservation['_mhb_reference_mapping'])
+            ? $providerReservation['_mhb_reference_mapping']
+            : [];
+        $clockBookingReference = (string) ($clockIdentifiers['clock_booking_reference'] ?? '');
         $now = \function_exists('current_time') ? \current_time('mysql') : \gmdate('Y-m-d H:i:s');
         $couponId = isset($pricing['applied_coupon_id']) ? (int) $pricing['applied_coupon_id'] : 0;
         $couponCode = isset($pricing['applied_coupon']) ? (string) $pricing['applied_coupon'] : '';
         $couponDiscountTotal = isset($pricing['discount_total']) ? (float) $pricing['discount_total'] : 0.0;
+        $pricingSnapshot = \function_exists('MustHotelBooking\\Frontend\\build_price_breakdown_snapshot')
+            ? \MustHotelBooking\Frontend\build_price_breakdown_snapshot($pricing)
+            : [];
         $repository = \MustHotelBooking\Engine\get_reservation_repository();
         $reservationId = $repository->createProviderMirrorReservation([
             'booking_id' => $bookingId,
@@ -93,6 +107,25 @@ final class ClockMirrorReservationService
                 'provider_created_before_payment' => (string) ($options['payment_status'] ?? '') === 'pending',
                 'payment_reconciliation_required' => false,
                 'clock_payment_required' => (string) ($options['payment_status'] ?? '') === 'pending',
+                'clock_booking_id' => $providerBookingId,
+                'clock_booking_reference' => $clockBookingReference,
+                'website_booking_reference' => $bookingId,
+                'pricing_snapshot' => $pricingSnapshot,
+                'website_reference_sent_to_clock' => !empty($referenceMapping['website_reference_sent_to_clock']),
+                'clock_reference_storage_field' => (string) ($referenceMapping['clock_reference_storage_field'] ?? ''),
+                'clock_reference_fallback_fields' => isset($referenceMapping['clock_reference_fallback_fields']) && \is_array($referenceMapping['clock_reference_fallback_fields'])
+                    ? $referenceMapping['clock_reference_fallback_fields']
+                    : [],
+                'clock_reference_text' => (string) ($referenceMapping['clock_reference_text'] ?? ''),
+                'last_clock_reference_sync' => [
+                    'success' => !empty($referenceMapping['website_reference_sent_to_clock']),
+                    'sync_status' => !empty($referenceMapping['website_reference_sent_to_clock']) ? 'synced' : 'failed',
+                    'synced_at' => $now,
+                    'storage_field' => (string) ($referenceMapping['clock_reference_storage_field'] ?? ''),
+                    'fallback_fields' => isset($referenceMapping['clock_reference_fallback_fields']) && \is_array($referenceMapping['clock_reference_fallback_fields'])
+                        ? $referenceMapping['clock_reference_fallback_fields']
+                        : [],
+                ],
                 'provider_response' => $this->responseSummary($providerReservation),
                 'selected_room_id' => $roomId,
                 'physical_room_id' => $assignedRoomId,
@@ -114,6 +147,7 @@ final class ClockMirrorReservationService
         );
 
         \do_action('must_hotel_booking/reservation_created', $reservationId);
+        $this->logReferenceDiagnostics($reservationId, $bookingId, $providerBookingId, $clockBookingReference, $referenceMapping);
 
         return $reservationId;
     }
@@ -132,7 +166,7 @@ final class ClockMirrorReservationService
         LockEngine::releaseExactLock($roomId, $checkin, $checkout);
     }
 
-    private function generateBookingId(): string
+    public function generateBookingReference(): string
     {
         $repository = \MustHotelBooking\Engine\get_reservation_repository();
         $attempt = 0;
@@ -149,6 +183,63 @@ final class ClockMirrorReservationService
         }
 
         return 'MHB-' . \gmdate('YmdHis') . '-' . \wp_rand(1000, 9999);
+    }
+
+    /** @param array<string, mixed> $referenceMapping */
+    private function logReferenceDiagnostics(
+        int $reservationId,
+        string $websiteReference,
+        string $clockBookingId,
+        string $clockBookingReference,
+        array $referenceMapping
+    ): void {
+        $repository = \MustHotelBooking\Engine\get_activity_repository();
+        $context = [
+            'reservation_id' => $reservationId,
+            'booking_id' => $websiteReference,
+            'clock_booking_id' => $clockBookingId,
+            'clock_booking_reference' => $clockBookingReference,
+            'website_reference_sent_to_clock' => !empty($referenceMapping['website_reference_sent_to_clock']),
+            'clock_reference_storage_field' => (string) ($referenceMapping['clock_reference_storage_field'] ?? ''),
+            'clock_reference_fallback_fields' => isset($referenceMapping['clock_reference_fallback_fields']) && \is_array($referenceMapping['clock_reference_fallback_fields'])
+                ? $referenceMapping['clock_reference_fallback_fields']
+                : [],
+        ];
+
+        $referenceEvent = !empty($referenceMapping['website_reference_sent_to_clock'])
+            ? 'clock_website_reference_sent'
+            : 'clock_website_reference_failed';
+        $referenceMessage = !empty($referenceMapping['website_reference_sent_to_clock'])
+            ? \sprintf(\__('Website booking reference sent to Clock: %s', 'must-hotel-booking'), $websiteReference)
+            : \sprintf(\__('Website booking reference could not be sent to Clock: %s', 'must-hotel-booking'), $websiteReference);
+
+        $messages = [
+            'clock_booking_created' => \__('Clock booking created.', 'must-hotel-booking'),
+            'clock_booking_id_received' => $clockBookingId !== ''
+                ? \sprintf(\__('Clock booking ID received: %s', 'must-hotel-booking'), $clockBookingId)
+                : \__('Clock booking ID was not returned.', 'must-hotel-booking'),
+            'clock_booking_reference_received' => $clockBookingReference !== ''
+                ? \sprintf(\__('Clock booking reference received: %s', 'must-hotel-booking'), $clockBookingReference)
+                : \__('Clock booking reference was not returned.', 'must-hotel-booking'),
+            $referenceEvent => $referenceMessage,
+            'clock_reference_fallback_used' => \sprintf(
+                \__('Clock-side website reference storage used %1$s with fallback %2$s.', 'must-hotel-booking'),
+                (string) ($referenceMapping['clock_reference_storage_field'] ?? ''),
+                \implode(', ', (array) ($referenceMapping['clock_reference_fallback_fields'] ?? []))
+            ),
+        ];
+
+        foreach ($messages as $eventType => $message) {
+            $repository->createActivity([
+                'event_type' => (string) $eventType,
+                'severity' => $eventType === 'clock_website_reference_failed' ? 'warning' : 'info',
+                'entity_type' => 'reservation',
+                'entity_id' => $reservationId,
+                'reference' => $websiteReference,
+                'message' => $message,
+                'context_json' => \wp_json_encode($context),
+            ]);
+        }
     }
 
     /** @param array<string, mixed> $source @param array<int, string> $keys */
@@ -168,7 +259,7 @@ final class ClockMirrorReservationService
     {
         $summary = [];
 
-        foreach (['id', 'booking_id', 'reservation_id', 'confirmation_number', 'reference', 'status', 'state', 'payment_status'] as $key) {
+        foreach (['id', 'booking_id', 'reservation_id', 'reference_number', 'confirmation_number', 'reference', 'status', 'state', 'payment_status'] as $key) {
             if (isset($response[$key]) && \is_scalar($response[$key])) {
                 $summary[$key] = (string) $response[$key];
             }

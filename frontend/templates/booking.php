@@ -36,6 +36,9 @@ $fixed_room_beds = isset($fixed_room['beds']) ? (string) $fixed_room['beds'] : '
 $fixed_room_view_type = isset($fixed_room['view_type']) ? (string) $fixed_room['view_type'] : '';
 $fixed_room_floor = isset($fixed_room['floor']) ? (int) $fixed_room['floor'] : 0;
 $fixed_room_primary_image_url = isset($fixed_room['primary_image_url']) ? (string) $fixed_room['primary_image_url'] : '';
+$calendar_layout = isset($view['calendar_layout']) ? (string) $view['calendar_layout'] : 'two_calendars';
+$calendar_layout = \in_array($calendar_layout, ['one_calendar', 'two_calendars'], true) ? $calendar_layout : 'two_calendars';
+$calendar_layout_class = $calendar_layout === 'one_calendar' ? ' is-one-calendar' : '';
 $form_action_url = $fixed_room_mode ? \must_hotel_booking\get_checkout_page_url() : $accommodation_url;
 $show_results_section = false;
 $back_arrow_icon_url = \defined('MUST_HOTEL_BOOKING_URL') ? MUST_HOTEL_BOOKING_URL . 'assets/img/ArrowLEFT.svg' : '';
@@ -83,7 +86,7 @@ if ($checkout !== '') {
 }
 ?>
 <?php \get_header(); ?>
-<main class="must-hotel-booking-page must-hotel-booking-page-booking must-booking-process-page<?php echo $fixed_room_mode ? ' is-fixed-room-flow' : ''; ?>">
+<main class="must-hotel-booking-page must-hotel-booking-page-booking must-booking-process-page<?php echo $fixed_room_mode ? ' is-fixed-room-flow' : ''; ?><?php echo \esc_attr($calendar_layout_class); ?>">
     <div class="must-hotel-booking-container">
         <section class="must-booking-step-header">
             <h1 id="must-booking-step-heading"><?php echo \esc_html($step_heading); ?></h1>
@@ -112,7 +115,7 @@ if ($checkout !== '') {
             </div>
         </section>
 
-        <form id="must-booking-search-form" class="must-booking-calendar-step-form" method="get" action="<?php echo \esc_url($form_action_url); ?>">
+        <form id="must-booking-search-form" class="must-booking-calendar-step-form" method="get" action="<?php echo \esc_url($form_action_url); ?>" data-calendar-layout="<?php echo \esc_attr($calendar_layout); ?>">
             <input id="must-booking-checkin" class="must-hotel-booking-checkin" type="hidden" name="checkin" value="<?php echo \esc_attr($checkin); ?>" />
             <input id="must-booking-checkout" class="must-hotel-booking-checkout" type="hidden" name="checkout" value="<?php echo \esc_attr($checkout); ?>" />
             <input id="must-booking-guests" class="must-hotel-booking-guests" type="hidden" name="guests" value="<?php echo \esc_attr((string) $guests); ?>" />
@@ -144,6 +147,12 @@ if ($checkout !== '') {
                                     <select class="must-booking-calendar-month-chip" id="must-booking-checkin-month"></select>
                                     <select class="must-booking-calendar-year-chip" id="must-booking-checkin-year"></select>
                                 </div>
+
+                                <button id="must-booking-cal-next-inline" type="button" class="must-booking-cal-shift must-booking-cal-shift-next must-booking-cal-next-inline" aria-label="<?php echo \esc_attr__('Next month', 'must-hotel-booking'); ?>">
+                                    <?php if ($arrow_icon_url !== '') : ?>
+                                        <img src="<?php echo \esc_url($arrow_icon_url); ?>" alt="" aria-hidden="true" />
+                                    <?php endif; ?>
+                                </button>
                             </div>
 
                             <div id="must-booking-checkin-calendar" class="must-booking-inline-calendar"></div>

@@ -1,5 +1,16 @@
 # Task Log
 
+## 2026-07-06 - Configurable booking display options
+- Changed: Added settings for public date picker layout (`one_calendar` or default `two_calendars`), checkout price breakdown mode (`total_only` or `date_price_rows`), and email price breakdown mode (`total_only` or `date_price_rows`).
+- Changed: Date-price checkout and email modes use stored quote/reservation nightly-rate snapshots and fall back to total-only behavior when nightly rows are unavailable.
+- Safety: No live pricing/API recalculation is used for email breakdown rows; the Clock bidirectional reference work remains separate.
+
+## 2026-07-06 - Clock bidirectional booking reference mapping
+- Changed: Clock-backed website bookings now generate the local `MHB-...` booking reference before the provider write, send it to Clock via `reference_number`, and append `Website booking reference: ...` to the booking note as a manual-search fallback.
+- Changed: Local mirror metadata now stores Clock booking ID, Clock booking reference, website reference sent status, and Clock-side storage/fallback fields; admin detail displays them and can retry sending the website reference after a Clock reread.
+- Changed: Admin reservation search now includes website booking reference, Clock provider IDs, provider payload ref, and provider metadata so Clock references are searchable without schema changes.
+- Checks: PHP lint and focused Clock/reference tests passed. No live Clock booking was created.
+
 ## 2026-06-24 - Clock deposit-folio balance verification hardening
 - Status: PASS for local mocked verification; no live database, provider, payment, refund, Clock folio, transfer, deployment, commit, or historical-row repair was performed.
 - Changed: Hardened Clock payment accounting verification so deposit postings require a `deposit=true` target, signed raw Clock deposit-folio balance movement, normalized deposit-held amount match, unchanged standard folio balances, and a returned credit-item reference before `verified_deposit_isolated`.
@@ -289,3 +300,10 @@
 - Evidence: Sanitized June 14 backup shows historical Stripe folio `71355798` had `deposit=false` and received the payment directly; later deposit flow created `deposit=true` folio `71442250` and posted credit item `60052192` there while the original standard folio ID remained separate.
 - Blocked: Current local WordPress DB was unavailable on 2026-06-22, so current saved PokPay credentials and live Clock folio state could not be re-read. No real provider write was performed.
 - Checks: PHP lint and standalone mocked tests cover PokPay environment/auth states, redaction, Clock deposit isolation/idempotency/refund review, 429 backoff, and duplicate GET suppression.
+
+## 2026-07-06 - Public payment defaults and checkout enforcement
+- Changed: Pay at hotel is disabled by default behind explicit `pay_at_hotel_enabled=false`; fresh defaults use `default_payment_mode=pokpay` and enabled PokPay without offline fallback.
+- Changed: Public confirmation now validates payment method policy before reservation/provider creation, clears stale disabled offline drafts, and blocks checkout when no online gateway is configured instead of silently falling back to Pay at hotel.
+- Changed: Admin settings/payments UI warns about Pay at hotel, prevents it as default unless enabled, normalizes invalid old defaults, and diagnostics/support readiness expose public payment policy fields.
+- Checks: PHP syntax checks on changed PHP files, `php tests\PaymentPublicCheckoutPolicyTest.php`, `php tests\BookingPerformanceSafetyTest.php`, and `php tests\ClockBookingReferenceMappingTest.php`.
+- Not run: No live PokPay/Stripe/Clock booking was created; provider success/failure flows remain covered by existing mocked/static tests and require manual local browser/provider testing.

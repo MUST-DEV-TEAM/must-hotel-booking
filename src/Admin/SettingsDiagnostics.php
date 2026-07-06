@@ -146,6 +146,8 @@ final class SettingsDiagnostics
         $stripeWebhookSecretSet = PaymentEngine::getStripeWebhookSecret() !== '';
         $pokpayEnabled = \in_array('pokpay', $enabledMethods, true);
         $pokpayConfigured = PaymentEngine::isPokPayConfigured();
+        $paymentPolicy = PaymentEngine::getPublicCheckoutPaymentPolicy();
+        $lastPublicBookingPayment = self::getLastPublicBookingPaymentSummary();
 
         if ($stripeEnabled && !$stripeConfigured) {
             $warnings++;
@@ -170,7 +172,16 @@ final class SettingsDiagnostics
             'pokpay_configured' => $pokpayConfigured,
             'pokpay_environment' => PaymentEngine::getPokPayApiEnvironment(),
             'pokpay_webhook_url' => MustBookingConfig::build_public_rest_url('must-hotel-booking/v1/pokpay/webhook'),
-            'default_payment_mode' => (string) MustBookingConfig::get_setting('default_payment_mode', 'guest_choice'),
+            'default_payment_mode' => (string) MustBookingConfig::get_setting('default_payment_mode', 'pokpay'),
+            'pay_at_hotel_enabled' => MustBookingConfig::is_pay_at_hotel_enabled(),
+            'public_checkout_payment_policy' => (string) ($paymentPolicy['public_checkout_payment_policy'] ?? ''),
+            'enabled_online_methods' => (array) ($paymentPolicy['enabled_online_methods'] ?? []),
+            'public_offline_payment_allowed' => !empty($paymentPolicy['public_offline_payment_allowed']),
+            'backend_rejects_disabled_pay_at_hotel' => !empty($paymentPolicy['backend_rejects_disabled_pay_at_hotel']),
+            'payment_policy_configuration_error' => (string) ($paymentPolicy['configuration_error'] ?? ''),
+            'last_public_booking_payment_method' => (string) ($lastPublicBookingPayment['payment_method'] ?? ''),
+            'last_public_booking_payment_status' => (string) ($lastPublicBookingPayment['payment_status'] ?? ''),
+            'checkout_price_breakdown_mode' => MustBookingConfig::get_checkout_price_breakdown_mode(),
             'deposit_required' => !empty(MustBookingConfig::get_setting('deposit_required', false)),
             'deposit_type' => (string) MustBookingConfig::get_setting('deposit_type', 'percentage'),
             'deposit_value' => (float) MustBookingConfig::get_setting('deposit_value', 0),
@@ -208,6 +219,7 @@ final class SettingsDiagnostics
             'booking_recipient' => $bookingRecipient,
             'template_count' => \count($emailTemplates),
             'layout_type' => (string) (EmailLayoutEngine::getLayoutTypeLabels()[MustBookingConfig::get_email_layout_type()] ?? MustBookingConfig::get_email_layout_type()),
+            'email_price_breakdown_mode' => MustBookingConfig::get_email_price_breakdown_mode(),
             'recent_failures' => $emailFailures,
             'is_configured' => \is_email($emailSender) && \is_email($bookingRecipient) && !empty($emailTemplates),
         ];
@@ -265,6 +277,7 @@ final class SettingsDiagnostics
             'hotel_name' => MustBookingConfig::get_hotel_name(),
             'currency' => MustBookingConfig::get_currency(),
             'timezone' => MustBookingConfig::get_timezone(),
+            'date_picker_calendar_layout' => MustBookingConfig::get_date_picker_calendar_layout(),
         ];
 
         $providerSummary = ClockConnectionDiagnostic::getConfigSummary();
@@ -564,6 +577,49 @@ final class SettingsDiagnostics
 
         return \is_array($decoded) ? $decoded : [];
     }
+    /**
+     * @return array<string, mixed>
+     */
+    private static function getLastPublicBookingPaymentSummary(): array
+    {
+        global $wpdb;
+
+        $reservationsTable = $wpdb->prefix . 'must_reservations';
+        $paymentsTable = $wpdb->prefix . 'must_payments';
+
+        if (
+            !self::tableExists($reservationsTable)
+            || !self::tableExists($paymentsTable)
+            || !self::columnExists($reservationsTable, 'id')
+            || !self::columnExists($reservationsTable, 'booking_source')
+            || !self::columnExists($reservationsTable, 'payment_status')
+            || !self::columnExists($paymentsTable, 'id')
+            || !self::columnExists($paymentsTable, 'reservation_id')
+            || !self::columnExists($paymentsTable, 'method')
+        ) {
+            return [];
+        }
+
+        $paymentStatusSelect = self::columnExists($paymentsTable, 'status')
+            ? "COALESCE(p.status, r.payment_status, '')"
+            : "COALESCE(r.payment_status, '')";
+        $createdSelect = self::columnExists($reservationsTable, 'created_at') ? 'r.created_at' : "''";
+
+        $row = $wpdb->get_row(
+            "SELECT
+                COALESCE(p.method, '') AS payment_method,
+                {$paymentStatusSelect} AS payment_status,
+                {$createdSelect} AS created_at
+            FROM `{$reservationsTable}` r
+            LEFT JOIN `{$paymentsTable}` p ON p.reservation_id = r.id
+            WHERE r.booking_source = 'website'
+            ORDER BY r.id DESC, p.id DESC
+            LIMIT 1",
+            ARRAY_A
+        );
+
+        return \is_array($row) ? $row : [];
+    }
 
     private static function tableExists(string $tableName): bool
     {
@@ -576,6 +632,22 @@ final class SettingsDiagnostics
             $wpdb->prepare(
                 'SHOW TABLES LIKE %s',
                 $tableName
+            )
+        );
+
+        return \is_string($match) && $match !== '';
+    }
+    private static function columnExists(string $tableName, string $columnName): bool
+    {
+        if ($tableName === '' || $columnName === '') {
+            return false;
+        }
+
+        global $wpdb;
+        $match = $wpdb->get_var(
+            $wpdb->prepare(
+                "SHOW COLUMNS FROM `{$tableName}` LIKE %s",
+                $columnName
             )
         );
 

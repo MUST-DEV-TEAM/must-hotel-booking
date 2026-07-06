@@ -484,6 +484,14 @@ function get_pending_confirmation_page_view_data(): array
         ? get_fixed_room_booking_room_id()
         : 0;
     $flow_data = get_booking_selection_flow_data();
+    if (PaymentEngine::clearInvalidPublicPaymentMethodDraft($flow_data)) {
+        update_booking_selection_flow_data([
+            'payment_method' => '',
+            'pending_payment' => PaymentEngine::getEmptyPendingPaymentFlowData(),
+        ]);
+        $flow_data['payment_method'] = '';
+        $flow_data['pending_payment'] = PaymentEngine::getEmptyPendingPaymentFlowData();
+    }
     $pending_payment = PaymentEngine::normalizePendingPaymentFlowData($flow_data['pending_payment'] ?? []);
     $context = BookingPerformanceMonitor::measure(
         'booking_validation',
@@ -503,17 +511,27 @@ function get_pending_confirmation_page_view_data(): array
     $payment_state = BookingPerformanceMonitor::measure(
         'payment_provider_initialization',
         static function () use ($request_source, $flow_data): array {
-            $method = PaymentEngine::getSelectedCheckoutPaymentMethod($request_source, $flow_data);
+            $validation = PaymentEngine::validatePublicCheckoutPaymentMethod($request_source, $flow_data);
+            $method = (string) ($validation['method'] ?? '');
+            $methods = isset($validation['methods']) && \is_array($validation['methods'])
+                ? $validation['methods']
+                : PaymentEngine::getCheckoutPaymentMethods();
             return [
+                'success' => !empty($validation['success']),
                 'method' => $method,
-                'methods' => PaymentEngine::getCheckoutPaymentMethods(),
+                'methods' => $methods,
                 'cta' => PaymentEngine::getCheckoutPaymentCtaLabel($method),
+                'message' => (string) ($validation['message'] ?? ''),
+                'reason' => (string) ($validation['reason'] ?? ''),
             ];
         }
     );
     $payment_method = (string) $payment_state['method'];
     $payment_methods = (array) $payment_state['methods'];
     $confirmation_cta_label = (string) $payment_state['cta'];
+    if (empty($payment_state['success']) && (string) ($payment_state['message'] ?? '') !== '') {
+        $messages[] = (string) $payment_state['message'];
+    }
     $request_action = isset($request_source['must_confirmation_action']) ? \sanitize_key((string) \wp_unslash($request_source['must_confirmation_action'])) : '';
     $submitted_coupon_code = isset($request_source['coupon_code']) ? \sanitize_text_field((string) \wp_unslash($request_source['coupon_code'])) : '';
     $persisted_coupon_code = isset($request_source['applied_coupon_code']) ? \sanitize_text_field((string) \wp_unslash($request_source['applied_coupon_code'])) : '';
@@ -606,10 +624,10 @@ function get_pending_confirmation_page_view_data(): array
                 foreach ($billing_errors as $billing_error) {
                     $messages[] = $billing_error;
                 }
-                if (!isset($payment_methods[$payment_method])) {
+                if (empty($payment_state['success']) || !isset($payment_methods[$payment_method])) {
                     $messages[] = \__('Please select a valid payment method.', 'must-hotel-booking');
                 }
-                if (empty($billing_errors) && isset($payment_methods[$payment_method]) && !empty($context['is_valid'])) {
+                if (empty($billing_errors) && !empty($payment_state['success']) && isset($payment_methods[$payment_method]) && !empty($context['is_valid'])) {
                     $effective_coupon_code = $applied_coupon_code !== '' ? $applied_coupon_code : $coupon_code;
                     $payment_creation_options = PaymentEngine::getReservationCreationOptions($payment_method);
                     $total_amount = isset($summary['total_price']) ? (float) $summary['total_price'] : 0.0;
@@ -803,7 +821,7 @@ function get_pending_confirmation_page_view_data(): array
     return [
         'success' => false,
         'is_form_mode' => true,
-        'can_confirm' => !empty($context['is_valid']) && !empty($stored_guest_form_source) && !empty($selected_room_ids) && empty($room_items['errors']),
+        'can_confirm' => !empty($context['is_valid']) && !empty($stored_guest_form_source) && !empty($selected_room_ids) && empty($room_items['errors']) && !empty($payment_state['success']) && $payment_method !== '',
         'message' => '',
         'messages' => $messages,
         'reservations' => [],

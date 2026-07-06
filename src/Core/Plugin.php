@@ -7,6 +7,7 @@ final class Plugin
     public static function activate(): void
     {
         \MustHotelBooking\Database\install_tables();
+        \MustHotelBooking\Core\MustBookingConfig::maybe_migrate_payment_policy_defaults();
         (new \MustHotelBooking\Database\DefaultInventoryUnitSyncService())->maybeRunBackfill();
         \MustHotelBooking\Core\ManagedPages::install();
         \MustHotelBooking\Core\StaffAccess::syncRoleCapabilities();
@@ -43,6 +44,7 @@ final class Plugin
         }
 
         \MustHotelBooking\Database\install_tables();
+        \MustHotelBooking\Core\MustBookingConfig::maybe_migrate_payment_policy_defaults();
 
         \MustHotelBooking\Engine\LockEngine::scheduleCleanupCron();
         \MustHotelBooking\Provider\Sync\ProviderSyncJobRunner::scheduleCron();
@@ -52,6 +54,7 @@ final class Plugin
     public static function initPlugin(): void
     {
         (new \MustHotelBooking\Database\DefaultInventoryUnitSyncService())->maybeRunBackfill();
+        \MustHotelBooking\Core\MustBookingConfig::maybe_migrate_payment_policy_defaults();
         \MustHotelBooking\Core\ManagedPages::sync();
         \MustHotelBooking\Core\StaffAccess::syncRoleCapabilities();
         \MustHotelBooking\Core\Updater::boot();

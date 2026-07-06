@@ -29,7 +29,7 @@ The payment layer is built around three collaborating components:
 
 `PaymentFactory::normalizeMethod()` maps `pay_at_hotel` and `cash` to the string `'cash'`, `pokpay` to `'pokpay'`, and `stripe` to `'stripe'`. Any other value returns `''`.
 
-The set of enabled methods is stored in the `payment_methods` key of the `payments_summary` settings group and managed by `PaymentMethodRegistry`. PokPay is the primary online method and Stripe is the fallback. At checkout, `PaymentEngine::getCheckoutPaymentMethods()` filters gateways by configuration, so PokPay or Stripe are excluded if their active environment credentials are missing. If no method passes validation, `pay_at_hotel` is returned as a hard fallback.
+The set of enabled methods is stored in the `payment_methods` key of the `payments_summary` settings group and managed by `PaymentMethodRegistry`. `pay_at_hotel_enabled` is the explicit opt-in for offline collection and defaults to false. PokPay is the primary online method and Stripe is the fallback. At checkout, `PaymentEngine::getCheckoutPaymentMethods()` filters gateways by configuration, so PokPay or Stripe are excluded if their active environment credentials are missing. If no method passes validation and Pay at hotel is not explicitly enabled, public checkout is blocked with a configuration error instead of falling back to offline payment.
 
 ## PokPay refunds
 

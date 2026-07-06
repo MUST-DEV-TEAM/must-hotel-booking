@@ -636,6 +636,7 @@ function build_booking_page_view_data(): array
         'max_booking_guests' => $max_booking_guests,
         'max_booking_rooms' => $max_booking_rooms,
         'accommodation_type' => (string) $context['accommodation_type'],
+        'calendar_layout' => MustBookingConfig::get_date_picker_calendar_layout(),
         'booking_categories' => RoomCatalog::getBookingCategories(),
         'has_search' => $has_search,
         'is_valid' => (bool) $context['is_valid'],
@@ -967,6 +968,7 @@ $arrow_icon_url = MUST_HOTEL_BOOKING_URL . 'assets/img/ArrowRight.svg';
             'maxRooms' => $max_booking_rooms,
             'categoryCapacities' => $category_capacities,
             'pageMode' => 'calendar',
+            'calendarLayout' => MustBookingConfig::get_date_picker_calendar_layout(),
             'fixedRoomMode' => $fixed_room_mode,
             'fixedRoomId' => $fixed_room_id,
             'fixedRoom' => [

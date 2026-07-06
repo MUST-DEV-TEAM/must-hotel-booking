@@ -666,13 +666,21 @@ final class ClockReservationProvider implements ReservationProviderInterface
         $reservationIds = [];
         $appliedCouponIds = [];
         foreach ($validatedRooms as $validatedRoom) {
-            $providerReservation = $this->createClockBooking($context, $guestForm, $validatedRoom, $clockStatus, $returningGuestId);
+            $websiteBookingReference = $this->mirror->generateBookingReference();
+            $providerReservation = $this->createClockBooking($context, $guestForm, $validatedRoom, $clockStatus, $returningGuestId, $websiteBookingReference);
             if (empty($providerReservation['success'])) {
                 return $this->errorResult([(string) ($providerReservation['message'] ?? \__('Unable to create the booking in Clock.', 'must-hotel-booking'))]);
             }
             $providerData = isset($providerReservation['reservation']) && \is_array($providerReservation['reservation'])
                 ? $providerReservation['reservation']
                 : [];
+            $providerData['_mhb_reference_mapping'] = [
+                'website_booking_reference' => $websiteBookingReference,
+                'website_reference_sent_to_clock' => true,
+                'clock_reference_storage_field' => (string) ($providerReservation['clock_reference_storage_field'] ?? ''),
+                'clock_reference_fallback_fields' => (array) ($providerReservation['clock_reference_fallback_fields'] ?? []),
+                'clock_reference_text' => (string) ($providerReservation['clock_reference_text'] ?? ''),
+            ];
             $reservationId = $this->mirror->createMirrorReservation(
                 $context,
                 $guestForm,
@@ -680,6 +688,7 @@ final class ClockReservationProvider implements ReservationProviderInterface
                 $validatedRoom,
                 $providerData,
                 [
+                    'booking_id' => $websiteBookingReference,
                     'reservation_status' => $reservationStatus,
                     'payment_status' => $paymentStatus,
                 ]
@@ -764,16 +773,18 @@ final class ClockReservationProvider implements ReservationProviderInterface
      * @param array<string, mixed> $validatedRoom
      * @return array<string, mixed>
      */
-    private function createClockBooking(array $context, array $guestForm, array $validatedRoom, string $clockStatus, string $returningGuestId = ''): array
+    private function createClockBooking(array $context, array $guestForm, array $validatedRoom, string $clockStatus, string $returningGuestId = '', string $websiteBookingReference = ''): array
     {
         $idempotencyKey = $this->idempotencyKey($context, $guestForm, [$validatedRoom], $clockStatus, 'clock_pms');
-        $body = $this->bookingCreatePayload($context, $guestForm, $validatedRoom, $clockStatus, $returningGuestId);
+        $payload = $this->bookingCreatePayload($context, $guestForm, $validatedRoom, $clockStatus, $returningGuestId, $websiteBookingReference);
+        $body = $payload['payload'];
         $response = $this->client->request(
             'POST',
             ClockConfig::reservationCreatePath(),
             [
                 'idempotency_key' => $idempotencyKey,
                 'body' => $body,
+                'booking_reference' => $websiteBookingReference,
             ],
             'clock.reservation_create'
         );
@@ -802,6 +813,9 @@ final class ClockReservationProvider implements ReservationProviderInterface
         return [
             'success' => true,
             'reservation' => $reservation,
+            'clock_reference_storage_field' => (string) ($payload['primary_field'] ?? ''),
+            'clock_reference_fallback_fields' => (array) ($payload['fallback_fields'] ?? []),
+            'clock_reference_text' => (string) ($payload['reference_text'] ?? ''),
         ];
     }
     /** @param array<string, mixed> $reservation @param array<string, mixed> $validatedRoom */
@@ -857,7 +871,7 @@ final class ClockReservationProvider implements ReservationProviderInterface
      * @param array<string, mixed> $validatedRoom
      * @return array<string, mixed>
      */
-    private function bookingCreatePayload(array $context, array $guestForm, array $validatedRoom, string $clockStatus, string $returningGuestId): array
+    private function bookingCreatePayload(array $context, array $guestForm, array $validatedRoom, string $clockStatus, string $returningGuestId, string $websiteBookingReference = ''): array
     {
         $roomMapping = isset($validatedRoom['room_mapping']) && \is_array($validatedRoom['room_mapping']) ? $validatedRoom['room_mapping'] : [];
         $physicalMapping = isset($validatedRoom['physical_mapping']) && \is_array($validatedRoom['physical_mapping']) ? $validatedRoom['physical_mapping'] : [];
@@ -873,7 +887,7 @@ final class ClockReservationProvider implements ReservationProviderInterface
             'status' => $clockStatus,
             'adults' => isset($validatedRoom['guests']) ? \max(1, (int) $validatedRoom['guests']) : \max(1, (int) ($context['guests'] ?? 1)),
             'children' => 0,
-            'reference_number' => $this->clockReferenceNumber($context, $validatedRoom),
+            'reference_number' => $websiteBookingReference,
             'rate_id' => $this->nullableExternalId($ratePlanMapping),
             'arrival_room_type_id' => $this->nullableExternalId($roomMapping),
             'arrival_room_id' => $this->nullableExternalId($physicalMapping),
@@ -914,7 +928,7 @@ final class ClockReservationProvider implements ReservationProviderInterface
         if ($returningGuestId !== '') {
             $payload['main_booking_guest'] = $returningGuestId;
         }
-        return $payload;
+        return ClockBookingReferenceMapper::applyWebsiteReferenceToPayload($payload, $websiteBookingReference);
     }
     /** @param array<int, array<string, mixed>> $validatedRooms @return array<int, array<string, mixed>> */
     private function providerRoomPayloads(array $validatedRooms): array
@@ -1015,17 +1029,6 @@ final class ClockReservationProvider implements ReservationProviderInterface
         }
         return $this->firstString($pricing, ['provider_rate_id', 'clock_rate_id']);
     }
-    /** @param array<string, mixed> $context @param array<string, mixed> $validatedRoom */
-    private function clockReferenceNumber(array $context, array $validatedRoom): string
-    {
-        $parts = [
-            'MHB',
-            \gmdate('YmdHis'),
-            isset($validatedRoom['room_id']) ? (string) (int) $validatedRoom['room_id'] : '0',
-            \substr(\hash('crc32b', (string) ($context['checkin'] ?? '') . (string) ($context['checkout'] ?? '') . $this->uuid()), 0, 8),
-        ];
-        return \implode('-', $parts);
-    }
     /** @param array<string, string> $guestForm @param array<string, mixed> $pricing */
     private function bookingNote(int $roomId, array $guestForm, array $pricing): string
     {
@@ -1100,13 +1103,6 @@ final class ClockReservationProvider implements ReservationProviderInterface
     {
         $externalId = (string) ($mapping['external_id'] ?? '');
         return $externalId !== '' && \is_numeric($externalId) ? (int) $externalId : ($externalId !== '' ? $externalId : null);
-    }
-    private function uuid(): string
-    {
-        if (\function_exists('wp_generate_uuid4')) {
-            return \wp_generate_uuid4();
-        }
-        return \bin2hex(\random_bytes(16));
     }
     /** @param array<string, mixed>|null $mapping @return array<string, mixed> */
     private function mappingSummary(?array $mapping): array

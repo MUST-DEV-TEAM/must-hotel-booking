@@ -97,13 +97,208 @@ final class PaymentEngine
                 'description' => isset($catalog[$methodKey]['description']) ? (string) $catalog[$methodKey]['description'] : '',
             ];
         }
-        if (empty($options)) {
-            $options['pay_at_hotel'] = [
-                'label' => \__('Pay at hotel', 'must-hotel-booking'),
-                'description' => \__('Guest pays in cash at the property during check-in or check-out.', 'must-hotel-booking'),
+        return $options;
+    }
+    /**
+     * @return array<int, string>
+     */
+    public static function getEnabledOnlineCheckoutMethods(): array
+    {
+        $methods = [];
+        foreach (['pokpay', 'stripe'] as $method) {
+            if (isset(self::getCheckoutPaymentMethods()[$method])) {
+                $methods[] = $method;
+            }
+        }
+        return $methods;
+    }
+    public static function normalizeDefaultPaymentMode(string $mode, array $methodStates = []): string
+    {
+        $mode = \sanitize_key($mode);
+        $payAtHotelEnabled = \class_exists(MustBookingConfig::class)
+            ? MustBookingConfig::is_pay_at_hotel_enabled()
+            : false;
+
+        if (!empty($methodStates)) {
+            $payAtHotelEnabled = !empty($methodStates['pay_at_hotel']);
+        }
+
+        if ($mode === 'pay_at_hotel' && !$payAtHotelEnabled) {
+            $mode = '';
+        }
+
+        if (\in_array($mode, ['pokpay', 'stripe', 'pay_now', 'guest_choice'], true)) {
+            return $mode;
+        }
+        if ($mode === 'pay_at_hotel' && $payAtHotelEnabled) {
+            return 'pay_at_hotel';
+        }
+        if (empty($methodStates) || !empty($methodStates['pokpay'])) {
+            return 'pokpay';
+        }
+        if (!empty($methodStates['stripe'])) {
+            return 'stripe';
+        }
+        return $payAtHotelEnabled ? 'pay_at_hotel' : 'pokpay';
+    }
+    public static function resolveDefaultPublicCheckoutPaymentMethod(): string
+    {
+        $methods = self::getCheckoutPaymentMethods();
+        $defaultMode = self::normalizeDefaultPaymentMode(
+            (string) MustBookingConfig::get_setting('default_payment_mode', 'pokpay')
+        );
+
+        if (isset($methods[$defaultMode])) {
+            return $defaultMode;
+        }
+        foreach (['pokpay', 'stripe', 'pay_at_hotel'] as $method) {
+            if (isset($methods[$method])) {
+                return $method;
+            }
+        }
+        return '';
+    }
+    /**
+     * @return array<string, mixed>
+     */
+    public static function getPublicCheckoutPaymentPolicy(): array
+    {
+        $methods = self::getCheckoutPaymentMethods();
+        $onlineMethods = self::getEnabledOnlineCheckoutMethods();
+        $payAtHotelEnabled = MustBookingConfig::is_pay_at_hotel_enabled();
+        $defaultMethod = self::resolveDefaultPublicCheckoutPaymentMethod();
+        $defaultPaymentMode = self::normalizeDefaultPaymentMode(
+            (string) MustBookingConfig::get_setting('default_payment_mode', 'pokpay')
+        );
+        $offlineAllowed = $payAtHotelEnabled && isset($methods['pay_at_hotel']);
+        $configurationError = self::getPublicCheckoutConfigurationError($methods, $onlineMethods, $defaultMethod);
+
+        return [
+            'default_payment_mode' => $defaultPaymentMode,
+            'default_method' => $defaultMethod,
+            'pay_at_hotel_enabled' => $payAtHotelEnabled,
+            'public_checkout_payment_policy' => $configurationError === '' ? 'online_payment_first' : 'blocked_configuration',
+            'enabled_methods' => \array_keys($methods),
+            'enabled_online_methods' => $onlineMethods,
+            'public_offline_payment_allowed' => $offlineAllowed,
+            'backend_rejects_disabled_pay_at_hotel' => true,
+            'configuration_error' => $configurationError,
+        ];
+    }
+    /**
+     * @param array<string, mixed> $source
+     * @param array<string, mixed> $flowData
+     * @return array{success: bool, method: string, message: string, reason: string, methods: array<string, array<string, string>>}
+     */
+    public static function validatePublicCheckoutPaymentMethod(array $source, array $flowData = []): array
+    {
+        $methods = self::getCheckoutPaymentMethods();
+        $onlineMethods = self::getEnabledOnlineCheckoutMethods();
+        $defaultMethod = self::resolveDefaultPublicCheckoutPaymentMethod();
+        $configurationError = self::getPublicCheckoutConfigurationError($methods, $onlineMethods, $defaultMethod);
+        $rawMethod = '';
+        $hasSubmittedMethod = false;
+
+        if (isset($source['payment_method']) && !\is_array($source['payment_method'])) {
+            $rawMethod = \sanitize_key((string) \wp_unslash($source['payment_method']));
+            $hasSubmittedMethod = $rawMethod !== '';
+        }
+
+        if ($hasSubmittedMethod) {
+            if ($rawMethod === 'pay_at_hotel' && !MustBookingConfig::is_pay_at_hotel_enabled()) {
+                return [
+                    'success' => false,
+                    'method' => '',
+                    'message' => \__('Pay at hotel is not enabled for online checkout. Please choose an online payment method.', 'must-hotel-booking'),
+                    'reason' => 'pay_at_hotel_disabled',
+                    'methods' => $methods,
+                ];
+            }
+            if (!isset($methods[$rawMethod])) {
+                return [
+                    'success' => false,
+                    'method' => '',
+                    'message' => $configurationError !== ''
+                        ? $configurationError
+                        : \__('Please select a valid payment method.', 'must-hotel-booking'),
+                    'reason' => $configurationError !== '' ? 'payment_configuration_error' : 'invalid_payment_method',
+                    'methods' => $methods,
+                ];
+            }
+            return [
+                'success' => true,
+                'method' => $rawMethod,
+                'message' => '',
+                'reason' => '',
+                'methods' => $methods,
             ];
         }
-        return $options;
+
+        if ($configurationError !== '' || $defaultMethod === '') {
+            return [
+                'success' => false,
+                'method' => '',
+                'message' => $configurationError !== ''
+                    ? $configurationError
+                    : \__('Online checkout is not configured with an available payment method.', 'must-hotel-booking'),
+                'reason' => 'payment_configuration_error',
+                'methods' => $methods,
+            ];
+        }
+
+        $flowMethod = isset($flowData['payment_method']) ? \sanitize_key((string) $flowData['payment_method']) : '';
+        if ($flowMethod !== '' && isset($methods[$flowMethod])) {
+            return [
+                'success' => true,
+                'method' => $flowMethod,
+                'message' => '',
+                'reason' => '',
+                'methods' => $methods,
+            ];
+        }
+
+        return [
+            'success' => true,
+            'method' => $defaultMethod,
+            'message' => '',
+            'reason' => '',
+            'methods' => $methods,
+        ];
+    }
+    /**
+     * @param array<string, mixed> $flowData
+     */
+    public static function clearInvalidPublicPaymentMethodDraft(array $flowData): bool
+    {
+        $method = isset($flowData['payment_method']) ? \sanitize_key((string) $flowData['payment_method']) : '';
+        if ($method === '') {
+            return false;
+        }
+        $methods = self::getCheckoutPaymentMethods();
+        if ($method === 'pay_at_hotel' && !MustBookingConfig::is_pay_at_hotel_enabled()) {
+            return true;
+        }
+        return !isset($methods[$method]);
+    }
+    /**
+     * @param array<string, array<string, string>> $methods
+     * @param array<int, string> $onlineMethods
+     */
+    private static function getPublicCheckoutConfigurationError(array $methods, array $onlineMethods, string $defaultMethod): string
+    {
+        if (empty($methods)) {
+            return \__('Online checkout is not configured. Please contact the hotel before completing this booking.', 'must-hotel-booking');
+        }
+        if (empty($onlineMethods) && !MustBookingConfig::is_pay_at_hotel_enabled()) {
+            return \__('Online checkout needs PokPay or Stripe credentials before public bookings can be confirmed.', 'must-hotel-booking');
+        }
+        if ((string) MustBookingConfig::get_setting('default_payment_mode', 'pokpay') === 'pay_at_hotel' && !MustBookingConfig::is_pay_at_hotel_enabled()) {
+            return \__('Online checkout is misconfigured because Pay at hotel is selected as the default but is disabled.', 'must-hotel-booking');
+        }
+        if ($defaultMethod === '' || !isset($methods[$defaultMethod])) {
+            return \__('Online checkout is not configured with a valid default payment method.', 'must-hotel-booking');
+        }
+        return '';
     }
     public static function getGateway(string $method = ''): PaymentInterface
     {
@@ -120,7 +315,7 @@ final class PaymentEngine
         if (\in_array($paymentMethod, $availableMethods, true)) {
             return $paymentMethod;
         }
-        return (string) (\reset($availableMethods) ?: 'pay_at_hotel');
+        return self::resolveDefaultPublicCheckoutPaymentMethod();
     }
     /**
      * @param array<string, mixed> $source
@@ -136,8 +331,11 @@ final class PaymentEngine
     }
     public static function getCheckoutPaymentCtaLabel(string $paymentMethod): string
     {
-        $paymentMethod = self::normalizeCheckoutPaymentMethod($paymentMethod);
+        $paymentMethod = \sanitize_key($paymentMethod);
         $gateway = self::normalizeMethod($paymentMethod);
+        if ($paymentMethod === '') {
+            return \__('Payment configuration required', 'must-hotel-booking');
+        }
         if ($paymentMethod === 'clock_pms') {
             return \__('Confirm in Clock PMS', 'must-hotel-booking');
         }

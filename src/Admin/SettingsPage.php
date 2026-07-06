@@ -1161,7 +1161,8 @@ final class SettingsPage
             'enable_special_requests' => !empty(MustBookingConfig::get_setting('enable_special_requests', true)),
             'require_terms_acceptance' => !empty(MustBookingConfig::get_setting('require_terms_acceptance', true)),
             'default_reservation_status' => (string) MustBookingConfig::get_setting('default_reservation_status', 'confirmed'),
-            'default_payment_mode' => (string) MustBookingConfig::get_setting('default_payment_mode', 'guest_choice'),
+            'default_payment_mode' => PaymentEngine::normalizeDefaultPaymentMode((string) MustBookingConfig::get_setting('default_payment_mode', 'pokpay')),
+            'date_picker_calendar_layout' => MustBookingConfig::get_date_picker_calendar_layout(),
             'cancellation_allowed' => !empty(MustBookingConfig::get_setting('cancellation_allowed', true)),
             'cancellation_policy_days' => MustBookingConfig::get_cancellation_policy_days(),
             'cancellation_notice_hours' => MustBookingConfig::get_cancellation_notice_hours(),
@@ -1207,6 +1208,7 @@ final class SettingsPage
             'deposit_type' => (string) MustBookingConfig::get_setting('deposit_type', 'percentage'),
             'deposit_value' => (float) MustBookingConfig::get_setting('deposit_value', 0),
             'tax_rate' => (float) MustBookingConfig::get_setting('tax_rate', 0),
+            'checkout_price_breakdown_mode' => MustBookingConfig::get_checkout_price_breakdown_mode(),
         ];
         return \array_merge($form, $overrides);
     }
@@ -1280,6 +1282,7 @@ final class SettingsPage
             'email_button_color' => MustBookingConfig::get_email_button_color(),
             'email_footer_text' => MustBookingConfig::get_email_footer_text(),
             'email_layout_type' => MustBookingConfig::get_email_layout_type(),
+            'email_price_breakdown_mode' => MustBookingConfig::get_email_price_breakdown_mode(),
         ];
         return \array_merge($form, $overrides);
     }
@@ -1400,7 +1403,9 @@ final class SettingsPage
         $form['enable_special_requests'] = self::parseBool($source, 'enable_special_requests');
         $form['require_terms_acceptance'] = self::parseBool($source, 'require_terms_acceptance');
         $form['default_reservation_status'] = \sanitize_key((string) \wp_unslash($source['default_reservation_status'] ?? $form['default_reservation_status']));
-        $form['default_payment_mode'] = \sanitize_key((string) \wp_unslash($source['default_payment_mode'] ?? $form['default_payment_mode']));
+        $submittedDefaultPaymentMode = \sanitize_key((string) \wp_unslash($source['default_payment_mode'] ?? $form['default_payment_mode']));
+        $form['default_payment_mode'] = PaymentEngine::normalizeDefaultPaymentMode($submittedDefaultPaymentMode);
+        $form['date_picker_calendar_layout'] = \sanitize_key((string) \wp_unslash($source['date_picker_calendar_layout'] ?? $form['date_picker_calendar_layout']));
         $form['cancellation_allowed'] = self::parseBool($source, 'cancellation_allowed');
         $form['cancellation_policy_days'] = (int) \absint(\wp_unslash($source['cancellation_policy_days'] ?? $form['cancellation_policy_days']));
         $form['cancellation_notice_hours'] = $form['cancellation_policy_days'] * 24;
@@ -1443,6 +1448,12 @@ final class SettingsPage
         }
         if ($form['pending_reservation_expiration_minutes'] < 5 || $form['pending_reservation_expiration_minutes'] > 1440) {
             $errors[] = \__('Pending reservation expiration must be between 5 and 1440 minutes.', 'must-hotel-booking');
+        }
+        if ($submittedDefaultPaymentMode === 'pay_at_hotel' && !MustBookingConfig::is_pay_at_hotel_enabled()) {
+            $errors[] = \__('Pay at hotel cannot be selected as the default payment mode unless it is explicitly enabled in Payments settings.', 'must-hotel-booking');
+        }
+        if (!\in_array($form['date_picker_calendar_layout'], ['one_calendar', 'two_calendars'], true)) {
+            $form['date_picker_calendar_layout'] = 'two_calendars';
         }
         if ($form['cancellation_policy_days'] < 0 || $form['cancellation_policy_days'] > 365) {
             $errors[] = \__('Cancellation policy days must be between 0 and 365.', 'must-hotel-booking');
@@ -1513,6 +1524,7 @@ final class SettingsPage
         $form['deposit_type'] = \sanitize_key((string) \wp_unslash($source['deposit_type'] ?? $form['deposit_type']));
         $form['deposit_value'] = \is_numeric($source['deposit_value'] ?? null) ? (float) $source['deposit_value'] : 0.0;
         $form['tax_rate'] = \is_numeric($source['tax_rate'] ?? null) ? (float) $source['tax_rate'] : 0.0;
+        $form['checkout_price_breakdown_mode'] = \sanitize_key((string) \wp_unslash($source['checkout_price_breakdown_mode'] ?? $form['checkout_price_breakdown_mode']));
         $errors = [];
         if (!\in_array($form['deposit_type'], ['fixed', 'percentage'], true)) {
             $errors[] = \__('Deposit type must be fixed or percentage.', 'must-hotel-booking');
@@ -1525,6 +1537,9 @@ final class SettingsPage
         }
         if ($form['tax_rate'] < 0 || $form['tax_rate'] > 100) {
             $errors[] = \__('Tax rate must be between 0 and 100.', 'must-hotel-booking');
+        }
+        if (!\in_array($form['checkout_price_breakdown_mode'], ['total_only', 'date_price_rows'], true)) {
+            $form['checkout_price_breakdown_mode'] = 'total_only';
         }
         return [
             'form' => $form,
@@ -1683,6 +1698,7 @@ final class SettingsPage
         $form['email_button_color'] = \sanitize_hex_color((string) \wp_unslash($source['email_button_color'] ?? '')) ?: '#141414';
         $form['email_footer_text'] = \sanitize_textarea_field((string) \wp_unslash($source['email_footer_text'] ?? ''));
         $form['email_layout_type'] = EmailLayoutEngine::normalizeLayoutType((string) \wp_unslash($source['email_layout_type'] ?? 'classic'));
+        $form['email_price_breakdown_mode'] = \sanitize_key((string) \wp_unslash($source['email_price_breakdown_mode'] ?? $form['email_price_breakdown_mode']));
         $errors = [];
         if (!\is_email($form['booking_notification_email'])) {
             $errors[] = \__('Booking notification recipient must be a valid email address.', 'must-hotel-booking');
@@ -1695,6 +1711,9 @@ final class SettingsPage
         }
         if ($form['email_reply_to'] !== '' && !\is_email($form['email_reply_to'])) {
             $errors[] = \__('Reply-to must be a valid email address.', 'must-hotel-booking');
+        }
+        if (!\in_array($form['email_price_breakdown_mode'], ['total_only', 'date_price_rows'], true)) {
+            $form['email_price_breakdown_mode'] = 'total_only';
         }
         return [
             'form' => $form,
@@ -2535,6 +2554,18 @@ final class SettingsPage
     private static function renderBookingRulesTab(array $form): void
     {
         $warnings = [];
+        $paymentModeOptions = [
+            'pokpay' => __('PokPay (recommended)', 'must-hotel-booking'),
+            'stripe' => __('Stripe', 'must-hotel-booking'),
+            'guest_choice' => __('Guest chooses at checkout', 'must-hotel-booking'),
+            'pay_now' => __('Pay now', 'must-hotel-booking'),
+        ];
+        if (MustBookingConfig::is_pay_at_hotel_enabled()) {
+            $paymentModeOptions['pay_at_hotel'] = __('Pay at hotel', 'must-hotel-booking');
+        } elseif ((string) ($form['default_payment_mode'] ?? '') === 'pay_at_hotel') {
+            $form['default_payment_mode'] = PaymentEngine::normalizeDefaultPaymentMode('pay_at_hotel');
+            $warnings[] = \__('Default payment mode was reset because Pay at hotel is disabled.', 'must-hotel-booking');
+        }
         if (empty($form['allow_multi_room_booking']) && (int) ($form['max_booking_rooms'] ?? 1) > 1) {
             $warnings[] = \__('Multi-room booking is disabled while maximum rooms per reservation is greater than 1.', 'must-hotel-booking');
         }
@@ -2567,7 +2598,8 @@ final class SettingsPage
         echo '<div class="must-settings-grid must-settings-grid--2">';
         self::renderSectionIntro(\__('Operational defaults', 'must-hotel-booking'));
         self::renderField(['label' => __('Default reservation status', 'must-hotel-booking'), 'name' => 'default_reservation_status', 'type' => 'select', 'value' => $form['default_reservation_status'] ?? 'confirmed', 'options' => ['pending' => __('Pending', 'must-hotel-booking'), 'pending_payment' => __('Pending payment', 'must-hotel-booking'), 'confirmed' => __('Confirmed', 'must-hotel-booking'), 'completed' => __('Completed', 'must-hotel-booking'), 'cancelled' => __('Cancelled', 'must-hotel-booking')]]);
-        self::renderField(['label' => __('Default payment mode', 'must-hotel-booking'), 'name' => 'default_payment_mode', 'type' => 'select', 'value' => $form['default_payment_mode'] ?? 'guest_choice', 'options' => ['guest_choice' => __('Guest chooses at checkout', 'must-hotel-booking'), 'pay_now' => __('Pay now', 'must-hotel-booking'), 'pay_at_hotel' => __('Pay at hotel', 'must-hotel-booking')]]);
+        self::renderField(['label' => __('Default payment mode', 'must-hotel-booking'), 'name' => 'default_payment_mode', 'type' => 'select', 'value' => $form['default_payment_mode'] ?? 'pokpay', 'options' => $paymentModeOptions, 'description' => __('Public checkout uses this only when the submitted payment method is missing and the selected method is enabled and configured.', 'must-hotel-booking')]);
+        self::renderField(['label' => __('Date picker calendar layout', 'must-hotel-booking'), 'name' => 'date_picker_calendar_layout', 'type' => 'select', 'value' => $form['date_picker_calendar_layout'] ?? 'two_calendars', 'options' => ['one_calendar' => __('One calendar', 'must-hotel-booking'), 'two_calendars' => __('Two calendars', 'must-hotel-booking')], 'description' => __('Controls the public booking date picker layout. Two calendars preserves the current live layout.', 'must-hotel-booking')]);
         self::renderField([
             'label' => __('Allow customer cancellation', 'must-hotel-booking'),
             'name' => 'cancellation_allowed',
@@ -2655,6 +2687,9 @@ final class SettingsPage
         if (\in_array('pokpay', $enabledMethods, true) && !PaymentEngine::isPokPayConfigured()) {
             $warnings[] = \__('PokPay is enabled but the active merchant ID, key ID, or key secret is missing.', 'must-hotel-booking');
         }
+        if (MustBookingConfig::is_pay_at_hotel_enabled()) {
+            $warnings[] = \__('Pay at hotel allows confirmed bookings without online payment. Enable only if the hotel accepts manual payment collection.', 'must-hotel-booking');
+        }
         self::renderFormStart('payments_summary');
         self::renderWarnings($warnings);
         self::renderPanelStart(\__('Payments Summary', 'must-hotel-booking'), \__('A control surface for high-level payment defaults with shortcuts into the dedicated Payments page.', 'must-hotel-booking'));
@@ -2670,6 +2705,7 @@ final class SettingsPage
         self::renderField(['label' => __('Deposit type', 'must-hotel-booking'), 'name' => 'deposit_type', 'type' => 'select', 'value' => $form['deposit_type'] ?? 'percentage', 'options' => ['percentage' => __('Percentage', 'must-hotel-booking'), 'fixed' => __('Fixed amount', 'must-hotel-booking')]]);
         self::renderField(['label' => __('Deposit value', 'must-hotel-booking'), 'name' => 'deposit_value', 'type' => 'number', 'min' => 0, 'step' => '0.01', 'value' => $form['deposit_value'] ?? 0]);
         self::renderField(['label' => __('Tax rate (%)', 'must-hotel-booking'), 'name' => 'tax_rate', 'type' => 'number', 'min' => 0, 'max' => 100, 'step' => '0.01', 'value' => $form['tax_rate'] ?? 0]);
+        self::renderField(['label' => __('Checkout price breakdown display', 'must-hotel-booking'), 'name' => 'checkout_price_breakdown_mode', 'type' => 'select', 'value' => $form['checkout_price_breakdown_mode'] ?? 'total_only', 'options' => ['total_only' => __('Show total only', 'must-hotel-booking'), 'date_price_rows' => __('Show date-by-date prices', 'must-hotel-booking')], 'description' => __('Date-by-date mode uses stored quote pricing rows and falls back to the current total-only display when rows are unavailable.', 'must-hotel-booking')]);
         echo '</div>';
         echo '<div class="must-dashboard-action-strip"><span class="must-dashboard-action-strip-label">' . \esc_html__('Quick actions', 'must-hotel-booking') . '</span>';
         if (\function_exists(__NAMESPACE__ . '\get_admin_payments_page_url')) {
@@ -2958,6 +2994,7 @@ final class SettingsPage
         self::renderField(['label' => __('Button color', 'must-hotel-booking'), 'name' => 'email_button_color', 'type' => 'color', 'value' => $form['email_button_color'] ?? '#141414']);
         self::renderField(['label' => __('Shared footer text', 'must-hotel-booking'), 'name' => 'email_footer_text', 'type' => 'textarea', 'rows' => 4, 'value' => $form['email_footer_text'] ?? '']);
         self::renderField(['label' => __('Email layout', 'must-hotel-booking'), 'name' => 'email_layout_type', 'type' => 'select', 'value' => $form['email_layout_type'] ?? 'classic', 'options' => EmailLayoutEngine::getLayoutTypeLabels()]);
+        self::renderField(['label' => __('Email price breakdown display', 'must-hotel-booking'), 'name' => 'email_price_breakdown_mode', 'type' => 'select', 'value' => $form['email_price_breakdown_mode'] ?? 'total_only', 'options' => ['total_only' => __('Show total only', 'must-hotel-booking'), 'date_price_rows' => __('Show date-by-date prices', 'must-hotel-booking')], 'description' => __('Date-by-date mode uses stored reservation pricing snapshot rows and falls back to total-only when rows are unavailable.', 'must-hotel-booking')]);
         echo '</div>';
         echo '<div class="must-dashboard-action-strip"><span class="must-dashboard-action-strip-label">' . \esc_html__('Quick actions', 'must-hotel-booking') . '</span>';
         if (\function_exists(__NAMESPACE__ . '\get_admin_emails_page_url')) {

@@ -787,7 +787,14 @@ function markUnavailableDayElement(dayElement, unavailableDates) {
         });
     }
     function refreshUnavailableDayClasses() {
-        syncUnavailableDayClasses(state.checkinPicker, state.disabledCheckinDates);
+        var checkinInput = document.getElementById('must-booking-checkin');
+        var checkoutInput = document.getElementById('must-booking-checkout');
+        syncUnavailableDayClasses(
+            state.checkinPicker,
+            !state.checkoutPicker && checkinInput && checkoutInput
+                ? getSingleCalendarVisualUnavailableDates(checkinInput.value)
+                : state.disabledCheckinDates
+        );
         syncUnavailableDayClasses(state.checkoutPicker, state.disabledCheckoutDates);
     }
     function normalizeDateList(value) {
@@ -802,6 +809,30 @@ function markUnavailableDayElement(dayElement, unavailableDates) {
     }
     function isDateInList(date, dates) {
         return dates.indexOf(String(date || '')) !== -1;
+    }
+    function getSingleCalendarUnavailableDates() {
+        var seen = {};
+        var combined = [];
+        normalizeDateList(state.disabledCheckinDates).concat(normalizeDateList(state.disabledCheckoutDates)).forEach(function (date) {
+            if (seen[date]) {
+                return;
+            }
+            seen[date] = true;
+            combined.push(date);
+        });
+        return combined;
+    }
+    function getSingleCalendarDisabledDates(selectedCheckin) {
+        var currentCheckin = String(selectedCheckin || '').trim();
+        return getSingleCalendarUnavailableDates().filter(function (date) {
+            return !isValidDateString(currentCheckin) || date !== currentCheckin;
+        });
+    }
+    function getSingleCalendarVisualUnavailableDates(selectedCheckin) {
+        return getSingleCalendarDisabledDates(selectedCheckin);
+    }
+    function isSingleCalendarUnavailableDate(date, selectedCheckin) {
+        return getSingleCalendarDisabledDates(selectedCheckin).indexOf(String(date || '')) !== -1;
     }
     function findFirstAvailableDate(startDate, disabledDates) {
         var start = parseDateString(startDate || config.today || '');
@@ -913,7 +944,10 @@ function markUnavailableDayElement(dayElement, unavailableDates) {
             }
         }
         if (state.checkinPicker) {
-            state.checkinPicker.set('disable', state.disabledCheckinDates);
+            state.checkinPicker.set(
+                'disable',
+                !state.checkoutPicker ? getSingleCalendarDisabledDates(nextCheckin) : state.disabledCheckinDates
+            );
         }
         if (!state.checkoutPicker) {
             refreshUnavailableDayClasses();
@@ -1100,6 +1134,169 @@ function markUnavailableDayElement(dayElement, unavailableDates) {
         }
         var checkinCalendar = document.getElementById('must-booking-checkin-calendar');
         var checkoutCalendar = document.getElementById('must-booking-checkout-calendar');
+        var useOneCalendar = String(config.calendarLayout || 'two_calendars') === 'one_calendar';
+        function handleCalendarDateSelection(dateStr) {
+            var selectedDate = String(dateStr || '').trim();
+            var currentCheckin = String(checkinInput.value || '').trim();
+            var currentCheckout = String(checkoutInput.value || '').trim();
+
+            if (!isValidDateString(selectedDate)) {
+                return;
+            }
+            if (isSingleCalendarUnavailableDate(selectedDate, currentCheckin)) {
+                refreshUnavailableDayClasses();
+                updateRangeHighlights(checkinInput.value, checkoutInput.value, state.previewCheckout);
+                return;
+            }
+
+            if (!isValidDateString(currentCheckin) || isValidDateString(currentCheckout) || selectedDate <= currentCheckin) {
+                checkinInput.value = selectedDate;
+                checkoutInput.value = '';
+                state.previewCheckout = '';
+                if (state.checkinPicker) {
+                    state.checkinPicker.setDate(selectedDate, false);
+                    state.checkinPicker.set('disable', getSingleCalendarDisabledDates(selectedDate));
+                    state.checkinPicker.jumpToDate(selectedDate, true);
+                }
+                refreshUnavailableDayClasses();
+                updateRangeHighlights(checkinInput.value, checkoutInput.value, state.previewCheckout);
+                onFieldChange('checkin');
+                return;
+            }
+
+            checkoutInput.value = selectedDate;
+            state.previewCheckout = '';
+            if (state.checkinPicker) {
+                state.checkinPicker.set('disable', getSingleCalendarDisabledDates(checkinInput.value));
+            }
+            refreshUnavailableDayClasses();
+            updateRangeHighlights(checkinInput.value, checkoutInput.value, state.previewCheckout);
+            onFieldChange('checkout');
+        }
+        if (checkinCalendar && checkoutCalendar && useOneCalendar) {
+            state.checkoutPicker = null;
+            state.checkinPicker = window.flatpickr(checkinCalendar, {
+                inline: true,
+                disableMobile: true,
+                dateFormat: 'Y-m-d',
+                allowInput: false,
+                disable: getSingleCalendarDisabledDates(checkinInput.value),
+                locale: {
+                    firstDayOfWeek: 1
+                },
+                defaultDate: isValidDateString(checkinInput.value) ? checkinInput.value : null,
+                minDate: config.today || 'today',
+                onChange: function (selectedDates, dateStr) {
+                    handleCalendarDateSelection(dateStr);
+                },
+                onMonthChange: function () {
+                    updateCalendarMeta(state.checkinPicker, 'must-booking-checkin-month', 'must-booking-checkin-year');
+                    updateCalendarShiftState();
+                    refreshUnavailableDayClasses();
+                    updateRangeHighlights(checkinInput.value, checkoutInput.value, state.previewCheckout);
+                },
+                onYearChange: function () {
+                    updateCalendarMeta(state.checkinPicker, 'must-booking-checkin-month', 'must-booking-checkin-year');
+                    updateCalendarShiftState();
+                    refreshUnavailableDayClasses();
+                    updateRangeHighlights(checkinInput.value, checkoutInput.value, state.previewCheckout);
+                },
+                onDayCreate: function (selectedDates, dateStr, instance, dayElement) {
+                    markUnavailableDayElement(dayElement, getSingleCalendarVisualUnavailableDates(checkinInput.value));
+                }
+            });
+            if (state.checkinPicker && state.checkinPicker.calendarContainer) {
+                state.checkinPicker.calendarContainer.classList.add('must-booking-flatpickr-instance');
+            }
+            updateCalendarMeta(state.checkinPicker, 'must-booking-checkin-month', 'must-booking-checkin-year');
+            updateCalendarShiftState();
+            refreshUnavailableDayClasses();
+            updateRangeHighlights(checkinInput.value, checkoutInput.value, state.previewCheckout);
+            var singlePreviousButton = document.getElementById('must-booking-cal-prev');
+            var singleNextButton = document.getElementById('must-booking-cal-next-inline') || document.getElementById('must-booking-cal-next');
+            var singleCheckinMonthSelect = document.getElementById('must-booking-checkin-month');
+            var singleCheckinYearSelect = document.getElementById('must-booking-checkin-year');
+            if (singlePreviousButton) {
+                singlePreviousButton.addEventListener('click', function () {
+                    var floorDate = getMonthFloorDate();
+                    var checkinMonthDate = new Date(state.checkinPicker.currentYear, state.checkinPicker.currentMonth, 1);
+                    if (checkinMonthDate.getTime() <= floorDate.getTime()) {
+                        updateCalendarShiftState();
+                        return;
+                    }
+                    state.checkinPicker.changeMonth(-1);
+                    updateCalendarMeta(state.checkinPicker, 'must-booking-checkin-month', 'must-booking-checkin-year');
+                    updateCalendarShiftState();
+                    refreshUnavailableDayClasses();
+                    updateRangeHighlights(checkinInput.value, checkoutInput.value, state.previewCheckout);
+                });
+            }
+            if (singleNextButton) {
+                singleNextButton.addEventListener('click', function () {
+                    state.checkinPicker.changeMonth(1);
+                    updateCalendarMeta(state.checkinPicker, 'must-booking-checkin-month', 'must-booking-checkin-year');
+                    refreshUnavailableDayClasses();
+                    updateRangeHighlights(checkinInput.value, checkoutInput.value, state.previewCheckout);
+                });
+            }
+            if (singleCheckinMonthSelect) {
+                singleCheckinMonthSelect.addEventListener('change', function () {
+                    var month = parseInt(String(singleCheckinMonthSelect.value || '0'), 10);
+                    var year = parseInt(String((singleCheckinYearSelect && singleCheckinYearSelect.value) || state.checkinPicker.currentYear), 10);
+                    if (!Number.isFinite(month) || month < 0 || month > 11 || !Number.isFinite(year)) {
+                        return;
+                    }
+                    var floorDate = getMonthFloorDate();
+                    var target = new Date(year, month, 1);
+                    if (target.getTime() < floorDate.getTime()) {
+                        target = floorDate;
+                    }
+                    state.checkinPicker.jumpToDate(target, true);
+                    updateCalendarMeta(state.checkinPicker, 'must-booking-checkin-month', 'must-booking-checkin-year');
+                    updateCalendarShiftState();
+                    refreshUnavailableDayClasses();
+                    updateRangeHighlights(checkinInput.value, checkoutInput.value, state.previewCheckout);
+                });
+            }
+            if (singleCheckinYearSelect) {
+                singleCheckinYearSelect.addEventListener('change', function () {
+                    if (singleCheckinMonthSelect) {
+                        singleCheckinMonthSelect.dispatchEvent(new Event('change'));
+                    }
+                });
+            }
+            if (state.checkinPicker && state.checkinPicker.calendarContainer) {
+                state.checkinPicker.calendarContainer.addEventListener('mouseover', function (event) {
+                    var target = event.target && event.target.closest ? event.target.closest('.flatpickr-day') : null;
+                    if (!target || !target.dateObj) {
+                        return;
+                    }
+                    if (
+                        target.classList.contains('flatpickr-disabled') ||
+                        target.classList.contains('notAllowed') ||
+                        target.classList.contains('must-booking-day-unavailable')
+                    ) {
+                        return;
+                    }
+                    if (!checkinInput.value || checkoutInput.value) {
+                        return;
+                    }
+                    var hovered = formatDate(target.dateObj);
+                    if (hovered <= String(checkinInput.value || '')) {
+                        state.previewCheckout = '';
+                        updateRangeHighlights(checkinInput.value, checkoutInput.value, state.previewCheckout);
+                        return;
+                    }
+                    state.previewCheckout = hovered;
+                    updateRangeHighlights(checkinInput.value, checkoutInput.value, state.previewCheckout);
+                });
+                state.checkinPicker.calendarContainer.addEventListener('mouseleave', function () {
+                    state.previewCheckout = '';
+                    updateRangeHighlights(checkinInput.value, checkoutInput.value, state.previewCheckout);
+                });
+            }
+            return;
+        }
         if (checkinCalendar && checkoutCalendar) {
             state.checkoutPicker = window.flatpickr(checkoutCalendar, {
                 inline: true,

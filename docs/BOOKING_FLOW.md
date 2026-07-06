@@ -33,6 +33,7 @@ Managed pages are configured in `src/Core/ManagedPages.php` and installed/synced
 - Public flow code lives in `src/Frontend/booking-page.php`, `src/Frontend/accommodation-page.php`, `src/Frontend/checkout-page.php`, and `src/Frontend/confirmation-page.php`.
 - Templates live in `frontend/templates/booking.php`, `booking-accommodation.php`, `checkout.php`, and `booking-confirmation.php`.
 - Guest form parsing and validation use `src/Engine/BookingValidationEngine.php`.
+- The public date picker layout is configurable through `date_picker_calendar_layout`: default `two_calendars` preserves the current separate check-in/check-out calendars, while `one_calendar` uses a single inline calendar to choose the range.
 
 ## Availability Validation
 - Availability checks use `src/Engine/AvailabilityEngine.php` and provider abstractions through `src/Provider/ProviderManager.php`.
@@ -51,6 +52,7 @@ Managed pages are configured in `src/Core/ManagedPages.php` and installed/synced
 - Repository: `src/Database/ReservationRepository.php`.
 - Provider adapters: `src/Provider/Local/LocalReservationProvider.php` and `src/Provider/Clock/ClockReservationProvider.php`.
 - The reservation engine creates or finds guest data, validates pricing, starts a DB transaction where supported, creates reservation rows, saves coupon data, optionally assigns physical inventory, and clears booking selection.
+- Checkout/email price breakdown display is configurable. `date_price_rows` uses stored nightly-rate rows from the quote/reservation pricing snapshot and falls back to total-only display when rows are absent; email rendering does not recalculate live pricing.
 
 ## Booking Statuses
 - Inventory-blocking: `pending`, `pending_payment`, `confirmed`, `completed`, `blocked`.
@@ -61,6 +63,7 @@ Managed pages are configured in `src/Core/ManagedPages.php` and installed/synced
 ## Confirmation Behavior
 - Confirmation rows are loaded by reservation IDs or booking ID through `ReservationEngine::getConfirmationRowsByIds()` and `getConfirmationRowsByBookingId()`.
 - Payment status and reservation status can be updated after verified gateway events.
+- Public confirmation validates the selected payment method through `PaymentEngine::validatePublicCheckoutPaymentMethod()` before `create_checkout_reservations()` can run. Pay at hotel is rejected unless explicitly enabled, and missing/invalid payment configuration blocks checkout instead of falling back to offline payment.
 
 ## Cancellation Behavior
 - Cancellation rules and penalties are calculated in `src/Engine/CancellationEngine.php`.

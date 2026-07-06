@@ -259,6 +259,8 @@ function render_admin_reservations_notice_from_query(): void
         'reservation_amendment_queued' => ['warning', \__('Clock amendment is awaiting reread-first provider reconciliation.', 'must-hotel-booking')],
         'reservation_amendment_review' => ['warning', \__('The amendment requires manual review. The original local assignment was preserved unless Clock reread confirmed the change.', 'must-hotel-booking')],
         'reservation_amendment_failed' => ['error', \__('Reservation amendment failed. Review availability, mappings, provider diagnostics, and the latest error.', 'must-hotel-booking')],
+        'clock_website_reference_synced' => ['success', \__('Website booking reference was sent to Clock.', 'must-hotel-booking')],
+        'clock_website_reference_sync_failed' => ['error', \__('Website booking reference could not be sent to Clock. Check provider diagnostics before retrying.', 'must-hotel-booking')],
         'reservation_guest_update_queued' => ['warning', \__('Clock guest detail edit could not be completed immediately. A provider sync job was queued for retry.', 'must-hotel-booking')],
         'reservation_guest_update_failed' => ['error', \__('Clock guest detail edit could not be completed or queued. Check provider diagnostics before retrying.', 'must-hotel-booking')],
         'reservation_guest_email_resent' => ['success', \__('Guest reservation email resent.', 'must-hotel-booking')],
@@ -1386,6 +1388,18 @@ function render_admin_reservation_detail_page_content(array $detailData): void
         echo '<h2>' . \esc_html__('Provider Mirror', 'must-hotel-booking') . '</h2>';
         echo '<table class="widefat striped"><tbody>';
         echo '<tr><th>' . \esc_html__('Provider', 'must-hotel-booking') . '</th><td>' . \esc_html((string) ($providerContext['provider_label'] ?? '')) . '</td></tr>';
+        echo '<tr><th>' . \esc_html__('Website booking reference', 'must-hotel-booking') . '</th><td>' . \esc_html((string) ($providerContext['website_booking_reference'] ?? $bookingId)) . '</td></tr>';
+        if (!empty($providerContext['is_clock'])) {
+            echo '<tr><th>' . \esc_html__('Clock booking ID', 'must-hotel-booking') . '</th><td>' . \esc_html((string) ($providerContext['clock_booking_id'] ?? '')) . '</td></tr>';
+            echo '<tr><th>' . \esc_html__('Clock booking reference', 'must-hotel-booking') . '</th><td>' . \esc_html((string) ($providerContext['clock_booking_reference'] ?? '')) . '</td></tr>';
+            echo '<tr><th>' . \esc_html__('Website reference sent to Clock', 'must-hotel-booking') . '</th><td>' . render_admin_reservation_badge((string) ($providerContext['website_reference_sent_to_clock_label'] ?? ''), !empty($providerContext['website_reference_sent_to_clock']) ? 'success' : 'warning') . '</td></tr>';
+            if (!empty($providerContext['clock_reference_storage_field'])) {
+                echo '<tr><th>' . \esc_html__('Clock-side reference field', 'must-hotel-booking') . '</th><td>' . \esc_html((string) $providerContext['clock_reference_storage_field']) . '</td></tr>';
+            }
+            if (!empty($providerContext['clock_reference_fallback_fields']) && \is_array($providerContext['clock_reference_fallback_fields'])) {
+                echo '<tr><th>' . \esc_html__('Clock-side fallback field', 'must-hotel-booking') . '</th><td>' . \esc_html(\implode(', ', \array_map('strval', $providerContext['clock_reference_fallback_fields']))) . '</td></tr>';
+            }
+        }
         echo '<tr><th>' . \esc_html__('Provider booking ID', 'must-hotel-booking') . '</th><td>' . \esc_html((string) ($providerContext['provider_booking_id'] ?? '')) . '</td></tr>';
         echo '<tr><th>' . \esc_html__('Provider reservation ID', 'must-hotel-booking') . '</th><td>' . \esc_html((string) ($providerContext['provider_reservation_id'] ?? '')) . '</td></tr>';
         echo '<tr><th>' . \esc_html__('Provider status', 'must-hotel-booking') . '</th><td>' . render_admin_reservation_badge((string) ($providerContext['provider_status_label'] ?? ''), (string) ($providerContext['provider_status'] ?? 'info')) . '</td></tr>';
@@ -1465,6 +1479,17 @@ function render_admin_reservation_detail_page_content(array $detailData): void
             echo '<p><a class="button button-secondary" href="' . \esc_url($providerDiagnosticsUrl) . '">' . \esc_html__('Open Provider Diagnostics', 'must-hotel-booking') . '</a></p>';
         } else {
             echo '<p class="description">' . \esc_html__('Use Provider diagnostics to queue a manual Clock refresh or inspect broader sync health.', 'must-hotel-booking') . '</p>';
+        }
+        if (!empty($providerContext['is_clock']) && empty($providerContext['website_reference_sent_to_clock'])) {
+            render_admin_reservation_detail_action_form(
+                'sync_clock_website_reference',
+                \__('Send Website Reference to Clock', 'must-hotel-booking'),
+                $currentUrl,
+                $reservationId,
+                $currentUrl,
+                'button button-secondary',
+                \__('Send this website booking reference to Clock now?', 'must-hotel-booking')
+            );
         }
         echo '</div></div>';
     }

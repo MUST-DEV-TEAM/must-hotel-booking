@@ -908,6 +908,9 @@ final class ReservationEngine
             $ratePlanId = isset($validatedRoom['rate_plan_id']) ? (int) $validatedRoom['rate_plan_id'] : 0;
             $roomGuests = isset($validatedRoom['guests']) ? (int) $validatedRoom['guests'] : (int) $context['guests'];
             $pricing = isset($validatedRoom['pricing']) && \is_array($validatedRoom['pricing']) ? $validatedRoom['pricing'] : [];
+            $pricingSnapshot = \function_exists('MustHotelBooking\\Frontend\\build_price_breakdown_snapshot')
+                ? \MustHotelBooking\Frontend\build_price_breakdown_snapshot($pricing)
+                : [];
 
             $reservationId = self::createReservation(
                 $roomId,
@@ -920,7 +923,10 @@ final class ReservationEngine
                 $reservationStatus,
                 $ratePlanId,
                 $bookingSource,
-                $notes
+                $notes,
+                [
+                    'pricing_snapshot' => $pricingSnapshot,
+                ]
             );
 
             if ($reservationId <= 0) {
@@ -998,7 +1004,8 @@ final class ReservationEngine
         string $reservationStatus = 'pending',
         int $ratePlanId = 0,
         string $bookingSource = 'website',
-        string $notes = ''
+        string $notes = '',
+        array $providerMetadata = []
     ): int {
         if (
             $roomId <= 0 ||
@@ -1049,6 +1056,7 @@ final class ReservationEngine
                 'notes' => $notes,
                 'total_price' => $totalPrice,
                 'payment_status' => $paymentStatus,
+                'provider_metadata' => $providerMetadata,
                 'created_at' => $now,
             ],
             $sessionId,

@@ -310,6 +310,7 @@ final class SupportDiagnosticsEndpoint
         $checks = [
             'stripe' => self::getStripeReadiness($diagnostics),
             'pokpay' => self::getPokPayReadiness($diagnostics),
+            'payment_policy' => self::getPaymentPolicyReadiness($diagnostics),
             'clock' => self::getClockReadiness($diagnostics, $clockSummary, $clockRequestSummary),
             'inventory' => self::getInventoryReadiness($diagnostics),
             'email' => self::getEmailReadiness($diagnostics),
@@ -322,6 +323,50 @@ final class SupportDiagnosticsEndpoint
         return self::buildProductionReadinessStatus($checks) + ['checks' => $checks];
     }
 
+    /**
+     * @param array<string, mixed> $diagnostics
+     * @return array<string, mixed>
+     */
+    private static function getPaymentPolicyReadiness(array $diagnostics): array
+    {
+        $payments = isset($diagnostics['payments']) && \is_array($diagnostics['payments']) ? $diagnostics['payments'] : [];
+        $policy = PaymentEngine::getPublicCheckoutPaymentPolicy();
+        $defaultMode = (string) ($payments['default_payment_mode'] ?? ($policy['default_payment_mode'] ?? ''));
+        $payAtHotelEnabled = !empty($payments['pay_at_hotel_enabled']);
+        $onlineMethods = isset($payments['enabled_online_methods']) && \is_array($payments['enabled_online_methods'])
+            ? $payments['enabled_online_methods']
+            : (array) ($policy['enabled_online_methods'] ?? []);
+        $offlineAllowed = !empty($payments['public_offline_payment_allowed']);
+        $configurationError = (string) ($payments['payment_policy_configuration_error'] ?? ($policy['configuration_error'] ?? ''));
+        $publicBookingCanConfirmUnpaid = $offlineAllowed;
+        $blockers = [];
+
+        if ($defaultMode === 'pay_at_hotel' && !$payAtHotelEnabled) {
+            $blockers[] = 'default_payment_mode is pay_at_hotel while pay_at_hotel_enabled is false.';
+        }
+        if ($configurationError !== '') {
+            $blockers[] = $configurationError;
+        }
+        if (empty($onlineMethods) && !$payAtHotelEnabled) {
+            $blockers[] = 'No online payment provider is configured for public checkout.';
+        }
+        if ($offlineAllowed) {
+            $blockers[] = 'Public checkout can use Pay at hotel and create confirmed unpaid bookings.';
+        }
+
+        return [
+            'default_payment_mode' => $defaultMode,
+            'pay_at_hotel_enabled' => $payAtHotelEnabled,
+            'enabled_online_methods' => \array_values(\array_map('strval', $onlineMethods)),
+            'public_offline_payment_allowed' => $offlineAllowed,
+            'backend_rejects_disabled_pay_at_hotel' => !empty($payments['backend_rejects_disabled_pay_at_hotel']),
+            'public_booking_can_confirm_unpaid' => $publicBookingCanConfirmUnpaid,
+            'blockers' => $blockers,
+            'warnings' => [],
+            'manual_operations' => [],
+            'check_status' => !empty($blockers) ? 'blocked' : 'ready',
+        ];
+    }
     /**
      * @param array<string, mixed> $diagnostics
      * @return array<string, mixed>

@@ -501,6 +501,7 @@ final class BookingQuoteDraft
             'currency',
             'guarantee_policy_id',
             'provider_rate_id',
+            'nightly_rates',
             'cancellation_policy',
         ];
         $normalized = [];

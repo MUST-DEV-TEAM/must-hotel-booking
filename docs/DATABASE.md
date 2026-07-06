@@ -53,6 +53,8 @@ Verified from targeted current-code inspection on 2026-06-11. Use this document 
 | `must_clock_folio_accounting` | `payment_id`, `refund_id`, `reservation_id`, `booking_id`, gateway/provider refs, Clock booking/reservation/folio/credit-item IDs, `direction`, `amount`, `currency`, `status`, `verification_status`, `balance_before`, `expected_balance`, `actual_balance`, `reconciliation_status`, `idempotency_key`, `attempts`, `last_error_code`, `last_error`, retry/posted/verified timestamps. |
 
 Cancellation financial snapshots do not require a new table. They are stored under `must_reservations.provider_metadata.cancellation_financial_cleanup` so unpaid, paid, local, and Clock-originated cancellations share one durable state model.
+Clock booking reference mapping also uses `must_reservations.provider_metadata` for backfill safety. Current keys include `clock_booking_id`, `clock_booking_reference`, `website_booking_reference`, `website_reference_sent_to_clock`, `clock_reference_storage_field`, `clock_reference_fallback_fields`, and `last_clock_reference_sync`; older rows may only have `provider_booking_id`.
+Checkout/email date-price display uses `must_reservations.provider_metadata.pricing_snapshot` to store nightly-rate rows from the quote used at reservation creation; this does not require a schema change.
 | `mhb_provider_mappings` | `provider`, `entity_type`, `local_table`, `local_id`, `external_id`, `external_code`, `status`, `metadata`. |
 | `mhb_provider_sync_jobs` | `provider`, `operation`, `target_type`, `target_local_id`, `target_external_id`, `status`, attempts, timing, payload. |
 

@@ -8,6 +8,7 @@ use MustHotelBooking\Engine\BookingStatusEngine;
 use MustHotelBooking\Engine\EmailEngine;
 use MustHotelBooking\Engine\ReservationAmendmentService;
 use MustHotelBooking\Provider\Clock\ClockPaymentReconciliationService;
+use MustHotelBooking\Provider\Clock\ClockWebsiteReferenceSyncService;
 use MustHotelBooking\Provider\ProviderReservationActionPolicy;
 use MustHotelBooking\Provider\ProviderReservationView;
 
@@ -122,6 +123,9 @@ final class ReservationAdminActions
                 break;
             case 'amend_reservation':
                 $notice = $this->amendReservationNotice($reservationId);
+                break;
+            case 'sync_clock_website_reference':
+                $notice = $this->syncClockWebsiteReferenceNotice($reservationId);
                 break;
             case 'resend_guest_email':
                 $notice = EmailEngine::resendGuestReservationEmail($reservationId) ? 'reservation_guest_email_resent' : 'action_failed';
@@ -500,6 +504,15 @@ final class ReservationAdminActions
         }
 
         return 'reservation_amendment_failed';
+    }
+
+    private function syncClockWebsiteReferenceNotice(int $reservationId): string
+    {
+        $result = (new ClockWebsiteReferenceSyncService())->syncReservationReference($reservationId, 'admin');
+
+        return !empty($result['success'])
+            ? 'clock_website_reference_synced'
+            : 'clock_website_reference_sync_failed';
     }
 
     private function updateStayNotice(int $reservationId): string

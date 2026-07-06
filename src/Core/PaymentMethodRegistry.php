@@ -31,7 +31,7 @@ final class PaymentMethodRegistry
     public static function getDefaultStates(): array
     {
         return [
-            'pay_at_hotel' => true,
+            'pay_at_hotel' => false,
             'stripe' => false,
             'pokpay' => true,
         ];
@@ -41,7 +41,7 @@ final class PaymentMethodRegistry
      * @param mixed $value
      * @return array<string, bool>
      */
-    public static function normalizeStates($value): array
+    public static function normalizeStates($value, bool $enforcePayAtHotelGate = true): array
     {
         $defaults = self::getDefaultStates();
         $catalog = self::getCatalog();
@@ -57,7 +57,13 @@ final class PaymentMethodRegistry
             }
         }
 
-        return \array_merge($defaults, $states);
+        $states = \array_merge($defaults, $states);
+
+        if ($enforcePayAtHotelGate && !MustBookingConfig::is_pay_at_hotel_enabled()) {
+            $states['pay_at_hotel'] = false;
+        }
+
+        return $states;
     }
 
     /**
@@ -75,7 +81,18 @@ final class PaymentMethodRegistry
      */
     public static function saveStates(array $states): bool
     {
-        MustBookingConfig::set_setting('payment_methods', self::normalizeStates($states));
+        $payAtHotelEnabled = !empty($states['pay_at_hotel']);
+        MustBookingConfig::set_group_settings('payments_summary', [
+            'pay_at_hotel_enabled' => $payAtHotelEnabled,
+            'payment_methods' => self::normalizeStates($states, false),
+        ]);
+        MustBookingConfig::set_setting(
+            'default_payment_mode',
+            \MustHotelBooking\Engine\PaymentEngine::normalizeDefaultPaymentMode(
+                (string) MustBookingConfig::get_setting('default_payment_mode', 'pokpay'),
+                $states
+            )
+        );
 
         return true;
     }

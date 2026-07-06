@@ -316,6 +316,7 @@ final class ReservationRepository extends AbstractRepository
         $couponCode = isset($reservationData['coupon_code']) ? (string) $reservationData['coupon_code'] : '';
         $couponDiscountTotal = isset($reservationData['coupon_discount_total']) ? (float) $reservationData['coupon_discount_total'] : 0.0;
         $paymentStatus = isset($reservationData['payment_status']) ? (string) $reservationData['payment_status'] : 'unpaid';
+        $providerMetadata = $this->providerJson($reservationData['provider_metadata'] ?? null);
         $createdAt = isset($reservationData['created_at']) ? (string) $reservationData['created_at'] : $now;
         $statuses = $this->normalizeNonBlockingStatuses($nonBlockingStatuses);
         $locksTable = $this->lockTableName();
@@ -324,8 +325,8 @@ final class ReservationRepository extends AbstractRepository
         $availabilityTargetId = $assignedRoomId > 0 ? $assignedRoomId : $roomId;
         $sql = $this->wpdb->prepare(
             'INSERT INTO ' . $this->table('reservations') . '
-                (booking_id, room_id, room_type_id, assigned_room_id, rate_plan_id, guest_id, checkin, checkout, guests, status, total_price, coupon_id, coupon_code, coupon_discount_total, payment_status, created_at)
-            SELECT %s, %d, %d, %d, %d, %d, %s, %s, %d, %s, %f, %d, %s, %f, %s, %s
+                (booking_id, room_id, room_type_id, assigned_room_id, rate_plan_id, guest_id, checkin, checkout, guests, status, total_price, coupon_id, coupon_code, coupon_discount_total, payment_status, provider_metadata, created_at)
+            SELECT %s, %d, %d, %d, %d, %d, %s, %s, %d, %s, %f, %d, %s, %f, %s, %s, %s
             WHERE EXISTS (
                 SELECT 1
                 FROM ' . $locksTable . ' l
@@ -359,6 +360,7 @@ final class ReservationRepository extends AbstractRepository
             $couponCode,
             $couponDiscountTotal,
             $paymentStatus,
+            $providerMetadata,
             $createdAt,
             $lockRoomId,
             $checkin,
@@ -2080,6 +2082,7 @@ final class ReservationRepository extends AbstractRepository
                 r.status,
                 r.total_price,
                 r.payment_status,
+                r.provider_metadata,
                 r.assigned_room_id,
                 r.rate_plan_id,
                 rm.name AS room_name,
@@ -2319,6 +2322,14 @@ final class ReservationRepository extends AbstractRepository
         if ($filters['search'] !== '') {
             $searchClauses = ['r.booking_id LIKE %s'];
             $searchParams = ['%' . $filters['search'] . '%'];
+            $searchClauses[] = 'r.provider_booking_id LIKE %s';
+            $searchClauses[] = 'r.provider_reservation_id LIKE %s';
+            $searchClauses[] = 'r.provider_payload_ref LIKE %s';
+            $searchClauses[] = 'r.provider_metadata LIKE %s';
+            $searchParams[] = '%' . $filters['search'] . '%';
+            $searchParams[] = '%' . $filters['search'] . '%';
+            $searchParams[] = '%' . $filters['search'] . '%';
+            $searchParams[] = '%' . $filters['search'] . '%';
             if ($hasGuestsTable) {
                 $searchClauses[] = 'g.first_name LIKE %s';
                 $searchClauses[] = 'g.last_name LIKE %s';

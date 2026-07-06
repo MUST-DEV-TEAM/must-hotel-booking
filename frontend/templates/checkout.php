@@ -74,6 +74,7 @@ $country_picker_search_placeholder = \__('Search country', 'must-hotel-booking')
 $picker_no_results_label = \__('No matches found.', 'must-hotel-booking');
 $show_honeypot = \MustHotelBooking\Engine\BookingAbuseProtection::shouldRenderHoneypotField();
 $honeypot_field_name = $show_honeypot ? \MustHotelBooking\Engine\BookingAbuseProtection::getHoneypotFieldName() : '';
+$checkout_price_breakdown_mode = \MustHotelBooking\Core\MustBookingConfig::get_checkout_price_breakdown_mode();
 
 $summary_currency = 'USD';
 
@@ -93,6 +94,32 @@ $format_display_date = static function (string $date): string {
     }
 
     return \wp_date('D, M j Y', $timestamp);
+};
+
+$render_checkout_price_breakdown_rows = static function (array $pricing, string $currency) use ($format_money, $format_display_date): string {
+    $rows = \function_exists('MustHotelBooking\\Frontend\\get_price_breakdown_rows_from_pricing')
+        ? \MustHotelBooking\Frontend\get_price_breakdown_rows_from_pricing($pricing)
+        : [];
+
+    if (empty($rows)) {
+        return '';
+    }
+
+    $html = '<div class="must-checkout-price-breakdown-rows">';
+    $html .= '<div class="must-checkout-price-line is-breakdown-heading"><span>' . \esc_html__('Nightly Prices', 'must-hotel-booking') . '</span><span></span></div>';
+
+    foreach ($rows as $row) {
+        $date = isset($row['date']) ? (string) $row['date'] : '';
+        $amount = isset($row['amount']) ? (float) $row['amount'] : 0.0;
+        $html .= '<div class="must-checkout-price-line is-nightly-rate">';
+        $html .= '<span>' . \esc_html($format_display_date($date)) . '</span>';
+        $html .= '<span>' . \esc_html($format_money($amount, $currency)) . '</span>';
+        $html .= '</div>';
+    }
+
+    $html .= '</div>';
+
+    return $html;
 };
 ?>
 <?php \get_header(); ?>
@@ -214,6 +241,10 @@ $format_display_date = static function (string $date): string {
                         $room_applied_coupon = isset($pricing['applied_coupon']) ? (string) $pricing['applied_coupon'] : $applied_coupon_code;
                         $room_rate = $room_nights > 0 ? $room_accommodation_total / $room_nights : $room_accommodation_total;
                         $room_subtotal_before_taxes = $room_accommodation_total + $room_fee_total - $room_discount_total;
+                        $room_price_breakdown_rows_html = $checkout_price_breakdown_mode === 'date_price_rows'
+                            ? $render_checkout_price_breakdown_rows($pricing, $room_currency)
+                            : '';
+                        $show_room_price_breakdown_rows = $room_price_breakdown_rows_html !== '';
                         ?>
                         <section class="must-checkout-room-card">
                             <div class="must-checkout-room-summary-pane">
@@ -359,14 +390,18 @@ $format_display_date = static function (string $date): string {
                                     <div class="must-checkout-divider is-dark"></div>
 
                                     <div class="must-checkout-price-lines">
-                                        <div class="must-checkout-price-line">
-                                            <span><?php echo \esc_html__('Room Rate', 'must-hotel-booking'); ?></span>
-                                            <span><?php echo \esc_html($format_money($room_rate, $room_currency)); ?></span>
-                                        </div>
-                                        <div class="must-checkout-price-line">
-                                            <span><?php echo \esc_html__('Number of Nights', 'must-hotel-booking'); ?></span>
-                                            <span><?php echo \esc_html((string) $room_nights); ?></span>
-                                        </div>
+                                        <?php if ($show_room_price_breakdown_rows) : ?>
+                                            <?php echo $room_price_breakdown_rows_html; // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped ?>
+                                        <?php else : ?>
+                                            <div class="must-checkout-price-line">
+                                                <span><?php echo \esc_html__('Room Rate', 'must-hotel-booking'); ?></span>
+                                                <span><?php echo \esc_html($format_money($room_rate, $room_currency)); ?></span>
+                                            </div>
+                                            <div class="must-checkout-price-line">
+                                                <span><?php echo \esc_html__('Number of Nights', 'must-hotel-booking'); ?></span>
+                                                <span><?php echo \esc_html((string) $room_nights); ?></span>
+                                            </div>
+                                        <?php endif; ?>
                                         <div class="must-checkout-price-line">
                                             <span><?php echo \esc_html__('Guests', 'must-hotel-booking'); ?></span>
                                             <span><?php echo \esc_html((string) $assigned_room_guests); ?></span>

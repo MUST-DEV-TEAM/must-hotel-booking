@@ -88,6 +88,72 @@ class MustBookingConfig
         $storage[$group] = \array_merge((array) ($storage[$group] ?? []), $values);
         \update_option(self::OPTION_NAME, self::normalize_storage($storage));
     }
+    public static function is_pay_at_hotel_enabled(): bool
+    {
+        return self::bool(self::get_setting('pay_at_hotel_enabled', false));
+    }
+    public static function maybe_migrate_payment_policy_defaults(): void
+    {
+        $migrationKey = 'must_hotel_booking_payment_policy_migration_v1';
+        if ((string) \get_option($migrationKey, '') === '1') {
+            return;
+        }
+
+        $raw = self::get_wp_option(self::OPTION_NAME, []);
+        if (!\is_array($raw) || empty($raw)) {
+            \update_option($migrationKey, '1', false);
+            return;
+        }
+
+        $payments = isset($raw['payments_summary']) && \is_array($raw['payments_summary'])
+            ? $raw['payments_summary']
+            : [];
+        $bookingRules = isset($raw['booking_rules']) && \is_array($raw['booking_rules'])
+            ? $raw['booking_rules']
+            : [];
+
+        if (\array_key_exists('pay_at_hotel_enabled', $raw) && !\array_key_exists('pay_at_hotel_enabled', $payments)) {
+            $payments['pay_at_hotel_enabled'] = $raw['pay_at_hotel_enabled'];
+        }
+        if (isset($raw['payment_methods']) && \is_array($raw['payment_methods']) && !isset($payments['payment_methods'])) {
+            $payments['payment_methods'] = $raw['payment_methods'];
+        }
+        if (\array_key_exists('default_payment_mode', $raw) && !\array_key_exists('default_payment_mode', $bookingRules)) {
+            $bookingRules['default_payment_mode'] = $raw['default_payment_mode'];
+        }
+
+        $explicitPayAtHotel = \array_key_exists('pay_at_hotel_enabled', $payments)
+            && self::bool($payments['pay_at_hotel_enabled']);
+        $defaultPaymentMode = \sanitize_key((string) ($bookingRules['default_payment_mode'] ?? ''));
+        $changed = false;
+        $previousMode = $defaultPaymentMode;
+
+        if (!$explicitPayAtHotel) {
+            $methods = isset($payments['payment_methods']) && \is_array($payments['payment_methods'])
+                ? $payments['payment_methods']
+                : [];
+            $payments['pay_at_hotel_enabled'] = false;
+            $methods['pay_at_hotel'] = false;
+            $payments['payment_methods'] = $methods;
+
+            if ($defaultPaymentMode === 'pay_at_hotel') {
+                $bookingRules['default_payment_mode'] = self::preferred_online_default_from_methods($methods);
+                $changed = true;
+            }
+        }
+
+        if ($changed || !\array_key_exists('pay_at_hotel_enabled', $payments)) {
+            $raw['payments_summary'] = $payments;
+            $raw['booking_rules'] = $bookingRules;
+            \update_option(self::OPTION_NAME, self::normalize_storage($raw));
+        }
+
+        if ($changed) {
+            self::log_payment_policy_migration($previousMode, (string) ($bookingRules['default_payment_mode'] ?? 'pokpay'));
+        }
+
+        \update_option($migrationKey, '1', false);
+    }
     public static function get_hotel_name(): string
     {
         $value = \trim((string) self::get_setting('hotel_name', self::site_name()));
@@ -172,6 +238,18 @@ class MustBookingConfig
             ['embedded_sdk', 'sdk_confirm_url_redirect'],
             'sdk_confirm_url_redirect'
         );
+    }
+    public static function get_date_picker_calendar_layout(): string
+    {
+        return self::normalize_calendar_layout((string) self::get_setting('date_picker_calendar_layout', 'two_calendars'));
+    }
+    public static function get_checkout_price_breakdown_mode(): string
+    {
+        return self::normalize_price_breakdown_mode((string) self::get_setting('checkout_price_breakdown_mode', 'total_only'));
+    }
+    public static function get_email_price_breakdown_mode(): string
+    {
+        return self::normalize_price_breakdown_mode((string) self::get_setting('email_price_breakdown_mode', 'total_only'));
     }
     public static function get_public_callback_base_url(): string
     {
@@ -467,7 +545,8 @@ class MustBookingConfig
                 'enable_special_requests' => true,
                 'require_terms_acceptance' => true,
                 'default_reservation_status' => 'confirmed',
-                'default_payment_mode' => 'guest_choice',
+                'default_payment_mode' => 'pokpay',
+                'date_picker_calendar_layout' => 'two_calendars',
                 'cancellation_allowed' => true,
                 'cancellation_policy_days' => 21,
                 'cancellation_notice_hours' => 504,
@@ -483,11 +562,11 @@ class MustBookingConfig
                 'anti_abuse_logging_enabled' => false
             ],
             'checkin_checkout' => ['checkin_time' => '14:00', 'checkout_time' => '11:00', 'allow_early_checkin_request' => true, 'allow_late_checkout_request' => true, 'arrival_instructions' => '', 'departure_instructions' => '', 'guest_checkin_label' => \__('Check-in', 'must-hotel-booking'), 'guest_checkout_label' => \__('Check-out', 'must-hotel-booking')],
-            'payments_summary' => ['payment_methods' => ['pay_at_hotel' => true, 'stripe' => false, 'pokpay' => true], 'deposit_required' => false, 'deposit_type' => 'percentage', 'deposit_value' => 0.0, 'tax_rate' => 0.0, 'stripe_publishable_key' => '', 'stripe_secret_key' => '', 'stripe_webhook_secret' => '', 'stripe_local_publishable_key' => '', 'stripe_local_secret_key' => '', 'stripe_local_webhook_secret' => '', 'stripe_staging_publishable_key' => '', 'stripe_staging_secret_key' => '', 'stripe_staging_webhook_secret' => '', 'stripe_production_publishable_key' => '', 'stripe_production_secret_key' => '', 'stripe_production_webhook_secret' => '', 'pokpay_local_merchant_id' => '', 'pokpay_local_key_id' => '', 'pokpay_local_key_secret' => '', 'pokpay_staging_merchant_id' => '', 'pokpay_staging_key_id' => '', 'pokpay_staging_key_secret' => '', 'pokpay_production_merchant_id' => '', 'pokpay_production_key_id' => '', 'pokpay_production_key_secret' => '', 'pokpay_checkout_mode' => 'sdk_confirm_url_redirect', 'pokpay_fee_percent' => 0.0, 'pokpay_fee_fixed' => 0.0, 'pokpay_fee_currency' => 'USD', 'pokpay_fee_customer_absorbs' => false],
+            'payments_summary' => ['pay_at_hotel_enabled' => false, 'payment_methods' => ['pay_at_hotel' => false, 'stripe' => false, 'pokpay' => true], 'deposit_required' => false, 'deposit_type' => 'percentage', 'deposit_value' => 0.0, 'tax_rate' => 0.0, 'checkout_price_breakdown_mode' => 'total_only', 'stripe_publishable_key' => '', 'stripe_secret_key' => '', 'stripe_webhook_secret' => '', 'stripe_local_publishable_key' => '', 'stripe_local_secret_key' => '', 'stripe_local_webhook_secret' => '', 'stripe_staging_publishable_key' => '', 'stripe_staging_secret_key' => '', 'stripe_staging_webhook_secret' => '', 'stripe_production_publishable_key' => '', 'stripe_production_secret_key' => '', 'stripe_production_webhook_secret' => '', 'pokpay_local_merchant_id' => '', 'pokpay_local_key_id' => '', 'pokpay_local_key_secret' => '', 'pokpay_staging_merchant_id' => '', 'pokpay_staging_key_id' => '', 'pokpay_staging_key_secret' => '', 'pokpay_production_merchant_id' => '', 'pokpay_production_key_id' => '', 'pokpay_production_key_secret' => '', 'pokpay_checkout_mode' => 'sdk_confirm_url_redirect', 'pokpay_fee_percent' => 0.0, 'pokpay_fee_fixed' => 0.0, 'pokpay_fee_currency' => 'USD', 'pokpay_fee_customer_absorbs' => false],
             'staff_access' => ['enable_staff_portal' => false, 'redirect_worker_after_login' => 'dashboard', 'hide_wp_admin_for_workers' => true, 'portal_access_roles' => self::staff_access_role_defaults(), 'capability_matrix' => self::staff_matrix_defaults(), 'portal_module_visibility' => self::portal_module_visibility_defaults()],
             'branding' => ['primary_color' => '#0f766e', 'secondary_color' => '#155e75', 'accent_color' => '#f59e0b', 'text_color' => '#16212b', 'border_radius' => 18, 'font_family' => 'Instrument Sans', 'inherit_elementor_colors' => false, 'inherit_elementor_typography' => false, 'portal_welcome_title' => \__('Welcome back', 'must-hotel-booking'), 'portal_welcome_text' => \__('Manage arrivals, departures, guest requests, and stay operations from one place.', 'must-hotel-booking'), 'booking_form_style_preset' => 'balanced'],
             'managed_pages' => ['page_rooms_id' => 0, 'page_booking_id' => 0, 'page_booking_accommodation_id' => 0, 'page_checkout_id' => 0, 'page_booking_confirmation_id' => 0, 'portal_page_id' => 0, 'portal_login_page_id' => 0],
-            'notifications_summary' => ['booking_notification_email' => '', 'email_from_name' => '', 'email_from_email' => '', 'email_reply_to' => '', 'email_logo_url' => '', 'email_button_color' => '#141414', 'email_footer_text' => \__('We look forward to welcoming you.', 'must-hotel-booking'), 'email_layout_type' => 'classic', 'custom_email_layout_html' => '', 'email_templates' => []],
+            'notifications_summary' => ['booking_notification_email' => '', 'email_from_name' => '', 'email_from_email' => '', 'email_reply_to' => '', 'email_logo_url' => '', 'email_button_color' => '#141414', 'email_footer_text' => \__('We look forward to welcoming you.', 'must-hotel-booking'), 'email_layout_type' => 'classic', 'email_price_breakdown_mode' => 'total_only', 'custom_email_layout_html' => '', 'email_templates' => []],
             'provider' => [
                 'website_booking_flow_mode' => 'plugin_checkout',
                 'clock_wbe_inline_head_snippet' => '',
@@ -541,6 +620,54 @@ class MustBookingConfig
             'maintenance' => [],
         ];
     }
+    private static function normalize_default_payment_mode(string $mode): string
+    {
+        $mode = \sanitize_key($mode);
+        if (\in_array($mode, ['pokpay', 'stripe', 'pay_now', 'guest_choice', 'pay_at_hotel'], true)) {
+            return $mode;
+        }
+        return 'pokpay';
+    }
+    private static function normalize_calendar_layout(string $layout): string
+    {
+        return self::choice(\sanitize_key($layout), ['one_calendar', 'two_calendars'], 'two_calendars');
+    }
+    private static function normalize_price_breakdown_mode(string $mode): string
+    {
+        return self::choice(\sanitize_key($mode), ['total_only', 'date_price_rows'], 'total_only');
+    }
+    /** @param array<string, mixed> $methods */
+    private static function preferred_online_default_from_methods(array $methods): string
+    {
+        if (!empty($methods['pokpay'])) {
+            return 'pokpay';
+        }
+        if (!empty($methods['stripe'])) {
+            return 'stripe';
+        }
+        return 'pokpay';
+    }
+    private static function log_payment_policy_migration(string $previousMode, string $newMode): void
+    {
+        if (!\function_exists('MustHotelBooking\\Engine\\get_activity_repository')) {
+            return;
+        }
+
+        $context = [
+            'previous_default_payment_mode' => $previousMode,
+            'new_default_payment_mode' => $newMode,
+            'pay_at_hotel_enabled' => false,
+        ];
+
+        \MustHotelBooking\Engine\get_activity_repository()->createActivity([
+            'event_type' => 'settings.payment_policy_migrated',
+            'severity' => 'info',
+            'entity_type' => 'settings',
+            'reference' => 'payment_policy',
+            'message' => \__('Payment defaults migrated away from Pay at hotel because it was not explicitly enabled.', 'must-hotel-booking'),
+            'context_json' => \function_exists('wp_json_encode') ? (string) \wp_json_encode($context) : (string) \json_encode($context),
+        ]);
+    }
     /** @param array<string, mixed> $v @return array<string, mixed> */
     private static function normalize_general(array $v): array
     {
@@ -585,7 +712,8 @@ class MustBookingConfig
             'enable_special_requests' => self::bool($v['enable_special_requests'] ?? $d['enable_special_requests']),
             'require_terms_acceptance' => self::bool($v['require_terms_acceptance'] ?? $d['require_terms_acceptance']),
             'default_reservation_status' => self::choice(\sanitize_key((string) ($v['default_reservation_status'] ?? $d['default_reservation_status'])), ['pending', 'pending_payment', 'confirmed', 'completed', 'cancelled'], (string) $d['default_reservation_status']),
-            'default_payment_mode' => self::choice(\sanitize_key((string) ($v['default_payment_mode'] ?? $d['default_payment_mode'])), ['guest_choice', 'pay_now', 'pay_at_hotel'], (string) $d['default_payment_mode']),
+            'default_payment_mode' => self::normalize_default_payment_mode((string) ($v['default_payment_mode'] ?? $d['default_payment_mode'])),
+            'date_picker_calendar_layout' => self::normalize_calendar_layout((string) ($v['date_picker_calendar_layout'] ?? $d['date_picker_calendar_layout'])),
             'cancellation_allowed' => self::bool($v['cancellation_allowed'] ?? $d['cancellation_allowed']),
             'cancellation_policy_days' => self::int($v['cancellation_policy_days'] ?? $d['cancellation_policy_days'], 0, 365, (int) $d['cancellation_policy_days']),
             'cancellation_notice_hours' => self::int($v['cancellation_notice_hours'] ?? ((int) ($v['cancellation_policy_days'] ?? $d['cancellation_policy_days']) * 24), 0, 8760, (int) $d['cancellation_notice_hours']),
@@ -612,9 +740,14 @@ class MustBookingConfig
     {
         $d = self::group_defaults()['payments_summary'];
         $m = isset($v['payment_methods']) && \is_array($v['payment_methods']) ? $v['payment_methods'] : [];
+        $payAtHotelEnabled = self::bool($v['pay_at_hotel_enabled'] ?? $d['pay_at_hotel_enabled']);
+        $payAtHotelMethodEnabled = \array_key_exists('pay_at_hotel', $m)
+            ? !empty($m['pay_at_hotel'])
+            : $payAtHotelEnabled;
         return [
+            'pay_at_hotel_enabled' => $payAtHotelEnabled,
             'payment_methods' => [
-                'pay_at_hotel' => !empty($m['pay_at_hotel']),
+                'pay_at_hotel' => $payAtHotelEnabled && $payAtHotelMethodEnabled,
                 'stripe' => !empty($m['stripe']),
                 'pokpay' => !empty($m['pokpay']),
             ],
@@ -622,6 +755,7 @@ class MustBookingConfig
             'deposit_type' => self::choice(\sanitize_key((string) ($v['deposit_type'] ?? $d['deposit_type'])), ['fixed', 'percentage'], (string) $d['deposit_type']),
             'deposit_value' => self::decimal($v['deposit_value'] ?? $d['deposit_value'], 0.0, 999999.0, (float) $d['deposit_value']),
             'tax_rate' => self::decimal($v['tax_rate'] ?? $d['tax_rate'], 0.0, 100.0, (float) $d['tax_rate']),
+            'checkout_price_breakdown_mode' => self::normalize_price_breakdown_mode((string) ($v['checkout_price_breakdown_mode'] ?? $d['checkout_price_breakdown_mode'])),
             'stripe_publishable_key' => \sanitize_text_field((string) ($v['stripe_publishable_key'] ?? $d['stripe_publishable_key'])),
             'stripe_secret_key' => \sanitize_text_field((string) ($v['stripe_secret_key'] ?? $d['stripe_secret_key'])),
             'stripe_webhook_secret' => \sanitize_text_field((string) ($v['stripe_webhook_secret'] ?? $d['stripe_webhook_secret'])),
@@ -701,7 +835,7 @@ class MustBookingConfig
         $notify = \sanitize_email((string) ($v['booking_notification_email'] ?? ''));
         $from = \sanitize_email((string) ($v['email_from_email'] ?? ''));
         $reply = \sanitize_email((string) ($v['email_reply_to'] ?? ''));
-        return ['booking_notification_email' => \is_email($notify) ? $notify : (string) $d['booking_notification_email'], 'email_from_name' => \sanitize_text_field((string) ($v['email_from_name'] ?? $d['email_from_name'])), 'email_from_email' => \is_email($from) ? $from : (string) $d['email_from_email'], 'email_reply_to' => \is_email($reply) ? $reply : '', 'email_logo_url' => \esc_url_raw((string) ($v['email_logo_url'] ?? $d['email_logo_url'])), 'email_button_color' => self::hex((string) ($v['email_button_color'] ?? $d['email_button_color']), (string) $d['email_button_color']), 'email_footer_text' => \sanitize_textarea_field((string) ($v['email_footer_text'] ?? $d['email_footer_text'])), 'email_layout_type' => self::email_layout((string) ($v['email_layout_type'] ?? $d['email_layout_type'])), 'custom_email_layout_html' => (string) ($v['custom_email_layout_html'] ?? $d['custom_email_layout_html']), 'email_templates' => isset($v['email_templates']) && \is_array($v['email_templates']) ? $v['email_templates'] : (array) $d['email_templates']];
+        return ['booking_notification_email' => \is_email($notify) ? $notify : (string) $d['booking_notification_email'], 'email_from_name' => \sanitize_text_field((string) ($v['email_from_name'] ?? $d['email_from_name'])), 'email_from_email' => \is_email($from) ? $from : (string) $d['email_from_email'], 'email_reply_to' => \is_email($reply) ? $reply : '', 'email_logo_url' => \esc_url_raw((string) ($v['email_logo_url'] ?? $d['email_logo_url'])), 'email_button_color' => self::hex((string) ($v['email_button_color'] ?? $d['email_button_color']), (string) $d['email_button_color']), 'email_footer_text' => \sanitize_textarea_field((string) ($v['email_footer_text'] ?? $d['email_footer_text'])), 'email_layout_type' => self::email_layout((string) ($v['email_layout_type'] ?? $d['email_layout_type'])), 'email_price_breakdown_mode' => self::normalize_price_breakdown_mode((string) ($v['email_price_breakdown_mode'] ?? $d['email_price_breakdown_mode'])), 'custom_email_layout_html' => (string) ($v['custom_email_layout_html'] ?? $d['custom_email_layout_html']), 'email_templates' => isset($v['email_templates']) && \is_array($v['email_templates']) ? $v['email_templates'] : (array) $d['email_templates']];
     }
     /** @param array<string, mixed> $v @return array<string, mixed> */
     private static function normalize_provider(array $v): array

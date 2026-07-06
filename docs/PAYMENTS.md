@@ -8,7 +8,15 @@ Verified from targeted current-code inspection on 2026-06-11. Use this document 
 - `stripe`
 - `pokpay`
 
-Payment catalog/defaults are in `src/Core/PaymentMethodRegistry.php`. Checkout ordering in `PaymentEngine` prefers `pokpay`, then `stripe`, then `pay_at_hotel` when enabled and available.
+Payment catalog/defaults are in `src/Core/PaymentMethodRegistry.php`. Checkout ordering in `PaymentEngine` prefers `pokpay`, then `stripe`, then `pay_at_hotel` when explicitly enabled and available.
+
+## Public Checkout Policy
+- Public website checkout is online-payment-first by default.
+- Fresh/default settings use `default_payment_mode = pokpay`, `pay_at_hotel_enabled = false`, and `payment_methods.pay_at_hotel = false`.
+- `PaymentEngine::getCheckoutPaymentMethods()` no longer injects Pay at hotel when no online gateway is configured. If PokPay/Stripe are not available and Pay at hotel is not explicitly enabled, public checkout is blocked with a configuration error before reservation/provider creation.
+- `PaymentEngine::validatePublicCheckoutPaymentMethod()` is the backend guard for public confirmation POSTs. A forged or stale `payment_method=pay_at_hotel` is rejected while Pay at hotel is disabled.
+- `PaymentEngine::clearInvalidPublicPaymentMethodDraft()` clears old checkout draft/session payment methods that are no longer allowed.
+- A one-time startup migration moves older `default_payment_mode=pay_at_hotel` installs to an online default unless `pay_at_hotel_enabled` was explicitly true, and records an activity-log entry.
 
 ## Payment Row Behavior
 - Payment rows are stored in `must_payments`.
@@ -25,7 +33,7 @@ Payment catalog/defaults are in `src/Core/PaymentMethodRegistry.php`. Checkout o
 - PokPay uses `src/Engine/Payment/PokPayPayment.php` and documented SDK order/finalization behavior in `src/Engine/PaymentEngine.php`. It supports two SDK-order modes controlled by `pokpay_checkout_mode`: embedded SDK and SDK confirmUrl redirect.
 - PokPay credential readiness is not inferred from populated fields. The Payments admin page can run a no-charge authentication test and stores `missing`, `unverified`, `verified`, `rejected`, `provider_unavailable`, or `malformed` state per environment. Known rejected/malformed credentials remove PokPay from checkout before a Clock booking is created.
 - Secret fields render blank and preserve the saved value when submitted blank; verification reports and provider logs contain only masked merchant/key identifiers.
-- Online gateway reservations use `PaymentEngine::getInitialReservationStateForMethod()` behavior: Stripe/PokPay initialize pending-style payment state; pay-at-hotel initializes unpaid behavior.
+- Online gateway reservations use `PaymentEngine::getReservationCreationOptions()` behavior: Stripe/PokPay initialize `pending_payment` / `pending`; Pay at hotel initializes confirmed/unpaid only when explicitly allowed.
 
 ## Payment Confirmation
 - Stripe success is verified by the REST webhook `must-hotel-booking/v1/stripe/webhook`.
