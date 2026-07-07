@@ -93,11 +93,12 @@ if (
     $failures[] = 'Final availability, product pricing, and guarantee-policy reads must explicitly bypass the short cache.';
 }
 if (
-    \strpos($clockConfig, 'return \\max(1, \\min(100') === false
-    || \strpos($mustConfig, "'clock_auto_sync_interval_minutes' => 60") === false
-    || \strpos($mustConfig, "'clock_auto_sync_batch_size' => 1") === false
+    \strpos($clockConfig, 'reservationFallbackBatchSize') === false
+    || \strpos($clockConfig, 'return \\max(1, \\min(5') === false
+    || \strpos($mustConfig, "'clock_reservation_fallback_interval_minutes' => 5") === false
+    || \strpos($mustConfig, "'clock_reservation_fallback_batch_size' => 1") === false
 ) {
-    $failures[] = 'Hardened Clock auto-sync defaults must be one reservation every 60 minutes without overwriting saved settings.';
+    $failures[] = 'Hardened Clock reservation fallback sync defaults must be one reservation every 5 minutes without overwriting saved settings.';
 }
 
 if ($failures) {

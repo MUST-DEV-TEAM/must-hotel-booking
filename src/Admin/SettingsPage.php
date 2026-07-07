@@ -15,13 +15,13 @@ use MustHotelBooking\Provider\Clock\ClockEndpointRegistry;
 use MustHotelBooking\Provider\Clock\ClockEndpointResolver;
 use MustHotelBooking\Provider\Clock\ClockInboundSyncService;
 use MustHotelBooking\Provider\Clock\ClockReservationSyncService;
+use MustHotelBooking\Provider\Clock\ClockSyncScheduler;
 use MustHotelBooking\Provider\ProviderManager;
 use MustHotelBooking\Provider\Storage\ProviderMappingRepository;
 use MustHotelBooking\Provider\Storage\ProviderSyncJobRepository;
 use MustHotelBooking\Provider\Sync\ProviderSyncJobRunner;
 use MustHotelBooking\Portal\PortalRegistry;
 use MustHotelBooking\Portal\PortalRouter;
-use MustHotelBooking\Provider\Clock\ClockReservationAutoSyncScheduler;
 final class SettingsPage
 {
     /** @var array<string, mixed>|null */
@@ -256,7 +256,7 @@ final class SettingsPage
         if ($persist) {
             self::persistUpdates(isset($sanitized['updates']) && \is_array($sanitized['updates']) ? $sanitized['updates'] : []);
             if ($tab === 'provider') {
-                ClockReservationAutoSyncScheduler::scheduleCron();
+                ClockSyncScheduler::scheduleCron();
             }
         }
         $state['notice'] = $tab . '_saved';
@@ -329,7 +329,7 @@ final class SettingsPage
             ];
         }
         $task = isset($source['maintenance_task']) ? \sanitize_key((string) \wp_unslash($source['maintenance_task'])) : '';
-        $allowedTasks = ['reinstall_pages', 'reschedule_cron', 'cleanup_expired_locks', 'send_test_email', 'flush_portal_routes', 'repair_inventory_mirror', 'apply_clock_api_defaults', 'test_clock_connection', 'fetch_clock_catalog', 'clock_full_sync', 'run_provider_sync_jobs', 'queue_clock_reservation_refresh'];
+        $allowedTasks = ['reinstall_pages', 'reschedule_cron', 'cleanup_expired_locks', 'send_test_email', 'flush_portal_routes', 'repair_inventory_mirror', 'apply_clock_api_defaults', 'test_clock_connection', 'fetch_clock_catalog', 'clock_full_sync', 'run_clock_catalog_sync_now', 'run_clock_availability_rate_sync_now', 'run_clock_reservation_fallback_sync_now', 'repair_clock_sync_schedules', 'run_provider_sync_jobs', 'queue_clock_reservation_refresh'];
         if (!\in_array($task, $allowedTasks, true)) {
             return [
                 'tab' => $tab,
@@ -446,6 +446,37 @@ final class SettingsPage
                 ],
             ];
         }
+        if (\in_array($task, ['run_clock_catalog_sync_now', 'run_clock_availability_rate_sync_now', 'run_clock_reservation_fallback_sync_now'], true)) {
+            $syncType = $task === 'run_clock_catalog_sync_now'
+                ? 'catalog'
+                : ($task === 'run_clock_availability_rate_sync_now' ? 'availability_rates' : 'reservations');
+            $summary = $persist ? ClockSyncScheduler::runManualSync($syncType) : ['success' => true, 'sanitized_error' => ''];
+            if (empty($summary['success']) && !empty($summary['sanitized_error'])) {
+                return [
+                    'tab' => $tab,
+                    'notice' => '',
+                    'errors' => [(string) $summary['sanitized_error']],
+                    'forms' => [],
+                ];
+            }
+            return [
+                'tab' => $tab,
+                'notice' => 'clock_sync_action_completed',
+                'errors' => [],
+                'forms' => [],
+            ];
+        }
+        if ($task === 'repair_clock_sync_schedules') {
+            if ($persist) {
+                ClockSyncScheduler::repairSchedules();
+            }
+            return [
+                'tab' => $tab,
+                'notice' => 'clock_sync_schedules_repaired',
+                'errors' => [],
+                'forms' => [],
+            ];
+        }
         if ($task === 'run_provider_sync_jobs') {
             $summary = $persist
                 ? (new ProviderSyncJobRunner())->runDueJobs(10)
@@ -505,7 +536,7 @@ final class SettingsPage
                 LockEngine::scheduleCleanupCron();
                 ProviderSyncJobRunner::unscheduleCron();
                 ProviderSyncJobRunner::scheduleCron();
-                ClockReservationAutoSyncScheduler::scheduleCron();
+                ClockSyncScheduler::scheduleCron(true);
             } elseif ($task === 'cleanup_expired_locks') {
                 LockEngine::cleanupExpiredLocks();
             } elseif ($task === 'send_test_email') {
@@ -562,13 +593,20 @@ final class SettingsPage
             'clock_endpoint_overrides' => [],
             'clock_payment_posting_mode' => 'auto_detect',
             'clock_same_day_folio_payment_enabled' => true,
+            'clock_full_catalog_sync_enabled' => true,
+            'clock_full_catalog_sync_hour' => '03:00',
+            'clock_availability_rate_sync_enabled' => true,
+            'clock_availability_rate_interval_minutes' => 15,
+            'clock_reservation_fallback_sync_enabled' => true,
+            'clock_reservation_fallback_interval_minutes' => 5,
+            'clock_reservation_fallback_batch_size' => 1,
             'clock_timeout_seconds' => \max(1, (int) ($provider['clock_timeout_seconds'] ?? 15)),
             'fallback_to_local_when_clock_unavailable' => false,
         ]);
         MustBookingConfig::set_group_settings('provider', $provider);
     }
     /** @return array<string, mixed> */
-    private static function runClockFullSync(): array
+    public static function runClockFullSync(): array
     {
         self::applyClockApiDefaults();
         $catalog = (new ClockCatalogService())->refreshCatalog();
@@ -1800,6 +1838,13 @@ final class SettingsPage
         if ($posted_webhook_basic_password !== '') {
             $form['clock_webhook_basic_password'] = $posted_webhook_basic_password;
         }
+        $form['clock_full_catalog_sync_enabled'] = self::parseBool($source, 'clock_full_catalog_sync_enabled');
+        $form['clock_full_catalog_sync_hour'] = self::sanitizeClockSyncHour((string) \wp_unslash($source['clock_full_catalog_sync_hour'] ?? ($form['clock_full_catalog_sync_hour'] ?? '03:00')));
+        $form['clock_availability_rate_sync_enabled'] = self::parseBool($source, 'clock_availability_rate_sync_enabled');
+        $form['clock_availability_rate_interval_minutes'] = ClockConfig::normalizeAutoSyncInterval((int) \absint(\wp_unslash($source['clock_availability_rate_interval_minutes'] ?? ($form['clock_availability_rate_interval_minutes'] ?? 15))));
+        $form['clock_reservation_fallback_sync_enabled'] = self::parseBool($source, 'clock_reservation_fallback_sync_enabled');
+        $form['clock_reservation_fallback_interval_minutes'] = ClockConfig::normalizeAutoSyncInterval((int) \absint(\wp_unslash($source['clock_reservation_fallback_interval_minutes'] ?? ($form['clock_reservation_fallback_interval_minutes'] ?? 5))));
+        $form['clock_reservation_fallback_batch_size'] = \max(1, \min(5, (int) \absint(\wp_unslash($source['clock_reservation_fallback_batch_size'] ?? ($form['clock_reservation_fallback_batch_size'] ?? 1)))));
         $form['clock_auto_sync_enabled'] = self::parseBool($source, 'clock_auto_sync_enabled');
         $form['clock_auto_sync_interval_minutes'] = ClockConfig::normalizeAutoSyncInterval((int) \absint(\wp_unslash($source['clock_auto_sync_interval_minutes'] ?? ($form['clock_auto_sync_interval_minutes'] ?? 60))));
         $form['clock_auto_sync_batch_size'] = \max(1, \min(100, (int) \absint(\wp_unslash($source['clock_auto_sync_batch_size'] ?? ($form['clock_auto_sync_batch_size'] ?? 1)))));
@@ -1880,6 +1925,17 @@ final class SettingsPage
     private static function parseBool(array $source, string $key): bool
     {
         return !empty($source[$key]);
+    }
+    private static function sanitizeClockSyncHour(string $value): string
+    {
+        $value = \trim($value);
+        if (\preg_match('/^(2[0-3]|[01]\d):([0-5]\d)$/', $value) === 1) {
+            return $value;
+        }
+        if (\preg_match('/^(2[0-3]|[01]?\d)$/', $value, $matches) === 1) {
+            return \str_pad((string) (int) $matches[1], 2, '0', STR_PAD_LEFT) . ':00';
+        }
+        return '03:00';
     }
     private static function isValidTime(string $value): bool
     {
@@ -2057,6 +2113,8 @@ final class SettingsPage
             'clock_catalog_fetched_with_warnings' => \__('Clock catalog fetch completed with warnings. Review the catalog diagnostics below.', 'must-hotel-booking'),
             'clock_api_defaults_applied' => \__('Clock API defaults applied. Enter the PMS/Base API URLs, API user, and API key, then save and test the connection.', 'must-hotel-booking'),
             'clock_full_sync_completed' => \__('Clock full sync completed. Catalog was refreshed and missing local Clock mappings/imports were created where safe.', 'must-hotel-booking'),
+            'clock_sync_action_completed' => \__('Clock sync action completed. Review sync diagnostics for status, counts, and sanitized errors.', 'must-hotel-booking'),
+            'clock_sync_schedules_repaired' => \__('Clock sync schedules were repaired from the saved settings.', 'must-hotel-booking'),
             'provider_sync_jobs_processed' => \__('Provider sync jobs processed.', 'must-hotel-booking'),
             'clock_reservation_refresh_queued' => \__('Clock reservation refresh queued.', 'must-hotel-booking'),
             'managed_page_repaired' => \__('Managed page action completed.', 'must-hotel-booking'),
@@ -3135,37 +3193,69 @@ final class SettingsPage
                     : __('Optional. This is checked against the HTTP Basic Authorization header from Clock PUSH.', 'must-hotel-booking'),
             ]);
             self::renderField([
-                'label' => __('Enable automatic Clock reservation sync', 'must-hotel-booking'),
-                'name' => 'clock_auto_sync_enabled',
+                'label' => __('Enable daily full catalog sync', 'must-hotel-booking'),
+                'name' => 'clock_full_catalog_sync_enabled',
                 'type' => 'checkbox',
-                'value' => $form['clock_auto_sync_enabled'] ?? true,
-                'description' => __('Automatically refresh active Clock-backed reservations so changes made in Clock PMS are mirrored on the website.', 'must-hotel-booking'),
+                'value' => $form['clock_full_catalog_sync_enabled'] ?? true,
+                'description' => __('Runs a non-destructive Clock catalog and mapping sync once per day. Website-owned content is preserved.', 'must-hotel-booking'),
             ]);
             self::renderField([
-                'label' => __('Automatic sync interval', 'must-hotel-booking'),
-                'name' => 'clock_auto_sync_interval_minutes',
+                'label' => __('Full catalog sync time', 'must-hotel-booking'),
+                'name' => 'clock_full_catalog_sync_hour',
+                'type' => 'time',
+                'value' => (string) ($form['clock_full_catalog_sync_hour'] ?? '03:00'),
+                'description' => __('Local site time. Default is 03:00.', 'must-hotel-booking'),
+            ]);
+            self::renderField([
+                'label' => __('Enable availability/rate sync', 'must-hotel-booking'),
+                'name' => 'clock_availability_rate_sync_enabled',
+                'type' => 'checkbox',
+                'value' => $form['clock_availability_rate_sync_enabled'] ?? true,
+                'description' => __('Refreshes local display cache for daily availability, rates, and restrictions. Checkout still live-revalidates with Clock before payment.', 'must-hotel-booking'),
+            ]);
+            self::renderField([
+                'label' => __('Availability/rate sync interval', 'must-hotel-booking'),
+                'name' => 'clock_availability_rate_interval_minutes',
                 'type' => 'select',
-                'value' => (string) ($form['clock_auto_sync_interval_minutes'] ?? 60),
+                'value' => (string) ($form['clock_availability_rate_interval_minutes'] ?? 15),
                 'options' => [
                     '5' => __('Every 5 minutes', 'must-hotel-booking'),
                     '10' => __('Every 10 minutes', 'must-hotel-booking'),
-                    '15' => __('Every 15 minutes', 'must-hotel-booking'),
+                    '15' => __('Every 15 minutes - default', 'must-hotel-booking'),
                     '30' => __('Every 30 minutes', 'must-hotel-booking'),
-                    '60' => __('Every 60 minutes - recommended', 'must-hotel-booking'),
+                    '60' => __('Every 60 minutes', 'must-hotel-booking'),
                 ],
             ]);
             self::renderField([
-                'label' => __('Max reservations per sync run', 'must-hotel-booking'),
-                'name' => 'clock_auto_sync_batch_size',
+                'label' => __('Enable reservation fallback sync', 'must-hotel-booking'),
+                'name' => 'clock_reservation_fallback_sync_enabled',
+                'type' => 'checkbox',
+                'value' => $form['clock_reservation_fallback_sync_enabled'] ?? true,
+                'description' => __('Fallback polling for Clock reservation changes. Clock PUSH/webhooks remain the preferred immediate path.', 'must-hotel-booking'),
+            ]);
+            self::renderField([
+                'label' => __('Reservation fallback interval', 'must-hotel-booking'),
+                'name' => 'clock_reservation_fallback_interval_minutes',
                 'type' => 'select',
-                'value' => (string) ($form['clock_auto_sync_batch_size'] ?? 1),
+                'value' => (string) ($form['clock_reservation_fallback_interval_minutes'] ?? 5),
                 'options' => [
-                    '1' => __('1 reservation - recommended', 'must-hotel-booking'),
+                    '5' => __('Every 5 minutes - default', 'must-hotel-booking'),
+                    '10' => __('Every 10 minutes', 'must-hotel-booking'),
+                    '15' => __('Every 15 minutes', 'must-hotel-booking'),
+                    '30' => __('Every 30 minutes', 'must-hotel-booking'),
+                    '60' => __('Every 60 minutes', 'must-hotel-booking'),
+                ],
+            ]);
+            self::renderField([
+                'label' => __('Max reservations per fallback run', 'must-hotel-booking'),
+                'name' => 'clock_reservation_fallback_batch_size',
+                'type' => 'select',
+                'value' => (string) ($form['clock_reservation_fallback_batch_size'] ?? 1),
+                'options' => [
+                    '1' => __('1 reservation - default', 'must-hotel-booking'),
+                    '2' => __('2 reservations', 'must-hotel-booking'),
+                    '3' => __('3 reservations', 'must-hotel-booking'),
                     '5' => __('5 reservations', 'must-hotel-booking'),
-                    '10' => __('10 reservations', 'must-hotel-booking'),
-                    '25' => __('25 reservations', 'must-hotel-booking'),
-                    '50' => __('50 reservations', 'must-hotel-booking'),
-                    '100' => __('100 reservations', 'must-hotel-booking'),
                 ],
             ]);
             echo '<p class="description"><strong>' . \esc_html__('Resolved PMS API URL:', 'must-hotel-booking') . '</strong> <code>' . \esc_html((string) ($summary['clock_pms_base_url'] ?? '')) . '</code></p>';
@@ -3242,6 +3332,7 @@ final class SettingsPage
         $catalogSummary = ClockCatalogService::getCachedCatalogSummary();
         $catalogCounts = isset($catalogSummary['counts']) && \is_array($catalogSummary['counts']) ? $catalogSummary['counts'] : [];
         self::renderPanelStart(\__('Clock synchronization', 'must-hotel-booking'), \__('Use the sync after connecting Clock. It refreshes Clock catalog data, imports missing local room/rate records needed by the website frontend, and creates provider mappings where safe.', 'must-hotel-booking'));
+        $clockSyncDiagnostics = ClockSyncScheduler::getDiagnostics();
         echo '<div class="must-clock-sync-hero">';
         echo '<div>';
         echo '<h3>' . \esc_html__('Sync website frontend with Clock PMS', 'must-hotel-booking') . '</h3>';
@@ -3250,13 +3341,20 @@ final class SettingsPage
         echo '<form method="post" action="' . \esc_url(get_admin_settings_page_url(['tab' => 'provider'])) . '">';
         \wp_nonce_field('must_settings_maintenance_action', 'must_settings_nonce');
         echo '<input type="hidden" name="must_settings_action" value="maintenance_action" />';
-        echo '<input type="hidden" name="maintenance_task" value="clock_full_sync" />';
+        echo '<input type="hidden" name="maintenance_task" value="run_clock_catalog_sync_now" />';
         echo '<input type="hidden" name="return_tab" value="provider" />';
-        echo '<button type="submit" class="button button-primary button-hero">' . \esc_html__('Sync Clock catalog and mappings', 'must-hotel-booking') . '</button>';
+        echo '<button type="submit" class="button button-primary button-hero">' . \esc_html__('Run full catalog sync now', 'must-hotel-booking') . '</button>';
         echo '</form>';
         echo '</div>';
         echo '<div class="must-settings-summary-grid">';
-        echo '<article class="must-settings-summary-card"><span class="must-settings-summary-label">' . \esc_html__('Last catalog sync', 'must-hotel-booking') . '</span><strong>' . \esc_html((string) ($catalogSummary['last_fetched_at'] ?? '') ?: __('Never', 'must-hotel-booking')) . '</strong></article>';
+        echo '<article class="must-settings-summary-card"><span class="must-settings-summary-label">' . \esc_html__('Auto-sync health', 'must-hotel-booking') . '</span><strong>' . \esc_html((string) ($clockSyncDiagnostics['auto_sync_health'] ?? 'unknown')) . '</strong></article>';
+        echo '<article class="must-settings-summary-card"><span class="must-settings-summary-label">' . \esc_html__('Last full catalog sync', 'must-hotel-booking') . '</span><strong>' . \esc_html((string) ($clockSyncDiagnostics['last_full_catalog_sync'] ?? '') ?: ((string) ($catalogSummary['last_fetched_at'] ?? '') ?: __('Never', 'must-hotel-booking'))) . '</strong></article>';
+        echo '<article class="must-settings-summary-card"><span class="must-settings-summary-label">' . \esc_html__('Last availability/rate sync', 'must-hotel-booking') . '</span><strong>' . \esc_html((string) ($clockSyncDiagnostics['last_availability_rate_sync'] ?? '') ?: __('Never', 'must-hotel-booking')) . '</strong></article>';
+        echo '<article class="must-settings-summary-card"><span class="must-settings-summary-label">' . \esc_html__('Last reservation fallback sync', 'must-hotel-booking') . '</span><strong>' . \esc_html((string) ($clockSyncDiagnostics['last_reservation_fallback_sync'] ?? '') ?: __('Never', 'must-hotel-booking')) . '</strong></article>';
+        echo '<article class="must-settings-summary-card"><span class="must-settings-summary-label">' . \esc_html__('Last webhook received', 'must-hotel-booking') . '</span><strong>' . \esc_html((string) ($clockSyncDiagnostics['last_webhook_received'] ?? '') ?: __('Never', 'must-hotel-booking')) . '</strong></article>';
+        echo '<article class="must-settings-summary-card"><span class="must-settings-summary-label">' . \esc_html__('Next catalog sync', 'must-hotel-booking') . '</span><strong>' . \esc_html((string) ($clockSyncDiagnostics['next_full_catalog_sync'] ?? '') ?: __('Not scheduled', 'must-hotel-booking')) . '</strong></article>';
+        echo '<article class="must-settings-summary-card"><span class="must-settings-summary-label">' . \esc_html__('Next availability/rate sync', 'must-hotel-booking') . '</span><strong>' . \esc_html((string) ($clockSyncDiagnostics['next_availability_rate_sync'] ?? '') ?: __('Not scheduled', 'must-hotel-booking')) . '</strong></article>';
+        echo '<article class="must-settings-summary-card"><span class="must-settings-summary-label">' . \esc_html__('Next reservation sync', 'must-hotel-booking') . '</span><strong>' . \esc_html((string) ($clockSyncDiagnostics['next_reservation_fallback_sync'] ?? '') ?: __('Not scheduled', 'must-hotel-booking')) . '</strong></article>';
         echo '<article class="must-settings-summary-card"><span class="must-settings-summary-label">' . \esc_html__('Clock room types', 'must-hotel-booking') . '</span><strong>' . \esc_html((string) ($catalogCounts['room_types'] ?? 0)) . '</strong></article>';
         echo '<article class="must-settings-summary-card"><span class="must-settings-summary-label">' . \esc_html__('Clock rooms', 'must-hotel-booking') . '</span><strong>' . \esc_html((string) ($catalogCounts['rooms'] ?? 0)) . '</strong></article>';
         echo '<article class="must-settings-summary-card"><span class="must-settings-summary-label">' . \esc_html__('Clock rates', 'must-hotel-booking') . '</span><strong>' . \esc_html((string) ($catalogCounts['rates'] ?? 0)) . '</strong></article>';
@@ -3266,6 +3364,20 @@ final class SettingsPage
         echo '</div>';
         echo '<details class="must-settings-advanced"><summary>' . \esc_html__('Advanced diagnostics actions', 'must-hotel-booking') . '</summary>';
         echo '<p class="description">' . \esc_html__('Use these when troubleshooting a specific connection or reservation mirror issue.', 'must-hotel-booking') . '</p>';
+        foreach ([
+            'run_clock_catalog_sync_now' => __('Run full catalog sync now', 'must-hotel-booking'),
+            'run_clock_availability_rate_sync_now' => __('Run availability/rate sync now', 'must-hotel-booking'),
+            'run_clock_reservation_fallback_sync_now' => __('Run reservation fallback sync now', 'must-hotel-booking'),
+            'repair_clock_sync_schedules' => __('Repair Clock sync schedules', 'must-hotel-booking'),
+        ] as $task => $label) {
+            echo '<form method="post" action="' . \esc_url(get_admin_settings_page_url(['tab' => 'provider'])) . '" class="must-settings-secondary-action">';
+            \wp_nonce_field('must_settings_maintenance_action', 'must_settings_nonce');
+            echo '<input type="hidden" name="must_settings_action" value="maintenance_action" />';
+            echo '<input type="hidden" name="maintenance_task" value="' . \esc_attr((string) $task) . '" />';
+            echo '<input type="hidden" name="return_tab" value="provider" />';
+            echo '<button type="submit" class="button button-secondary">' . \esc_html((string) $label) . '</button>';
+            echo '</form>';
+        }
         echo '<form method="post" action="' . \esc_url(get_admin_settings_page_url(['tab' => 'provider'])) . '" class="must-settings-secondary-action">';
         \wp_nonce_field('must_settings_maintenance_action', 'must_settings_nonce');
         echo '<input type="hidden" name="must_settings_action" value="maintenance_action" />';
@@ -3383,6 +3495,13 @@ final class SettingsPage
                     $hidden['clock_endpoint_overrides[' . $key . ']'] = (string) $value;
                 }
             }
+            $hidden['clock_full_catalog_sync_enabled'] = !empty($form['clock_full_catalog_sync_enabled']) ? '1' : '';
+            $hidden['clock_full_catalog_sync_hour'] = (string) ($form['clock_full_catalog_sync_hour'] ?? '03:00');
+            $hidden['clock_availability_rate_sync_enabled'] = !empty($form['clock_availability_rate_sync_enabled']) ? '1' : '';
+            $hidden['clock_availability_rate_interval_minutes'] = (string) ($form['clock_availability_rate_interval_minutes'] ?? 15);
+            $hidden['clock_reservation_fallback_sync_enabled'] = !empty($form['clock_reservation_fallback_sync_enabled']) ? '1' : '';
+            $hidden['clock_reservation_fallback_interval_minutes'] = (string) ($form['clock_reservation_fallback_interval_minutes'] ?? 5);
+            $hidden['clock_reservation_fallback_batch_size'] = (string) ($form['clock_reservation_fallback_batch_size'] ?? 1);
             $hidden['clock_auto_sync_enabled'] = !empty($form['clock_auto_sync_enabled']) ? '1' : '';
             $hidden['clock_auto_sync_interval_minutes'] = (string) ($form['clock_auto_sync_interval_minutes'] ?? 60);
             $hidden['clock_auto_sync_batch_size'] = (string) ($form['clock_auto_sync_batch_size'] ?? 1);
@@ -3649,8 +3768,13 @@ final class SettingsPage
         $recentProblemJobs = isset($syncJobs['recent_problem_jobs']) && \is_array($syncJobs['recent_problem_jobs']) ? $syncJobs['recent_problem_jobs'] : [];
         $inboundSync = isset($providerData['inbound_sync']) && \is_array($providerData['inbound_sync']) ? $providerData['inbound_sync'] : [];
         $inboundSummary = isset($inboundSync['summary']) && \is_array($inboundSync['summary']) ? $inboundSync['summary'] : [];
+        $clockSyncDiagnostics = ClockSyncScheduler::getDiagnostics();
+        $recentRuns = isset($clockSyncDiagnostics['recent_runs']) && \is_array($clockSyncDiagnostics['recent_runs']) ? $clockSyncDiagnostics['recent_runs'] : [];
+        $locks = isset($clockSyncDiagnostics['locks']) && \is_array($clockSyncDiagnostics['locks']) ? $clockSyncDiagnostics['locks'] : [];
+        $lastErrors = isset($clockSyncDiagnostics['last_errors']) && \is_array($clockSyncDiagnostics['last_errors']) ? $clockSyncDiagnostics['last_errors'] : [];
         self::renderPanelStart(\__('Sync &amp; reconciliation health', 'must-hotel-booking'), \__('Compact view of outbound sync jobs, inbound webhook events, and recent errors.', 'must-hotel-booking'));
         echo '<div class="must-settings-summary-grid">';
+        echo '<article class="must-settings-summary-card"><span class="must-settings-summary-label">' . \esc_html__('Auto-sync health', 'must-hotel-booking') . '</span><strong>' . \esc_html((string) ($clockSyncDiagnostics['auto_sync_health'] ?? 'unknown')) . '</strong></article>';
         echo '<article class="must-settings-summary-card"><span class="must-settings-summary-label">' . \esc_html__('Pending jobs', 'must-hotel-booking') . '</span><strong>' . \esc_html((string) ($syncCounts[ProviderSyncJobRepository::STATUS_PENDING] ?? 0)) . '</strong></article>';
         echo '<article class="must-settings-summary-card"><span class="must-settings-summary-label">' . \esc_html__('Retryable jobs', 'must-hotel-booking') . '</span><strong>' . \esc_html((string) ($syncCounts[ProviderSyncJobRepository::STATUS_RETRYABLE] ?? 0)) . '</strong></article>';
         echo '<article class="must-settings-summary-card"><span class="must-settings-summary-label">' . \esc_html__('Failed / exhausted', 'must-hotel-booking') . '</span><strong>' . \esc_html((string) ((int) ($syncCounts[ProviderSyncJobRepository::STATUS_FAILED] ?? 0) + (int) ($syncCounts[ProviderSyncJobRepository::STATUS_EXHAUSTED] ?? 0))) . '</strong></article>';
@@ -3664,6 +3788,42 @@ final class SettingsPage
         }
         if (!empty($inboundSummary['last_error'])) {
             echo '<p class="description"><strong>' . \esc_html__('Last inbound error:', 'must-hotel-booking') . '</strong> ' . \esc_html((string) $inboundSummary['last_error']) . '</p>';
+        }
+        foreach ($lastErrors as $type => $error) {
+            if ((string) $error !== '') {
+                echo '<p class="description"><strong>' . \esc_html(\sprintf(__('Last %s sync error:', 'must-hotel-booking'), \str_replace('_', ' ', (string) $type))) . '</strong> ' . \esc_html((string) $error) . '</p>';
+            }
+        }
+        if (!empty($locks)) {
+            echo '<h4 style="margin-bottom:4px;">' . \esc_html__('Current Clock sync locks', 'must-hotel-booking') . '</h4>';
+            echo '<table class="widefat striped" style="margin-bottom:8px;"><thead><tr><th>' . \esc_html__('Type', 'must-hotel-booking') . '</th><th>' . \esc_html__('Locked', 'must-hotel-booking') . '</th><th>' . \esc_html__('Age', 'must-hotel-booking') . '</th><th>' . \esc_html__('Stale', 'must-hotel-booking') . '</th></tr></thead><tbody>';
+            foreach ($locks as $type => $lock) {
+                if (!\is_array($lock)) {
+                    continue;
+                }
+                echo '<tr><td>' . \esc_html(\str_replace('_', ' ', (string) $type)) . '</td><td>' . \esc_html(!empty($lock['locked']) ? __('Yes', 'must-hotel-booking') : __('No', 'must-hotel-booking')) . '</td><td>' . \esc_html((string) ($lock['age_seconds'] ?? 0)) . 's</td><td>' . \esc_html(!empty($lock['stale']) ? __('Yes', 'must-hotel-booking') : __('No', 'must-hotel-booking')) . '</td></tr>';
+            }
+            echo '</tbody></table>';
+        }
+        if (!empty($recentRuns)) {
+            echo '<h4 style="margin-bottom:4px;">' . \esc_html__('Recent Clock sync runs', 'must-hotel-booking') . '</h4>';
+            echo '<table class="widefat striped" style="margin-bottom:8px;"><thead><tr><th>' . \esc_html__('Run ID', 'must-hotel-booking') . '</th><th>' . \esc_html__('Type', 'must-hotel-booking') . '</th><th>' . \esc_html__('Source', 'must-hotel-booking') . '</th><th>' . \esc_html__('Started', 'must-hotel-booking') . '</th><th>' . \esc_html__('Status', 'must-hotel-booking') . '</th><th>' . \esc_html__('Counts', 'must-hotel-booking') . '</th><th>' . \esc_html__('Error', 'must-hotel-booking') . '</th></tr></thead><tbody>';
+            foreach (\array_slice($recentRuns, 0, 20) as $run) {
+                if (!\is_array($run)) {
+                    continue;
+                }
+                $counts = isset($run['counts']) && \is_array($run['counts']) ? \array_filter($run['counts']) : [];
+                echo '<tr>';
+                echo '<td><code>' . \esc_html(\substr((string) ($run['run_id'] ?? ''), 0, 12)) . '</code></td>';
+                echo '<td>' . \esc_html((string) ($run['sync_type'] ?? '')) . '</td>';
+                echo '<td>' . \esc_html((string) ($run['source'] ?? '')) . '</td>';
+                echo '<td>' . \esc_html((string) ($run['started_at'] ?? '')) . '</td>';
+                echo '<td>' . \esc_html((string) ($run['status'] ?? '')) . '</td>';
+                echo '<td>' . \esc_html(!empty($counts) ? self::jsonPreview($counts) : '-') . '</td>';
+                echo '<td style="max-width:300px;word-break:break-word;">' . \esc_html(\wp_trim_words((string) ($run['sanitized_error'] ?? ''), 20)) . '</td>';
+                echo '</tr>';
+            }
+            echo '</tbody></table>';
         }
         if (!empty($recentProblemJobs)) {
             echo '<h4 style="margin-bottom:4px;">' . \esc_html__('Recent problem jobs', 'must-hotel-booking') . '</h4>';

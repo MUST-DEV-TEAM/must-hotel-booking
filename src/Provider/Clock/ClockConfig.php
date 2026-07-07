@@ -213,17 +213,46 @@ final class ClockConfig
     {
         return (string) (self::settings()['clock_webhook_basic_password'] ?? '');
     }
+    public static function fullCatalogSyncEnabled(): bool
+    {
+        return !empty(self::settings()['clock_full_catalog_sync_enabled']);
+    }
+    public static function fullCatalogSyncHour(): string
+    {
+        $time = (string) (self::settings()['clock_full_catalog_sync_hour'] ?? '03:00');
+        return \preg_match('/^(2[0-3]|[01]\d):([0-5]\d)$/', $time) === 1 ? $time : '03:00';
+    }
+    public static function availabilityRateSyncEnabled(): bool
+    {
+        return !empty(self::settings()['clock_availability_rate_sync_enabled']);
+    }
+    public static function availabilityRateSyncIntervalMinutes(): int
+    {
+        return self::normalizeAutoSyncInterval((int) (self::settings()['clock_availability_rate_interval_minutes'] ?? 15));
+    }
+    public static function reservationFallbackSyncEnabled(): bool
+    {
+        return !empty(self::settings()['clock_reservation_fallback_sync_enabled']);
+    }
+    public static function reservationFallbackIntervalMinutes(): int
+    {
+        return self::normalizeAutoSyncInterval((int) (self::settings()['clock_reservation_fallback_interval_minutes'] ?? 5));
+    }
+    public static function reservationFallbackBatchSize(): int
+    {
+        return \max(1, \min(5, (int) (self::settings()['clock_reservation_fallback_batch_size'] ?? 1)));
+    }
     public static function autoSyncEnabled(): bool
     {
-        return !empty(self::settings()['clock_auto_sync_enabled']);
+        return self::reservationFallbackSyncEnabled();
     }
     public static function autoSyncIntervalMinutes(): int
     {
-        return self::normalizeAutoSyncInterval((int) (self::settings()['clock_auto_sync_interval_minutes'] ?? 60));
+        return self::reservationFallbackIntervalMinutes();
     }
     public static function autoSyncBatchSize(): int
     {
-        return \max(1, \min(100, (int) (self::settings()['clock_auto_sync_batch_size'] ?? 1)));
+        return self::reservationFallbackBatchSize();
     }
     public static function autoSyncPastDays(): int
     {
@@ -523,6 +552,13 @@ final class ClockConfig
             'clock_webhook_basic_auth_incomplete' => (self::webhookBasicUsername() !== '') !== (self::webhookBasicPassword() !== ''),
             'public_callback_base_url' => MustBookingConfig::get_public_callback_base_url(),
             'clock_webhook_url' => \function_exists('rest_url') ? MustBookingConfig::build_public_rest_url('must-hotel-booking/v1/clock/webhook') : '',
+            'clock_full_catalog_sync_enabled' => self::fullCatalogSyncEnabled(),
+            'clock_full_catalog_sync_hour' => self::fullCatalogSyncHour(),
+            'clock_availability_rate_sync_enabled' => self::availabilityRateSyncEnabled(),
+            'clock_availability_rate_interval_minutes' => self::availabilityRateSyncIntervalMinutes(),
+            'clock_reservation_fallback_sync_enabled' => self::reservationFallbackSyncEnabled(),
+            'clock_reservation_fallback_interval_minutes' => self::reservationFallbackIntervalMinutes(),
+            'clock_reservation_fallback_batch_size' => self::reservationFallbackBatchSize(),
             'clock_auto_sync_enabled' => self::autoSyncEnabled(),
             'clock_auto_sync_interval_minutes' => self::autoSyncIntervalMinutes(),
             'clock_auto_sync_batch_size' => self::autoSyncBatchSize(),

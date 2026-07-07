@@ -1,5 +1,13 @@
 # Task Log
 
+## 2026-07-07 - Clock sync scheduler architecture and customer email copy cleanup
+- Changed: Added canonical Clock sync scheduling for daily full catalog sync, 15-minute availability/rate sync, and 5-minute reservation fallback sync with independent locks, bounded recent-run diagnostics, WP-Cron-disabled health, overdue detection, and repair/manual-run admin actions.
+- Changed: Provider settings now expose separate enable/interval/hour/batch controls and diagnostics for last/next full catalog, availability/rate, reservation fallback, webhook, manual, automatic, and successful syncs.
+- Changed: Customer emails and checkout price breakdown copy no longer use "Nightly Prices" or "Stored reservation snapshot"; email breakdowns use "Price details" only for multi-night rows and payment summary labels use Total price, Paid, Balance due, Payment method, and Payment status.
+- Root cause found: The old UI only reported catalog freshness while the only automatic path was a reservation-refresh queue. Catalog sync remained manual, and the admin view could not identify missing cron, overdue runs, locks, failures, or manual-only activity.
+- Checks: Added and ran `php tests\ClockSyncArchitectureTest.php` and `php tests\EmailCustomerCopySafetyTest.php`.
+- External records created: None. No live Clock, Stripe, or PokPay writes were performed.
+
 ## 2026-07-06 - Configurable booking display options
 - Changed: Added settings for public date picker layout (`one_calendar` or default `two_calendars`), checkout price breakdown mode (`total_only` or `date_price_rows`), and email price breakdown mode (`total_only` or `date_price_rows`).
 - Changed: Date-price checkout and email modes use stored quote/reservation nightly-rate snapshots and fall back to total-only behavior when nightly rows are unavailable.

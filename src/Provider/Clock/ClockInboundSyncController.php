@@ -78,6 +78,10 @@ final class ClockInboundSyncController
             ], (int) ($authResult['status'] ?? 403));
         }
 
+        if (\class_exists(ClockSyncScheduler::class)) {
+            ClockSyncScheduler::recordWebhookReceived('success');
+        }
+
         if (!empty($sns)) {
             $snsType = (string) ($sns['type'] ?? '');
             if ($snsType === 'SubscriptionConfirmation') {

@@ -19,8 +19,8 @@ final class Plugin
 
         \MustHotelBooking\Portal\PortalBootstrap::registerRewriteRules();
 
-        \MustHotelBooking\Provider\Clock\ClockReservationAutoSyncScheduler::registerHooks();
-        \MustHotelBooking\Provider\Clock\ClockReservationAutoSyncScheduler::scheduleCron();
+        \MustHotelBooking\Provider\Clock\ClockSyncScheduler::registerHooks();
+        \MustHotelBooking\Provider\Clock\ClockSyncScheduler::scheduleCron();
 
         \flush_rewrite_rules();
     }
@@ -29,7 +29,7 @@ final class Plugin
     {
         \MustHotelBooking\Engine\LockEngine::unscheduleCleanupCron();
         \MustHotelBooking\Provider\Sync\ProviderSyncJobRunner::unscheduleCron();
-        \MustHotelBooking\Provider\Clock\ClockReservationAutoSyncScheduler::unscheduleCron();
+        \MustHotelBooking\Provider\Clock\ClockSyncScheduler::unscheduleCron();
 
         \flush_rewrite_rules();
     }
@@ -48,7 +48,7 @@ final class Plugin
 
         \MustHotelBooking\Engine\LockEngine::scheduleCleanupCron();
         \MustHotelBooking\Provider\Sync\ProviderSyncJobRunner::scheduleCron();
-        \MustHotelBooking\Provider\Clock\ClockReservationAutoSyncScheduler::scheduleCron();
+        \MustHotelBooking\Provider\Clock\ClockSyncScheduler::scheduleCron();
     }
 
     public static function initPlugin(): void
@@ -70,8 +70,8 @@ final class Plugin
         \MustHotelBooking\Provider\Sync\ProviderSyncJobRunner::registerHooks();
         \MustHotelBooking\Provider\Sync\ProviderSyncJobRunner::scheduleCron();
 
-        \MustHotelBooking\Provider\Clock\ClockReservationAutoSyncScheduler::registerHooks();
-        \MustHotelBooking\Provider\Clock\ClockReservationAutoSyncScheduler::scheduleCron();
+        \MustHotelBooking\Provider\Clock\ClockSyncScheduler::registerHooks();
+        \MustHotelBooking\Provider\Clock\ClockSyncScheduler::scheduleCron();
 
         \MustHotelBooking\Engine\PaymentEngine::registerHooks();
         \MustHotelBooking\Provider\Clock\ClockPaymentAccountingService::registerHooks();

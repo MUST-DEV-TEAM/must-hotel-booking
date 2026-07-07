@@ -1,5 +1,12 @@
 # Decisions
 
+## 2026-07-07 - Clock sync split into catalog, availability/rate, and reservation fallback schedules
+- Decision: Use separate canonical WP-Cron hooks for daily full catalog sync, frequent availability/rate sync, and reservation fallback polling, with independent locks, bounded run logs, overdue diagnostics, and a repair action.
+- Reason: A single ambiguous auto-sync setting and "Last catalog sync" display could not prove whether automatic sync was scheduled, overdue, locked, failing, disabled, or only manually triggered.
+- Boundaries: Catalog sync preserves website-owned presentation/content; availability/rate sync is display/cache only; final checkout still live-revalidates with Clock; reservation webhooks remain preferred and fallback polling only queues small refresh jobs.
+- Source of truth: Clock owns Clock IDs, availability, restrictions, reservation status/moves/blocks, and final live price/availability. Website content and presentation remain local. Payment provider/local ledger remains payment truth.
+- Schema impact: None. Diagnostics use bounded options and existing provider-sync queues/logs.
+
 ## 2026-06-24 - Clock deposit verification uses signed raw balance plus normalized held amount
 - Decision: Verify website deposits on Clock `deposit=true` folios by comparing Clock's signed raw balance movement and a normalized deposit-held amount, while still requiring the target folio to remain `deposit=true`, the credit-item reference to be recorded when exposed, and the standard accommodation folio to remain unchanged.
 - Reason: Live read-only evidence for reservation 136 / Clock booking 120 showed the correct isolated deposit flow produced raw deposit-folio balance `-150` for a held `150 EUR` deposit while the booking header displayed aggregate `Balance 0`. The previous verifier could mark a row `verified_deposit_isolated` solely from standard-folio isolation even when raw deposit balance comparison failed.

@@ -106,7 +106,7 @@ $render_checkout_price_breakdown_rows = static function (array $pricing, string 
     }
 
     $html = '<div class="must-checkout-price-breakdown-rows">';
-    $html .= '<div class="must-checkout-price-line is-breakdown-heading"><span>' . \esc_html__('Nightly Prices', 'must-hotel-booking') . '</span><span></span></div>';
+    $html .= '<div class="must-checkout-price-line is-breakdown-heading"><span>' . \esc_html__('Price details', 'must-hotel-booking') . '</span><span></span></div>';
 
     foreach ($rows as $row) {
         $date = isset($row['date']) ? (string) $row['date'] : '';

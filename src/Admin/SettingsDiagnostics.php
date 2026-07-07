@@ -12,6 +12,7 @@ use MustHotelBooking\Engine\LockEngine;
 use MustHotelBooking\Engine\PaymentEngine;
 use MustHotelBooking\Provider\Clock\ClockConnectionDiagnostic;
 use MustHotelBooking\Provider\Clock\ClockCatalogService;
+use MustHotelBooking\Provider\Clock\ClockSyncScheduler;
 use MustHotelBooking\Provider\ProviderManager;
 use MustHotelBooking\Provider\Storage\ProviderRequestLogRepository;
 use MustHotelBooking\Provider\Storage\ProviderSyncJobRepository;
@@ -311,6 +312,7 @@ final class SettingsDiagnostics
         $outboundSummary = $requestLogs->getOutboundSummary(ProviderManager::CLOCK_MODE);
         $latestOutbound = $requestLogs->getLatestOutboundLogSummary(ProviderManager::CLOCK_MODE);
         $syncJobCounts = isset($syncJobSummary['counts']) && \is_array($syncJobSummary['counts']) ? $syncJobSummary['counts'] : [];
+        $clockSyncDiagnostics = ClockSyncScheduler::getDiagnostics();
 
         if ((string) $configuredMode === 'clock' && !empty($providerSummary['clock_direct_api_configured'])) {
             $catalogErrors = isset($catalogSummary['errors']) && \is_array($catalogSummary['errors']) ? $catalogSummary['errors'] : [];
@@ -348,6 +350,7 @@ final class SettingsDiagnostics
             'sync_jobs' => [
                 'summary' => $syncJobSummary,
                 'recent_problem_jobs' => $syncJobs->getRecentProblemJobs(ProviderManager::CLOCK_MODE, 5),
+                'clock_sync' => $clockSyncDiagnostics,
                 'cron' => [
                     'status' => $syncCronScheduled ? 'healthy' : 'warning',
                     'health' => $syncCronScheduled ? 'ok' : 'missing',
@@ -540,7 +543,17 @@ final class SettingsDiagnostics
         $syncSummary = isset($syncJobs['summary']) && \is_array($syncJobs['summary']) ? $syncJobs['summary'] : [];
         $syncCounts = isset($syncSummary['counts']) && \is_array($syncSummary['counts']) ? $syncSummary['counts'] : [];
         $syncCron = isset($syncJobs['cron']) && \is_array($syncJobs['cron']) ? $syncJobs['cron'] : [];
+        $clockSync = isset($syncJobs['clock_sync']) && \is_array($syncJobs['clock_sync']) ? $syncJobs['clock_sync'] : [];
         $lines[] = 'Clock Sync Cron: ' . (string) ($syncCron['health'] ?? '');
+        $lines[] = 'Clock Auto Sync Health: ' . (string) ($clockSync['auto_sync_health'] ?? '');
+        $lines[] = 'Clock WP-Cron Disabled: ' . (!empty($clockSync['wp_cron_disabled']) ? 'yes' : 'no');
+        $lines[] = 'Clock Last Full Catalog Sync: ' . (string) ($clockSync['last_full_catalog_sync'] ?? '');
+        $lines[] = 'Clock Last Availability/Rate Sync: ' . (string) ($clockSync['last_availability_rate_sync'] ?? '');
+        $lines[] = 'Clock Last Reservation Fallback Sync: ' . (string) ($clockSync['last_reservation_fallback_sync'] ?? '');
+        $lines[] = 'Clock Last Webhook Received: ' . (string) ($clockSync['last_webhook_received'] ?? '');
+        $lines[] = 'Clock Next Full Catalog Sync: ' . (string) ($clockSync['next_full_catalog_sync'] ?? '');
+        $lines[] = 'Clock Next Availability/Rate Sync: ' . (string) ($clockSync['next_availability_rate_sync'] ?? '');
+        $lines[] = 'Clock Next Reservation Fallback Sync: ' . (string) ($clockSync['next_reservation_fallback_sync'] ?? '');
         $lines[] = 'Clock Sync Due Jobs: ' . (string) ($syncSummary['due'] ?? 0);
         $lines[] = 'Clock Sync Pending Jobs: ' . (string) ($syncCounts[ProviderSyncJobRepository::STATUS_PENDING] ?? 0);
         $lines[] = 'Clock Sync Retryable Jobs: ' . (string) ($syncCounts[ProviderSyncJobRepository::STATUS_RETRYABLE] ?? 0);

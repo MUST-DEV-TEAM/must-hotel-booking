@@ -111,6 +111,16 @@
 - If checkout remains slow after deployment, inspect the performance timeline for Clock call count/duration, cache hit/miss, provider-log write time, database query count/time, lock wait, HTTP status, retries, and timeouts. Customer-facing rendering must not run credential probes, support reports, reconciliation, or reservation-refresh batches.
 - 429 responses honor `Retry-After` and retry with exponential backoff and jitter. A later successful request clears the aggregate active-error state, so a historical 429 is not a permanent production blocker.
 
+### Clock automatic sync is stale or overdue
+- Open Settings -> Provider and check Auto-sync health, last/next full catalog sync, last/next availability/rate sync, last/next reservation fallback sync, last webhook received, current lock ages, and recent Clock sync runs.
+- If health is `wp_cron_disabled`, configure the server to call `wp-cron.php` regularly; WordPress will not trigger scheduled syncs from traffic when `DISABLE_WP_CRON` is true.
+- If health is `missing`, use `Repair Clock sync schedules`. This clears duplicate/mismatched events and recreates the canonical catalog, availability/rate, and reservation fallback hooks from saved settings.
+- If health is `overdue`, compare the last successful automatic sync with the expected cadence: availability/rates are overdue after 2x the configured interval, reservations after 2x the configured fallback interval, and catalog after the daily window.
+- If health is `locked`, check lock age. Fresh locks skip safely; stale locks are cleared by the next run and recorded in the recent run log.
+- If health is `failing`, inspect the last sanitized error and provider request logs. Secrets, API keys, authorization headers, and payment secrets should not appear in diagnostics.
+- Manual buttons are safe operational probes: Run full catalog sync now, Run availability/rate sync now, Run reservation fallback sync now, and Repair Clock sync schedules. Do not use live destructive provider writes for diagnosis.
+- The previous admin-only "Last catalog sync" field did not prove automatic sync was alive. Use the new last manual, last automatic, last successful, next scheduled, and recent run fields for live verification.
+
 ## Admin/Staff Portal Issue Areas
 - Admin menu and dashboard: `src/Admin/dashboard.php`.
 - Admin data providers/actions: `src/Admin/*DataProvider.php`, `src/Admin/*Actions.php`.

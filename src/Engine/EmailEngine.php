@@ -650,15 +650,12 @@ final class EmailEngine
         $currency = (string) ($placeholders['{currency}'] ?? MustBookingConfig::get_currency());
         $priceBreakdownRows = self::renderEmailPriceBreakdownRows($meta, $currency);
         $rows = [
-            ['label' => \__('Booking ID', 'must-hotel-booking'), 'value' => (string) ($placeholders['{booking_id}'] ?? '')],
+            ['label' => \__('Booking reference', 'must-hotel-booking'), 'value' => (string) ($placeholders['{booking_id}'] ?? '')],
             ['label' => \__('Guest', 'must-hotel-booking'), 'value' => (string) ($placeholders['{guest_name}'] ?? '')],
-            ['label' => \__('Room', 'must-hotel-booking'), 'value' => (string) ($placeholders['{room_name}'] ?? '')],
-            ['label' => \__('Check-in', 'must-hotel-booking'), 'value' => (string) ($placeholders['{checkin}'] ?? '')],
-            ['label' => \__('Check-out', 'must-hotel-booking'), 'value' => (string) ($placeholders['{checkout}'] ?? '')],
+            ['label' => \__('Room/rate', 'must-hotel-booking'), 'value' => (string) ($placeholders['{room_name}'] ?? '')],
+            ['label' => \__('Dates', 'must-hotel-booking'), 'value' => \trim((string) ($placeholders['{checkin}'] ?? '') . ' - ' . (string) ($placeholders['{checkout}'] ?? ''), ' -')],
             ...$priceBreakdownRows,
-            ['label' => \__('Total', 'must-hotel-booking'), 'value' => \trim((string) ($placeholders['{total_price}'] ?? '') . ' ' . $currency)],
-            ['label' => \__('Payment Method', 'must-hotel-booking'), 'value' => (string) ($placeholders['{payment_method}'] ?? '')],
-            ['label' => \__('Payment Status', 'must-hotel-booking'), 'value' => (string) ($placeholders['{payment_status}'] ?? '')],
+            ...self::buildPaymentSummaryRows($placeholders, $currency),
         ];
         return \array_values(\array_filter(
             $rows,
@@ -689,9 +686,12 @@ final class EmailEngine
         if (empty($rows)) {
             return [];
         }
+        if (\count($rows) <= 1) {
+            return [];
+        }
 
         $summaryRows = [
-            ['label' => \__('Nightly Prices', 'must-hotel-booking'), 'value' => \__('Stored reservation snapshot', 'must-hotel-booking')],
+            ['label' => \__('Price details', 'must-hotel-booking'), 'value' => \__('By date', 'must-hotel-booking')],
         ];
 
         foreach ($rows as $row) {
@@ -702,6 +702,26 @@ final class EmailEngine
         }
 
         return $summaryRows;
+    }
+    /**
+     * @param array<string, string> $placeholders
+     * @return array<int, array<string, string>>
+     */
+    private static function buildPaymentSummaryRows(array $placeholders, string $currency): array
+    {
+        $total = \trim((string) ($placeholders['{total_price}'] ?? ''));
+        $paymentStatus = (string) ($placeholders['{payment_status}'] ?? '');
+        $paymentMethod = (string) ($placeholders['{payment_method}'] ?? '');
+        $isPaid = \sanitize_key($paymentStatus) === 'paid';
+        $totalValue = \trim($total . ' ' . $currency);
+
+        return [
+            ['label' => \__('Total price', 'must-hotel-booking'), 'value' => $totalValue],
+            ['label' => \__('Paid', 'must-hotel-booking'), 'value' => $isPaid ? $totalValue : \trim(self::formatAmount(0.0) . ' ' . $currency)],
+            ['label' => \__('Balance due', 'must-hotel-booking'), 'value' => $isPaid ? \trim(self::formatAmount(0.0) . ' ' . $currency) : $totalValue],
+            ['label' => \__('Payment method', 'must-hotel-booking'), 'value' => $paymentMethod],
+            ['label' => \__('Payment status', 'must-hotel-booking'), 'value' => $paymentStatus],
+        ];
     }
     /**
      * @param array<string, scalar> $meta
