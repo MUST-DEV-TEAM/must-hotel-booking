@@ -94,6 +94,9 @@ jobs:
           rsync -a ./ dist/must-hotel-booking/ \
             --exclude '.git/' \
             --exclude '.github/' \
+            --exclude '.agents/' \
+            --exclude '.playwright-cli/' \
+            --exclude '.worktrees/' \
             --exclude '_puc_tmp/' \
             --exclude 'dist/' \
             --exclude 'node_modules/' \
@@ -102,6 +105,8 @@ jobs:
             --exclude 'test/' \
             --exclude 'Test/' \
             --exclude 'docs/' \
+            --exclude 'tmp/' \
+            --exclude 'tools/' \
             --exclude 'screenshots/' \
             --exclude 'screenshot-*.png' \
             --exclude 'screenshot-*.jpg' \
@@ -115,7 +120,9 @@ jobs:
             --exclude '*.log' \
             --exclude '.DS_Store' \
             --exclude 'Thumbs.db' \
+            --exclude 'AGENTS.md' \
             --exclude 'README.md' \
+            --exclude 'todo.md' \
             --exclude 'composer.json' \
             --exclude 'composer.lock' \
             --exclude 'package.json' \
@@ -134,7 +141,29 @@ jobs:
         run: |
           entries="$(unzip -Z1 "${{ steps.meta.outputs.asset }}")"
 
-          echo "$entries" | grep -q '^must-hotel-booking/must-hotel-booking.php$'
+          required_files=(
+            'must-hotel-booking/must-hotel-booking.php'
+            'must-hotel-booking/src/Engine/PaymentEngine.php'
+            'must-hotel-booking/src/Provider/Clock/ClockReservationProvider.php'
+            'must-hotel-booking/src/Provider/Clock/ClockMirrorReservationService.php'
+            'must-hotel-booking/src/Database/ReservationRepository.php'
+            'must-hotel-booking/src/Engine/BookingStatusEngine.php'
+            'must-hotel-booking/src/Admin/PaymentAdminActions.php'
+            'must-hotel-booking/lib/plugin-update-checker/plugin-update-checker.php'
+          )
+
+          for required in "${required_files[@]}"; do
+            if ! printf '%s\n' "$entries" | grep -F -q -x "$required"; then
+              echo "ZIP is missing required file: ${required}."
+              exit 1
+            fi
+          done
+
+          if printf '%s\n' "$entries" | grep -F -q '\'; then
+            echo "ZIP contains Windows backslashes in entry paths."
+            exit 1
+          fi
+
           echo "$entries" | grep -q '^must-hotel-booking/lib/plugin-update-checker/plugin-update-checker.php$'
 
           if echo "$entries" | grep -q '^must-hotel-booking/must-hotel-booking/'; then
@@ -150,14 +179,21 @@ jobs:
           for forbidden in \
             '^must-hotel-booking/\.git/' \
             '^must-hotel-booking/\.github/' \
+            '^must-hotel-booking/\.agents/' \
+            '^must-hotel-booking/\.playwright-cli/' \
+            '^must-hotel-booking/\.worktrees/' \
             '^must-hotel-booking/node_modules/' \
             '^must-hotel-booking/vendor/bin/' \
             '^must-hotel-booking/tests/' \
             '^must-hotel-booking/test/' \
             '^must-hotel-booking/Test/' \
+            '^must-hotel-booking/docs/' \
+            '^must-hotel-booking/tmp/' \
+            '^must-hotel-booking/tools/' \
             '^must-hotel-booking/screenshots/' \
             '^must-hotel-booking/\.idea/' \
             '^must-hotel-booking/\.vscode/' \
+            '^must-hotel-booking/AGENTS\.md$' \
             '^must-hotel-booking/README\.md$'
           do
             if echo "$entries" | grep -q "$forbidden"; then
