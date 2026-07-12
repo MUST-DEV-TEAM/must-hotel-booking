@@ -463,6 +463,13 @@ final class PaymentAdminActions
         $transactionId = isset($state['transaction_id']) ? (string) $state['transaction_id'] : '';
         $targetStatus = \in_array($currentStatus, ['confirmed', 'completed'], true) ? $currentStatus : 'confirmed';
 
+        if (
+            \sanitize_key((string) ($reservation['provider'] ?? '')) === 'clock'
+            && \in_array($method, ['stripe', 'pokpay'], true)
+        ) {
+            return false;
+        }
+
         BookingStatusEngine::updateReservationStatuses([$reservationId], $targetStatus, 'paid');
         BookingStatusEngine::createPaymentRows([$reservationId], $method, 'paid', $transactionId);
 

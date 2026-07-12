@@ -61,6 +61,11 @@ final class ClockMirrorReservationService
         if ($providerReservationId === '') {
             $providerReservationId = $providerBookingId;
         }
+        $deferProviderCreation = !empty($options['defer_provider_creation']);
+        $providerCreated = $providerBookingId !== '' || $providerReservationId !== '';
+        $pendingGuestForm = $deferProviderCreation && isset($options['pending_guest_form']) && \is_array($options['pending_guest_form'])
+            ? $this->sanitizePendingGuestForm($options['pending_guest_form'])
+            : [];
         $providerStatus = $this->firstString($providerReservation, ['status', 'state', 'reservation_status']);
         $providerPaymentStatus = $this->firstString($providerReservation, ['payment_status', 'payment_state']);
         $referenceMapping = isset($providerReservation['_mhb_reference_mapping']) && \is_array($providerReservation['_mhb_reference_mapping'])
@@ -69,7 +74,9 @@ final class ClockMirrorReservationService
         $clockBookingReference = (string) ($clockIdentifiers['clock_booking_reference'] ?? '');
         $now = \function_exists('current_time') ? \current_time('mysql') : \gmdate('Y-m-d H:i:s');
         $couponId = isset($pricing['applied_coupon_id']) ? (int) $pricing['applied_coupon_id'] : 0;
-        $couponCode = isset($pricing['applied_coupon']) ? (string) $pricing['applied_coupon'] : '';
+        $couponCode = isset($options['coupon_code'])
+            ? \sanitize_text_field((string) $options['coupon_code'])
+            : (isset($pricing['applied_coupon']) ? (string) $pricing['applied_coupon'] : '');
         $couponDiscountTotal = isset($pricing['discount_total']) ? (float) $pricing['discount_total'] : 0.0;
         $pricingSnapshot = \function_exists('MustHotelBooking\\Frontend\\build_price_breakdown_snapshot')
             ? \MustHotelBooking\Frontend\build_price_breakdown_snapshot($pricing)
@@ -98,15 +105,17 @@ final class ClockMirrorReservationService
             'provider_reservation_id' => $providerReservationId,
             'provider_status' => $providerStatus,
             'provider_payment_status' => $providerPaymentStatus,
-            'provider_sync_status' => 'synced',
-            'provider_synced_at' => $now,
+            'provider_sync_status' => $providerCreated ? 'synced' : ($deferProviderCreation ? 'pending_payment' : 'synced'),
+            'provider_synced_at' => $providerCreated ? $now : null,
             'provider_payload_ref' => $providerReservationId !== '' ? $providerReservationId : $providerBookingId,
             'provider_metadata' => [
                 'source' => $bookingSource !== '' && $bookingSource !== 'website' ? $bookingSource : 'public_booking_mvp',
                 'payment_strategy' => 'clock_pms',
-                'provider_created_before_payment' => (string) ($options['payment_status'] ?? '') === 'pending',
+                'provider_created_before_payment' => $providerCreated && (string) ($options['payment_status'] ?? '') === 'pending',
+                'pending_clock_creation' => $deferProviderCreation,
                 'payment_reconciliation_required' => false,
-                'clock_payment_required' => (string) ($options['payment_status'] ?? '') === 'pending',
+                'clock_payment_required' => $providerCreated && (string) ($options['payment_status'] ?? '') === 'pending',
+                'pending_guest_form' => $pendingGuestForm,
                 'clock_booking_id' => $providerBookingId,
                 'clock_booking_reference' => $clockBookingReference,
                 'website_booking_reference' => $bookingId,
@@ -118,9 +127,11 @@ final class ClockMirrorReservationService
                     : [],
                 'clock_reference_text' => (string) ($referenceMapping['clock_reference_text'] ?? ''),
                 'last_clock_reference_sync' => [
-                    'success' => !empty($referenceMapping['website_reference_sent_to_clock']),
-                    'sync_status' => !empty($referenceMapping['website_reference_sent_to_clock']) ? 'synced' : 'failed',
-                    'synced_at' => $now,
+                    'success' => $providerCreated && !empty($referenceMapping['website_reference_sent_to_clock']),
+                    'sync_status' => !$providerCreated
+                        ? 'pending_payment'
+                        : (!empty($referenceMapping['website_reference_sent_to_clock']) ? 'synced' : 'failed'),
+                    'synced_at' => $providerCreated ? $now : null,
                     'storage_field' => (string) ($referenceMapping['clock_reference_storage_field'] ?? ''),
                     'fallback_fields' => isset($referenceMapping['clock_reference_fallback_fields']) && \is_array($referenceMapping['clock_reference_fallback_fields'])
                         ? $referenceMapping['clock_reference_fallback_fields']
@@ -147,7 +158,9 @@ final class ClockMirrorReservationService
         );
 
         \do_action('must_hotel_booking/reservation_created', $reservationId);
-        $this->logReferenceDiagnostics($reservationId, $bookingId, $providerBookingId, $clockBookingReference, $referenceMapping);
+        if ($providerCreated) {
+            $this->logReferenceDiagnostics($reservationId, $bookingId, $providerBookingId, $clockBookingReference, $referenceMapping);
+        }
 
         return $reservationId;
     }
@@ -164,6 +177,22 @@ final class ClockMirrorReservationService
         }
 
         LockEngine::releaseExactLock($roomId, $checkin, $checkout);
+    }
+
+    /** @param array<string, mixed> $guestForm @return array<string, string> */
+    private function sanitizePendingGuestForm(array $guestForm): array
+    {
+        $sanitized = [];
+        foreach (['first_name', 'last_name', 'email', 'phone_country_code', 'phone_number', 'country', 'address', 'city', 'zip_code'] as $key) {
+            if (!isset($guestForm[$key]) || !\is_scalar($guestForm[$key])) {
+                continue;
+            }
+            $value = (string) $guestForm[$key];
+            $sanitized[$key] = $key === 'email'
+                ? \sanitize_email($value)
+                : \sanitize_text_field($value);
+        }
+        return $sanitized;
     }
 
     public function generateBookingReference(): string

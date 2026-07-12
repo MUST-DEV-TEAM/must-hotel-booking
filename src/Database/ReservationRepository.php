@@ -224,6 +224,70 @@ final class ReservationRepository extends AbstractRepository
             ['%d']
         ) !== false;
     }
+
+    /**
+     * Claim a pending Clock reservation for one verified online payment.
+     *
+     * @return string claimed|already_fulfilled|in_progress|blocked
+     */
+    public function claimPendingClockReservation(int $reservationId, string $claimKey, bool $allowRetry = false): string
+    {
+        $claimKey = $this->providerText($claimKey, 191);
+        if ($reservationId <= 0 || $claimKey === '') {
+            return 'blocked';
+        }
+
+        $reservation = $this->getReservation($reservationId);
+        if (!\is_array($reservation)) {
+            return 'blocked';
+        }
+
+        if (\trim((string) ($reservation['provider_booking_id'] ?? '')) !== ''
+            || \trim((string) ($reservation['provider_reservation_id'] ?? '')) !== '') {
+            return 'already_fulfilled';
+        }
+
+        $status = \sanitize_key((string) ($reservation['status'] ?? ''));
+        $paymentStatus = \sanitize_key((string) ($reservation['payment_status'] ?? ''));
+        if ($status !== 'pending_payment' || $paymentStatus !== 'pending') {
+            return 'blocked';
+        }
+
+        $syncStatus = \sanitize_key((string) ($reservation['provider_sync_status'] ?? ''));
+        $syncError = \trim((string) ($reservation['provider_sync_error'] ?? ''));
+        if ($syncStatus === 'creating') {
+            return $syncError === $claimKey ? 'claimed' : 'in_progress';
+        }
+        if ($syncStatus === 'pending_fulfilment' && !$allowRetry) {
+            return 'blocked';
+        }
+        if (!\in_array($syncStatus, ['', 'pending_payment', 'pending_fulfilment'], true)) {
+            return 'blocked';
+        }
+
+        $updated = $this->wpdb->query(
+            $this->wpdb->prepare(
+                'UPDATE ' . $this->table('reservations') . '
+                SET provider_sync_status = %s, provider_sync_error = %s
+                WHERE id = %d
+                    AND status = %s
+                    AND payment_status = %s
+                    AND provider_booking_id = %s
+                    AND provider_reservation_id = %s
+                    AND provider_sync_status = %s',
+                'creating',
+                $claimKey,
+                $reservationId,
+                'pending_payment',
+                'pending',
+                '',
+                '',
+                $syncStatus
+            )
+        );
+
+        return $updated === 1 ? 'claimed' : 'in_progress';
+    }
     /**
      * @param array<string, mixed> $reservationData
      * @param array<int, string> $nonBlockingStatuses

@@ -23,6 +23,14 @@ final class BookingStatusEngine
                 continue;
             }
 
+            if (
+                !ReservationStatus::isConfirmed($previousStatus)
+                && ReservationStatus::isConfirmed($status)
+                && self::isBlockedOnlineClockConfirmation($reservationId, $paymentStatus)
+            ) {
+                continue;
+            }
+
             $reservationRepository->updateReservationStatus($reservationId, $status, $paymentStatus);
 
             if ($previousStatus !== 'cancelled' && $status === 'cancelled') {
@@ -285,5 +293,40 @@ final class BookingStatusEngine
     private static function getPaymentReservationRows(array $reservationIds): array
     {
         return get_reservation_repository()->getReservationsByIds($reservationIds);
+    }
+
+    private static function isBlockedOnlineClockConfirmation(int $reservationId, string $targetPaymentStatus): bool
+    {
+        $reservation = get_reservation_repository()->getReservation($reservationId);
+        if (!\is_array($reservation) || \sanitize_key((string) ($reservation['provider'] ?? '')) !== 'clock') {
+            return false;
+        }
+
+        $providerBookingId = \trim((string) ($reservation['provider_booking_id'] ?? ''));
+        $providerReservationId = \trim((string) ($reservation['provider_reservation_id'] ?? ''));
+        if ($providerBookingId === '' && $providerReservationId === '') {
+            return true;
+        }
+
+        $onlinePayment = false;
+        $paidPayment = false;
+        foreach (get_payment_repository()->getPaymentsForReservation($reservationId) as $payment) {
+            if (!\is_array($payment)) {
+                continue;
+            }
+            $method = \sanitize_key((string) ($payment['method'] ?? ''));
+            if (!\in_array($method, ['stripe', 'pokpay'], true)) {
+                continue;
+            }
+            $onlinePayment = true;
+            if (
+                \sanitize_key((string) ($payment['status'] ?? '')) === 'paid'
+                && \trim((string) ($payment['transaction_id'] ?? '')) !== ''
+            ) {
+                $paidPayment = true;
+            }
+        }
+
+        return $onlinePayment && (!$paidPayment || \sanitize_key($targetPaymentStatus) !== 'paid');
     }
 }

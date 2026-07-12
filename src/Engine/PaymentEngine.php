@@ -6,6 +6,7 @@ use MustHotelBooking\Core\PaymentMethodRegistry;
 use MustHotelBooking\Core\ReservationStatus;
 use MustHotelBooking\Engine\Payment\PaymentFactory;
 use MustHotelBooking\Engine\Payment\PaymentInterface;
+use MustHotelBooking\Provider\ProviderManager;
 use MustHotelBooking\Provider\ProviderDataSanitizer;
 use MustHotelBooking\Provider\Storage\ProviderRequestLogRepository;
 final class PaymentEngine
@@ -759,6 +760,7 @@ final class PaymentEngine
             ];
         }
         $reservationIds = self::normalizeReservationIds($reservationIds);
+        $sessionId = \sanitize_text_field($sessionId);
         $sessionResponse = self::getStripeCheckoutSession($sessionId);
         if (empty($sessionResponse['success'])) {
             return [
@@ -767,6 +769,10 @@ final class PaymentEngine
             ];
         }
         $session = isset($sessionResponse['session']) && \is_array($sessionResponse['session']) ? $sessionResponse['session'] : [];
+        $binding = self::validateStripeSessionFacts($session, $reservationIds);
+        if (empty($binding['success'])) {
+            return $binding;
+        }
         $paymentStatus = isset($session['payment_status']) ? (string) $session['payment_status'] : '';
         $sessionStatus = isset($session['status']) ? (string) $session['status'] : '';
         if ($paymentStatus === 'paid' && $sessionStatus === 'complete') {
@@ -777,48 +783,32 @@ final class PaymentEngine
                     'state' => 'paid',
                 ];
             }
-            $reservationRows = get_reservation_repository()->getReservationsByIds($reservationIds);
-            $shouldIncrementCouponUsage = false;
-            foreach ($reservationRows as $reservationRow) {
-                $status = isset($reservationRow['status']) ? (string) $reservationRow['status'] : '';
-                if (!ReservationStatus::isConfirmed($status)) {
-                    $shouldIncrementCouponUsage = true;
-                    break;
-                }
+            if (!self::reservationPaymentIdsMatchTransaction($reservationIds, 'stripe', $sessionId)) {
+                return [
+                    'success' => false,
+                    'state' => 'integrity_error',
+                    'message' => \__('Stripe session is not bound to this local payment reservation.', 'must-hotel-booking'),
+                    'reason_code' => 'stripe_payment_binding_mismatch',
+                ];
             }
-            BookingStatusEngine::updateReservationStatuses($reservationIds, 'confirmed', 'paid');
-            BookingStatusEngine::createPaymentRows(
-                $reservationIds,
-                'stripe',
-                'paid',
-                $transactionId
-            );
+            $completion = self::completeVerifiedOnlinePayment('stripe', $reservationIds, $transactionId, $sessionId, false);
+            if (empty($completion['success'])) {
+                return $completion;
+            }
             (new PaymentProviderFeeService())->captureStripeFeeSnapshotForReservations($reservationIds, $session);
-            /*
-             * Do not mark the Clock booking itself as paid.
-             * ClockPaymentAccountingService records the Stripe payment separately
-             * on a verified deposit folio through must_hotel_booking/payment_recorded.
-             */
-            if ($shouldIncrementCouponUsage) {
-                $couponMetadata = isset($session['metadata']['coupon_ids']) ? (string) $session['metadata']['coupon_ids'] : '';
-                $couponIds = $couponMetadata === ''
-                    ? []
-                    : \array_values(
-                        \array_filter(
-                            \array_map('intval', \array_map('trim', \explode(',', $couponMetadata))),
-                            static function (int $couponId): bool {
-                                return $couponId > 0;
-                            }
-                        )
-                    );
-                unset($couponIds);
-            }
             return [
                 'success' => true,
                 'state' => 'paid',
             ];
         }
         if ($sessionStatus === 'expired') {
+            if (!self::reservationPaymentIdsMatchTransaction($reservationIds, 'stripe', $sessionId)) {
+                return [
+                    'success' => false,
+                    'state' => 'integrity_error',
+                    'message' => \__('Expired Stripe session is not bound to this local payment reservation.', 'must-hotel-booking'),
+                ];
+            }
             BookingStatusEngine::failPendingStripeReservations($reservationIds, 'expired');
             return [
                 'success' => true,
@@ -1371,7 +1361,7 @@ final class PaymentEngine
      * @param array<int, int> $reservationIds
      * @return array<string, mixed>
      */
-    public static function finalizePokPayOrder(string $orderId, array $reservationIds): array
+    public static function finalizePokPayOrder(string $orderId, array $reservationIds, bool $allowClockRetry = false): array
     {
         $orderId = \sanitize_text_field($orderId);
         $reservationIds = self::normalizeReservationIds($reservationIds);
@@ -1379,6 +1369,13 @@ final class PaymentEngine
             return [
                 'success' => false,
                 'message' => \__('PokPay payment details are missing.', 'must-hotel-booking'),
+            ];
+        }
+        if (!self::reservationPaymentsMatchPokPayOrder($reservationIds, $orderId)) {
+            return [
+                'success' => false,
+                'state' => 'integrity_error',
+                'message' => \__('This PokPay order does not match the local payment reservation.', 'must-hotel-booking'),
             ];
         }
         $orderResponse = self::getPokPaySdkOrder($orderId);
@@ -1390,18 +1387,26 @@ final class PaymentEngine
         }
         $status = isset($orderResponse['status']) ? \strtoupper((string) $orderResponse['status']) : '';
         if (\in_array($status, ['CAPTURED', 'PAID', 'COMPLETED'], true)) {
-            BookingStatusEngine::updateReservationStatuses($reservationIds, 'confirmed', 'paid');
-            BookingStatusEngine::createPaymentRows($reservationIds, 'pokpay', 'paid', $orderId);
+            $order = isset($orderResponse['order']) && \is_array($orderResponse['order']) ? $orderResponse['order'] : [];
+            $binding = self::validatePokPayOrderBinding($order, $orderId, $reservationIds);
+            if (empty($binding['success'])) {
+                return $binding;
+            }
+            if (self::providerPaymentAlreadyCompleted($reservationIds, 'pokpay', $orderId)) {
+                return [
+                    'success' => true,
+                    'state' => 'paid',
+                ];
+            }
+            $completion = self::completeVerifiedOnlinePayment('pokpay', $reservationIds, $orderId, $orderId, $allowClockRetry);
+            if (empty($completion['success'])) {
+                return $completion;
+            }
             (new PaymentProviderFeeService())->capturePokPayFeeSnapshotForReservations(
                 $reservationIds,
-                isset($orderResponse['order']) && \is_array($orderResponse['order']) ? $orderResponse['order'] : [],
+                $order,
                 $orderId
             );
-            /*
-             * Do not mark the Clock booking payment status as paid.
-             * The external PokPay payment is recorded separately as a Clock deposit by
-             * ClockPaymentAccountingService through must_hotel_booking/payment_recorded.
-             */
             if (\function_exists('MustHotelBooking\Frontend\clear_booking_selection')) {
                 \MustHotelBooking\Frontend\clear_booking_selection(false);
             }
@@ -2175,6 +2180,9 @@ final class PaymentEngine
             $stripeReservationIds[] = (int) $reservationId;
         }
         foreach ($pokPayReservationIdsByOrder as $orderId => $orderReservationIds) {
+            if (self::hasPendingClockFulfilment($orderReservationIds)) {
+                continue;
+            }
             $result = self::finalizePokPayOrder((string) $orderId, $orderReservationIds);
             if (!empty($result['success']) && (string) ($result['state'] ?? '') === 'paid') {
                 continue;
@@ -2184,7 +2192,15 @@ final class PaymentEngine
             }
         }
         if (!empty($stripeReservationIds)) {
-            BookingStatusEngine::failPendingStripeReservations($stripeReservationIds, 'expired');
+            $stripeReservationIds = \array_values(\array_filter(
+                $stripeReservationIds,
+                static function (int $reservationId): bool {
+                    return !self::hasPendingClockFulfilment([$reservationId]);
+                }
+            ));
+            if (!empty($stripeReservationIds)) {
+                BookingStatusEngine::failPendingStripeReservations($stripeReservationIds, 'expired');
+            }
         }
     }
     public static function registerPaymentRestRoutes(): void
@@ -2260,26 +2276,27 @@ final class PaymentEngine
             if (self::stripeCompletedSessionAlreadyRecorded($reservationIds, $transactionId)) {
                 return new \WP_REST_Response(['success' => true], 200);
             }
-            $couponMetadata = isset($object['metadata']['coupon_ids']) ? (string) $object['metadata']['coupon_ids'] : '';
-            $couponIds = $couponMetadata === ''
-                ? []
-                : \array_values(
-                    \array_filter(
-                        \array_map('intval', \array_map('trim', \explode(',', $couponMetadata))),
-                        static function (int $couponId): bool {
-                            return $couponId > 0;
-                        }
-                    )
+            $binding = self::validateStripeSessionFacts($object, $reservationIds);
+            if (empty($binding['success'])) {
+                return new \WP_REST_Response($binding, 409);
+            }
+            if (!self::reservationPaymentIdsMatchTransaction($reservationIds, 'stripe', $sessionId)) {
+                return new \WP_REST_Response([
+                    'success' => false,
+                    'state' => 'integrity_error',
+                    'message' => \__('Stripe session is not bound to this local payment reservation.', 'must-hotel-booking'),
+                    'reason_code' => 'stripe_payment_binding_mismatch',
+                ], 409);
+            }
+            $completion = self::completeVerifiedOnlinePayment('stripe', $reservationIds, $transactionId, $sessionId, true);
+            if (empty($completion['success'])) {
+                return new \WP_REST_Response(
+                    $completion,
+                    !empty($completion['retryable']) ? 503 : 409,
+                    !empty($completion['retryable']) ? ['Retry-After' => '30'] : []
                 );
-            BookingStatusEngine::updateReservationStatuses($reservationIds, 'confirmed', 'paid');
-            BookingStatusEngine::createPaymentRows($reservationIds, 'stripe', 'paid', $transactionId);
+            }
             (new PaymentProviderFeeService())->captureStripeFeeSnapshotForReservations($reservationIds, $object);
-            /*
-             * Do not mark the Clock booking payment status as paid.
-             * The external Stripe payment is recorded separately as a Clock deposit by
-             * ClockPaymentAccountingService through must_hotel_booking/payment_recorded.
-             */
-            unset($couponIds);
         } elseif ($type === 'checkout.session.expired') {
             BookingStatusEngine::failPendingStripeReservations($reservationIds, 'expired');
         }
@@ -2356,12 +2373,231 @@ final class PaymentEngine
         if (empty($reservationIds)) {
             return new \WP_REST_Response(['success' => false, 'message' => 'Unknown PokPay order id.'], 404);
         }
-        $result = self::finalizePokPayOrder($orderId, $reservationIds);
+        $result = self::finalizePokPayOrder($orderId, $reservationIds, true);
         return new \WP_REST_Response([
             'success' => !empty($result['success']),
             'state' => isset($result['state']) ? (string) $result['state'] : '',
-        ], 200);
+            'message' => isset($result['message']) ? (string) $result['message'] : '',
+        ], !empty($result['success']) ? 200 : (!empty($result['retryable']) ? 503 : 409), !empty($result['retryable']) ? ['Retry-After' => '30'] : []);
     }
+
+    /** @param array<int, int> $reservationIds @return array<string, mixed> */
+    private static function completeVerifiedOnlinePayment(
+        string $method,
+        array $reservationIds,
+        string $transactionId,
+        string $providerReference,
+        bool $allowClockRetry
+    ): array {
+        $method = self::normalizeMethod($method);
+        $reservationIds = self::normalizeReservationIds($reservationIds);
+        if (!\in_array($method, ['stripe', 'pokpay'], true) || empty($reservationIds) || \trim($transactionId) === '') {
+            return [
+                'success' => false,
+                'state' => 'integrity_error',
+                'message' => \__('The verified payment data is incomplete.', 'must-hotel-booking'),
+            ];
+        }
+
+        $clockRequired = false;
+        foreach ($reservationIds as $reservationId) {
+            $reservation = get_reservation_repository()->getReservation((int) $reservationId);
+            if (\is_array($reservation) && \sanitize_key((string) ($reservation['provider'] ?? '')) === ProviderManager::CLOCK_MODE) {
+                $clockRequired = true;
+                break;
+            }
+        }
+        if ($clockRequired) {
+            $reservations = new \MustHotelBooking\Provider\Clock\ClockReservationProvider();
+            if (!$reservations instanceof \MustHotelBooking\Provider\Clock\ClockReservationProvider) {
+                return [
+                    'success' => false,
+                    'state' => 'pending_fulfilment',
+                    'retryable' => false,
+                    'message' => \__('Clock reservation fulfillment is unavailable.', 'must-hotel-booking'),
+                ];
+            }
+            $clockResult = $reservations->fulfillPendingOnlinePayment($reservationIds, $method, $providerReference, $allowClockRetry);
+            if (empty($clockResult['success'])) {
+                return $clockResult;
+            }
+        }
+
+        BookingStatusEngine::createPaymentRows($reservationIds, $method, 'paid', $transactionId);
+        BookingStatusEngine::updateReservationStatuses($reservationIds, 'confirmed', 'paid');
+        if (!self::allReservationsConfirmed($reservationIds)) {
+            return [
+                'success' => false,
+                'state' => 'pending_fulfilment',
+                'retryable' => false,
+                'message' => \__('Payment was verified, but the reservation could not be confirmed safely.', 'must-hotel-booking'),
+            ];
+        }
+
+        if (\function_exists('MustHotelBooking\\Frontend\\clear_booking_selection')) {
+            \MustHotelBooking\Frontend\clear_booking_selection(false);
+        }
+        return [
+            'success' => true,
+            'state' => 'paid',
+        ];
+    }
+
+    /** @param array<string, mixed> $session @param array<int, int> $reservationIds @return array<string, mixed> */
+    private static function validateStripeSessionFacts(array $session, array $reservationIds): array
+    {
+        $metadataReservationIds = self::getReservationIdsFromStripeSession($session);
+        if (!self::sameReservationIds($metadataReservationIds, $reservationIds)) {
+            return [
+                'success' => false,
+                'state' => 'integrity_error',
+                'message' => \__('Stripe session metadata does not match this reservation set.', 'must-hotel-booking'),
+                'reason_code' => 'stripe_reservation_metadata_mismatch',
+            ];
+        }
+
+        $currency = \strtoupper(\sanitize_text_field((string) ($session['currency'] ?? '')));
+        $expectedCurrency = \strtoupper(\sanitize_text_field((string) MustBookingConfig::get_currency()));
+        $amountMinor = isset($session['amount_total']) && \is_numeric($session['amount_total']) ? (int) $session['amount_total'] : 0;
+        $expectedAmount = self::sumReservationTotals($reservationIds);
+        if ($currency === '' || $amountMinor <= 0 || $expectedAmount === null || $currency !== $expectedCurrency
+            || $amountMinor !== self::convertAmountToMinorUnits($expectedAmount, $currency)) {
+            return [
+                'success' => false,
+                'state' => 'integrity_error',
+                'message' => \__('Stripe payment amount or currency does not match the reservation.', 'must-hotel-booking'),
+                'reason_code' => 'stripe_amount_currency_mismatch',
+            ];
+        }
+
+        return ['success' => true];
+    }
+
+    /** @param array<string, mixed> $order @param array<int, int> $reservationIds @return array<string, mixed> */
+    private static function validatePokPayOrderBinding(array $order, string $orderId, array $reservationIds): array
+    {
+        if (!self::reservationPaymentsMatchPokPayOrder($reservationIds, $orderId)) {
+            return [
+                'success' => false,
+                'state' => 'integrity_error',
+                'message' => \__('This PokPay order does not match the local payment reservation.', 'must-hotel-booking'),
+                'reason_code' => 'pokpay_reservation_binding_mismatch',
+            ];
+        }
+
+        $amount = self::firstNumericValue($order, ['amount', 'amountPaid', 'amount_paid', 'finalAmount', 'final_amount']);
+        $currency = \strtoupper(self::firstTextValue($order, ['currencyCode', 'currency', 'currency_code']));
+        $expectedAmount = self::sumReservationTotals($reservationIds);
+        $expectedCurrency = \strtoupper(\sanitize_text_field((string) MustBookingConfig::get_currency()));
+        if ($amount === null || $currency === '' || $expectedAmount === null || $currency !== $expectedCurrency || \abs($amount - $expectedAmount) > 0.01) {
+            return [
+                'success' => false,
+                'state' => 'integrity_error',
+                'message' => \__('PokPay payment amount or currency does not match the reservation.', 'must-hotel-booking'),
+                'reason_code' => 'pokpay_amount_currency_mismatch',
+            ];
+        }
+
+        return ['success' => true];
+    }
+
+    /** @param array<int, int> $reservationIds */
+    private static function providerPaymentAlreadyCompleted(array $reservationIds, string $method, string $transactionId): bool
+    {
+        foreach (self::normalizeReservationIds($reservationIds) as $reservationId) {
+            $paymentId = get_payment_repository()->getLatestPaymentIdForReservationMethodTransaction($reservationId, $method, $transactionId);
+            $payment = $paymentId > 0 ? get_payment_repository()->getPayment($paymentId) : null;
+            $reservation = get_reservation_repository()->getReservation($reservationId);
+            if (
+                !\is_array($payment)
+                || \sanitize_key((string) ($payment['status'] ?? '')) !== 'paid'
+                || !\is_array($reservation)
+                || !ReservationStatus::isConfirmed((string) ($reservation['status'] ?? ''))
+            ) {
+                return false;
+            }
+        }
+        return !empty($reservationIds);
+    }
+
+    /** @param array<int, int> $reservationIds */
+    private static function allReservationsConfirmed(array $reservationIds): bool
+    {
+        $rows = get_reservation_repository()->getReservationsByIds($reservationIds);
+        if (\count($rows) !== \count(self::normalizeReservationIds($reservationIds))) {
+            return false;
+        }
+        foreach ($rows as $row) {
+            if (!\is_array($row) || !ReservationStatus::isConfirmed((string) ($row['status'] ?? ''))) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    /** @param array<int, int> $reservationIds */
+    private static function hasPendingClockFulfilment(array $reservationIds): bool
+    {
+        foreach (self::normalizeReservationIds($reservationIds) as $reservationId) {
+            $reservation = get_reservation_repository()->getReservation($reservationId);
+            if (
+                \is_array($reservation)
+                && \sanitize_key((string) ($reservation['provider'] ?? '')) === ProviderManager::CLOCK_MODE
+                && \sanitize_key((string) ($reservation['provider_sync_status'] ?? '')) === 'pending_fulfilment'
+            ) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /** @param array<int, int> $reservationIds */
+    private static function sumReservationTotals(array $reservationIds): ?float
+    {
+        $ids = self::normalizeReservationIds($reservationIds);
+        $rows = get_reservation_repository()->getReservationsByIds($ids);
+        if (empty($ids) || \count($rows) !== \count($ids)) {
+            return null;
+        }
+        $total = 0.0;
+        foreach ($rows as $row) {
+            if (!\is_array($row) || !isset($row['total_price']) || !\is_numeric($row['total_price'])) {
+                return null;
+            }
+            $total += (float) $row['total_price'];
+        }
+        return \round($total, 2);
+    }
+
+    /** @param array<int, int> $left @param array<int, int> $right */
+    private static function sameReservationIds(array $left, array $right): bool
+    {
+        $left = \array_values(\array_unique(self::normalizeReservationIds($left)));
+        $right = \array_values(\array_unique(self::normalizeReservationIds($right)));
+        \sort($left);
+        \sort($right);
+        return $left === $right && !empty($left);
+    }
+
+    /** @param array<string, mixed> $data @param array<int, string> $keys */
+    private static function firstTextValue(array $data, array $keys): string
+    {
+        foreach ($keys as $key) {
+            if (isset($data[$key]) && \is_scalar($data[$key])) {
+                return \sanitize_text_field((string) $data[$key]);
+            }
+        }
+        foreach (['sdkOrder', 'order', 'payment', 'data'] as $nestedKey) {
+            if (isset($data[$nestedKey]) && \is_array($data[$nestedKey])) {
+                $value = self::firstTextValue($data[$nestedKey], $keys);
+                if ($value !== '') {
+                    return $value;
+                }
+            }
+        }
+        return '';
+    }
+
     /**
      * @param array<int, int> $reservationIds
      * @return array<int, int>
@@ -2391,6 +2627,39 @@ final class PaymentEngine
         }
         return self::normalizeReservationIds($value);
     }
+
+    /** @param array<int, int> $reservationIds */
+    private static function reservationPaymentIdsMatchTransaction(array $reservationIds, string $method, string $transactionId): bool
+    {
+        $method = \sanitize_key($method);
+        $transactionId = \sanitize_text_field($transactionId);
+        if ($method === '' || $transactionId === '' || !self::sameReservationIds(
+            get_payment_repository()->findReservationIdsByTransactionId($transactionId),
+            $reservationIds
+        )) {
+            return false;
+        }
+
+        $paymentsByReservation = get_payment_repository()->getPaymentsForReservationIds($reservationIds);
+        foreach (self::normalizeReservationIds($reservationIds) as $reservationId) {
+            $matched = false;
+            foreach ((array) ($paymentsByReservation[$reservationId] ?? []) as $payment) {
+                if (
+                    \is_array($payment)
+                    && \sanitize_key((string) ($payment['method'] ?? '')) === $method
+                    && \sanitize_text_field((string) ($payment['transaction_id'] ?? '')) === $transactionId
+                ) {
+                    $matched = true;
+                    break;
+                }
+            }
+            if (!$matched) {
+                return false;
+            }
+        }
+        return true;
+    }
+
     /**
      * @param array<int, int> $reservationIds
      */
@@ -2399,6 +2668,9 @@ final class PaymentEngine
         $reservationIds = self::normalizeReservationIds($reservationIds);
         $orderId = \sanitize_text_field($orderId);
         if ($orderId === '' || empty($reservationIds)) {
+            return false;
+        }
+        if (!self::reservationPaymentIdsMatchTransaction($reservationIds, 'pokpay', $orderId)) {
             return false;
         }
         $paymentsByReservation = get_payment_repository()->getPaymentsForReservationIds($reservationIds);
@@ -2442,7 +2714,13 @@ final class PaymentEngine
                 return false;
             }
             $payment = $payments->getPayment($paymentId);
-            if (!\is_array($payment) || (string) ($payment['status'] ?? '') !== 'paid') {
+            $reservation = get_reservation_repository()->getReservation((int) $reservationId);
+            if (
+                !\is_array($payment)
+                || (string) ($payment['status'] ?? '') !== 'paid'
+                || !\is_array($reservation)
+                || !ReservationStatus::isConfirmed((string) ($reservation['status'] ?? ''))
+            ) {
                 return false;
             }
         }
