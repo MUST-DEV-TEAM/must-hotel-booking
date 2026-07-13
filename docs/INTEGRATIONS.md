@@ -1,122 +1,207 @@
 # Integrations
 
+This reference describes integration boundaries on current `main` at `v0.4.90`. It names configuration fields but never their values. Provider contracts and production configuration were not refreshed during documentation consolidation.
+
+## Ownership summary
+
+| Integration | Owns or supplies | Does not prove |
+|---|---|---|
+| Stripe | Checkout Session/PaymentIntent and Stripe refund outcomes | Local reservation commit or Clock fulfillment |
+| PokPay | SDK-order and PokPay refund outcomes | Local reservation commit or Clock fulfillment |
+| Clock PMS | Provider IDs, live availability/restrictions, provider reservation state, supported PMS amendments | Stripe/PokPay payment or refund truth |
+| WordPress/plugin | Local mirror, presentation, workflow metadata, payment/refund/accounting evidence | Provider success without an authenticated/reread result |
+| AWS SNS transport | Authenticated delivery envelope for Clock PUSH events | Correct application of the enclosed provider change |
+| Elementor | Optional booking and room-list entry widgets | Availability, pricing, reservation, or payment policy |
+| WordPress email | Message handoff through `wp_mail()` | Final delivery to the recipient |
+| GitHub updater | Release discovery and package delivery | Successful production deployment or rollback readiness |
+
+All external HTTP traffic uses the WordPress HTTP API. Do not log or document credentials, authorization headers, full personal-data payloads, cancellation tokens, or unmasked provider responses. `ProviderDataSanitizer` and provider request logging are security boundaries.
+
+## Shared callback and environment rules
+
+`MustBookingConfig` stores plugin configuration in WordPress options and provides normalized helpers. Relevant non-secret logical keys include `provider_mode`, `clock_enabled`, `public_callback_base_url`, payment-method enablement, active site/payment environment, and per-provider environment credentials.
+
+- Test and production credentials are separate. Environment, merchant/account, currency, and transaction identity are part of payment binding.
+- `public_callback_base_url` may override generated return/webhook URLs only with a verified HTTPS staging/tunnel/public origin.
+- A browser return is transport state, not payment proof.
+- Localhost callbacks are not provider-reachable without an explicitly approved tunnel.
+- No live credential probe, provider write, booking, payment, refund, cancellation, webhook replay, or reconciliation is allowed during routine local work.
+
+## Public REST endpoints
+
+The route permission callbacks are public because providers cannot use WordPress sessions. Each callback must therefore enforce its own authentication and binding.
+
+| Method and route | Owner | Internal verification |
+|---|---|---|
+| `POST /wp-json/must-hotel-booking/v1/stripe/webhook` | `PaymentEngine` | Stripe signature, event parsing, provider/local binding |
+| `POST /wp-json/must-hotel-booking/v1/pokpay/finalize` | `PaymentEngine` | WordPress REST nonce plus authoritative PokPay order reread |
+| `POST /wp-json/must-hotel-booking/v1/pokpay/error` | `PaymentEngine` | Diagnostic input sanitization; not a success signal |
+| `POST /wp-json/must-hotel-booking/v1/pokpay/webhook` | `PaymentEngine` | Known order lookup, local binding, authoritative provider reread |
+| `POST /wp-json/must-hotel-booking/v1/clock/webhook` | `ClockInboundSyncController` | SNS signature/certificate rules or configured legacy authentication |
+| `GET /wp-json/must-support/v1/health` | `SupportDiagnosticsEndpoint` | Feature enabled plus constant-time token comparison; returns 404 on failure |
+
 ## Stripe
-- Main code: `src/Engine/PaymentEngine.php`, `src/Engine/Payment/StripePayment.php`, `src/Engine/PaymentRefundService.php`.
-- Settings defaults/sanitization: `src/Core/MustBookingConfig.php`.
-- Webhook URL helper returns `must-hotel-booking/v1/stripe/webhook`.
-- REST route verifies Stripe signature using the configured webhook secret.
-- Successful `checkout.session.completed` confirms reservations, marks payment paid, creates payment rows, and runs Clock payment reconciliation if available.
-- Duplicate `checkout.session.completed` events must no-op when the exact Stripe payment intent/session transaction already has a paid row; this prevents refunded Stripe ledger rows from being reused as paid rows during replay.
-- On successful Stripe finalization, `PaymentProviderFeeService` fetches the Stripe payment intent/charge balance transaction and stores the exact provider fee snapshot on `must_payments` when Stripe exposes it. If the fee cannot be fetched, the payment is marked `provider_fee_status = unknown` for admin review; no percentage is hardcoded.
-- `checkout.session.expired` expires pending Stripe reservations.
-- Refund webhooks handled by `PaymentRefundService` for `refund.created`, `refund.updated`, and `charge.refunded`.
-- A Stripe Dashboard endpoint may listen to all events, but the plugin only handles `checkout.session.completed`, `checkout.session.expired`, `refund.created`, `refund.updated`, and `charge.refunded`; selected events should include at least those five.
-- Default refund math is `paid amount - stored provider fee - cancellation fee`, never below zero. If the provider fee is unknown, guest cancellation/default refund requires manual review instead of silently refunding the full paid amount.
+
+### Purpose and source owners
+
+Stripe provides hosted card checkout, server-side payment verification, fee capture support, and refunds. Primary owners are:
+
+- `src/Engine/PaymentEngine.php`
+- `src/Engine/Payment/StripePayment.php`
+- `src/Engine/PaymentRefundService.php`
+
+### Authentication and configuration
+
+Logical settings include Stripe enablement; test/live publishable keys, secret keys, and webhook secrets; active environment; currency; and callback base. Never expose their values. Outbound API calls use Bearer authentication to `https://api.stripe.com/v1/`.
+
+### Identifiers and verification
+
+- Local reservation/payment IDs are bound to the Checkout Session metadata and pending payment transaction reference.
+- Completion rereads the session and requires `payment_status=paid`, session `status=complete`, the same reservation set, expected amount, expected currency, and matching local session reference.
+- The PaymentIntent ID becomes the paid transaction reference when present.
+- Stripe webhook payloads require a valid `Stripe-Signature` under the configured tolerance.
+- Current handlers cover Checkout Session completion/expiration and refund/charge refund events.
+
+### Retry and idempotency
+
+- Outbound responses mark network failures, HTTP 429, and 5xx as retryable; general API calls do not blindly retry.
+- Refund creation transmits a stable Stripe `Idempotency-Key`.
+- Existing paid rows plus confirmed reservations short-circuit repeated completion.
+- No durable Stripe event ledger or exclusive cross-callback completion lease was verified. Concurrency remains especially high-risk while Clock fulfillment is in progress.
+
+### Error handling and reconciliation
+
+Failed or expired sessions move pending reservations through the explicit failure/expiry lifecycle. A successful browser return still triggers a provider reread. Provider request logs store sanitized summaries, status, duration, correlation, and error data. Fee snapshot capture and refund reconciliation remain separate from reservation confirmation.
+
+### Unknowns
+
+Production keys, selected webhook events, account/currency configuration, callback reachability, provider fee availability, and current production acceptance were not inspected.
 
 ## PokPay
-- Main code: `src/Engine/PaymentEngine.php`, `src/Engine/Payment/PokPayPayment.php`, `src/Engine/PaymentRefundService.php`.
-- Settings include environment-specific merchant/key fields in `MustBookingConfig`.
-- Payments -> Payment Settings provides a safe PokPay credential test that authenticates only. It stores masked verification evidence and never creates an SDK order, charge, refund, or Clock booking.
-- Credential state is fingerprinted to the saved merchant/key values. Editing credentials invalidates old verification, and known rejected/malformed credentials are gated before Clock reservation creation.
-- API base can be production or staging; JS SDK URL is `https://static.pokpay.io/public/dist/pokpayments/pok-payment.js`.
-- PokPay checkout mode is configured in the admin Payments page under Payment Settings -> PokPay Checkout -> PokPay checkout mode. Allowed values are `embedded_sdk` and `sdk_confirm_url_redirect`; both use SDK orders.
-- SDK order creation posts to `merchants/{merchantId}/sdk-orders` with `amount`, `currencyCode`, `autoCapture`, `description`, `webhookUrl`, `redirectUrl`, `failRedirectUrl`, and `products`; do not add unsupported top-level `currency` or `email` fields.
-- In redirect mode, the plugin extracts the provider checkout URL from `sdkOrder._self.confirmUrl` first, then related `_self`/SDK order fallback fields. `redirectUrl` and `failRedirectUrl` are treated as return URLs, not provider checkout URLs.
-- Finalization endpoint: `must-hotel-booking/v1/pokpay/finalize`.
-- Error endpoint: `must-hotel-booking/v1/pokpay/error`.
-- Finalization validates the `x-wp-nonce` REST nonce, order ID, reservation IDs, active flow data, and payment row/order relationship, then polls `GET sdk-orders/{orderId}`. Captured/paid/completed SDK order states mark the reservation paid and trigger Clock payment reconciliation.
-- PokPay paid finalization stores a provider fee snapshot from the PokPay order response when an exact fee is present, including common nested response wrappers such as `sdkOrder`. If PokPay does not return a fee, the plugin can snapshot the configured PokPay fee estimate from payment settings at payment time.
-- There is no Stripe-style PokPay webhook secret in current code. The browser/SDK callback and PokPay webhook route both confirm/mark paid only after server-side `GET sdk-orders/{orderId}` verification.
-- Official PokPay Postman/API docs verified on 2026-06-13 list `POST /merchants/{merchantId}/sdk-orders/{sdkOrderId}/refund` with `refundReason` and optional `refundAmount`. The plugin attempts this endpoint first, then fetches the order and requires a completed/refunded status before marking the local refund succeeded.
-- If PokPay rejects the refund, returns an incomplete status, or the order is already refunded, the refund request falls back to `manual_pending`; staff must verify/refund from the POK dashboard and then mark the refund completed in the plugin. Completing the manual refund records the local refund ledger, can continue the selected cancel-after-refund flow, and attempts Clock refund accounting if applicable.
-- PokPay staging write E2E passed on 2026-06-14 with a fresh SDK order, manual staging payment, local callback/webhook update, provider refund, duplicate payment/refund replay, and Clock positive/negative accounting on a deposit folio.
+
+### Purpose and source owners
+
+PokPay provides SDK-order checkout, provider-hosted confirmation URLs, server-side order verification, credential diagnostics, and refunds. Primary owners are the same payment engine/gateway/refund services as Stripe.
+
+### Authentication and configuration
+
+Logical settings include PokPay enablement; environment-specific merchant ID, key ID, key secret, API base; checkout mode; fee defaults; active environment; currency; and callback base.
+
+The plugin authenticates through the provider SDK login, caches the bearer token, and can refresh once after an authentication failure. Populated credential fields are `unverified` until an authenticated, environment-specific check succeeds.
+
+### Identifiers and verification
+
+- The SDK-order ID is saved as the pending transaction/provider reference.
+- Finalization rereads the order and accepts captured/paid/completed provider state only when order, local reservation allocation, amount, and currency match.
+- Redirect/fail/webhook URLs are generated server-side.
+- Checkout URLs are restricted to approved HTTPS PokPay/RPay host families.
+- Refunds use the merchant SDK-order refund path and require completed provider evidence; ambiguous results become manual review.
+
+### Retry and idempotency
+
+- Token authentication may retry once after refreshing credentials.
+- A webhook does not trust its body as paid evidence; it locates the known order and rereads the provider.
+- SDK-order creation and refund requests store local correlation/idempotency data but do not transmit a provider idempotency key in current code.
+
+### Current risks and unknowns
+
+- `PokPayPayment::validatePayment()` can run an external authentication probe when credential state is unverified. Because gateway validation is reachable while rendering a public checkout/confirmation flow, a public request can trigger an external credential probe. Credential verification should be an explicit administrative/operational action.
+- The webhook has no separately verified local shared secret; safety depends on provider reread and binding.
+- Current provider contract, webhook authenticity features, rate limits, production account behavior, and refund idempotency support are unverified.
+- Confirmation return parameters are not authorization and currently participate in the forged-failure defect described in [DOMAIN_LIFECYCLES.md](DOMAIN_LIFECYCLES.md).
 
 ## Clock PMS
-- Main provider directory: `src/Provider/Clock`.
-- Provider registration happens through `src/Provider/ProviderManager.php`.
-- Modes found: local and Clock.
-- Clock support includes availability, quote, booking/reservation provider behavior, catalog service, inbound sync, auto sync scheduler, payment reconciliation, folio payment sync, folio refund sync, mappings, and diagnostics.
-- Website-created Clock bookings send the local website booking reference (for example `MHB-YYYYMMDD-XXXXXXXX`) before the Clock write. The create payload uses Clock's existing writable `reference_number` field and also appends `Website booking reference: ...` to the booking note as a manual-search fallback.
-- Local Clock mirror rows store `clock_booking_id`, `clock_booking_reference`, `website_booking_reference`, `website_reference_sent_to_clock`, and the Clock-side storage/fallback fields in `must_reservations.provider_metadata`. Existing `provider_booking_id` remains the raw Clock booking ID fallback for older rows.
-- Admin reservation detail shows the website booking reference, Clock booking ID/reference, and whether the website reference was sent to Clock. If the sent marker is missing, the detail page exposes a safe retry action that rereads the Clock booking, appends the website-reference note only if missing, and updates Clock through `PUT /bookings/{booking_id}`.
-- Clock webhook URL is exposed in Clock config as `must-hotel-booking/v1/clock/webhook`.
-- Clock PMS PUSH webhooks use Amazon SNS envelope payloads. `ClockInboundSyncController` verifies SNS signatures from safe Amazon SNS signing certificate URLs, supports SNS `SubscriptionConfirmation` and `Notification`, confirms safe SNS subscribe URLs, and extracts the Clock event type from `Subject` plus event data from the JSON string in `Message`.
-- Clock PUSH can optionally use HTTP Basic authentication when Clock embeds credentials in the endpoint URL. The legacy `clock_webhook_secret` still supports custom Bearer token and HMAC senders for backward compatibility, but it is not required for official Clock PUSH/SNS.
-- Clock PUSH Basic authentication is valid only when both username and password are configured. Half-configured credentials block inbound processing and are reported in diagnostics.
-- Clock inbound processing serializes each SNS event ID with a database advisory lock. Successful duplicates are no-ops; failed attempts remain retryable.
-- Official status subjects such as `booking_canceled`, `booking_checked_out`, and `booking_no_show` can apply a safe local status fallback when the Clock booking detail fetch is temporarily unavailable. Detail-only events return retryable failure until booking details are fetched.
-- A valid booking event that arrives before its room/provider mapping exists queues a retryable `booking_upsert` provider-sync job; it never invents a mapping or updates an unrelated reservation.
-- Booking cancellation uses the documented `PUT /bookings/{booking_id}` endpoint with body `booking.status = canceled`; do not close folios automatically.
-- Pre-arrival Clock room/type/date amendments use documented booking `GET` and `PUT` operations. The write body uses the `booking` wrapper with `arrival`, `departure`, `arrival_room_type_id`, optional `arrival_room_id`, optional `rate_id`, and `lock_version` when returned by the pre-write reread.
-- Clock amendment retries always reread the booking before another write. WordPress is updated only after a matching provider reread; a confirmed provider write followed by local failure queues `reservation_amendment` reconciliation.
-- Checked-in/current-room Clock moves are intentionally blocked. The documented arrival-room update is not treated as an API for creating `booking_room_changes`.
-- Checked-in date-only corrections may update the stay window, but their payload omits `arrival_room_type_id`, `arrival_room_id`, and `rate_id`.
-- Clock amendment price increases/decreases create manual financial-review metadata only. No Stripe/PokPay charge/refund or Clock folio credit item is created by the amendment service.
-- Clock inbound webhooks, scheduled refresh jobs, Clock booking upserts, and successful outbound Clock cancellation reconciliation apply local status changes through `BookingLifecycleSyncService`, not direct repository status writes. This keeps Clock-originated cancellations separate from automatic refunds while still firing the standard cancellation domain event and email hooks once.
-- For paid Stripe/PokPay website bookings cancelled from Clock/provider sync, `BookingLifecycleSyncService` creates a `refund_review_required` row for staff decision when no active/completed refund already exists. Do not replace this with automatic refund behavior unless the provider/refund policy is explicitly verified.
-- Stripe/PokPay paid rows trigger `ClockPaymentAccountingService` through `must_hotel_booking/payment_recorded`; the service creates/reuses `must_clock_folio_accounting` and guards duplicate posts by idempotency key and posting claim.
-- Clock deposit idempotency uses gateway + provider transaction ID + reservation ID + accounting operation, not the local payment-row ID.
-- Provider sync jobs use `mhb_provider_sync_jobs` with atomic claim, stale-lock release, backoff, max attempts, and admin-triggered manual runs from Settings. A stale running job consumes an attempt before it is requeued or exhausted so repeated worker crashes cannot retry forever without reaching a terminal state.
-- Clock payment posting mode is configured by `clock_payment_posting_mode`: `auto_detect`, `deposit_for_future_bookings`, `folio_payment_only`, or `manual_clock_accounting`. Default `auto_detect` posts future Stripe/PokPay website payments to a Clock deposit folio, not to the normal folio.
-- A centralized endpoint registry lives in `src/Provider/Clock/ClockEndpointRegistry.php`. Existing folio endpoints now resolve through the registry and advanced provider settings can override endpoint templates.
-- Clock endpoint overrides must be safe relative path templates only. Absolute URLs, protocol-relative URLs, credentials, traversal, control characters, and unknown placeholders are rejected before settings are saved.
-- Clock accounting rows use structured `last_error_code` values such as `future_booking_requires_deposit_endpoint`, `deposit_endpoint_not_verified`, `same_day_folio_posting_disabled`, `clock_folio_not_found`, and `clock_api_right_missing`; the human-readable detail remains in `last_error`.
-- Payment accounting rows in `manual_review` or `failed` can be marked `handled_manually` from the admin payment detail screen after staff records the website payment in Clock outside the plugin. This is terminal local accounting state and does not post to Clock or change the paid payment ledger.
-- Official Clock docs verified on 2026-06-13 support `POST /bookings/{booking_id}/folios/` with `booking_folio.deposit=true`, followed by `POST /folios/{folio_id}/credit_items` to record the website payment on the open deposit folio. Clock support docs state payments in open deposit folios are treated as deposits; deposit refund is a negative payment in the deposit folio.
-- Clock sandbox verified on 2026-06-13: deposit folio `71442250` was created for booking `36591448`, payment credit item `60052192` posted, duplicate sync returned `already_posted`, refund/reversal credit item `60052222` posted, and the deposit folio balance returned to zero.
-- Clock sandbox write E2E on 2026-06-14 verified Stripe and PokPay future-stay deposit folios with positive provider payment credit items, negative refund credit items, duplicate replay idempotency, and final folio balances returning to zero.
-- Normal Stripe/PokPay website payments always use deposit folios. A saved legacy `folio_payment_only` value is treated as deposit mode and cannot target the standard accommodation folio.
-- Refunds use the actual refunded amount from the refund row, post one negative Clock `credit_item` to the original posted payment folio when available, and guard duplicate negative posts through `must_clock_folio_accounting`.
-- Ambiguous Clock folio/payment targets, missing original refund folios, or unverifiable accounting targets must go to `manual_review` rather than auto-posting or silently repairing financial state.
-- Customer cancellation sync changes the Clock booking status only. Room charge reversal, cancellation-fee accounting, or folio closure remain separate hotel accounting policy tasks unless a safe Clock charge-reversal flow is implemented.
-- The full cached Clock Postman collection refreshed from the live public export on 2026-06-19 documents generic folio charge voiding through `DELETE /base_api/:subscription_id/:account_id/folios/:folio_id/charges/:charge_id` with `void_reason`, a compensating `POST /base_api/:subscription_id/:account_id/folios/:folio_id/charges/bulk` pattern that uses positive price with negative quantity, generic booking-associated single charge creation through `POST /pms_api/:subscription_id/:account_id/bookings/:booking_id/charges_by_source`, booking-associated bulk charge creation through `POST /pms_api/:subscription_id/:account_id/bookings/:booking_id/charges_by_source/bulk`, and discount mirroring through `POST /base_api/:subscription_id/:account_id/folios/:folio_id/charges/`.
-- Those contracts are still not treated as approval for automatic room-move writes, automatic future room-change creation, coupon-native sync, or blanket accommodation/cancellation cleanup. Continue using `manual_clock_charge_cleanup_required` and `manual_clock_cancellation_fee_required` until business rules define which Clock charges/folios are eligible and how closed-folio cases should be handled.
-- Outbound Clock cancellation performs a booking reread before a retry and after a successful cancellation request. Local cancellation is finalized only when reread confirms `canceled`/`cancelled`.
-- Booking folio list responses can be scalar IDs such as `[71355568]`, string IDs, full folio objects, or wrappers like `data`, `folios`, `booking_folios`, `items`, and `records`.
-- Folio verification reads `GET /folios/{folio_id}` and Clock may return money values as nested objects like `balance.cents`.
-- Deposit posting verifies that the target remains `deposit=true`, Clock's raw signed deposit-folio balance matches the expected movement, the normalized deposit amount held matches the website payment, the credit-item reference is present when Clock exposes it, and standard non-deposit folio balances did not change before recording `verified_deposit_isolated`. Clock's booking header may still display aggregate `Balance 0`/deposit summary values even when the standard folio has not received a payment or transfer; do not create compensating entries to alter that native presentation.
-- `ClockApiClient` deduplicates identical safe GETs within one request, caches catalogue/config reads briefly, and permits a 45-second cache for intermediate public availability/product quote display. Final reservation availability, product pricing, and guarantee-policy reads pass `bypass_cache`, do not read or write request/transient caches, and use dedicated final-revalidation operation names.
-- Public Clock availability/product reads use an 8-second total timeout. Safe GETs may retry once for HTTP 429; writes are not automatically retried. The shared four-requests-per-second limiter covers Digest challenge and authenticated calls.
-- The booking-selection transient contains the signed server-side quote draft, so checkout/confirmation rendering normally avoids repeated Clock quote work. Final submission compares fresh total/currency and guarantee policy to that signed draft before any Clock booking write.
-- Clock auto-sync scheduling only enqueues refresh jobs. The provider worker uses an atomic expiring option lock, processes one due job per cron slice, and schedules another slice when work remains. New-install defaults are one reservation every 60 minutes; existing saved settings are preserved until an administrator changes them.
-- Clock sync now has three canonical schedules: `must_hotel_booking_clock_full_catalog_sync` for the daily non-destructive catalog/mapping sync, `must_hotel_booking_clock_availability_rate_sync` for lightweight availability/rate cache refresh, and `must_hotel_booking_clock_reservation_fallback_sync` for webhook fallback reservation polling.
-- Full catalog sync defaults to 03:00 local site time. It may import or map Clock room types, physical rooms, and rates, but must preserve website-owned images, galleries, Elementor/post content, SEO fields, icons, marketing descriptions, and custom display ordering.
-- Availability/rate sync defaults to every 15 minutes and updates local display/cache diagnostics only. Final checkout must continue bypassing request/transient caches for live Clock availability, product pricing, and guarantee-policy validation before payment/provider writes.
-- Reservation fallback sync defaults to every 5 minutes with a max batch of 1. It queues small reservation refresh jobs through the existing provider-sync worker. Clock PUSH/SNS webhooks remain the preferred immediate update path.
-- Clock sync diagnostics are stored in bounded options: last manual/automatic/successful sync, last full catalog/availability-rate/reservation fallback/webhook timestamps, next scheduled runs, lock ages, last sanitized error per sync type, and the last 20 run records. The admin Provider tab exposes manual run buttons and `Repair Clock sync schedules`.
-- Auto-sync health reports `healthy`, `missing`, `overdue`, `disabled`, `locked`, `failing`, or `wp_cron_disabled`. If `DISABLE_WP_CRON` is true, configure a real server cron to call `wp-cron.php`.
-- Clock PMS remains source of truth for Clock IDs, availability, restrictions, reservations, cancellations, date/room moves, room blocks, and final live price/availability. The website remains source of truth for presentation/content fields. Stripe/PokPay/local ledgers remain payment truth for transaction IDs, paid/deposit/balance amounts, refunds, and payment logs.
-- Provider request summaries use recursive redaction for tokens, authorization headers, secrets, card data, self-service keys/PINs, door codes, and unnecessary contact data.
-- Some Clock payment/refund accounting may require manual review if API rights or folio IDs are missing.
 
-## Elementor Widgets
-- Booking search widget: `src/Elementor/Booking_Search_Widget.php` and `src/Elementor/booking-search-widget.php`.
-- Rooms list widget: `src/Elementor/Rooms_List_Widget.php` and `src/Elementor/rooms-list-widget.php`.
-- Rooms text grid widget: `src/Elementor/Rooms_Text_Grid_Widget.php` and `src/Elementor/rooms-text-grid-widget.php`.
-- Assets live in `assets/css/*widget.css` and `assets/js/*widget.js`.
-- Widgets register through Elementor hooks and check Elementor classes before registration.
+### Purpose and source owners
 
-## GitHub Updater/Plugin-Update-Checker
-- Main code: `src/Core/Updater.php`.
-- Library: `lib/plugin-update-checker/plugin-update-checker.php`.
-- Constants in `must-hotel-booking.php` configure repository URL, branch, release asset pattern, token, slug, and updater enablement.
-- Updater expects release ZIP names matching the configured pattern.
+Clock supplies live catalog/availability/rate/reservation data in Clock mode, accepts supported booking/cancellation/amendment writes, sends reservation events, and holds downstream folio accounting. Code is isolated primarily under `src/Provider/Clock/`, with provider interfaces/selection under `src/Provider/`.
 
-## Settings/Options
-- Payment settings include `payment_methods`, Stripe/PokPay environment credentials, and PokPay fee estimate fields in `MustBookingConfig`.
-- Clock settings include PMS/Base API URL details, credentials, official PUSH/SNS inbound options, legacy custom webhook token/HMAC auth, provider mode, WBE inline mode settings, and mapping settings.
-- General settings include optional `public_callback_base_url`. Leave it blank for normal local/site URL generation; set it to an HTTPS tunnel or staging origin when Stripe, PokPay, or Clock callbacks/returns must use a public host instead of `localhost`.
-- Public callback URL generation is centralized in `MustBookingConfig::build_public_callback_url()` and `build_public_rest_url()`. Provider success/cancel URLs and Stripe/PokPay/Clock webhook diagnostics should use those helpers instead of raw `home_url()`, `site_url()`, or `rest_url()`.
-- Staff portal and managed page settings are stored through `MustBookingConfig`.
+### Provider selection and fallback
 
-## Known Limitations
-- Exact provider API behavior must be verified from provider docs and current code; do not guess.
-- Clock permissions can block automatic folio payment/refund posting.
-- Production credentials and provider account configuration are unknown from current code inspection.
-- Local callback URLs are not provider-reachable unless `public_callback_base_url` is set to a public HTTPS origin/tunnel and webhook secrets are configured.
+`ProviderManager` registers `local` and `clock` modes. When Clock is configured but not booking-ready and local fallback is disabled, the Clock mode remains visible as unavailable rather than silently changing ownership. Enabling `fallback_to_local_when_clock_unavailable` can use local data during provider failure and creates a split-brain inventory risk.
 
-## Rules
-- Keep integration logic isolated from core booking logic.
-- Do not log secrets.
-- Preserve idempotency keys and provider request logs.
-- Do not change provider endpoints, payloads, or status mapping without verifying current code and provider docs.
+### Authentication and configuration
+
+Clock uses configured API type, regional/subscription/account identifiers, endpoint templates/base URLs, API user/key, inbound path/auth values, room/rate mappings, sync toggles/intervals, timeout/cache/rate-limit values, and accounting mode. Secret values must remain in WordPress settings only.
+
+Outbound API calls use a two-request HTTP Digest challenge flow. `ClockEndpointResolver` constructs regional/account URLs or validates configured base/template paths. Safe endpoint overrides must remain relative to the expected provider base.
+
+### Outbound behavior
+
+- `ClockApiClient` sends a correlation header and records sanitized request/response summaries.
+- Safe GET operations can retry once after HTTP 429 and can use bounded request/transient caches.
+- Writes are not automatically retried because timeout-after-write is ambiguous.
+- Final availability/quote/guarantee checks explicitly bypass caches.
+- Exact-room creation requires room-type, physical-room, and rate mapping; the website booking reference is sent in provider reference/note fields.
+- Cancellation and amendment paths reread before retry and verify provider state after writes.
+- Local idempotency keys are logged, but a general provider idempotency header is not transmitted.
+
+### Inbound Clock and AWS SNS
+
+`POST /clock/webhook` supports official AWS SNS delivery:
+
+- restrict certificate URLs to safe Amazon SNS hosts/schemes;
+- verify the SNS signature and signed fields;
+- handle subscription confirmation through a safe URL request;
+- use `MessageId`/body keys, locks, and request logs for deduplication;
+- return retryable failure when provider fetch or durable local mirror application fails.
+
+Optional complete Basic credentials can protect the endpoint. Legacy Bearer/HMAC header verification remains for configured non-SNS senders. Missing mappings enqueue a booking-upsert job; they must not invent provider identity.
+
+### Scheduling and rate limits
+
+| Work | Hook | Current purpose |
+|---|---|---|
+| Full catalog | `must_hotel_booking_clock_full_catalog_sync` | Daily provider catalog refresh while preserving local presentation |
+| Availability/rates | `must_hotel_booking_clock_availability_rate_sync` | Frequent display/cache refresh; never final booking authority |
+| Reservation fallback | `must_hotel_booking_clock_reservation_fallback_sync` | Bounded polling when webhook convergence needs repair |
+| Provider job runner | `must_hotel_booking_process_provider_sync_jobs` | Bounded retry/reconciliation/accounting/amendment work |
+
+Defaults evidenced in code/settings are daily catalog, 15-minute availability/rate, and five-minute reservation fallback with small batches, but saved installations can retain different values. All schedules depend on functional WP-Cron or an external system trigger.
+
+### Folio accounting
+
+Website gateway money is synchronized separately from provider reservation creation. Eligible future payments use an open deposit folio; the standard folio must remain unchanged. Payment/refund accounting uses local accounting rows and provider jobs to correlate folio and credit-item operations.
+
+Missing rights, ambiguous folio/item identity, transferred/applied/closed folios, accommodation-charge cleanup, cancellation-fee posting, and uncertain balance evidence remain manual-review boundaries. Clock booking-header balance is never gateway payment proof. See [ADR-0003](decisions/ADR-0003-clock-deposit-and-manual-accounting-boundaries.md).
+
+### Current risks and unknowns
+
+- Paid fulfillment lacks a fully durable local paid-outcome/recovery owner before the Clock write.
+- Duplicate callbacks and local persistence failure can create duplicate Clock reservations.
+- Multi-room fulfillment can partially succeed.
+- Current authoritative endpoints/rights, provider idempotency support, rate limits, production mappings, and webhook reachability were not externally verified.
+- Historical Postman and sandbox evidence is dated evidence, not a current production contract.
+
+## Elementor
+
+The plugin registers Booking Search, Rooms List, and Rooms Text Grid widgets through Elementor hooks. Uppercase class files and lowercase registration/asset files are complementary and must not be classified as duplicates without a call/registration analysis.
+
+Widgets check Elementor availability before registration and reuse plugin-managed booking routes and assets. Elementor may supply global colors/typography when enabled, but it does not own lifecycle rules. Active Elementor/theme versions, production widget usage, and rendered compatibility were not verified.
+
+## Email
+
+`EmailEngine` builds configured guest/admin lifecycle messages and passes them to `wp_mail()`. Logical settings include sender name/address, reply-to, layout, logo, colors, footer, template enablement, and content. A successful `wp_mail()` call is only handoff evidence. Failures are logged through activity/diagnostic paths; no durable outbound email retry queue was found.
+
+## GitHub updater
+
+`src/Core/Updater.php` wraps the bundled Plugin Update Checker. Repository/branch/slug/optional token/enablement and release-asset rules are constants in `must-hotel-booking.php`.
+
+- Plugin header/version constant and `readme.txt` stable tag must match.
+- Release assets use `must-hotel-booking-X.Y.Z.zip`.
+- Public release discovery needs no token; private access requires a protected token.
+- The current Linux-compatible package workflow is part of the updater contract.
+
+Repository inspection does not prove package provenance, production reachability, successful installation, or rollback readiness.
+
+## Logging, redaction, and retention
+
+Provider request logs record provider, operation, direction, correlation/idempotency keys, target IDs, sanitized summaries, status, duration, and sanitized errors. Preserve recursive redaction when adding fields. Never store raw authorization material, secret settings, complete guest payloads, or unmasked provider bodies.
+
+A clear retention/pruning policy for provider and activity logs was not found. Establish one before assuming long-term audit evidence or storage bounds.
+
+## Production safety gate
+
+External verification requires explicit approval, a named non-production or production target, backup/rollback readiness, masked evidence collection, known expected records, and a stop condition. Do not infer authorization from the existence of configured credentials.
+
+Current source also declares PHP 7.4 compatibility while payment, email, and portal paths use PHP 8-only functions such as `str_contains()`/`str_starts_with()`. Treat PHP 8 as the practical runtime requirement until code or metadata is reconciled and verified.

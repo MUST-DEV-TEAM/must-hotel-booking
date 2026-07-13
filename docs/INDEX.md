@@ -1,35 +1,86 @@
-# Codex Knowledge Base Index
+# Documentation Index
 
-This folder is the concise project knowledge base for Codex task navigation. Do not read every doc by default. Read only the docs relevant to the task, then use targeted code search if details are still unknown.
+This file routes humans and agents to the minimum context required for a task.
 
-## Routing
-- Booking task: read `BOOKING_FLOW.md`, `DATABASE.md`, and maybe `PAYMENTS.md`.
-- Payment/refund task: read `PAYMENTS.md`, `BOOKING_FLOW.md`, `DATABASE.md`, and maybe `INTEGRATIONS.md`.
-- Admin dashboard task: read `ADMIN_DASHBOARD.md`, `UI_RULES.md`, and `DATABASE.md` if data-related.
-- Staff portal task: read `STAFF_PORTAL.md`, `UI_RULES.md`, `FILE_MAP.md`, and maybe `DATABASE.md` or `PAYMENTS.md`.
-- Customer/guest checkout task: read `CUSTOMER_DASHBOARD.md`, `BOOKING_FLOW.md`, and `PAYMENTS.md`.
-- CSS/UI task: read `UI_RULES.md` plus the relevant dashboard or frontend doc.
-- Database task: read `DATABASE.md`, `ARCHITECTURE.md`, and `FILE_MAP.md`.
-- Integration task: read `INTEGRATIONS.md` plus `PAYMENTS.md` if payment-related.
-- Debugging task: read `TROUBLESHOOTING.md` plus the relevant flow doc.
-- Reservation amendment acceptance: read `RESERVATION_AMENDMENT_ACCEPTANCE.md`.
+**Do not load all documentation for every task.**
 
-## Trust And Staleness
-- These docs were generated from targeted current-code inspection on 2026-06-11.
-- Use docs to route the task, then verify behavior in code before changing runtime logic.
-- If docs and current code disagree, current code wins. Update the relevant doc only if the task clarifies durable project knowledge.
-- Always run `git status --short` before editing and preserve unrelated existing changes.
+## All tasks
 
-## Known Uncertain Areas
-- Older task prompts referenced inspected versions `0.4.71`/`0.4.72`; the current local plugin header reports `0.4.80`.
-- No separate logged-in customer account dashboard was found.
-- No `add_shortcode` registration was found in targeted inspection.
-- Production provider credentials, Clock API permissions, and site/theme overrides are unknown from current code inspection.
+Read:
 
-## Core Docs
-- `PROJECT_CONTEXT.md`: short project summary, user types, and current-code assumptions.
-- `ARCHITECTURE.md`: bootstrap, main layers, routes, pages, hooks, and integrations.
-- `FILE_MAP.md`: quick file-to-purpose map for token-saving navigation.
-- `STAFF_PORTAL.md`: staff portal modules, routes, capabilities, templates, and action safety notes.
-- `DECISIONS.md`: concise decision log.
-- `TASK_LOG.md`: lightweight completed-task notes useful to future Codex runs.
+- `../AGENTS.md`
+- `PROJECT_CONTEXT.md`
+
+Then follow one route below and verify current behavior in the relevant source before editing it.
+
+## Architecture or database tasks
+
+Also read:
+
+- `ARCHITECTURE.md`
+- Relevant ADRs in `decisions/`
+- `OPERATIONS.md` for installation or migration work
+
+## Booking, availability, pricing, payment, cancellation, or refund tasks
+
+Also read:
+
+- `DOMAIN_LIFECYCLES.md`
+- `ARCHITECTURE.md`
+- Relevant ADRs
+
+## PokPay, Clock PMS, Stripe, webhook, email, updater, or provider tasks
+
+Also read:
+
+- `INTEGRATIONS.md`
+- `DOMAIN_LIFECYCLES.md`
+- `OPERATIONS.md`
+
+## Admin, staff portal, frontend, booking-calendar, Elementor, or interface tasks
+
+Also read:
+
+- `UI_UX.md`
+- Relevant sections of `DOMAIN_LIFECYCLES.md`
+- `ARCHITECTURE.md` when routes, capabilities, hooks, or data access change
+
+## Deployment, diagnostics, production investigation, or recovery
+
+Also read:
+
+- `OPERATIONS.md`
+- `INTEGRATIONS.md`
+- Relevant lifecycle and ADR sections
+
+## Historical reasoning
+
+Read:
+
+- `DECISIONS.md`
+- The relevant ADR
+- `PROJECT_TIMELINE.md`
+- `../CHANGELOG.md`
+- Git history when exact implementation detail is needed
+
+## Temporary repository cleanup
+
+Only when executing an approved cleanup phase, read:
+
+- `REPOSITORY_CONSOLIDATION_PLAN.md`
+- Only the requested phase and its explicitly required canonical documents
+
+The consolidation plan records suspected defects and future work; it is not authoritative current-behavior documentation.
+
+## Canonical ownership
+
+| Document | Owns |
+| --- | --- |
+| `PROJECT_CONTEXT.md` | Product scope, status, terminology, capabilities, limitations, priorities |
+| `ARCHITECTURE.md` | Bootstrap, modules, persistence, routes, hooks, configuration, jobs, entry points |
+| `DOMAIN_LIFECYCLES.md` | Booking, payment, cancellation, refund, amendment, sync, accounting state transitions |
+| `INTEGRATIONS.md` | External systems, auth models, callbacks, identifiers, retry, idempotency, testing boundaries |
+| `OPERATIONS.md` | Setup, deployment, diagnostics, tests, incidents, rollback, cron, secret handling |
+| `UI_UX.md` | Public/admin/staff interface and interaction contracts |
+| `PROJECT_TIMELINE.md` | Major evidence-backed milestones and incidents |
+| `DECISIONS.md` | Searchable decision register and ADR links |

@@ -1,122 +1,93 @@
-# MUST Hotel Booking Codex Instructions
+# MUST Hotel Booking Agent Instructions
 
-This is the automatic project instruction file for Codex work on the MUST Hotel Booking WordPress plugin.
+## Repository purpose
 
-## Project
-- This is the MUST Hotel Booking WordPress plugin.
-- Work only inside this plugin unless explicitly told otherwise.
+This repository is the MUST Hotel Booking WordPress plugin. Work only inside this plugin unless the user explicitly expands scope.
 
-## Scope
-- Do not modify unrelated files.
-- Do not copy logic from other projects/plugins unless explicitly requested.
-- Preserve existing booking, payment, dashboard, database, shortcode, frontend, admin, staff portal, and integration behavior.
+## Start every task
 
-## Mandatory Workflow For Every Future Task
-1. Read `AGENTS.md`.
+1. Read this file.
 2. Read `docs/INDEX.md`.
-3. Read only the relevant docs under `docs/` for the task.
-4. Prefer the docs knowledge base before searching the codebase.
-5. Run `git status --short` before editing and preserve unrelated dirty worktree changes.
-6. If docs conflict with current code, trust current code and update relevant docs only when the task clarifies durable project knowledge.
-7. Use targeted search only.
-8. Do not scan the whole plugin unless necessary.
-9. Keep changes minimal and scoped.
-10. Do not modify unrelated files.
-11. After editing, run relevant checks.
-12. Final response must include:
-    - Files changed.
-    - What changed.
-    - How to test.
-    - Checks run.
-    - Risks / follow-up.
-    - Docs updated or not updated.
+3. Read only the canonical documents routed for the task. Do not load all documentation by default.
+4. Run `git status --short` before editing and preserve unrelated changes.
+5. Use the documentation as navigation; verify behavior in current executable code before changing it.
 
-## Search Rules
-- Use `rg` or equivalent targeted search.
-- Search by class, function, table, template, shortcode, hook, or CSS class.
-- Avoid broad repo scanning.
-- Read relevant docs first.
-- Treat docs as a navigation aid, not as proof when current code disagrees.
+## Scope and safety
 
-## WordPress Rules
-- Escape output in templates.
-- Sanitize input.
-- Use nonces for forms and admin/staff/customer actions.
-- Check capabilities for admin actions.
-- Do not trust `$_GET`, `$_POST`, cookies, sessions, or external API responses.
-- Preserve managed pages, routes, rewrite rules, Elementor/theme compatibility, and existing hooks.
+- Keep changes minimal and task-scoped. Do not perform unrelated refactoring.
+- Never discard, reset, overwrite, or silently absorb unrelated user work.
+- Do not create task reports, completion reports, scratch plans, diaries, or random Markdown files. Exact implementation history belongs in Git.
+- Before removing a file, inspect runtime loading, autoloading, hooks, dynamic callbacks, deployment/package use, migrations, tests, operations, Git history, and compatibility significance.
+- Distinguish verified current behavior, intended behavior, historical behavior, unresolved behavior, and suspected defects.
 
-## Database Rules
-- Schema changes must be idempotent.
-- Preserve existing data.
-- Do not rename tables/columns without an explicit migration plan.
-- Update installer/upgrade logic if schema changes are requested.
-- Do not delete customer, guest, booking, payment, room, availability, or integration data unless explicitly requested.
+## WordPress and PHP conventions
 
-## Booking Rules
-- Do not double-reserve inventory.
-- Do not confirm unpaid bookings unless the existing lifecycle explicitly allows it.
-- Do not release availability except through proper cancellation, expiration, or refund logic.
-- Avoid placing business logic directly inside templates.
-- Use service/repository/lifecycle classes where they exist.
+- Preserve plugin bootstrap, namespaces, compatibility aliases, managed pages, rewrite rules, routes, hooks, query arguments, option names, metadata keys, and public FQCNs.
+- Escape template output, sanitize input, verify nonces, and enforce capabilities.
+- Do not trust `$_GET`, `$_POST`, cookies, sessions, return URLs, provider payloads, or external responses.
+- Keep frontend, admin, and staff-portal selectors scoped under plugin wrappers. Avoid global theme/Elementor side effects.
+- Keep business rules in engines/services/providers/repositories rather than templates.
+- PHP 7.4 is the declared minimum, but current code uses PHP 8-only helpers. Do not claim PHP 7.4 works or introduce further incompatibility without an approved compatibility change and tests.
 
-## Payment Rules
-- Never mark a booking as paid without verified payment logic.
-- Do not fake successful payments.
-- Keep payment provider code isolated from booking core logic.
-- Webhook/payment/refund logic must be idempotent.
-- Log payment events safely if logging exists.
-- Preserve existing `pay_at_hotel`, Stripe, PokPay, refund, and Clock reconciliation behavior.
+## Database compatibility
 
-## Admin Dashboard Rules
-- Check capabilities.
-- Keep admin pages consistent with existing UI.
-- Preserve filters, pagination, actions, and URLs.
-- Do not mix admin logic with staff portal or guest-facing logic.
+- Schema changes must be additive or have an explicit migration and rollback plan.
+- Installation and upgrade logic must be idempotent and preserve existing data.
+- Do not rename or drop tables/columns, delete historical migrations, or reinterpret stored provider/payment identifiers without verified usage and migration analysis.
+- Existing installations may have partial or legacy shapes; test both fresh install and upgrades.
+- Never delete guest, reservation, payment, refund, room, availability, provider, accounting, or activity data unless explicitly requested.
 
-## Staff Portal Rules
-- Preserve `/staff` and `/staff-login`.
-- Preserve staff portal modules: dashboard, reservations, calendar, front desk, guests, payments, housekeeping, rooms & availability, and reports.
-- Check permissions/security before exposing staff actions or data.
-- Keep staff portal UI consistent with existing patterns.
+## Booking and payment integrity
 
-## Customer/Guest Rules
-- No separate logged-in customer dashboard was found from current code inspection.
-- Guest-facing pages are checkout and booking confirmation.
-- Do not expose bookings, payments, invoices, or profile data to the wrong user/session.
-- Preserve guest checkout/confirmation behavior.
+- Do not double-reserve inventory or bypass final availability/price/policy validation.
+- A normal online booking must not be confirmed before authoritative server-side payment verification.
+- Browser returns, redirects, frontend state, and order creation are not payment success.
+- Booking status, payment status, payment rows, provider transaction status, deposit, paid amount, balance, refund, and Clock folio balance are distinct.
+- Booking, payment, Clock creation, webhook, refund, accounting, reconciliation, and retry paths must be idempotent.
+- Failed or ambiguous provider operations remain failed, retryable, or manual review; never document or convert them as success.
+- Offline Pay at Hotel is an explicit opt-in flow and must remain separate from Stripe/PokPay verification.
+- Preserve cancellation/refund separation and manual Clock accounting boundaries unless an approved business rule changes them.
 
-## UI Rules
-- Scope CSS under plugin-specific wrapper classes.
-- Avoid global selectors.
-- Avoid breaking Elementor, Hello Elementor, or the active theme.
-- Reuse existing card/button/table/tab/filter styles.
-- Keep JS scoped and avoid global side effects.
+## External providers and production data
 
-## Integration Rules
-- Do not guess API behavior.
-- Use docs and current code first.
-- Preserve Stripe, PokPay, Clock PMS, Elementor widget, and GitHub updater behavior where present.
-- Keep integration logic isolated from core booking logic.
+- Do not guess Stripe, PokPay, Clock PMS, AWS SNS, GitHub, email, or other external contracts.
+- Do not make provider or production requests, including read-only probes, without explicit approval.
+- Do not trigger cron, sync, reconciliation, bookings, payments, refunds, cancellations, webhooks, or accounting jobs without explicit approval.
+- Do not expose credentials, tokens, webhook secrets, customer data, provider payloads, or unmasked identifiers in output, tests, logs, or documentation.
+- Use non-production environments and backups for approved write E2E. Stop if environment separation, callback reachability, credentials, or rollback is uncertain.
 
-## Knowledge Base Maintenance Rules
-- After every future task, update the relevant docs only if the task changed or clarified architecture, file locations, booking flow, payment flow, refund behavior, database structure, admin behavior, staff portal behavior, UI conventions, integrations, troubleshooting knowledge, or project decisions. Do not update docs for tiny cosmetic/code-only changes unless the change teaches something useful for future Codex tasks.
-- Treat `docs/` as the project knowledge base.
-- Add major decisions to `docs/DECISIONS.md`.
-- Add useful completed-task notes to `docs/TASK_LOG.md`.
-- Keep docs concise.
-- Do not turn docs into long chat logs.
+## Lightweight verification
 
-## Verification
-- Run `php -l` for changed PHP files.
-- Run existing lint/test/build commands if available.
-- For documentation-only tasks, no PHP lint or runtime/plugin test is required.
-- If a check cannot be run, say why.
+- Run `php -l` for every changed PHP file.
+- Run `node --check` for changed JavaScript when Node is available.
+- Run the focused standalone PHP tests relevant to the changed behavior.
+- Use `git diff --check`, inspect `git diff --stat`, and confirm the final file scope.
+- Do not call a test “behavioral” if it only scans source text.
+- Documentation-only tasks require link, scope, secret-pattern, and claim verification; PHP lint is not required when no PHP changed.
 
-## Final Response Format
-- Files changed
-- What changed
-- How to test
-- Checks run
-- Risks / follow-up
-- Docs updated
+## Canonical documentation ownership
+
+| Change type | Canonical document |
+| --- | --- |
+| Product scope, status, capabilities, limitations, priorities | `docs/PROJECT_CONTEXT.md` |
+| Bootstrap, modules, data model, routes, hooks, jobs, configuration architecture | `docs/ARCHITECTURE.md` |
+| Booking, availability, pricing, payment, cancellation, refund, amendment, reconciliation | `docs/DOMAIN_LIFECYCLES.md` |
+| Provider authentication, endpoints, callbacks, retry, idempotency, safety | `docs/INTEGRATIONS.md` |
+| Setup, deployment, diagnostics, tests, incidents, recovery | `docs/OPERATIONS.md` |
+| Public/admin/staff interfaces and interaction contracts | `docs/UI_UX.md` |
+| Major milestones/incidents | `docs/PROJECT_TIMELINE.md` |
+| Durable decisions | `docs/DECISIONS.md` and a selective ADR under `docs/decisions/` |
+| Notable user-facing, integration, operational, compatibility, or security changes | `CHANGELOG.md` |
+
+Significant, cross-cutting, high-risk, or difficult-to-reverse decisions require an ADR. Do not create ADRs for routine implementation detail. Update docs only when the task changes or clarifies durable knowledge.
+
+## Final response
+
+Report:
+
+- Files changed.
+- What changed.
+- How to test.
+- Checks run and exact results.
+- Risks / follow-up.
+- Docs updated or not updated.

@@ -1,48 +1,69 @@
-﻿# MUST Hotel Booking
+# MUST Hotel Booking
 
-MUST Hotel Booking is a WordPress plugin designed to help hotels manage room reservations directly from their website. It provides an integrated booking system that allows customers to check availability, make reservations, and manage bookings easily.
+MUST Hotel Booking is a WordPress hotel-booking and operations plugin. It manages accommodations, availability, pricing, guest reservations, payments, refunds, staff workflows, email notifications, and optional Clock PMS synchronization from one plugin.
 
-## Features
+## Project status
 
-- Room availability management
-- Online booking system
-- Reservation management from WordPress dashboard
-- Customer booking form
-- Simple and lightweight integration
-- Designed for hotel and accommodation websites
+- Current code and release tag: `0.4.90`.
+- Runtime: WordPress plugin; metadata declares PHP 7.4+, but current code practically requires PHP 8 until compatibility is reconciled.
+- Status: active development with substantial local, Stripe, PokPay, Clock PMS, admin, staff-portal, and Elementor functionality.
+- Readiness: **not proven production-ready**. The repository audit records unresolved critical confirmation access-control and paid-payment/Clock-fulfillment recovery risks. See [Project Context](docs/PROJECT_CONTEXT.md) and the temporary [Repository Consolidation Plan](docs/REPOSITORY_CONSOLIDATION_PLAN.md).
 
-## Installation
+## Main capabilities
 
-1. Download or clone the repository.
-2. Place the `must-hotel-booking` folder in your WordPress `/wp-content/plugins/` directory.
-3. Go to **WordPress Admin -> Plugins**.
-4. Activate **MUST Hotel Booking**.
-
-## Usage
-
-After activation:
-
-1. Navigate to the plugin settings inside the WordPress dashboard.
-2. Configure hotel rooms and booking options.
-3. Add the booking functionality to any page using the provided shortcode or block.
-
-## Release Readiness Checklist
-
-Before publishing a GitHub release for WordPress updates:
-
-1. Bump the plugin header `Version` in [must-hotel-booking.php](must-hotel-booking.php).
-2. Bump `MUST_HOTEL_BOOKING_VERSION` in [must-hotel-booking.php](must-hotel-booking.php) to the exact same value.
-3. Align `Stable tag` in [readme.txt](readme.txt) with that exact same version.
-4. Create a matching Git tag in the format `vX.Y.Z`.
-5. Publish exactly one canonical release ZIP asset named `must-hotel-booking-X.Y.Z.zip`.
-6. If the repository or releases are private, define `MUST_HOTEL_BOOKING_GITHUB_TOKEN` in `wp-config.php`.
-7. Test the update on staging from a previous installed version before production rollout.
+- Managed public booking, accommodation selection, checkout, confirmation, and guest cancellation flows.
+- Local and Clock-backed availability, quoting, reservation, synchronization, and amendment workflows.
+- Stripe Checkout, PokPay SDK checkout, opt-in Pay at Hotel, refunds, and Clock deposit-folio accounting.
+- WordPress admin workspaces for reservations, payments, rooms, pricing, availability, guests, email, reports, settings, and diagnostics.
+- Capability-gated staff portal at `/staff` with login at `/staff-login`.
+- Elementor booking search, room list, and room text-grid widgets.
+- GitHub release updater and release-package workflow.
 
 ## Requirements
 
-- WordPress 5.0+
-- PHP 7.4+
+- WordPress 5.0 or later.
+- PHP 8 in practice. The plugin header currently declares PHP 7.4, but active payment, email, and portal paths use PHP 8-only string helpers.
+- Pretty permalinks for staff portal routes.
+- Provider credentials and callback URLs only when the relevant integration is explicitly enabled.
+
+The header/readme requirements are distribution metadata, but they currently conflict with executable PHP usage. Treat both PHP 7.4 support and WordPress versions newer than the recorded tested-through value as unverified until compatibility tests pass.
+
+## Local installation
+
+1. Place this directory at `wp-content/plugins/must-hotel-booking`, or install a canonical release ZIP.
+2. Activate **MUST Hotel Booking** in WordPress.
+3. Open **MUST Hotel Booking → Settings** and review hotel identity, booking rules, managed pages, payments, email, staff access, and provider mode.
+4. Save permalinks if `/staff` or managed-page routing returns 404.
+5. Test the full booking lifecycle in a non-production environment before enabling public traffic.
+
+Activation installs or upgrades plugin tables, creates managed pages, synchronizes staff capabilities, schedules WP-Cron hooks, and flushes rewrite rules. Do not activate against an unsnapshotted production database as an informal test.
+
+## Safe development checks
+
+Run from the plugin root:
+
+```powershell
+git status --short
+php -l path\to\changed-file.php
+php tests\PaymentPublicCheckoutPolicyTest.php
+php tests\ProviderDataSanitizerTest.php
+git diff --check
+```
+
+The standalone tests vary in strength; some inspect source markers and do not prove concurrency or database behavior. The WordPress-loaded E2E harness and provider preflight tools have different side-effect boundaries. Read [Operations](docs/OPERATIONS.md) before running them.
+
+## Documentation
+
+- Start with the task router: [docs/INDEX.md](docs/INDEX.md).
+- Current architecture: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
+- Booking and payment behavior: [docs/DOMAIN_LIFECYCLES.md](docs/DOMAIN_LIFECYCLES.md).
+- Installation, diagnostics, deployment, and recovery: [docs/OPERATIONS.md](docs/OPERATIONS.md).
+- Notable changes: [CHANGELOG.md](CHANGELOG.md).
+
+## Production and provider warning
+
+Do not run provider probes, callback tests, Clock sync, booking/payment/refund E2E, cleanup scripts, deployment, or production-data operations without explicit approval, a verified non-production target where applicable, and a current backup. Browser return data is not authoritative payment proof.
 
 ## License
 
-This project is maintained by **MUST**.
+GPL-2.0-or-later. See the plugin header and `readme.txt`.
