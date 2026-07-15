@@ -6,6 +6,7 @@ use MustHotelBooking\Engine\BookingAbuseProtection;
 use MustHotelBooking\Engine\BookingQuoteDraft;
 use MustHotelBooking\Engine\BookingValidationEngine;
 use MustHotelBooking\Engine\LockEngine;
+use MustHotelBooking\Engine\PublicBookingAccessService;
 use MustHotelBooking\Engine\ReservationEngine;
 use MustHotelBooking\Engine\RatePlanEngine;
 use MustHotelBooking\Provider\Contracts\ReservationProviderInterface;
@@ -529,9 +530,10 @@ final class ClockReservationProvider implements ReservationProviderInterface
         return [
             'success' => true,
             'errors' => [],
-            'redirect_url' => \add_query_arg(
-                ['reservation_ids' => \implode(',', \array_map('intval', (array) ($result['reservation_ids'] ?? [])))],
-                ManagedPages::getBookingConfirmationPageUrl()
+            'redirect_url' => (new PublicBookingAccessService())->buildPublicUrl(
+                ManagedPages::getBookingConfirmationPageUrl(),
+                (array) ($result['reservation_ids'] ?? []),
+                PublicBookingAccessService::PURPOSE_VIEW_CONFIRMATION
             ),
         ];
     }
@@ -751,6 +753,7 @@ final class ClockReservationProvider implements ReservationProviderInterface
         }
 
         $repository = \MustHotelBooking\Engine\get_reservation_repository();
+        $fulfilledReservationIds = [];
         foreach ($reservationIds as $reservationId) {
             $reservation = $repository->getReservation($reservationId);
             if (!\is_array($reservation)) {
@@ -778,11 +781,14 @@ final class ClockReservationProvider implements ReservationProviderInterface
             }
 
             $claimKey = 'mhb-clock-payment-' . \substr(\hash('sha256', $reservationId . '|' . $method . '|' . $paymentReference), 0, 48);
-            $claim = $repository->claimPendingClockReservation($reservationId, $claimKey, $allowRetry);
-            if ($claim === 'already_fulfilled') {
+            $ownerToken = \substr(\hash('sha256', \wp_generate_uuid4() . '|' . \microtime(true)), 0, 64);
+            $claim = $repository->claimPendingClockReservation($reservationId, $claimKey, $ownerToken);
+            $claimOutcome = \sanitize_key((string) ($claim['outcome'] ?? 'blocked'));
+            if ($claimOutcome === 'already_fulfilled') {
+                $fulfilledReservationIds[] = $reservationId;
                 continue;
             }
-            if ($claim === 'in_progress') {
+            if ($claimOutcome === 'in_progress') {
                 return [
                     'success' => false,
                     'state' => 'pending_fulfilment',
@@ -790,7 +796,16 @@ final class ClockReservationProvider implements ReservationProviderInterface
                     'message' => \__('Clock reservation fulfillment is already in progress.', 'must-hotel-booking'),
                 ];
             }
-            if ($claim === 'blocked') {
+            if ($claimOutcome === 'expired_claim_recovery') {
+                return $this->markPendingClockFulfilmentManualReview(
+                    $repository,
+                    $reservationIds,
+                    $fulfilledReservationIds,
+                    \__('A previous Clock fulfillment lease expired. Clock must be reread before another create attempt.', 'must-hotel-booking'),
+                    'expired_claim_recovery'
+                );
+            }
+            if ($claimOutcome !== 'claimed') {
                 return [
                     'success' => false,
                     'state' => 'pending_fulfilment',
@@ -799,23 +814,39 @@ final class ClockReservationProvider implements ReservationProviderInterface
                 ];
             }
 
-            $result = $this->createClockReservationForPendingPayment($reservation, $claimKey);
-            if (empty($result['success'])) {
-                $metadata = $this->decodeProviderMetadata($reservation['provider_metadata'] ?? null);
-                $metadata['website_payment_verified'] = true;
-                $metadata['pending_clock_creation'] = true;
-                $repository->updateProviderMetadata($reservationId, [
-                    'provider_sync_status' => 'pending_fulfilment',
-                    'provider_sync_error' => (string) ($result['message'] ?? 'clock_creation_failed'),
-                    'provider_metadata' => $metadata,
-                ]);
-                return [
-                    'success' => false,
-                    'state' => 'pending_fulfilment',
-                    'retryable' => $allowRetry,
-                    'message' => (string) ($result['message'] ?? \__('Clock reservation creation failed after payment verification.', 'must-hotel-booking')),
-                ];
+            $claimMetadata = $this->decodeProviderMetadata($reservation['provider_metadata'] ?? null);
+            $claimMetadata['website_payment_verified'] = true;
+            $claimMetadata['pending_clock_creation'] = true;
+            $claimMetadata['clock_fulfilment'] = [
+                'state' => 'create_may_be_in_flight',
+                'website_booking_reference' => (string) ($reservation['booking_id'] ?? ''),
+                'idempotency_key' => $claimKey,
+                'claimed_at' => \current_time('mysql'),
+                'recovery_required' => 'reread_clock_before_create_if_ambiguous',
+            ];
+            if (!$repository->updateClaimedClockReservation($reservationId, $claimKey, $ownerToken, [
+                'provider_metadata' => $claimMetadata,
+            ])) {
+                return $this->markPendingClockFulfilmentManualReview(
+                    $repository,
+                    $reservationIds,
+                    $fulfilledReservationIds,
+                    \__('Clock fulfillment intent could not be stored before creating the reservation.', 'must-hotel-booking'),
+                    'clock_create_intent_persistence_failed'
+                );
             }
+
+            $result = $this->createClockReservationForPendingPayment($reservation, $claimKey, $ownerToken);
+            if (empty($result['success'])) {
+                return $this->markPendingClockFulfilmentManualReview(
+                    $repository,
+                    $reservationIds,
+                    $fulfilledReservationIds,
+                    (string) ($result['message'] ?? \__('Clock reservation creation could be ambiguous after payment verification.', 'must-hotel-booking')),
+                    'clock_create_requires_reread'
+                );
+            }
+            $fulfilledReservationIds[] = $reservationId;
         }
 
         return [
@@ -825,8 +856,56 @@ final class ClockReservationProvider implements ReservationProviderInterface
         ];
     }
 
+    /**
+     * A paid group with a failed, partial, or expired Clock write is not safe
+     * to retry automatically. The durable payment evidence remains intact and
+     * staff must reread Clock using the website reference before recovery.
+     *
+     * @param array<int, int> $reservationIds
+     * @param array<int, int> $fulfilledReservationIds
+     * @return array<string, mixed>
+     */
+    private function markPendingClockFulfilmentManualReview(
+        $repository,
+        array $reservationIds,
+        array $fulfilledReservationIds,
+        string $message,
+        string $reason
+    ): array {
+        $fulfilledReservationIds = \array_values(\array_unique(\array_filter(\array_map('intval', $fulfilledReservationIds))));
+        foreach ($reservationIds as $reservationId) {
+            $reservation = $repository->getReservation((int) $reservationId);
+            if (!\is_array($reservation)) {
+                continue;
+            }
+            $metadata = $this->decodeProviderMetadata($reservation['provider_metadata'] ?? null);
+            $metadata['website_payment_verified'] = true;
+            $metadata['pending_clock_creation'] = false;
+            $metadata['clock_fulfilment'] = [
+                'state' => empty($fulfilledReservationIds) ? 'manual_review' : 'partial_manual_review',
+                'reason' => \sanitize_key($reason),
+                'website_booking_reference' => (string) ($reservation['booking_id'] ?? ''),
+                'fulfilled_reservation_ids' => $fulfilledReservationIds,
+                'recovery_required' => 'reread_clock_before_create',
+                'recorded_at' => \current_time('mysql'),
+            ];
+            $repository->updateProviderMetadata((int) $reservationId, [
+                'provider_sync_status' => 'manual_review',
+                'provider_sync_error' => \sanitize_text_field($message),
+                'provider_metadata' => $metadata,
+            ]);
+        }
+
+        return [
+            'success' => false,
+            'state' => 'manual_review',
+            'retryable' => false,
+            'message' => $message,
+        ];
+    }
+
     /** @param array<string, mixed> $reservation @return array<string, mixed> */
-    private function createClockReservationForPendingPayment(array $reservation, string $idempotencyKey): array
+    private function createClockReservationForPendingPayment(array $reservation, string $idempotencyKey, string $ownerToken): array
     {
         $reservationId = isset($reservation['id']) ? (int) $reservation['id'] : 0;
         $roomId = isset($reservation['room_id']) ? (int) $reservation['room_id'] : 0;
@@ -839,6 +918,11 @@ final class ClockReservationProvider implements ReservationProviderInterface
 
         if ($reservationId <= 0 || $roomId <= 0 || $checkin === '' || $checkout === '') {
             return ['success' => false, 'message' => \__('The pending Clock reservation data is incomplete.', 'must-hotel-booking')];
+        }
+
+        $repository = \MustHotelBooking\Engine\get_reservation_repository();
+        if (!$repository->ownsPendingClockReservation($reservationId, $idempotencyKey, $ownerToken)) {
+            return ['success' => false, 'message' => \__('The Clock fulfillment lease is no longer owned by this request.', 'must-hotel-booking')];
         }
 
         $guestForm = $this->pendingGuestForm($metadata, (int) ($reservation['guest_id'] ?? 0));
@@ -895,6 +979,9 @@ final class ClockReservationProvider implements ReservationProviderInterface
             'room_count' => 1,
             'accommodation_type' => '',
         ];
+        if (!$repository->ownsPendingClockReservation($reservationId, $idempotencyKey, $ownerToken)) {
+            return ['success' => false, 'message' => \__('The Clock fulfillment lease expired before reservation creation.', 'must-hotel-booking')];
+        }
         $providerReservation = $this->createClockBooking(
             $context,
             $guestForm,
@@ -938,12 +1025,17 @@ final class ClockReservationProvider implements ReservationProviderInterface
         $metadata['clock_reference_fallback_fields'] = $referenceMapping['clock_reference_fallback_fields'];
         $metadata['clock_reference_text'] = $referenceMapping['clock_reference_text'];
         $metadata['provider_response'] = $this->responseSummary($providerData);
+        $metadata['clock_fulfilment'] = [
+            'state' => 'fulfilled',
+            'website_booking_reference' => (string) ($reservation['booking_id'] ?? ''),
+            'fulfilled_at' => \current_time('mysql'),
+        ];
         if (\function_exists('MustHotelBooking\\Frontend\\build_price_breakdown_snapshot')) {
             $metadata['pricing_snapshot'] = \MustHotelBooking\Frontend\build_price_breakdown_snapshot($pricing);
         }
         unset($metadata['pending_guest_form']);
 
-        $updated = \MustHotelBooking\Engine\get_reservation_repository()->updateProviderMetadata($reservationId, [
+        $updated = $repository->updateClaimedClockReservation($reservationId, $idempotencyKey, $ownerToken, [
             'provider' => ProviderManager::CLOCK_MODE,
             'provider_booking_id' => $providerBookingId,
             'provider_reservation_id' => $providerReservationId,
@@ -951,6 +1043,8 @@ final class ClockReservationProvider implements ReservationProviderInterface
             'provider_sync_status' => 'synced',
             'provider_synced_at' => \current_time('mysql'),
             'provider_sync_error' => '',
+            'provider_fulfilment_owner' => '',
+            'provider_fulfilment_lease_expires_at' => null,
             'provider_payload_ref' => $providerReservationId !== '' ? $providerReservationId : $providerBookingId,
             'provider_metadata' => $metadata,
         ]);

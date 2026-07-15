@@ -1179,9 +1179,10 @@ final class ReservationEngine
         return [
             'success' => true,
             'errors' => [],
-            'redirect_url' => \add_query_arg(
-                ['reservation_ids' => \implode(',', \array_map('intval', (array) ($result['reservation_ids'] ?? [])))],
-                ManagedPages::getBookingConfirmationPageUrl()
+            'redirect_url' => (new PublicBookingAccessService())->buildPublicUrl(
+                ManagedPages::getBookingConfirmationPageUrl(),
+                (array) ($result['reservation_ids'] ?? []),
+                PublicBookingAccessService::PURPOSE_VIEW_CONFIRMATION
             ),
         ];
     }

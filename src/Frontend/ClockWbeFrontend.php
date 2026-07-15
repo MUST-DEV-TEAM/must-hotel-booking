@@ -4,7 +4,7 @@ namespace MustHotelBooking\Frontend;
 
 use MustHotelBooking\Core\ManagedPages;
 use MustHotelBooking\Core\MustBookingConfig;
-use MustHotelBooking\Engine\ReservationEngine;
+use MustHotelBooking\Engine\PublicBookingAccessService;
 
 final class ClockWbeFrontend
 {
@@ -114,27 +114,27 @@ final class ClockWbeFrontend
 
     public static function isRecognizedLocalConfirmationRequest(): bool
     {
-        $bookingId = isset($_GET['booking_id'])
-            ? \trim(\sanitize_text_field((string) \wp_unslash($_GET['booking_id'])))
-            : '';
         $requestAction = isset($_GET['must_action'])
             ? \sanitize_key((string) \wp_unslash($_GET['must_action']))
             : '';
         $stripeReturn = isset($_GET['stripe_return'])
             ? \sanitize_key((string) \wp_unslash($_GET['stripe_return']))
             : '';
-        $reservationIds = ReservationEngine::getReservationIdsFromSource(\is_array($_GET) ? $_GET : []);
-
-        if (!empty($reservationIds) && !empty(ReservationEngine::getConfirmationRowsByIds($reservationIds))) {
+        $service = new PublicBookingAccessService();
+        $purpose = $requestAction === 'review_cancellation'
+            ? PublicBookingAccessService::PURPOSE_REVIEW_CANCELLATION
+            : ($requestAction === 'confirm_cancellation'
+                ? PublicBookingAccessService::PURPOSE_CONFIRM_CANCELLATION
+                : PublicBookingAccessService::PURPOSE_VIEW_CONFIRMATION);
+        if (!empty($service->authorizeRequest(
+            $purpose,
+            \is_array($_GET) ? $_GET : [],
+            \is_array($_COOKIE) ? $_COOKIE : []
+        )['success'])) {
             return true;
         }
 
-        if ($bookingId !== '' && !empty(ReservationEngine::getConfirmationRowsByBookingId($bookingId))) {
-            return true;
-        }
-
-        return $requestAction === 'cancel_reservation'
-            || ($stripeReturn !== '' && self::hasLocalConfirmationResumeSelection());
+        return $requestAction === '' && $stripeReturn === '' && self::hasLocalConfirmationResumeSelection();
     }
 
     private static function redirectAwayFromLegacyBookingFlow(): void

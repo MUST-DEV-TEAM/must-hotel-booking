@@ -181,6 +181,22 @@ final class ReservationRepository extends AbstractRepository
         if ($reservationId <= 0) {
             return false;
         }
+        $data = $this->normalizeProviderMetadataUpdate($metadata);
+        if (empty($data)) {
+            return true;
+        }
+        return $this->wpdb->update(
+            $this->table('reservations'),
+            $data,
+            ['id' => $reservationId],
+            $this->providerMetadataFormats($data),
+            ['%d']
+        ) !== false;
+    }
+
+    /** @param array<string, mixed> $metadata @return array<string, mixed> */
+    private function normalizeProviderMetadataUpdate(array $metadata): array
+    {
         $data = [];
         foreach ($metadata as $key => $value) {
             if (!\is_string($key)) {
@@ -202,6 +218,14 @@ final class ReservationRepository extends AbstractRepository
                 case 'provider_sync_status':
                     $data[$key] = $this->providerKey((string) $value, 50);
                     break;
+                case 'provider_fulfilment_key':
+                    $data[$key] = $this->providerText((string) $value, 191);
+                    break;
+                case 'provider_fulfilment_owner':
+                    $data[$key] = $this->providerText((string) $value, 64);
+                    break;
+                case 'provider_fulfilment_claimed_at':
+                case 'provider_fulfilment_lease_expires_at':
                 case 'provider_synced_at':
                     $data[$key] = $this->providerNullableText($value);
                     break;
@@ -213,80 +237,160 @@ final class ReservationRepository extends AbstractRepository
                     break;
             }
         }
-        if (empty($data)) {
-            return true;
+        return $data;
+    }
+
+    public function ownsPendingClockReservation(int $reservationId, string $claimKey, string $ownerToken): bool
+    {
+        if ($reservationId <= 0 || $claimKey === '' || $ownerToken === '') {
+            return false;
         }
-        return $this->wpdb->update(
+        $owned = $this->wpdb->get_var(
+            $this->wpdb->prepare(
+                'SELECT id FROM ' . $this->table('reservations') . '
+                WHERE id = %d
+                    AND provider_sync_status = %s
+                    AND provider_fulfilment_key = %s
+                    AND provider_fulfilment_owner = %s
+                    AND provider_fulfilment_lease_expires_at > %s
+                    AND provider_booking_id = %s
+                    AND provider_reservation_id = %s
+                LIMIT 1',
+                $reservationId,
+                'creating',
+                $this->providerText($claimKey, 191),
+                $this->providerText($ownerToken, 64),
+                \current_time('mysql', true),
+                '',
+                ''
+            )
+        );
+        return (int) $owned === $reservationId;
+    }
+
+    /** @param array<string, mixed> $metadata */
+    public function updateClaimedClockReservation(int $reservationId, string $claimKey, string $ownerToken, array $metadata): bool
+    {
+        $data = $this->normalizeProviderMetadataUpdate($metadata);
+        if ($reservationId <= 0 || $claimKey === '' || $ownerToken === '' || empty($data)) {
+            return false;
+        }
+        $updated = $this->wpdb->update(
             $this->table('reservations'),
             $data,
-            ['id' => $reservationId],
+            [
+                'id' => $reservationId,
+                'provider_sync_status' => 'creating',
+                'provider_fulfilment_key' => $this->providerText($claimKey, 191),
+                'provider_fulfilment_owner' => $this->providerText($ownerToken, 64),
+                'provider_booking_id' => '',
+                'provider_reservation_id' => '',
+            ],
             $this->providerMetadataFormats($data),
-            ['%d']
-        ) !== false;
+            ['%d', '%s', '%s', '%s', '%s', '%s']
+        );
+        return $updated === 1;
+    }
+
+    /** @return array<string, mixed>|null */
+    public function getReservationForUpdate(int $reservationId): ?array
+    {
+        if ($reservationId <= 0) {
+            return null;
+        }
+        $row = $this->wpdb->get_row(
+            $this->wpdb->prepare(
+                'SELECT * FROM ' . $this->table('reservations') . ' WHERE id = %d FOR UPDATE',
+                $reservationId
+            ),
+            ARRAY_A
+        );
+        return \is_array($row) ? $row : null;
     }
 
     /**
      * Claim a pending Clock reservation for one verified online payment.
      *
-     * @return string claimed|already_fulfilled|in_progress|blocked
+     * @return array{outcome: string, lease_expires_at?: string}
      */
-    public function claimPendingClockReservation(int $reservationId, string $claimKey, bool $allowRetry = false): string
+    public function claimPendingClockReservation(int $reservationId, string $claimKey, string $ownerToken, int $leaseSeconds = 300): array
     {
         $claimKey = $this->providerText($claimKey, 191);
-        if ($reservationId <= 0 || $claimKey === '') {
-            return 'blocked';
+        $ownerToken = $this->providerText($ownerToken, 64);
+        if ($reservationId <= 0 || $claimKey === '' || $ownerToken === '') {
+            return ['outcome' => 'blocked'];
         }
 
         $reservation = $this->getReservation($reservationId);
         if (!\is_array($reservation)) {
-            return 'blocked';
+            return ['outcome' => 'blocked'];
         }
 
         if (\trim((string) ($reservation['provider_booking_id'] ?? '')) !== ''
             || \trim((string) ($reservation['provider_reservation_id'] ?? '')) !== '') {
-            return 'already_fulfilled';
+            return ['outcome' => 'already_fulfilled'];
         }
 
         $status = \sanitize_key((string) ($reservation['status'] ?? ''));
         $paymentStatus = \sanitize_key((string) ($reservation['payment_status'] ?? ''));
         if ($status !== 'pending_payment' || $paymentStatus !== 'pending') {
-            return 'blocked';
+            return ['outcome' => 'blocked'];
         }
 
         $syncStatus = \sanitize_key((string) ($reservation['provider_sync_status'] ?? ''));
-        $syncError = \trim((string) ($reservation['provider_sync_error'] ?? ''));
-        if ($syncStatus === 'creating') {
-            return $syncError === $claimKey ? 'claimed' : 'in_progress';
+        if (!\in_array($syncStatus, ['', 'pending_payment', 'pending_fulfilment', 'creating'], true)) {
+            return ['outcome' => 'blocked'];
         }
-        if ($syncStatus === 'pending_fulfilment' && !$allowRetry) {
-            return 'blocked';
+        $now = \current_time('mysql', true);
+        $leaseSeconds = \max(60, \min(900, $leaseSeconds));
+        $leaseExpiresAt = \gmdate('Y-m-d H:i:s', \time() + $leaseSeconds);
+        $activeLease = \trim((string) ($reservation['provider_fulfilment_lease_expires_at'] ?? ''));
+        if ($syncStatus === 'creating' && $activeLease !== '' && $activeLease > $now) {
+            return ['outcome' => 'in_progress', 'lease_expires_at' => $activeLease];
         }
-        if (!\in_array($syncStatus, ['', 'pending_payment', 'pending_fulfilment'], true)) {
-            return 'blocked';
+        $expiredRecovery = $syncStatus === 'creating' && $activeLease !== '' && $activeLease <= $now;
+        if ($expiredRecovery) {
+            return ['outcome' => 'expired_claim_recovery'];
         }
 
         $updated = $this->wpdb->query(
             $this->wpdb->prepare(
                 'UPDATE ' . $this->table('reservations') . '
-                SET provider_sync_status = %s, provider_sync_error = %s
+                SET provider_sync_status = %s,
+                    provider_sync_error = %s,
+                    provider_fulfilment_key = %s,
+                    provider_fulfilment_owner = %s,
+                    provider_fulfilment_claimed_at = %s,
+                    provider_fulfilment_lease_expires_at = %s
                 WHERE id = %d
                     AND status = %s
                     AND payment_status = %s
                     AND provider_booking_id = %s
                     AND provider_reservation_id = %s
-                    AND provider_sync_status = %s',
+                    AND provider_sync_status IN (%s, %s, %s)
+                    AND (provider_fulfilment_lease_expires_at IS NULL OR provider_fulfilment_lease_expires_at = %s OR provider_fulfilment_lease_expires_at <= %s)',
                 'creating',
+                '',
                 $claimKey,
+                $ownerToken,
+                $now,
+                $leaseExpiresAt,
                 $reservationId,
                 'pending_payment',
                 'pending',
                 '',
                 '',
-                $syncStatus
+                '',
+                'pending_payment',
+                'pending_fulfilment',
+                '',
+                $now
             )
         );
 
-        return $updated === 1 ? 'claimed' : 'in_progress';
+        return $updated === 1
+            ? ['outcome' => 'claimed', 'lease_expires_at' => $leaseExpiresAt]
+            : ['outcome' => 'in_progress'];
     }
     /**
      * @param array<string, mixed> $reservationData
@@ -1677,6 +1781,7 @@ final class ReservationRepository extends AbstractRepository
                 r.notes,
                 r.total_price,
                 r.payment_status,
+                r.provider_sync_status,
                 r.created_at,
                 COALESCE(rm.name, \'\') AS room_name
             FROM ' . $this->table('reservations') . ' r
@@ -2483,6 +2588,7 @@ final class ReservationRepository extends AbstractRepository
                 r.coupon_code,
                 r.coupon_discount_total,
                 r.payment_status,
+                r.provider_sync_status,
                 r.created_at,
                 rm.name AS room_name,
                 inv.room_number AS assigned_room_number,

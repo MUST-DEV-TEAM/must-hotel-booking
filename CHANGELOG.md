@@ -7,10 +7,19 @@ Notable product, architecture, integration, operational, compatibility, and secu
 ### Changed
 
 - Consolidated repository documentation into the canonical structure routed by `docs/INDEX.md`; no runtime behavior changed.
+- Persist authoritative verified-payment evidence before Clock fulfillment, serialize creation with an owner-token lease, and expose truthful blocked/failed lifecycle outcomes.
+- Serialize local paid-row and confirmation persistence under exact reservation-row locks, deferring payment/accounting and confirmation/email hooks until commit.
+- Record per-room Clock fulfillment and route expired, ambiguous, persistence-failed, or partial outcomes to manual review.
 
 ### Security
 
-- Documented unresolved confirmation-page access-control and payment/Clock recovery risks for phased remediation. No security fix is included in this documentation change.
+- Replace numeric public confirmation/cancellation access with opaque, hashed, expiring reservation-set grants and per-tab cookie-bound contexts.
+- Bind PokPay finalize/success handling to the authorized exact reservation set and stored order; failure/cancel returns do not mutate local booking state.
+- Redact access tokens and other sensitive URL/query values from provider diagnostics.
+
+### Database
+
+- Add idempotent public-access grant/context tables and additive Clock fulfillment key, owner, claim, lease, and lease-index schema repair, including equal-version upgrades.
 
 ## 0.4.90 - 2026-07-13
 

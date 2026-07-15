@@ -40,6 +40,8 @@ final class Plugin
 
         if (\version_compare($db_version, MUST_HOTEL_BOOKING_VERSION, '>=')) {
             \MustHotelBooking\Database\ensure_payment_release_schema();
+            \MustHotelBooking\Database\ensure_public_access_schema();
+            \MustHotelBooking\Database\ensure_clock_fulfilment_schema();
             return;
         }
 

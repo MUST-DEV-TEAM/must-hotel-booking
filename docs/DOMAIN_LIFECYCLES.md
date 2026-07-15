@@ -98,7 +98,7 @@ See [ADR-0002](decisions/ADR-0002-final-live-quote-revalidation.md).
 4. Keep inventory blocked while the attempt is pending.
 5. Expiration/failure moves reservations to `expired` or `payment_failed` and releases inventory.
 
-Pending-payment cleanup runs through WP-Cron and a bounded age threshold. Rows explicitly marked as verified payment/pending Clock fulfillment are skipped; there is no complete internal recovery queue for all such outcomes.
+Pending-payment cleanup runs through WP-Cron and a bounded age threshold. Rows with durable verified-payment evidence or a pending/manual Clock fulfillment are not ordinary expired checkout attempts; manual-review outcomes require explicit reconciliation.
 
 ## Verified online completion and Clock fulfillment
 
@@ -108,10 +108,12 @@ Current Clock mode follows payment-first ordering:
 flowchart LR
     A["Pending local reservation and payment"] --> B["Provider payment reread and binding checks"]
     B -->|"not authoritative"| C["Remain pending or fail/expire"]
-    B -->|"verified paid"| D["Claim Clock fulfillment"]
-    D --> E["Create and reread Clock reservation"]
-    E --> F["Write local paid payment row"]
-    F --> G["Confirm local reservation"]
+    B -->|"verified paid"| D["Persist verified-payment evidence"]
+    D --> E["Acquire owner-token lease"]
+    E --> H["Create and persist Clock identifiers"]
+    H --> I["Lock exact reservation set"]
+    I --> F["Commit paid row and confirmation"]
+    F --> G["Emit payment and confirmation hooks"]
 ```
 
 `BookingStatusEngine` blocks a first online Clock confirmation if provider IDs are absent, or if there is no paid Stripe/PokPay row with a transaction reference. This guard is useful but is not a centralized immutable authorization system.
@@ -121,31 +123,27 @@ flowchart LR
 - Gateway callbacks reread provider state and validate reservation binding, amount, and currency.
 - Existing paid payment/confirmed reservation state short-circuits repeated completion.
 - Payment rows are reused by method/transaction where possible.
-- Clock fulfillment stores claim/provider metadata and rereads some state on retry.
+- Clock fulfillment uses an atomic owner-token lease; a second callback receives `in_progress` and cannot create.
+- Matching verified-payment evidence is idempotent and cannot overwrite an active claim or synced provider state.
+- Exact reservation-row locks serialize local paid-row and confirmation persistence; hooks are deferred until the winning transaction commits.
 - Provider request, sync job, and accounting repositories store correlation/idempotency information.
 
-### Current recovery and atomicity gaps
+### Recovery and atomicity boundaries
 
-- `completeVerifiedOnlinePayment()` fulfills Clock before writing the durable local paid row. Clock failure after capture leaves a verified provider payment represented only by pending metadata; no comprehensive internal retry job owns recovery.
-- Clock success followed by a local metadata/database failure can cause a later retry to create a duplicate provider reservation.
-- A repeated fulfillment claim with the same key can be treated as claimed again; it is not an exclusive lease.
+- Authoritative gateway evidence is stored transactionally in reservation provider metadata before any Clock write; this evidence does not confirm the booking or emit payment/accounting hooks.
+- Only the active lease owner can reach the Clock create boundary or persist returned Clock identifiers.
+- Expired leases, ambiguous provider responses, and local persistence failures enter `manual_review`; another create is forbidden until Clock is reread and reconciled.
 - Clock request logging records idempotency information, but the API client does not generally transmit a provider idempotency header.
-- Multi-room Clock creation loops across rooms and is not one transaction; partial provider creation can leave an orphan/compensation case.
-- Current tests around payment-first ordering are substantially static and do not prove concurrent callback or timeout-after-write behavior.
+- Multi-room Clock creation is not one provider transaction. Each completed room is recorded, and any partial group is reported as partial manual review rather than complete success.
+- No runtime or provider certification is established by this integration review.
 
 See [ADR-0001](decisions/ADR-0001-payment-first-clock-fulfillment.md).
 
 ## Confirmation page and guest cancellation
 
-The confirmation page displays booking, stay, guest, payment, and cancellation information and can process Stripe/PokPay returns. Guest cancellation uses a token and policy window, can initiate provider cancellation/refund cleanup, and routes uncertain/inside-window work to review.
+The confirmation page displays booking, stay, guest, payment, and cancellation information and can process Stripe/PokPay returns. Public links use opaque, hashed, expiring grants scoped to an exact reservation set. URL grants are exchanged for per-tab selectors backed by secure HttpOnly cookies; numeric reservation/booking query arguments are not authorization.
 
-### Confirmed security defects on current main
-
-- Confirmation lookup accepts sequential reservation IDs/booking IDs without a signed or session-bound authorization check. It can disclose booking and guest details to an unauthenticated requester.
-- A forged PokPay cancel return containing another pending reservation ID can call the failure path and release that reservation's inventory.
-- Cancellation tokens are deterministic and have no explicit expiry independent of the policy/record state.
-
-The unmerged confirmation-integrity branches contain proposed/additive controls, but they are not current behavior and must not be cited as mitigation on `main`.
+Cancellation review and execution use separate purposes. The execution grant is short-lived and atomically consumed before mutation. PokPay success/finalize paths derive the reservation set from the authorized grant and require the stored SDK-order binding; failure/cancel returns are informational and do not change booking/payment state.
 
 ## Admin and staff transitions
 
@@ -154,7 +152,7 @@ The unmerged confirmation-integrity branches contain proposed/additive controls,
 - Staff front desk cancellation can enter an approval queue; authorized approval performs the cancellation lifecycle.
 - Check-in/check-out/completion, room moves, payment recording, and housekeeping actions remain separate permissions and states.
 
-Known limitation: some generic confirmation callers can return a success-shaped result even when `BookingStatusEngine` skipped a prohibited transition. Authorization and truthful result reporting are not yet centralized.
+`BookingStatusEngine` reports updated, already-applied, blocked, and failed IDs. `BookingLifecycleSyncService` rereads the row and returns failure when a requested transition was not persisted.
 
 ## Cancellation lifecycle
 

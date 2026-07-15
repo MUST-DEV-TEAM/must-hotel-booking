@@ -360,6 +360,10 @@ function install_tables(): void
         provider_status VARCHAR(100) NOT NULL DEFAULT '',
         provider_payment_status VARCHAR(100) NOT NULL DEFAULT '',
         provider_sync_status VARCHAR(50) NOT NULL DEFAULT '',
+        provider_fulfilment_key VARCHAR(191) NOT NULL DEFAULT '',
+        provider_fulfilment_owner VARCHAR(64) NOT NULL DEFAULT '',
+        provider_fulfilment_claimed_at DATETIME NULL DEFAULT NULL,
+        provider_fulfilment_lease_expires_at DATETIME NULL DEFAULT NULL,
         provider_synced_at DATETIME NULL DEFAULT NULL,
         provider_sync_error TEXT NULL,
         provider_payload_ref VARCHAR(191) NOT NULL DEFAULT '',
@@ -383,7 +387,8 @@ function install_tables(): void
         KEY provider (provider),
         KEY provider_booking_id (provider_booking_id),
         KEY provider_reservation_id (provider_reservation_id),
-        KEY provider_sync_status (provider_sync_status)
+        KEY provider_sync_status (provider_sync_status),
+        KEY provider_fulfilment_lease (provider_fulfilment_lease_expires_at)
     ) {$charset_collate};";
 
     $tables[] = "CREATE TABLE {$prefix}must_pricing (
@@ -783,11 +788,159 @@ function install_tables(): void
         \dbDelta($sql);
     }
 
+    ensure_public_access_schema($wpdb);
     ensure_payment_release_schema($wpdb);
+    ensure_clock_fulfilment_schema($wpdb);
 
     (new AccommodationCategoryUpgradeService($wpdb))->run();
 
     \update_option('must_hotel_booking_db_version', MUST_HOTEL_BOOKING_VERSION);
+}
+
+/**
+ * Ensure the public booking access grant table is present without coupling
+ * its repair decision to the plugin release version.
+ */
+function ensure_public_access_schema(?\wpdb $wpdb_instance = null): void
+{
+    global $wpdb;
+
+    $db = $wpdb_instance ?: $wpdb;
+    $targetVersion = defined('MUST_HOTEL_BOOKING_PUBLIC_ACCESS_SCHEMA_VERSION')
+        ? (int) MUST_HOTEL_BOOKING_PUBLIC_ACCESS_SCHEMA_VERSION
+        : 2;
+    $storedVersion = (int) get_option('must_hotel_booking_public_access_schema_version', 0);
+    $table = $db->prefix . 'must_public_booking_access';
+    $contextTable = $db->prefix . 'must_public_booking_access_contexts';
+    $existingTable = (string) $db->get_var(
+        $db->prepare('SHOW TABLES LIKE %s', $table)
+    );
+    $existingContextTable = (string) $db->get_var(
+        $db->prepare('SHOW TABLES LIKE %s', $contextTable)
+    );
+
+    if (
+        $storedVersion >= $targetVersion
+        && $existingTable === $table
+        && $existingContextTable === $contextTable
+        && public_access_schema_has_required_shape($db, $table, $contextTable)
+    ) {
+        return;
+    }
+
+    require_once ABSPATH . 'wp-admin/includes/upgrade.php';
+
+    $charsetCollate = $db->get_charset_collate();
+    $sql = "CREATE TABLE {$table} (
+        id BIGINT(20) UNSIGNED NOT NULL AUTO_INCREMENT,
+        token_hash CHAR(64) NOT NULL,
+        operation_key CHAR(64) NULL DEFAULT NULL,
+        purpose VARCHAR(40) NOT NULL DEFAULT '',
+        reservation_ids LONGTEXT NOT NULL,
+        reservation_set_hash CHAR(64) NOT NULL,
+        created_at DATETIME NOT NULL,
+        expires_at DATETIME NOT NULL,
+        revoked_at DATETIME NULL DEFAULT NULL,
+        first_used_at DATETIME NULL DEFAULT NULL,
+        last_used_at DATETIME NULL DEFAULT NULL,
+        execution_status VARCHAR(32) NOT NULL DEFAULT 'available',
+        consumed_at DATETIME NULL DEFAULT NULL,
+        claimed_at DATETIME NULL DEFAULT NULL,
+        completed_at DATETIME NULL DEFAULT NULL,
+        failed_at DATETIME NULL DEFAULT NULL,
+        metadata_json LONGTEXT NULL,
+        PRIMARY KEY  (id),
+        UNIQUE KEY token_hash (token_hash),
+        UNIQUE KEY operation_key (operation_key),
+        KEY purpose_expiry (purpose, expires_at),
+        KEY reservation_set_lookup (reservation_set_hash, purpose),
+        KEY execution_status (execution_status)
+    ) {$charsetCollate};";
+
+    $contextSql = "CREATE TABLE {$contextTable} (
+        id BIGINT(20) UNSIGNED NOT NULL AUTO_INCREMENT,
+        context_hash CHAR(64) NOT NULL,
+        grant_id BIGINT(20) UNSIGNED NOT NULL,
+        purpose VARCHAR(40) NOT NULL DEFAULT '',
+        reservation_set_hash CHAR(64) NOT NULL,
+        created_at DATETIME NOT NULL,
+        expires_at DATETIME NOT NULL,
+        revoked_at DATETIME NULL DEFAULT NULL,
+        PRIMARY KEY  (id),
+        UNIQUE KEY context_hash (context_hash),
+        KEY grant_purpose (grant_id, purpose),
+        KEY context_expiry (expires_at)
+    ) {$charsetCollate};";
+
+    \dbDelta($sql);
+    \dbDelta($contextSql);
+
+    $verifiedTable = (string) $db->get_var(
+        $db->prepare('SHOW TABLES LIKE %s', $table)
+    );
+    $verifiedContextTable = (string) $db->get_var(
+        $db->prepare('SHOW TABLES LIKE %s', $contextTable)
+    );
+    if (
+        $verifiedTable === $table
+        && $verifiedContextTable === $contextTable
+        && public_access_schema_has_required_shape($db, $table, $contextTable)
+    ) {
+        update_option('must_hotel_booking_public_access_schema_version', $targetVersion, false);
+    }
+}
+
+function public_access_schema_has_required_shape(\wpdb $db, string $accessTable, string $contextTable): bool
+{
+    $accessColumns = $db->get_col('SHOW COLUMNS FROM ' . $accessTable, 0);
+    $contextColumns = $db->get_col('SHOW COLUMNS FROM ' . $contextTable, 0);
+    $accessIndexes = $db->get_col('SHOW INDEX FROM ' . $accessTable, 2);
+    $contextIndexes = $db->get_col('SHOW INDEX FROM ' . $contextTable, 2);
+    $accessColumns = is_array($accessColumns) ? array_map('strval', $accessColumns) : [];
+    $contextColumns = is_array($contextColumns) ? array_map('strval', $contextColumns) : [];
+    $accessIndexes = is_array($accessIndexes) ? array_map('strval', $accessIndexes) : [];
+    $contextIndexes = is_array($contextIndexes) ? array_map('strval', $contextIndexes) : [];
+
+    foreach (['token_hash', 'operation_key', 'reservation_ids', 'reservation_set_hash', 'execution_status', 'consumed_at'] as $column) {
+        if (!in_array($column, $accessColumns, true)) {
+            return false;
+        }
+    }
+    foreach (['context_hash', 'grant_id', 'purpose', 'reservation_set_hash', 'expires_at'] as $column) {
+        if (!in_array($column, $contextColumns, true)) {
+            return false;
+        }
+    }
+
+    return in_array('token_hash', $accessIndexes, true)
+        && in_array('operation_key', $accessIndexes, true)
+        && in_array('context_hash', $contextIndexes, true);
+}
+
+/**
+ * Repair the additive Clock fulfilment lease columns even when an existing
+ * installation already stores the current plugin/database version.
+ */
+function ensure_clock_fulfilment_schema(?\wpdb $wpdb_instance = null): void
+{
+    global $wpdb;
+
+    $db = $wpdb_instance ?: $wpdb;
+    ensure_table_columns(
+        $db,
+        $db->prefix . 'must_reservations',
+        [
+            'provider_fulfilment_key' => "VARCHAR(191) NOT NULL DEFAULT ''",
+            'provider_fulfilment_owner' => "VARCHAR(64) NOT NULL DEFAULT ''",
+            'provider_fulfilment_claimed_at' => 'DATETIME NULL DEFAULT NULL',
+            'provider_fulfilment_lease_expires_at' => 'DATETIME NULL DEFAULT NULL',
+        ]
+    );
+    ensure_table_indexes(
+        $db,
+        $db->prefix . 'must_reservations',
+        ['provider_fulfilment_lease' => 'provider_fulfilment_lease_expires_at']
+    );
 }
 
 /**

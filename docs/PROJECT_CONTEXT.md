@@ -2,10 +2,10 @@
 
 ## Evidence baseline
 
-- Current branch inspected: `main`.
-- Current commit/tag: `dcff3b4` / `v0.4.90`.
+- Integration branch inspected: `codex/clock-certification-code-integration`.
+- Base commit: `a920db3`; the integration changes are currently uncommitted.
 - Plugin header and version constant: `0.4.90`.
-- Evidence date: 2026-07-13.
+- Evidence date: 2026-07-15.
 - Current executable source outranks documentation. Production configuration and database state were not inspected.
 
 ## Product purpose
@@ -17,7 +17,7 @@ MUST Hotel Booking is a WordPress plugin for hotel sales and operations. It cove
 | Capability | Status | Evidence-based boundary |
 | --- | --- | --- |
 | Local public booking | Implemented | Managed booking pages, local availability/quote/reservation providers, locks, pricing, coupons, checkout and confirmation exist. |
-| Clock-backed public booking | Implemented with critical risks | Online payment uses a local pending mirror and post-payment Clock fulfillment. Paid-outcome durability, callback concurrency, and recovery are incomplete. |
+| Clock-backed public booking | Implemented; certification pending | Online payment uses a local pending mirror, durable verified-payment evidence, an exclusive Clock-fulfillment lease, serialized post-provider local completion, and manual-review boundaries for expired, ambiguous, or partial outcomes. Runtime/provider acceptance remains unverified. |
 | Stripe | Implemented | Checkout sessions, signed webhooks, return verification, refunds, fee snapshots, and Clock accounting exist. Production configuration is unknown. |
 | PokPay | Implemented | SDK order creation/fetch/finalization, embedded/redirect modes, refund attempt/manual fallback, and credential verification exist. Production configuration is unknown. |
 | Pay at Hotel | Implemented, opt-in | Disabled by default. Explicit enablement creates confirmed/unpaid reservations and manual cash refund behavior. |
@@ -84,25 +84,22 @@ Code supports local, staging and production payment credential slots, plus Clock
 
 ## Current limitations and unresolved risks
 
-1. Public confirmation lookups are not bound to a guest session or signed view token and can expose guest/reservation data by ID.
-2. A forged PokPay return query can fail another pending reservation.
-3. Provider-paid evidence is written locally only after Clock fulfillment succeeds; a Clock failure can strand a captured payment without an internal recovery job.
-4. Concurrent duplicate callbacks may create duplicate Clock bookings; current payment-first tests do not behaviorally test this.
-5. Concurrent refund and ambiguous Clock accounting retries have unresolved idempotency risks.
-6. Selected local rate-plan propagation and final cancellation-policy comparison have code/documentation discrepancies requiring focused tests.
-7. Clock checked-in room/type moves, accommodation-charge cleanup, cancellation-fee accounting, and ambiguous financial adjustments remain manual or unsupported.
-8. Distribution metadata declares PHP 7.4 support while active code uses PHP 8-only helpers; PHP 7.4 runtime compatibility is not credible without remediation/testing.
-9. Public rendering can trigger a PokPay credential authentication probe when saved credential state is unverified; passive requests should not own provider diagnostics.
-10. Guest cancellation tokens have no explicit expiry, provider/activity log retention is unspecified, and no durable email retry queue was verified.
-11. Production acceptance is not established by repository evidence. Dated sandbox/E2E notes are historical, not current readiness proof.
+1. The new confirmation grants, callback binding, verified-payment persistence, and fulfillment leases have received static review only; database concurrency and provider behavior are not certified.
+2. There is no automatic recovery worker for Clock fulfillment held in `manual_review`; staff must reread Clock before any approved recovery create.
+3. Concurrent refund and ambiguous Clock accounting retries retain unresolved idempotency risk outside this integration.
+4. Selected local rate-plan propagation and final cancellation-policy comparison have code/documentation discrepancies requiring focused tests.
+5. Clock checked-in room/type moves, accommodation-charge cleanup, cancellation-fee accounting, and ambiguous financial adjustments remain manual or unsupported.
+6. Distribution metadata declares PHP 7.4 support while active code uses PHP 8-only helpers; PHP 7.4 runtime compatibility is not credible without remediation/testing.
+7. Public rendering can trigger a PokPay credential authentication probe when saved credential state is unverified; passive requests should not own provider diagnostics.
+8. Provider/activity log retention is unspecified, and no durable email retry queue was verified.
+9. Production acceptance is not established by repository evidence. Dated sandbox/E2E notes are historical, not current readiness proof.
 
 Detailed evidence and future phases are in `REPOSITORY_CONSOLIDATION_PLAN.md`.
 
 ## Current priorities
 
-1. Close the confirmation IDOR and forged-return state change.
-2. Add durable provider-paid outcome recording and recoverable, exclusive Clock fulfillment.
-3. Add behavioral database/concurrency tests for confirmation, callbacks, refunds, inventory and accounting.
-4. Reconcile the unmerged confirmation-integrity design with current `main` without assuming branch code is released.
-5. Reconcile declared/runtime PHP compatibility and move provider credential probes out of passive public rendering.
-6. Complete later repository cleanup only after integrity coverage exists.
+1. Human-review and certify the integrated confirmation, payment, and Clock fulfillment call paths.
+2. Perform approved behavioral database/concurrency coverage for confirmation, callbacks, refunds, inventory and accounting.
+3. Certify Clock create/reference persistence, timeout-after-write recovery, and multi-room partial outcomes in a non-production environment.
+4. Reconcile declared/runtime PHP compatibility and move provider credential probes out of passive public rendering.
+5. Complete later repository cleanup only after integrity coverage exists.

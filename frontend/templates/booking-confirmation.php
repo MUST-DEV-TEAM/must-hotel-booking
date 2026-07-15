@@ -42,24 +42,25 @@ if (!empty($cancellation_review['message'])) {
         }
     ));
 }
-$cancellation_reservation_id = isset($cancellation_review['reservation_id']) ? (int) $cancellation_review['reservation_id'] : 0;
-$cancellation_booking_id = '';
-if (isset($_POST['booking_id'])) {
-    $cancellation_booking_id = \sanitize_text_field((string) \wp_unslash($_POST['booking_id']));
-} elseif (isset($_GET['booking_id'])) {
-    $cancellation_booking_id = \sanitize_text_field((string) \wp_unslash($_GET['booking_id']));
-}
-$cancellation_token = '';
-if (isset($_POST['cancel_token'])) {
-    $cancellation_token = \sanitize_text_field((string) \wp_unslash($_POST['cancel_token']));
-} elseif (isset($_GET['cancel_token'])) {
-    $cancellation_token = \sanitize_text_field((string) \wp_unslash($_GET['cancel_token']));
-}
 $can_show_cancellation_confirm_form = !empty($cancellation_review['eligible'])
     && empty($cancellation_review['manual_only'])
-    && $cancellation_reservation_id > 0
-    && $cancellation_booking_id !== ''
-    && $cancellation_token !== '';
+    && !empty($cancellation_review['execution_ready']);
+$cancellation_request_action = isset($_GET['must_action'])
+    ? \sanitize_key((string) \wp_unslash($_GET['must_action']))
+    : '';
+$cancellation_form_action = $cancellation_request_action === 'confirm_cancellation'
+    ? 'execute_cancellation'
+    : 'prepare_cancellation';
+$cancellation_nonce_action = $cancellation_form_action === 'execute_cancellation'
+    ? 'must_confirm_cancellation'
+    : 'must_prepare_cancellation';
+$cancellation_form_url = $confirmation_url;
+$cancellation_context_selector = isset($_GET['access_context'])
+    ? \sanitize_text_field((string) \wp_unslash($_GET['access_context']))
+    : '';
+if ((bool) \preg_match('/\A[a-f0-9]{64}\z/i', $cancellation_context_selector)) {
+    $cancellation_form_url = \add_query_arg(['access_context' => $cancellation_context_selector], $cancellation_form_url);
+}
 if ($can_show_cancellation_confirm_form && !empty($reservations)) {
     foreach ($reservations as $reservation) {
         if (!\is_array($reservation)) {
@@ -279,17 +280,11 @@ $render_payment_method_icon = static function (string $payment_method_key, strin
                         </div>
                         <?php if ($can_show_cancellation_confirm_form): ?>
                             <div class="must-confirmation-paid-success-actions">
-                                <form method="post" action="<?php echo \esc_url($confirmation_url); ?>"
+                                <form method="post" action="<?php echo \esc_url($cancellation_form_url); ?>"
                                     class="must-cancellation-confirm-form"
                                     onsubmit="return window.confirm('<?php echo \esc_js(__('Cancellation is final. Cancel this booking now?', 'must-hotel-booking')); ?>');">
-                                    <?php \wp_nonce_field('must_confirm_cancellation', 'must_cancellation_nonce'); ?>
-                                    <input type="hidden" name="must_confirmation_action" value="confirm_cancellation" />
-                                    <input type="hidden" name="reservation_id"
-                                        value="<?php echo \esc_attr((string) $cancellation_reservation_id); ?>" />
-                                    <input type="hidden" name="booking_id"
-                                        value="<?php echo \esc_attr($cancellation_booking_id); ?>" />
-                                    <input type="hidden" name="cancel_token"
-                                        value="<?php echo \esc_attr($cancellation_token); ?>" />
+                                    <?php \wp_nonce_field($cancellation_nonce_action, 'must_cancellation_nonce'); ?>
+                                    <input type="hidden" name="must_confirmation_action" value="<?php echo \esc_attr($cancellation_form_action); ?>" />
                                     <button type="submit" class="must-confirmation-submit must-cancellation-confirm-submit">
                                         <span><?php echo \esc_html__('Cancel reservation', 'must-hotel-booking'); ?></span>
                                         <?php if ($arrow_icon_url !== ''): ?>

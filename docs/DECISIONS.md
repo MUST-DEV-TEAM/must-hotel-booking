@@ -22,8 +22,11 @@ This register contains durable project decisions supported by current source, Gi
 | D-016 | 2026-07-12 | Accepted | In Clock booking mode, create pending local records, establish authoritative online payment success, then fulfill the Clock reservation. | A provider reservation must not be created before online payment is verified. | Booking and payment | [ADR-0001](decisions/ADR-0001-payment-first-clock-fulfillment.md) | Verified |
 | D-017 | 2026-07-13 | Accepted | Replace overlapping manuals, reports, and task diaries with a small canonical documentation set; keep exact history in Git. | Duplicate documents disagreed with current `0.4.90` behavior and increased maintenance cost. | Repository documentation | — | Verified |
 
+| D-018 | 2026-07-15 | Accepted | Authorize public confirmation and cancellation with opaque, hashed, expiring grants scoped to an exact reservation set and exchanged for per-tab contexts. | Numeric IDs and browser return parameters are not authorization. | Public booking access | — | Static code review |
+| D-019 | 2026-07-15 | Accepted | Persist verified gateway evidence before Clock writes, serialize fulfillment with an owner-token lease, and serialize post-provider local completion before emitting hooks; ambiguous, expired, persistence-failed, or partial outcomes stop in manual review. | Cross-system writes cannot be atomic and concurrent callbacks can duplicate reservations, ledger rows, or side effects without explicit ownership. | Booking and payment | [ADR-0001](decisions/ADR-0001-payment-first-clock-fulfillment.md) | Static code review |
+
 ## Current non-decisions
 
-- Confirmation-integrity Phase 1 and Phase 2 work exists only on unmerged `codex/` branches. Its immutable attempt binding, centralized confirmation authorization, and related schema are not accepted current-`main` behavior.
+- No decision authorizes automatic replay of a `manual_review` or expired Clock-fulfillment lease without first rereading and reconciling Clock.
 - No decision authorizes automatic Clock accommodation-charge deletion, automatic cancellation-fee charge posting, automatic financial settlement of amendment deltas, or blind retry of ambiguous provider writes.
 - No decision establishes the plugin as production-ready. Current readiness is constrained by the risks in [PROJECT_CONTEXT.md](PROJECT_CONTEXT.md) and the temporary [consolidation plan](REPOSITORY_CONSOLIDATION_PLAN.md).

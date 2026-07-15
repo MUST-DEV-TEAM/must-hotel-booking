@@ -77,8 +77,7 @@ document.addEventListener('DOMContentLoaded', function () {
                 'X-WP-Nonce': String(config.nonce || '')
             },
             body: JSON.stringify({
-                order_id: config.orderId || '',
-                reservation_ids: config.reservationIds || []
+                order_id: config.orderId || ''
             })
         })
             .then(function (response) {

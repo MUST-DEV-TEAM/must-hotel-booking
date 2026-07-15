@@ -753,6 +753,33 @@ final class PaymentEngine
      */
     public static function syncReturnSession(string $method, string $sessionId, array $reservationIds): array
     {
+        return self::syncReturnSessionWithPolicy($method, $sessionId, $reservationIds, true, true);
+    }
+
+    /**
+     * Inspect a browser return with authoritative provider verification while
+     * preventing failure/expiry paths from changing local booking state.
+     *
+     * @param array<int, int> $reservationIds
+     * @return array<string, mixed>
+     */
+    public static function inspectReturnSession(string $method, string $sessionId, array $reservationIds): array
+    {
+        return self::syncReturnSessionWithPolicy($method, $sessionId, $reservationIds, false, true);
+    }
+
+    /**
+     * @param array<int, int> $reservationIds
+     * @return array<string, mixed>
+     */
+    private static function syncReturnSessionWithPolicy(
+        string $method,
+        string $sessionId,
+        array $reservationIds,
+        bool $allowFailureMutation,
+        bool $allowSuccessMutation
+    ): array
+    {
         if (self::normalizeMethod($method) !== 'stripe') {
             return [
                 'success' => false,
@@ -777,6 +804,12 @@ final class PaymentEngine
         $sessionStatus = isset($session['status']) ? (string) $session['status'] : '';
         if ($paymentStatus === 'paid' && $sessionStatus === 'complete') {
             $transactionId = isset($session['payment_intent']) ? (string) $session['payment_intent'] : $sessionId;
+            if (!$allowSuccessMutation) {
+                return [
+                    'success' => true,
+                    'state' => 'paid',
+                ];
+            }
             if (self::stripeCompletedSessionAlreadyRecorded($reservationIds, $transactionId)) {
                 return [
                     'success' => true,
@@ -809,7 +842,9 @@ final class PaymentEngine
                     'message' => \__('Expired Stripe session is not bound to this local payment reservation.', 'must-hotel-booking'),
                 ];
             }
-            BookingStatusEngine::failPendingStripeReservations($reservationIds, 'expired');
+            if ($allowFailureMutation) {
+                BookingStatusEngine::failPendingStripeReservations($reservationIds, 'expired');
+            }
             return [
                 'success' => true,
                 'state' => 'expired',
@@ -1030,24 +1065,33 @@ final class PaymentEngine
         $successUrl = isset($options['success_url']) ? \esc_url_raw((string) $options['success_url']) : '';
         $cancelUrl = isset($options['cancel_url']) ? \esc_url_raw((string) $options['cancel_url']) : '';
         if ($successUrl === '') {
-            $successUrl = \add_query_arg(
+            $successUrl = (new PublicBookingAccessService())->buildPublicUrl(
+                ManagedPages::getBookingConfirmationPageUrl(),
+                $reservationIds,
+                PublicBookingAccessService::PURPOSE_VIEW_CONFIRMATION,
                 [
-                    'reservation_ids' => \implode(',', $reservationIds),
                     'payment_method' => 'stripe',
                     'stripe_return' => 'success',
                     'session_id' => '{CHECKOUT_SESSION_ID}',
-                ],
-                ManagedPages::getBookingConfirmationPageUrl()
+                ]
             );
         }
         if ($cancelUrl === '') {
-            $cancelUrl = \add_query_arg(
+            $cancelUrl = (new PublicBookingAccessService())->buildPublicUrl(
+                ManagedPages::getBookingConfirmationPageUrl(),
+                $reservationIds,
+                PublicBookingAccessService::PURPOSE_VIEW_CONFIRMATION,
                 [
                     'payment_method' => 'stripe',
                     'stripe_return' => 'cancel',
-                ],
-                ManagedPages::getBookingConfirmationPageUrl()
+                ]
             );
+        }
+        if ($successUrl === '' || $cancelUrl === '') {
+            return [
+                'success' => false,
+                'message' => __('Unable to establish a secure confirmation link for Stripe checkout.', 'must-hotel-booking'),
+            ];
         }
         $successUrl = MustBookingConfig::build_public_callback_url($successUrl);
         $cancelUrl = MustBookingConfig::build_public_callback_url($cancelUrl);
@@ -1149,22 +1193,31 @@ final class PaymentEngine
             )
             : \__('Hotel stay reservation', 'must-hotel-booking');
         $confirmationUrl = ManagedPages::getBookingConfirmationPageUrl();
-        $successUrl = \add_query_arg(
+        $publicAccess = new PublicBookingAccessService();
+        $successUrl = $publicAccess->buildPublicUrl(
+            $confirmationUrl,
+            $reservationIds,
+            PublicBookingAccessService::PURPOSE_VIEW_CONFIRMATION,
             [
-                'reservation_ids' => \implode(',', $reservationIds),
                 'payment_method' => 'pokpay',
                 'pokpay_return' => 'success',
-            ],
-            $confirmationUrl
+            ]
         );
-        $failUrl = \add_query_arg(
+        $failUrl = $publicAccess->buildPublicUrl(
+            $confirmationUrl,
+            $reservationIds,
+            PublicBookingAccessService::PURPOSE_VIEW_CONFIRMATION,
             [
-                'reservation_ids' => \implode(',', $reservationIds),
                 'payment_method' => 'pokpay',
                 'pokpay_return' => 'cancel',
-            ],
-            $confirmationUrl
+            ]
         );
+        if ($successUrl === '' || $failUrl === '') {
+            return [
+                'success' => false,
+                'message' => __('Unable to establish a secure confirmation link for PokPay checkout.', 'must-hotel-booking'),
+            ];
+        }
         $successUrl = MustBookingConfig::build_public_callback_url($successUrl);
         $failUrl = MustBookingConfig::build_public_callback_url($failUrl);
         $payload = [
@@ -1410,18 +1463,20 @@ final class PaymentEngine
             if (\function_exists('MustHotelBooking\Frontend\clear_booking_selection')) {
                 \MustHotelBooking\Frontend\clear_booking_selection(false);
             }
+            $redirectUrl = (new PublicBookingAccessService())->buildPublicUrl(
+                ManagedPages::getBookingConfirmationPageUrl(),
+                $reservationIds,
+                PublicBookingAccessService::PURPOSE_VIEW_CONFIRMATION,
+                [
+                    'payment_method' => 'pokpay',
+                    'pokpay_return' => 'success',
+                    'order_id' => $orderId,
+                ]
+            );
             return [
                 'success' => true,
                 'state' => 'paid',
-                'redirect_url' => \add_query_arg(
-                    [
-                        'reservation_ids' => \implode(',', $reservationIds),
-                        'payment_method' => 'pokpay',
-                        'pokpay_return' => 'success',
-                        'order_id' => $orderId,
-                    ],
-                    ManagedPages::getBookingConfirmationPageUrl()
-                ),
+                'redirect_url' => $redirectUrl,
             ];
         }
         if (\in_array($status, ['FAILED', 'DECLINED', 'CANCELED', 'CANCELLED', 'EXPIRED'], true)) {
@@ -2311,7 +2366,17 @@ final class PaymentEngine
         $params = $request->get_json_params();
         $params = \is_array($params) ? $params : [];
         $orderId = isset($params['order_id']) ? \sanitize_text_field((string) $params['order_id']) : '';
-        $reservationIds = self::normalizeReservationIdsFromMixed($params['reservation_ids'] ?? []);
+        $publicAccess = new PublicBookingAccessService();
+        $requestQuery = method_exists($request, 'get_query_params') ? $request->get_query_params() : [];
+        $requestQuery = \is_array($requestQuery) ? $requestQuery : [];
+        $accessGrant = $publicAccess->authorizeRequest(
+            PublicBookingAccessService::PURPOSE_VIEW_CONFIRMATION,
+            $requestQuery,
+            \is_array($_COOKIE) ? $_COOKIE : []
+        );
+        $reservationIds = !empty($accessGrant['success'])
+            ? PublicBookingAccessService::normalizeReservationIds((array) ($accessGrant['reservation_ids'] ?? []))
+            : [];
         if ($orderId === '' || empty($reservationIds)) {
             return new \WP_REST_Response(['success' => false, 'message' => \__('Payment details are missing.', 'must-hotel-booking')], 400);
         }
@@ -2357,7 +2422,7 @@ final class PaymentEngine
             'message' => isset($params['message']) ? \substr(\sanitize_text_field((string) $params['message']), 0, 500) : '',
             'code' => isset($params['code']) ? \substr(\sanitize_key((string) $params['code']), 0, 80) : '',
         ];
-        \error_log('MUST Hotel Booking PokPay checkout error: ' . \wp_json_encode($context));
+        \error_log('MUST Hotel Booking PokPay checkout error: ' . \wp_json_encode(ProviderDataSanitizer::sanitize($context)));
         return new \WP_REST_Response(['success' => true], 200);
     }
     public static function handlePokPayWebhookRequest(\WP_REST_Request $request): \WP_REST_Response
@@ -2408,6 +2473,15 @@ final class PaymentEngine
             }
         }
         if ($clockRequired) {
+            $durableVerification = self::recordVerifiedClockPaymentFulfilment(
+                $method,
+                $reservationIds,
+                $transactionId,
+                $providerReference
+            );
+            if (empty($durableVerification['success'])) {
+                return $durableVerification;
+            }
             $reservations = new \MustHotelBooking\Provider\Clock\ClockReservationProvider();
             if (!$reservations instanceof \MustHotelBooking\Provider\Clock\ClockReservationProvider) {
                 return [
@@ -2423,16 +2497,68 @@ final class PaymentEngine
             }
         }
 
-        BookingStatusEngine::createPaymentRows($reservationIds, $method, 'paid', $transactionId);
-        BookingStatusEngine::updateReservationStatuses($reservationIds, 'confirmed', 'paid');
-        if (!self::allReservationsConfirmed($reservationIds)) {
+        $repository = get_reservation_repository();
+        if (!$repository->beginTransaction()) {
             return [
                 'success' => false,
-                'state' => 'pending_fulfilment',
+                'state' => 'manual_review',
+                'retryable' => false,
+                'message' => \__('Verified payment completion could not be serialized safely.', 'must-hotel-booking'),
+            ];
+        }
+        foreach ($reservationIds as $reservationId) {
+            if (!\is_array($repository->getReservationForUpdate((int) $reservationId))) {
+                $repository->rollback();
+                return [
+                    'success' => false,
+                    'state' => 'manual_review',
+                    'retryable' => false,
+                    'message' => \__('A verified payment reservation could not be locked for completion.', 'must-hotel-booking'),
+                ];
+            }
+        }
+
+        $paymentOutcome = BookingStatusEngine::createPaymentRows($reservationIds, $method, 'paid', $transactionId, false);
+        if (!empty($paymentOutcome['failed'])) {
+            $repository->rollback();
+            return [
+                'success' => false,
+                'state' => 'manual_review',
+                'retryable' => false,
+                'message' => \__('Payment was verified, but its local payment evidence could not be completed safely.', 'must-hotel-booking'),
+            ];
+        }
+        $statusOutcome = BookingStatusEngine::updateReservationStatuses($reservationIds, 'confirmed', 'paid', false);
+        if (!empty($statusOutcome['blocked']) || !empty($statusOutcome['failed'])) {
+            $repository->rollback();
+            return [
+                'success' => false,
+                'state' => 'manual_review',
+                'retryable' => false,
+                'message' => \__('Payment was verified, but local confirmation was blocked and requires review.', 'must-hotel-booking'),
+            ];
+        }
+        if (!self::allReservationsConfirmed($reservationIds)) {
+            $repository->rollback();
+            return [
+                'success' => false,
+                'state' => 'manual_review',
                 'retryable' => false,
                 'message' => \__('Payment was verified, but the reservation could not be confirmed safely.', 'must-hotel-booking'),
             ];
         }
+        if (!$repository->commit()) {
+            $repository->rollback();
+            return [
+                'success' => false,
+                'state' => 'manual_review',
+                'retryable' => false,
+                'message' => \__('Verified payment completion could not be committed safely.', 'must-hotel-booking'),
+            ];
+        }
+
+        BookingStatusEngine::dispatchPaymentRecordedEvents($paymentOutcome);
+        BookingStatusEngine::dispatchReservationStatusEvents($statusOutcome);
 
         if (\function_exists('MustHotelBooking\\Frontend\\clear_booking_selection')) {
             \MustHotelBooking\Frontend\clear_booking_selection(false);
@@ -2535,15 +2661,235 @@ final class PaymentEngine
         return true;
     }
 
+    /**
+     * Persist authoritative payment evidence before making any Clock write.
+     * This is intentionally distinct from local booking confirmation and does
+     * not emit payment/accounting hooks.
+     *
+     * @param array<int, int> $reservationIds
+     * @return array<string, mixed>
+     */
+    private static function recordVerifiedClockPaymentFulfilment(
+        string $method,
+        array $reservationIds,
+        string $transactionId,
+        string $providerReference
+    ): array {
+        $reservationIds = self::normalizeReservationIds($reservationIds);
+        $currency = \strtoupper(\sanitize_text_field((string) MustBookingConfig::get_currency()));
+        $totalAmount = self::sumReservationTotals($reservationIds);
+        if ($currency === '' || $totalAmount === null || $totalAmount <= 0.0) {
+            return [
+                'success' => false,
+                'state' => 'manual_review',
+                'retryable' => false,
+                'message' => \__('Verified payment evidence could not be recorded without a complete local allocation.', 'must-hotel-booking'),
+            ];
+        }
+
+        $repository = get_reservation_repository();
+        $verifiedAt = \current_time('mysql');
+        $environment = self::getActiveSiteEnvironment();
+        $accountFingerprint = self::paymentProviderAccountFingerprint($method, $environment);
+        if (!$repository->beginTransaction()) {
+            return [
+                'success' => false,
+                'state' => 'manual_review',
+                'retryable' => false,
+                'message' => \__('Verified payment evidence could not be locked before Clock fulfillment.', 'must-hotel-booking'),
+            ];
+        }
+
+        $lockedReservations = [];
+        foreach ($reservationIds as $reservationId) {
+            $reservation = $repository->getReservationForUpdate((int) $reservationId);
+            if (!\is_array($reservation)) {
+                $repository->rollback();
+                return [
+                    'success' => false,
+                    'state' => 'manual_review',
+                    'retryable' => false,
+                    'message' => \__('A payment allocation could not be found before Clock fulfillment.', 'must-hotel-booking'),
+                ];
+            }
+            if (\sanitize_key((string) ($reservation['provider'] ?? '')) !== ProviderManager::CLOCK_MODE) {
+                $repository->rollback();
+                return [
+                    'success' => false,
+                    'state' => 'manual_review',
+                    'retryable' => false,
+                    'message' => \__('The verified payment group does not map entirely to Clock reservations.', 'must-hotel-booking'),
+                ];
+            }
+            $syncStatus = \sanitize_key((string) ($reservation['provider_sync_status'] ?? ''));
+            if ($syncStatus === 'manual_review') {
+                $repository->rollback();
+                return [
+                    'success' => false,
+                    'state' => 'manual_review',
+                    'retryable' => false,
+                    'message' => \__('This verified payment is already held for Clock recovery review.', 'must-hotel-booking'),
+                ];
+            }
+            if (!\in_array($syncStatus, ['', 'pending_payment', 'pending_fulfilment', 'creating', 'synced'], true)) {
+                if (!$repository->updateProviderMetadata((int) $reservationId, [
+                    'provider_sync_status' => 'manual_review',
+                    'provider_sync_error' => 'verified_payment_incompatible_fulfilment_state',
+                ]) || !$repository->commit()) {
+                    $repository->rollback();
+                }
+                return [
+                    'success' => false,
+                    'state' => 'manual_review',
+                    'retryable' => false,
+                    'message' => \__('The verified payment conflicts with the stored Clock fulfillment state.', 'must-hotel-booking'),
+                ];
+            }
+            $lockedReservations[$reservationId] = $reservation;
+        }
+
+        foreach ($lockedReservations as $reservationId => $reservation) {
+            $syncStatus = \sanitize_key((string) ($reservation['provider_sync_status'] ?? ''));
+
+            $metadata = self::decodeProviderMetadata((string) ($reservation['provider_metadata'] ?? ''));
+            $expectedVerification = [
+                'state' => 'verified_clock_fulfilment_pending',
+                'payment_method' => $method,
+                'provider_transaction_reference' => \sanitize_text_field($transactionId),
+                'provider_payment_reference' => \sanitize_text_field($providerReference),
+                'amount' => \round((float) ($reservation['total_price'] ?? 0.0), 2),
+                'group_amount' => \round($totalAmount, 2),
+                'currency' => $currency,
+                'environment' => $environment,
+                'account_fingerprint' => $accountFingerprint,
+                'reservation_allocation' => (int) $reservationId,
+                'reservation_group' => $reservationIds,
+            ];
+            $existingVerification = isset($metadata['online_payment_verification']) && \is_array($metadata['online_payment_verification'])
+                ? $metadata['online_payment_verification']
+                : [];
+            if (!empty($existingVerification) && !self::clockPaymentVerificationMatches($existingVerification, $expectedVerification)) {
+                if (!$repository->updateProviderMetadata((int) $reservationId, [
+                    'provider_sync_status' => 'manual_review',
+                    'provider_sync_error' => 'verified_payment_evidence_mismatch',
+                ]) || !$repository->commit()) {
+                    $repository->rollback();
+                }
+                return [
+                    'success' => false,
+                    'state' => 'manual_review',
+                    'retryable' => false,
+                    'message' => \__('Stored verified-payment evidence conflicts with this callback and requires review.', 'must-hotel-booking'),
+                ];
+            }
+            if (empty($existingVerification) && $syncStatus === 'creating') {
+                if (!$repository->updateProviderMetadata((int) $reservationId, [
+                    'provider_sync_status' => 'manual_review',
+                    'provider_sync_error' => 'missing_verified_payment_evidence_during_create',
+                ]) || !$repository->commit()) {
+                    $repository->rollback();
+                }
+                return [
+                    'success' => false,
+                    'state' => 'manual_review',
+                    'retryable' => false,
+                    'message' => \__('An active Clock fulfillment has no durable verified-payment evidence.', 'must-hotel-booking'),
+                ];
+            }
+            if (!empty($existingVerification)) {
+                continue;
+            }
+
+            $metadata['website_payment_verified'] = true;
+            $metadata['pending_clock_creation'] = \trim((string) ($reservation['provider_booking_id'] ?? '')) === ''
+                && \trim((string) ($reservation['provider_reservation_id'] ?? '')) === '';
+            $metadata['online_payment_verification'] = $expectedVerification + [
+                'verified_at' => $verifiedAt,
+                'fulfilment_state' => $syncStatus === 'synced' ? 'fulfilled' : 'pending',
+                'last_safe_recovery' => $syncStatus === 'synced' ? 'clock_identifiers_already_stored' : 'clock_create_not_started',
+            ];
+            $providerUpdate = [
+                'provider_sync_error' => '',
+                'provider_metadata' => $metadata,
+            ];
+            if ($syncStatus !== 'synced') {
+                $providerUpdate['provider_sync_status'] = 'pending_fulfilment';
+            }
+            if (!$repository->updateProviderMetadata((int) $reservationId, $providerUpdate)) {
+                $repository->rollback();
+                return [
+                    'success' => false,
+                    'state' => 'manual_review',
+                    'retryable' => false,
+                    'message' => \__('Verified payment evidence could not be saved before Clock fulfillment.', 'must-hotel-booking'),
+                ];
+            }
+        }
+
+        if (!$repository->commit()) {
+            $repository->rollback();
+            return [
+                'success' => false,
+                'state' => 'manual_review',
+                'retryable' => false,
+                'message' => \__('Verified payment evidence could not be committed before Clock fulfillment.', 'must-hotel-booking'),
+            ];
+        }
+
+        return ['success' => true, 'state' => 'pending_fulfilment'];
+    }
+
+    /** @param array<string, mixed> $stored @param array<string, mixed> $expected */
+    private static function clockPaymentVerificationMatches(array $stored, array $expected): bool
+    {
+        foreach (['payment_method', 'provider_transaction_reference', 'provider_payment_reference', 'currency', 'environment', 'account_fingerprint'] as $key) {
+            if ((string) ($stored[$key] ?? '') !== (string) ($expected[$key] ?? '')) {
+                return false;
+            }
+        }
+        if ((int) ($stored['reservation_allocation'] ?? 0) !== (int) ($expected['reservation_allocation'] ?? 0)) {
+            return false;
+        }
+        if (\abs((float) ($stored['amount'] ?? -1) - (float) ($expected['amount'] ?? 0)) > 0.01
+            || \abs((float) ($stored['group_amount'] ?? -1) - (float) ($expected['group_amount'] ?? 0)) > 0.01) {
+            return false;
+        }
+        return self::sameReservationIds(
+            self::normalizeReservationIds((array) ($stored['reservation_group'] ?? [])),
+            self::normalizeReservationIds((array) ($expected['reservation_group'] ?? []))
+        );
+    }
+
+    /** @return array<string, mixed> */
+    private static function decodeProviderMetadata(string $value): array
+    {
+        $decoded = \json_decode($value, true);
+        return \is_array($decoded) ? $decoded : [];
+    }
+
+    private static function paymentProviderAccountFingerprint(string $method, string $environment): string
+    {
+        $credentials = $method === 'stripe'
+            ? self::getStripeEnvironmentCredentials($environment)
+            : self::getPokPayEnvironmentCredentials($environment);
+        $identity = $method === 'stripe'
+            ? (string) ($credentials['publishable_key'] ?? '')
+            : (string) ($credentials['merchant_id'] ?? '') . '|' . (string) ($credentials['key_id'] ?? '');
+        return \hash('sha256', $method . '|' . $environment . '|' . $identity);
+    }
+
     /** @param array<int, int> $reservationIds */
     private static function hasPendingClockFulfilment(array $reservationIds): bool
     {
         foreach (self::normalizeReservationIds($reservationIds) as $reservationId) {
             $reservation = get_reservation_repository()->getReservation($reservationId);
+            $syncStatus = \is_array($reservation)
+                ? \sanitize_key((string) ($reservation['provider_sync_status'] ?? ''))
+                : '';
             if (
                 \is_array($reservation)
                 && \sanitize_key((string) ($reservation['provider'] ?? '')) === ProviderManager::CLOCK_MODE
-                && \sanitize_key((string) ($reservation['provider_sync_status'] ?? '')) === 'pending_fulfilment'
+                && \in_array($syncStatus, ['pending_fulfilment', 'creating', 'manual_review', 'synced'], true)
             ) {
                 return true;
             }
@@ -2604,14 +2950,16 @@ final class PaymentEngine
      */
     private static function normalizeReservationIds(array $reservationIds): array
     {
-        return \array_values(
+        $reservationIds = \array_values(\array_unique(
             \array_filter(
                 \array_map('intval', $reservationIds),
                 static function (int $reservationId): bool {
                     return $reservationId > 0;
                 }
             )
-        );
+        ));
+        \sort($reservationIds, SORT_NUMERIC);
+        return $reservationIds;
     }
     /**
      * @param mixed $value

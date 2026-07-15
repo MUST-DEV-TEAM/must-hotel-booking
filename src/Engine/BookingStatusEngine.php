@@ -10,16 +10,23 @@ final class BookingStatusEngine
     /**
      * @param array<int, int> $reservationIds
      */
-    public static function updateReservationStatuses(array $reservationIds, string $status, string $paymentStatus): void
+    public static function updateReservationStatuses(array $reservationIds, string $status, string $paymentStatus, bool $dispatchHooks = true): array
     {
         $reservationRows = self::getPaymentReservationRows($reservationIds);
         $reservationRepository = get_reservation_repository();
+        $outcome = ['updated' => [], 'already' => [], 'blocked' => [], 'failed' => [], 'events' => []];
 
         foreach ($reservationRows as $reservationRow) {
             $reservationId = isset($reservationRow['id']) ? (int) $reservationRow['id'] : 0;
             $previousStatus = isset($reservationRow['status']) ? (string) $reservationRow['status'] : '';
+            $previousPaymentStatus = isset($reservationRow['payment_status']) ? (string) $reservationRow['payment_status'] : '';
 
             if ($reservationId <= 0) {
+                $outcome['failed'][] = $reservationId;
+                continue;
+            }
+            if ($previousStatus === $status && ($paymentStatus === '' || $previousPaymentStatus === $paymentStatus)) {
+                $outcome['already'][] = $reservationId;
                 continue;
             }
 
@@ -28,22 +35,35 @@ final class BookingStatusEngine
                 && ReservationStatus::isConfirmed($status)
                 && self::isBlockedOnlineClockConfirmation($reservationId, $paymentStatus)
             ) {
+                $outcome['blocked'][] = $reservationId;
                 continue;
             }
 
-            $reservationRepository->updateReservationStatus($reservationId, $status, $paymentStatus);
+            if (!$reservationRepository->updateReservationStatus($reservationId, $status, $paymentStatus)) {
+                $outcome['failed'][] = $reservationId;
+                continue;
+            }
+            $outcome['updated'][] = $reservationId;
 
             if ($previousStatus !== 'cancelled' && $status === 'cancelled') {
-                \do_action('must_hotel_booking/reservation_cancelled', $reservationId);
+                $outcome['events'][] = ['hook' => 'must_hotel_booking/reservation_cancelled', 'reservation_id' => $reservationId];
+                if ($dispatchHooks) {
+                    \do_action('must_hotel_booking/reservation_cancelled', $reservationId);
+                }
             }
 
             if (
                 !ReservationStatus::isConfirmed($previousStatus) &&
                 ReservationStatus::isConfirmed($status)
             ) {
-                \do_action('must_hotel_booking/reservation_confirmed', $reservationId);
+                $outcome['events'][] = ['hook' => 'must_hotel_booking/reservation_confirmed', 'reservation_id' => $reservationId];
+                if ($dispatchHooks) {
+                    \do_action('must_hotel_booking/reservation_confirmed', $reservationId);
+                }
             }
         }
+
+        return $outcome;
     }
 
     /**
@@ -81,16 +101,18 @@ final class BookingStatusEngine
     /**
      * @param array<int, int> $reservationIds
      */
-    public static function createPaymentRows(array $reservationIds, string $method, string $status, string $transactionId = ''): void
+    public static function createPaymentRows(array $reservationIds, string $method, string $status, string $transactionId = '', bool $dispatchHooks = true): array
     {
         $reservationRows = self::getPaymentReservationRows($reservationIds);
         $currency = \class_exists(MustBookingConfig::class) ? MustBookingConfig::get_currency() : 'USD';
         $paymentRepository = get_payment_repository();
+        $outcome = ['created' => [], 'updated' => [], 'already' => [], 'failed' => [], 'events' => []];
 
         foreach ($reservationRows as $reservationRow) {
             $reservationId = isset($reservationRow['id']) ? (int) $reservationRow['id'] : 0;
 
             if ($reservationId <= 0) {
+                $outcome['failed'][] = $reservationId;
                 continue;
             }
 
@@ -119,6 +141,7 @@ final class BookingStatusEngine
                     \is_array($existingPayment)
                     && self::paymentRecordAlreadyMatches($existingPayment, $paymentData, $transactionId)
                 ) {
+                    $outcome['already'][] = $reservationId;
                     continue;
                 }
 
@@ -129,20 +152,25 @@ final class BookingStatusEngine
                 $updated = $paymentRepository->updatePayment($existingPaymentId, $paymentData);
 
                 if ($updated) {
-                    \do_action(
-                        'must_hotel_booking/payment_recorded',
-                        [
-                            'payment_id' => $existingPaymentId,
-                            'reservation_id' => $reservationId,
-                            'method' => $method,
-                            'status' => $status,
-                            'amount' => isset($paymentData['amount']) ? (float) $paymentData['amount'] : 0.0,
-                            'transaction_id' => $transactionId,
-                            'paid_at' => isset($paymentData['paid_at']) ? (string) $paymentData['paid_at'] : '',
-                            'created_at' => \current_time('mysql'),
-                            'is_update' => true,
-                        ]
-                    );
+                    $outcome['updated'][] = $reservationId;
+                    $event = [
+                        'payment_id' => $existingPaymentId,
+                        'reservation_id' => $reservationId,
+                        'method' => $method,
+                        'status' => $status,
+                        'amount' => isset($paymentData['amount']) ? (float) $paymentData['amount'] : 0.0,
+                        'transaction_id' => $transactionId,
+                        'paid_at' => isset($paymentData['paid_at']) ? (string) $paymentData['paid_at'] : '',
+                        'created_at' => \current_time('mysql'),
+                        'is_update' => true,
+                    ];
+                    $outcome['events'][] = $event;
+                    if ($dispatchHooks) {
+                        \do_action('must_hotel_booking/payment_recorded', $event);
+                    }
+                }
+                if (!$updated) {
+                    $outcome['failed'][] = $reservationId;
                 }
 
                 continue;
@@ -153,20 +181,51 @@ final class BookingStatusEngine
             $paymentId = $paymentRepository->createPayment($paymentData);
 
             if ($paymentId > 0) {
-                \do_action(
-                    'must_hotel_booking/payment_recorded',
-                    [
-                        'payment_id' => $paymentId,
-                        'reservation_id' => $reservationId,
-                        'method' => $method,
-                        'status' => $status,
-                        'amount' => isset($paymentData['amount']) ? (float) $paymentData['amount'] : 0.0,
-                        'transaction_id' => $transactionId,
-                        'paid_at' => isset($paymentData['paid_at']) ? (string) $paymentData['paid_at'] : '',
-                        'created_at' => (string) $paymentData['created_at'],
-                        'is_update' => false,
-                    ]
-                );
+                $outcome['created'][] = $reservationId;
+                $event = [
+                    'payment_id' => $paymentId,
+                    'reservation_id' => $reservationId,
+                    'method' => $method,
+                    'status' => $status,
+                    'amount' => isset($paymentData['amount']) ? (float) $paymentData['amount'] : 0.0,
+                    'transaction_id' => $transactionId,
+                    'paid_at' => isset($paymentData['paid_at']) ? (string) $paymentData['paid_at'] : '',
+                    'created_at' => (string) $paymentData['created_at'],
+                    'is_update' => false,
+                ];
+                $outcome['events'][] = $event;
+                if ($dispatchHooks) {
+                    \do_action('must_hotel_booking/payment_recorded', $event);
+                }
+            } else {
+                $outcome['failed'][] = $reservationId;
+            }
+        }
+
+        return $outcome;
+    }
+
+    /** @param array<string, mixed> $outcome */
+    public static function dispatchReservationStatusEvents(array $outcome): void
+    {
+        foreach ((array) ($outcome['events'] ?? []) as $event) {
+            if (!\is_array($event)) {
+                continue;
+            }
+            $hook = (string) ($event['hook'] ?? '');
+            $reservationId = (int) ($event['reservation_id'] ?? 0);
+            if ($reservationId > 0 && \in_array($hook, ['must_hotel_booking/reservation_cancelled', 'must_hotel_booking/reservation_confirmed'], true)) {
+                \do_action($hook, $reservationId);
+            }
+        }
+    }
+
+    /** @param array<string, mixed> $outcome */
+    public static function dispatchPaymentRecordedEvents(array $outcome): void
+    {
+        foreach ((array) ($outcome['events'] ?? []) as $event) {
+            if (\is_array($event) && (int) ($event['payment_id'] ?? 0) > 0) {
+                \do_action('must_hotel_booking/payment_recorded', $event);
             }
         }
     }
@@ -235,6 +294,7 @@ final class BookingStatusEngine
         $gateway = PaymentEngine::normalizeMethod($paymentMethodHint);
         $statuses = [];
         $paymentStatuses = [];
+        $providerSyncStatuses = [];
 
         foreach ($reservations as $reservation) {
             if (!\is_array($reservation)) {
@@ -243,6 +303,14 @@ final class BookingStatusEngine
 
             $statuses[] = isset($reservation['status']) ? \sanitize_key((string) $reservation['status']) : '';
             $paymentStatuses[] = isset($reservation['payment_status']) ? \sanitize_key((string) $reservation['payment_status']) : '';
+            $providerSyncStatuses[] = isset($reservation['provider_sync_status']) ? \sanitize_key((string) $reservation['provider_sync_status']) : '';
+        }
+
+        if (\in_array('manual_review', $providerSyncStatuses, true)) {
+            return [
+                'heading' => \__('Payment Received — Booking Review Required', 'must-hotel-booking'),
+                'message' => \__('Your payment was verified, but the hotel must safely review the reservation before it can be confirmed. Do not make another payment.', 'must-hotel-booking'),
+            ];
         }
 
         if (!empty($statuses) && \count(\array_unique($statuses)) === 1 && $statuses[0] === 'pending_payment') {

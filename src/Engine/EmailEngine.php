@@ -2,6 +2,7 @@
 namespace MustHotelBooking\Engine;
 use MustHotelBooking\Core\ManagedPages;
 use MustHotelBooking\Core\MustBookingConfig;
+use MustHotelBooking\Engine\PublicBookingAccessService;
 final class EmailEngine
 {
     public const TEMPLATES_SETTING_KEY = 'email_templates';
@@ -627,15 +628,7 @@ final class EmailEngine
             '{hotel_phone}' => $hotelPhone,
             '{hotel_phone_href}' => self::normalizePhoneHref($hotelPhone),
             '{hotel_website}' => (string) \home_url('/'),
-            '{cancellation_url}' => \add_query_arg(
-                [
-                    'booking_id' => 'TEST-1001',
-                    'reservation_id' => 1001,
-                    'must_action' => 'review_cancellation',
-                    'cancel_token' => 'test-token',
-                ],
-                ManagedPages::getBookingConfirmationPageUrl()
-            ),
+            '{cancellation_url}' => '',
             '{cancellation_action_label}' => \__('Review cancellation options', 'must-hotel-booking'),
             '{cancellation_details}' => \__('You can review cancellation eligibility from the link below. The website will check the hotel cancellation policy before any cancellation or refund is confirmed.', 'must-hotel-booking'),
             '{email_footer_text}' => MustBookingConfig::get_email_footer_text(),
@@ -732,7 +725,6 @@ final class EmailEngine
         $definition = self::getTemplateDefinitions()[$templateKey] ?? [];
         $audience = (string) ($definition['audience'] ?? 'guest');
         $label = (string) ($definition['cta_label'] ?? '');
-        $bookingId = isset($meta['booking_id']) ? \trim((string) $meta['booking_id']) : '';
         $reservationId = isset($meta['reservation_id']) ? (int) $meta['reservation_id'] : 0;
         if ($audience === 'admin') {
             if (\function_exists('MustHotelBooking\\Admin\\get_admin_reservation_detail_page_url') && $reservationId > 0) {
@@ -747,10 +739,10 @@ final class EmailEngine
                 'url' => $url,
             ];
         }
-        $url = ManagedPages::getBookingConfirmationPageUrl();
-        if ($bookingId !== '') {
-            $url = \add_query_arg(['booking_id' => $bookingId], $url);
-        }
+        $reservation = $reservationId > 0 ? self::getReservationForEmail($reservationId) : null;
+        $url = \is_array($reservation)
+            ? self::buildGuestPublicAccessUrl($reservation, PublicBookingAccessService::PURPOSE_VIEW_CONFIRMATION)
+            : '';
         return [
             'label' => $label !== '' ? $label : \__('View booking', 'must-hotel-booking'),
             'url' => $url,
@@ -834,30 +826,102 @@ final class EmailEngine
      */
     public static function buildGuestCancellationUrl(array $reservation): string
     {
-        $reservationId = isset($reservation['id']) ? (int) $reservation['id'] : 0;
-        $bookingId = self::resolveBookingId($reservation);
+        return self::buildGuestPublicAccessUrl($reservation, PublicBookingAccessService::PURPOSE_REVIEW_CANCELLATION);
+    }
 
-        if ($reservationId <= 0 || $bookingId === '') {
+    /** @param array<string, mixed> $reservation */
+    private static function buildGuestPublicAccessUrl(array $reservation, string $purpose): string
+    {
+        $reservationId = isset($reservation['id']) ? (int) $reservation['id'] : 0;
+        $reservationIds = self::resolveTrustedReservationGroup($reservation);
+        if ($reservationId <= 0 || empty($reservationIds)) {
             return '';
         }
 
-        return \add_query_arg(
-            [
-                'booking_id' => $bookingId,
-                'reservation_id' => $reservationId,
-                'must_action' => 'review_cancellation',
-                'cancel_token' => self::buildGuestCancellationToken($reservationId, $bookingId, (string) ($reservation['guest_email'] ?? '')),
-            ],
-            ManagedPages::getBookingConfirmationPageUrl()
+        return (new PublicBookingAccessService())->buildPublicUrl(
+            ManagedPages::getBookingConfirmationPageUrl(),
+            $reservationIds,
+            $purpose,
+            $purpose === PublicBookingAccessService::PURPOSE_REVIEW_CANCELLATION
+                ? ['must_action' => 'review_cancellation']
+                : []
         );
     }
-    public static function isValidGuestCancellationToken(int $reservationId, string $bookingId, string $guestEmail, string $token): bool
+
+    /** @param array<string, mixed> $reservation @return array<int, int> */
+    private static function resolveTrustedReservationGroup(array $reservation): array
     {
-        if ($reservationId <= 0 || \trim($bookingId) === '' || \trim($token) === '') {
-            return false;
+        $reservationId = isset($reservation['id']) ? (int) $reservation['id'] : 0;
+        if ($reservationId <= 0) {
+            return [];
         }
-        $expected = self::buildGuestCancellationToken($reservationId, $bookingId, $guestEmail);
-        return $expected !== '' && \hash_equals($expected, $token);
+
+        $payments = get_payment_repository()->getPaymentsForReservation($reservationId);
+        $onlineCandidates = [];
+        foreach ($payments as $payment) {
+            if (!\is_array($payment)) {
+                continue;
+            }
+            $candidateMethod = \sanitize_key((string) ($payment['method'] ?? ''));
+            $candidateTransactionId = \sanitize_text_field((string) ($payment['transaction_id'] ?? ''));
+            $candidateStatus = \sanitize_key((string) ($payment['status'] ?? ''));
+            if (
+                !\in_array($candidateMethod, ['stripe', 'pokpay'], true)
+                || $candidateTransactionId === ''
+                || \in_array($candidateStatus, ['failed', 'refunded', 'refund', 'cancelled'], true)
+            ) {
+                continue;
+            }
+
+            $candidateGroup = PublicBookingAccessService::normalizeReservationIds(
+                get_payment_repository()->findReservationIdsByTransactionId($candidateTransactionId)
+            );
+            if (!\in_array($reservationId, $candidateGroup, true)) {
+                continue;
+            }
+            $onlineCandidates[] = [
+                'transaction_id' => $candidateTransactionId,
+                'reservation_ids' => $candidateGroup,
+            ];
+        }
+        if (!empty($onlineCandidates)) {
+            $transactionIds = [];
+            $candidateGroups = [];
+            foreach ($onlineCandidates as $candidate) {
+                $transactionId = (string) ($candidate['transaction_id'] ?? '');
+                $group = PublicBookingAccessService::normalizeReservationIds((array) ($candidate['reservation_ids'] ?? []));
+                if ($transactionId === '' || empty($group)) {
+                    return [];
+                }
+                $transactionIds[$transactionId] = true;
+                $candidateGroups[implode(',', $group)] = $group;
+            }
+            if (count($transactionIds) !== 1 || count($candidateGroups) !== 1) {
+                return [];
+            }
+            return array_values($candidateGroups)[0];
+        }
+
+        $method = \sanitize_key((string) ($reservation['payment_method'] ?? ''));
+        if (\in_array($method, ['stripe', 'pokpay'], true)) {
+            // An online payment event without one unambiguous trusted
+            // allocation must not receive a broad single-reservation grant.
+            return [];
+        }
+
+        $bookingId = trim((string) ($reservation['booking_id'] ?? ''));
+        if ($bookingId === '' || !method_exists(get_reservation_repository(), 'getConfirmationRowsByBookingId')) {
+            return [];
+        }
+        $bookingRows = get_reservation_repository()->getConfirmationRowsByBookingId($bookingId);
+        $bookingReservationIds = [];
+        foreach ($bookingRows as $bookingRow) {
+            if (is_array($bookingRow) && isset($bookingRow['id'])) {
+                $bookingReservationIds[] = $bookingRow['id'];
+            }
+        }
+        $bookingReservationIds = PublicBookingAccessService::normalizeReservationIds($bookingReservationIds);
+        return in_array($reservationId, $bookingReservationIds, true) ? $bookingReservationIds : [];
     }
     /**
      * @param array<string, mixed> $reservation
@@ -937,13 +1001,6 @@ final class EmailEngine
         }
 
         return \__('You can review cancellation eligibility from the link below. The website will check the hotel cancellation policy before any cancellation or refund is confirmed.', 'must-hotel-booking');
-    }
-    private static function buildGuestCancellationToken(int $reservationId, string $bookingId, string $guestEmail): string
-    {
-        if ($reservationId <= 0 || \trim($bookingId) === '') {
-            return '';
-        }
-        return \wp_hash($reservationId . '|' . \trim($bookingId) . '|' . \strtolower(\trim($guestEmail)), 'auth');
     }
     private static function sanitizeEmailHtml(string $html): string
     {

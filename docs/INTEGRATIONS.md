@@ -24,6 +24,7 @@ All external HTTP traffic uses the WordPress HTTP API. Do not log or document cr
 - Test and production credentials are separate. Environment, merchant/account, currency, and transaction identity are part of payment binding.
 - `public_callback_base_url` may override generated return/webhook URLs only with a verified HTTPS staging/tunnel/public origin.
 - A browser return is transport state, not payment proof.
+- Public confirmation/cancellation links carry opaque expiring grants for one exact reservation set; URL tokens are exchanged for per-tab cookie-bound contexts before details are rendered.
 - Localhost callbacks are not provider-reachable without an explicitly approved tunnel.
 - No live credential probe, provider write, booking, payment, refund, cancellation, webhook replay, or reconciliation is allowed during routine local work.
 
@@ -34,7 +35,7 @@ The route permission callbacks are public because providers cannot use WordPress
 | Method and route | Owner | Internal verification |
 |---|---|---|
 | `POST /wp-json/must-hotel-booking/v1/stripe/webhook` | `PaymentEngine` | Stripe signature, event parsing, provider/local binding |
-| `POST /wp-json/must-hotel-booking/v1/pokpay/finalize` | `PaymentEngine` | WordPress REST nonce plus authoritative PokPay order reread |
+| `POST /wp-json/must-hotel-booking/v1/pokpay/finalize` | `PaymentEngine` | WordPress REST nonce, authorized per-tab confirmation context, exact stored order/reservation-set binding, and authoritative PokPay order reread |
 | `POST /wp-json/must-hotel-booking/v1/pokpay/error` | `PaymentEngine` | Diagnostic input sanitization; not a success signal |
 | `POST /wp-json/must-hotel-booking/v1/pokpay/webhook` | `PaymentEngine` | Known order lookup, local binding, authoritative provider reread |
 | `POST /wp-json/must-hotel-booking/v1/clock/webhook` | `ClockInboundSyncController` | SNS signature/certificate rules or configured legacy authentication |
@@ -66,8 +67,8 @@ Logical settings include Stripe enablement; test/live publishable keys, secret k
 
 - Outbound responses mark network failures, HTTP 429, and 5xx as retryable; general API calls do not blindly retry.
 - Refund creation transmits a stable Stripe `Idempotency-Key`.
-- Existing paid rows plus confirmed reservations short-circuit repeated completion.
-- No durable Stripe event ledger or exclusive cross-callback completion lease was verified. Concurrency remains especially high-risk while Clock fulfillment is in progress.
+- Existing paid rows plus confirmed reservations short-circuit repeated completion; otherwise exact reservation-row locks serialize paid-row/confirmation persistence and defer hooks until commit.
+- Clock-backed completion persists verified-payment evidence before fulfillment and uses an exclusive owner-token lease. Runtime concurrency behavior remains to be certified.
 
 ### Error handling and reconciliation
 
@@ -108,7 +109,7 @@ The plugin authenticates through the provider SDK login, caches the bearer token
 - `PokPayPayment::validatePayment()` can run an external authentication probe when credential state is unverified. Because gateway validation is reachable while rendering a public checkout/confirmation flow, a public request can trigger an external credential probe. Credential verification should be an explicit administrative/operational action.
 - The webhook has no separately verified local shared secret; safety depends on provider reread and binding.
 - Current provider contract, webhook authenticity features, rate limits, production account behavior, and refund idempotency support are unverified.
-- Confirmation return parameters are not authorization and currently participate in the forged-failure defect described in [DOMAIN_LIFECYCLES.md](DOMAIN_LIFECYCLES.md).
+- Confirmation return parameters are transport hints only. Success/finalize mutation requires the authorized reservation set plus stored-order binding; failure/cancel hints do not mutate local state.
 
 ## Clock PMS
 
@@ -167,9 +168,9 @@ Missing rights, ambiguous folio/item identity, transferred/applied/closed folios
 
 ### Current risks and unknowns
 
-- Paid fulfillment lacks a fully durable local paid-outcome/recovery owner before the Clock write.
-- Duplicate callbacks and local persistence failure can create duplicate Clock reservations.
-- Multi-room fulfillment can partially succeed.
+- Verified-payment evidence is durably stored before the Clock write, then an owner-token lease serializes fulfillment.
+- Active claims return `in_progress`; expired claims, ambiguous responses, and Clock-success/local-persistence failures require Clock reread and manual review before any new create.
+- Multi-room fulfillment can partially succeed, but completed reservation IDs are retained and the group is not presented as complete success.
 - Current authoritative endpoints/rights, provider idempotency support, rate limits, production mappings, and webhook reachability were not externally verified.
 - Historical Postman and sandbox evidence is dated evidence, not a current production contract.
 
