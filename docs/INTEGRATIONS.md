@@ -22,6 +22,8 @@ All external HTTP traffic uses the WordPress HTTP API. Do not log or document cr
 `MustBookingConfig` stores plugin configuration in WordPress options and provides normalized helpers. Relevant non-secret logical keys include `provider_mode`, `clock_enabled`, `public_callback_base_url`, payment-method enablement, active site/payment environment, and per-provider environment credentials.
 
 - Test and production credentials are separate. Environment, merchant/account, currency, and transaction identity are part of payment binding.
+- Online initiation requires an explicitly saved `local`, `staging`, or `production` site environment. The server derives provider mode and a salted credential fingerprint; browser-supplied environment/account identity is never accepted.
+- Clock-backed payment requires the corresponding `sandbox` or `production` Clock environment and an administrator-approved fingerprint of the configured region/subscription/account/property target. Changing site, gateway credentials, Clock environment, or Clock target invalidates pending reuse and blocks Clock creation until compatibility is re-established.
 - `public_callback_base_url` may override generated return/webhook URLs only with a verified HTTPS staging/tunnel/public origin.
 - A browser return is transport state, not payment proof.
 - Public confirmation/cancellation links carry opaque expiring grants for one exact reservation set; URL tokens are exchanged for per-tab cookie-bound contexts before details are rendered.
@@ -58,6 +60,7 @@ Logical settings include Stripe enablement; test/live publishable keys, secret k
 ### Identifiers and verification
 
 - Local reservation/payment IDs are bound to the Checkout Session metadata and pending payment transaction reference.
+- Pending rows retain the Checkout Session attempt reference after the paid row moves to the PaymentIntent transaction reference, allowing exact attempt-time allocation and credential checks on every replay.
 - Completion rereads the session and requires `payment_status=paid`, session `status=complete`, the same reservation set, expected amount, expected currency, and matching local session reference.
 - The PaymentIntent ID becomes the paid transaction reference when present.
 - The configured credential path supplies a non-secret account fingerprint and provider mode; both are part of immutable ownership together with the Checkout Session attempt reference.
@@ -95,6 +98,7 @@ The plugin authenticates through the provider SDK login, caches the bearer token
 ### Identifiers and verification
 
 - The SDK-order ID is saved as the pending transaction/provider reference.
+- Each SDK order is durably bound to one exact payment-row allocation, checkout mode, expiry, booking snapshot, explicit site environment, credential fingerprint, and Clock target when required.
 - The order is also bound to the configured PokPay environment and merchant/key fingerprint used for the authoritative reread.
 - Finalization rereads the order and accepts captured/paid/completed provider state only when order, local reservation allocation, amount, and currency match.
 - Redirect/fail/webhook URLs are generated server-side.
@@ -128,6 +132,8 @@ Clock supplies live catalog/availability/rate/reservation data in Clock mode, ac
 ### Authentication and configuration
 
 Clock uses configured API type, regional/subscription/account identifiers, endpoint templates/base URLs, API user/key, inbound path/auth values, room/rate mappings, sync toggles/intervals, timeout/cache/rate-limit values, and accounting mode. Secret values must remain in WordPress settings only.
+
+For payment fulfilment, the stable configured target fingerprint uses the finite Clock environment, API type and resolved base endpoint plus region, subscription, account, property and WBE hotel identifiers; it deliberately excludes API secrets. An administrator must approve the current target separately for each site environment, and any target change blocks new/replayed Clock-backed payment completion until re-approved.
 
 Outbound API calls use a two-request HTTP Digest challenge flow. `ClockEndpointResolver` constructs regional/account URLs or validates configured base/template paths. Safe endpoint overrides must remain relative to the expected provider base.
 

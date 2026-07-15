@@ -17,14 +17,16 @@ This ordering is a business-integrity requirement, but it does not by itself mak
 
 For the standard Stripe or PokPay path in Clock booking mode:
 
-1. Persist traceable pending local reservation and payment state.
+1. Persist traceable pending local reservation and payment state whose immutable payment rows bind the exact reservation/payment allocation, minor-unit total/currency, booking snapshot, checkout mode, expiry, gateway mode/credential fingerprint, explicit site environment, and approved Clock target when required.
 2. Treat browser returns, redirects, and payment initiation as non-authoritative.
-3. Establish payment success through the provider-specific verified completion path.
-4. Transactionally claim the provider transaction for one mode/account and exact deterministic reservation allocation, update its bound payment projections, and persist Clock-recovery evidence without confirming the booking or emitting payment/accounting hooks.
-5. Acquire an expiring owner-token lease; only that active owner may issue the Clock create and persist returned identifiers.
-6. Treat an active competing callback as `in_progress`; treat expired, ambiguous, persistence-failed, or partial outcomes as manual review requiring Clock reread.
-7. After the required provider result is durable and Clock fulfillment has succeeded when required, lock the exact reservation rows and commit first confirmation only through the central immutable authorization policy.
-8. Emit payment/accounting and confirmation/email hooks only after that local transaction commits; a concurrent callback observes the committed rows and emits no duplicate events.
+3. Reuse a pending provider attempt only after every durable identity field still matches; otherwise supersede it without overwriting provider ownership and fail closed or create a new attempt through the authoritative initiation service.
+4. Establish payment success through the provider-specific verified completion path and recheck the attempt-time gateway/site/Clock target before ownership or Clock creation.
+5. Transactionally claim the provider transaction for one mode/account and exact deterministic reservation allocation, update its bound payment projections, and persist Clock-recovery evidence without confirming the booking or emitting payment/accounting hooks.
+6. When the provider is authoritatively paid but a later integrity, persistence, confirmation, or fulfilment boundary fails, upsert one provider/reference observation plus expected/observed allocations and recovery state; this evidence is not a payment ledger or success authorization.
+7. Acquire an expiring owner-token lease; only that active owner may issue the Clock create and persist returned identifiers.
+8. Treat an active competing callback as `in_progress`; treat expired, ambiguous, persistence-failed, or partial outcomes as manual review requiring Clock reread.
+9. After the required provider result is durable and Clock fulfillment has succeeded when required, lock the exact reservation rows and commit first confirmation only through the central immutable authorization policy.
+10. Emit payment/accounting and confirmation/email hooks only after that local transaction commits; a concurrent callback observes the committed rows and emits no duplicate events.
 
 Offline and on-request modes retain their separate lifecycle rules. They must not be described as verified online payment flows.
 
@@ -51,6 +53,8 @@ Offline and on-request modes retain their separate lifecycle rules. They must no
 ## Implementation constraints
 
 - Verification must bind gateway, transaction/order identity, amount, currency, environment, and intended reservation allocation.
+- The site environment is explicit and finite. Gateway credentials are fingerprinted server-side; Clock-backed attempts require the compatible Clock environment and a separately approved configured property/account fingerprint.
+- Paid-provider observations are idempotent by provider/mode/account/reference, expose processing/manual/partial/resolved recovery states, and cannot confirm, email, post accounting, or consume coupons/inventory.
 - Fulfillment claims are exclusive owner-token leases; a repeated payment reference does not grant ownership.
 - Provider-payment ownership and allocations are immutable and unique; confirmation authorization is scoped to the exact reservation, verification group, claim and allocation-set hash.
 - The repository rejects direct first-confirmation writes, while already-confirmed idempotent updates remain compatible.

@@ -761,14 +761,18 @@ final class ClockReservationProvider implements ReservationProviderInterface
             if (!\is_array($reservation)) {
                 return [
                     'success' => false,
-                    'state' => 'pending_fulfilment',
+                    'state' => empty($fulfilledReservationIds) ? 'pending_fulfilment' : 'partial_manual_review',
                     'retryable' => false,
+                    'reason_code' => 'clock_local_reservation_missing',
+                    'reservation_ids' => $reservationIds,
+                    'fulfilled_reservation_ids' => $fulfilledReservationIds,
                     'message' => \__('The local payment reservation could not be found.', 'must-hotel-booking'),
                 ];
             }
 
             if (\trim((string) ($reservation['provider_booking_id'] ?? '')) !== ''
                 || \trim((string) ($reservation['provider_reservation_id'] ?? '')) !== '') {
+                $fulfilledReservationIds[] = $reservationId;
                 continue;
             }
 
@@ -776,8 +780,11 @@ final class ClockReservationProvider implements ReservationProviderInterface
                 || \sanitize_key((string) ($reservation['payment_status'] ?? '')) !== 'pending') {
                 return [
                     'success' => false,
-                    'state' => 'pending_fulfilment',
+                    'state' => empty($fulfilledReservationIds) ? 'pending_fulfilment' : 'partial_manual_review',
                     'retryable' => false,
+                    'reason_code' => 'clock_reservation_state_mismatch',
+                    'reservation_ids' => $reservationIds,
+                    'fulfilled_reservation_ids' => $fulfilledReservationIds,
                     'message' => \__('This payment reservation is no longer awaiting Clock fulfillment.', 'must-hotel-booking'),
                 ];
             }
@@ -795,6 +802,9 @@ final class ClockReservationProvider implements ReservationProviderInterface
                     'success' => false,
                     'state' => 'pending_fulfilment',
                     'retryable' => true,
+                    'reason_code' => 'clock_fulfilment_in_progress',
+                    'reservation_ids' => $reservationIds,
+                    'fulfilled_reservation_ids' => $fulfilledReservationIds,
                     'message' => \__('Clock reservation fulfillment is already in progress.', 'must-hotel-booking'),
                 ];
             }
@@ -810,8 +820,11 @@ final class ClockReservationProvider implements ReservationProviderInterface
             if ($claimOutcome !== 'claimed') {
                 return [
                     'success' => false,
-                    'state' => 'pending_fulfilment',
+                    'state' => empty($fulfilledReservationIds) ? 'pending_fulfilment' : 'partial_manual_review',
                     'retryable' => false,
+                    'reason_code' => 'clock_fulfilment_claim_blocked',
+                    'reservation_ids' => $reservationIds,
+                    'fulfilled_reservation_ids' => $fulfilledReservationIds,
                     'message' => \__('The verified payment is held for Clock reservation fulfillment.', 'must-hotel-booking'),
                 ];
             }
@@ -900,8 +913,11 @@ final class ClockReservationProvider implements ReservationProviderInterface
 
         return [
             'success' => false,
-            'state' => 'manual_review',
+            'state' => empty($fulfilledReservationIds) ? 'manual_review' : 'partial_manual_review',
             'retryable' => false,
+            'reason_code' => \sanitize_key($reason),
+            'reservation_ids' => \array_values(\array_map('intval', $reservationIds)),
+            'fulfilled_reservation_ids' => $fulfilledReservationIds,
             'message' => $message,
         ];
     }

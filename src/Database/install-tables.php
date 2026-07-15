@@ -462,6 +462,21 @@ function install_tables(): void
         method VARCHAR(50) NOT NULL DEFAULT '',
         status VARCHAR(50) NOT NULL DEFAULT 'pending',
         transaction_id VARCHAR(191) NOT NULL DEFAULT '',
+        provider_attempt_reference VARCHAR(191) NOT NULL DEFAULT '',
+        attempt_status VARCHAR(32) NOT NULL DEFAULT 'legacy',
+        attempt_site_environment VARCHAR(20) NOT NULL DEFAULT '',
+        attempt_provider_mode VARCHAR(30) NOT NULL DEFAULT '',
+        attempt_account_fingerprint CHAR(64) NOT NULL DEFAULT '',
+        attempt_checkout_mode VARCHAR(50) NOT NULL DEFAULT '',
+        attempt_clock_environment VARCHAR(20) NOT NULL DEFAULT '',
+        attempt_clock_target_fingerprint CHAR(64) NOT NULL DEFAULT '',
+        attempt_reservation_set_hash CHAR(64) NOT NULL DEFAULT '',
+        attempt_allocation_set_hash CHAR(64) NOT NULL DEFAULT '',
+        attempt_group_amount_minor BIGINT(20) NOT NULL DEFAULT -1,
+        attempt_currency VARCHAR(10) NOT NULL DEFAULT '',
+        attempt_expires_at DATETIME NULL DEFAULT NULL,
+        attempt_booking_snapshot_hash CHAR(64) NOT NULL DEFAULT '',
+        attempt_failure_code VARCHAR(80) NOT NULL DEFAULT '',
         provider_fee_amount DECIMAL(12,2) NOT NULL DEFAULT 0.00,
         provider_fee_currency VARCHAR(10) NOT NULL DEFAULT '',
         provider_net_amount DECIMAL(12,2) NOT NULL DEFAULT 0.00,
@@ -476,6 +491,9 @@ function install_tables(): void
         KEY reservation_id (reservation_id),
         KEY status (status),
         KEY transaction_id (transaction_id),
+        KEY provider_attempt_reference (provider_attempt_reference),
+        KEY attempt_status (attempt_status),
+        KEY attempt_expires_at (attempt_expires_at),
         KEY provider_fee_status (provider_fee_status),
         KEY provider_balance_transaction_id (provider_balance_transaction_id)
     ) {$charset_collate};";
@@ -517,6 +535,49 @@ function install_tables(): void
         UNIQUE KEY claim_hash (claim_hash),
         UNIQUE KEY payment_id (payment_id),
         UNIQUE KEY group_reservation (verification_group_id, reservation_id),
+        KEY reservation_id (reservation_id)
+    ) {$charset_collate};";
+
+    $tables[] = "CREATE TABLE {$prefix}must_paid_provider_observations (
+        id BIGINT(20) UNSIGNED NOT NULL AUTO_INCREMENT,
+        provider VARCHAR(50) NOT NULL,
+        provider_mode VARCHAR(30) NOT NULL DEFAULT '',
+        provider_account_fingerprint CHAR(64) NOT NULL DEFAULT '',
+        provider_transaction_reference VARCHAR(191) NOT NULL DEFAULT '',
+        provider_attempt_reference VARCHAR(191) NOT NULL DEFAULT '',
+        provider_event_reference VARCHAR(191) NOT NULL DEFAULT '',
+        verification_source VARCHAR(80) NOT NULL DEFAULT '',
+        observed_status VARCHAR(32) NOT NULL DEFAULT 'paid',
+        amount_minor BIGINT(20) NOT NULL DEFAULT -1,
+        currency VARCHAR(10) NOT NULL DEFAULT '',
+        ownership_key CHAR(64) NOT NULL,
+        expected_allocation_set_hash CHAR(64) NOT NULL DEFAULT '',
+        rejected_context_hash CHAR(64) NOT NULL DEFAULT '',
+        failure_code VARCHAR(80) NOT NULL DEFAULT '',
+        recovery_status VARCHAR(32) NOT NULL DEFAULT 'manual_review',
+        observed_at DATETIME NOT NULL,
+        last_seen_at DATETIME NOT NULL,
+        observation_count BIGINT(20) UNSIGNED NOT NULL DEFAULT 1,
+        created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        PRIMARY KEY  (id),
+        UNIQUE KEY ownership_key (ownership_key),
+        KEY provider_reference (provider, provider_transaction_reference),
+        KEY provider_attempt_reference (provider_attempt_reference),
+        KEY recovery_status (recovery_status)
+    ) {$charset_collate};";
+
+    $tables[] = "CREATE TABLE {$prefix}must_paid_provider_observation_allocations (
+        id BIGINT(20) UNSIGNED NOT NULL AUTO_INCREMENT,
+        observation_id BIGINT(20) UNSIGNED NOT NULL,
+        reservation_id BIGINT(20) UNSIGNED NOT NULL,
+        allocation_role VARCHAR(20) NOT NULL DEFAULT 'expected',
+        amount_minor BIGINT(20) NOT NULL DEFAULT -1,
+        currency VARCHAR(10) NOT NULL DEFAULT '',
+        allocation_hash CHAR(64) NOT NULL,
+        created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        PRIMARY KEY  (id),
+        UNIQUE KEY allocation_hash (allocation_hash),
+        KEY observation_id (observation_id),
         KEY reservation_id (reservation_id)
     ) {$charset_collate};";
 
@@ -838,6 +899,7 @@ function install_tables(): void
     ensure_payment_release_schema($wpdb);
     ensure_clock_fulfilment_schema($wpdb);
     ensure_confirmation_integrity_schema($wpdb);
+    ensure_payment_attempt_integrity_schema($wpdb);
 
     (new AccommodationCategoryUpgradeService($wpdb))->run();
 
@@ -1058,6 +1120,85 @@ function ensure_confirmation_integrity_schema(?\wpdb $wpdb_instance = null): voi
         UNIQUE KEY claim_hash (claim_hash),
         UNIQUE KEY payment_id (payment_id),
         UNIQUE KEY group_reservation (verification_group_id, reservation_id),
+        KEY reservation_id (reservation_id)
+    ) {$collation};");
+}
+
+/**
+ * Additively repair immutable attempt identity and provider-paid observation
+ * evidence even when the stored plugin version already matches this release.
+ */
+function ensure_payment_attempt_integrity_schema(?\wpdb $wpdb_instance = null): void
+{
+    global $wpdb;
+
+    $db = $wpdb_instance ?: $wpdb;
+    ensure_table_columns($db, $db->prefix . 'must_payments', [
+        'provider_attempt_reference' => "VARCHAR(191) NOT NULL DEFAULT ''",
+        'attempt_status' => "VARCHAR(32) NOT NULL DEFAULT 'legacy'",
+        'attempt_site_environment' => "VARCHAR(20) NOT NULL DEFAULT ''",
+        'attempt_provider_mode' => "VARCHAR(30) NOT NULL DEFAULT ''",
+        'attempt_account_fingerprint' => "CHAR(64) NOT NULL DEFAULT ''",
+        'attempt_checkout_mode' => "VARCHAR(50) NOT NULL DEFAULT ''",
+        'attempt_clock_environment' => "VARCHAR(20) NOT NULL DEFAULT ''",
+        'attempt_clock_target_fingerprint' => "CHAR(64) NOT NULL DEFAULT ''",
+        'attempt_reservation_set_hash' => "CHAR(64) NOT NULL DEFAULT ''",
+        'attempt_allocation_set_hash' => "CHAR(64) NOT NULL DEFAULT ''",
+        'attempt_group_amount_minor' => 'BIGINT(20) NOT NULL DEFAULT -1',
+        'attempt_currency' => "VARCHAR(10) NOT NULL DEFAULT ''",
+        'attempt_expires_at' => 'DATETIME NULL DEFAULT NULL',
+        'attempt_booking_snapshot_hash' => "CHAR(64) NOT NULL DEFAULT ''",
+        'attempt_failure_code' => "VARCHAR(80) NOT NULL DEFAULT ''",
+    ]);
+    ensure_table_indexes($db, $db->prefix . 'must_payments', [
+        'provider_attempt_reference' => 'provider_attempt_reference',
+        'attempt_status' => 'attempt_status',
+        'attempt_expires_at' => 'attempt_expires_at',
+    ]);
+
+    require_once ABSPATH . 'wp-admin/includes/upgrade.php';
+    $collation = $db->get_charset_collate();
+    $observations = $db->prefix . 'must_paid_provider_observations';
+    $allocations = $db->prefix . 'must_paid_provider_observation_allocations';
+    \dbDelta("CREATE TABLE {$observations} (
+        id BIGINT(20) UNSIGNED NOT NULL AUTO_INCREMENT,
+        provider VARCHAR(50) NOT NULL,
+        provider_mode VARCHAR(30) NOT NULL DEFAULT '',
+        provider_account_fingerprint CHAR(64) NOT NULL DEFAULT '',
+        provider_transaction_reference VARCHAR(191) NOT NULL DEFAULT '',
+        provider_attempt_reference VARCHAR(191) NOT NULL DEFAULT '',
+        provider_event_reference VARCHAR(191) NOT NULL DEFAULT '',
+        verification_source VARCHAR(80) NOT NULL DEFAULT '',
+        observed_status VARCHAR(32) NOT NULL DEFAULT 'paid',
+        amount_minor BIGINT(20) NOT NULL DEFAULT -1,
+        currency VARCHAR(10) NOT NULL DEFAULT '',
+        ownership_key CHAR(64) NOT NULL,
+        expected_allocation_set_hash CHAR(64) NOT NULL DEFAULT '',
+        rejected_context_hash CHAR(64) NOT NULL DEFAULT '',
+        failure_code VARCHAR(80) NOT NULL DEFAULT '',
+        recovery_status VARCHAR(32) NOT NULL DEFAULT 'manual_review',
+        observed_at DATETIME NOT NULL,
+        last_seen_at DATETIME NOT NULL,
+        observation_count BIGINT(20) UNSIGNED NOT NULL DEFAULT 1,
+        created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        PRIMARY KEY  (id),
+        UNIQUE KEY ownership_key (ownership_key),
+        KEY provider_reference (provider, provider_transaction_reference),
+        KEY provider_attempt_reference (provider_attempt_reference),
+        KEY recovery_status (recovery_status)
+    ) {$collation};");
+    \dbDelta("CREATE TABLE {$allocations} (
+        id BIGINT(20) UNSIGNED NOT NULL AUTO_INCREMENT,
+        observation_id BIGINT(20) UNSIGNED NOT NULL,
+        reservation_id BIGINT(20) UNSIGNED NOT NULL,
+        allocation_role VARCHAR(20) NOT NULL DEFAULT 'expected',
+        amount_minor BIGINT(20) NOT NULL DEFAULT -1,
+        currency VARCHAR(10) NOT NULL DEFAULT '',
+        allocation_hash CHAR(64) NOT NULL,
+        created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        PRIMARY KEY  (id),
+        UNIQUE KEY allocation_hash (allocation_hash),
+        KEY observation_id (observation_id),
         KEY reservation_id (reservation_id)
     ) {$collation};");
 }

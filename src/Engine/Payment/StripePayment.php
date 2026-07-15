@@ -43,7 +43,56 @@ final class StripePayment implements PaymentInterface
         }
 
         $transactionId = isset($result['session_id']) ? (string) $result['session_id'] : '';
-        BookingStatusEngine::createPaymentRows($reservationIds, $this->method, 'pending', $transactionId);
+        if ($transactionId === '') {
+            return [
+                'success' => false,
+                'method' => $this->method,
+                'state' => 'manual_review',
+                'provider_attempt_created' => true,
+                'reason_code' => 'provider_attempt_reference_missing',
+                'message' => \__('Stripe created a checkout response without a usable session reference. Do not retry until the hotel reviews it.', 'must-hotel-booking'),
+            ];
+        }
+        $attempt = isset($context['payment_attempt']) && \is_array($context['payment_attempt']) ? $context['payment_attempt'] : [];
+        $attempt['provider_attempt_reference'] = $transactionId;
+        $attempt['attempt_checkout_mode'] = 'hosted_redirect';
+        $attempt['attempt_expires_at'] = (string) ($result['expires_at'] ?? '');
+        if ($attempt['attempt_expires_at'] === '') {
+            $attempt['attempt_expires_at'] = \gmdate('Y-m-d H:i:s', \time() + (PaymentEngine::getPendingPaymentCleanupMinutes() * 60));
+        }
+        $paymentRows = BookingStatusEngine::createPaymentRows($reservationIds, $this->method, 'pending', $transactionId, true, $attempt);
+        if (!empty($paymentRows['failed'])) {
+            return [
+                'success' => false,
+                'method' => $this->method,
+                'state' => 'manual_review',
+                'provider_attempt_created' => true,
+                'provider_reference' => $transactionId,
+                'session_id' => $transactionId,
+                'expires_at' => (string) $attempt['attempt_expires_at'],
+                'reason_code' => 'pending_attempt_persistence_failed',
+                'message' => \__('Stripe checkout was created, but its local attempt identity could not be stored safely. Do not retry until the hotel reviews it.', 'must-hotel-booking'),
+            ];
+        }
+        $checkoutUrl = isset($result['checkout_url']) ? (string) $result['checkout_url'] : '';
+        if ($checkoutUrl === '' || !PaymentEngine::isStripeCheckoutUrl($checkoutUrl)) {
+            $attemptRows = \MustHotelBooking\Engine\get_payment_repository()->getPaymentAttemptRows($this->method, $transactionId);
+            \MustHotelBooking\Engine\get_payment_repository()->updatePaymentAttemptRows(
+                \array_values(\array_filter(\array_map('intval', \array_column($attemptRows, 'id')))),
+                ['attempt_status' => 'manual_review', 'attempt_failure_code' => 'provider_checkout_response_invalid']
+            );
+            return [
+                'success' => false,
+                'method' => $this->method,
+                'state' => 'manual_review',
+                'provider_attempt_created' => true,
+                'provider_reference' => $transactionId,
+                'session_id' => $transactionId,
+                'expires_at' => (string) $attempt['attempt_expires_at'],
+                'reason_code' => 'provider_checkout_response_invalid',
+                'message' => \__('Stripe checkout was created without a safe redirect URL. Do not retry until the hotel reviews it.', 'must-hotel-booking'),
+            ];
+        }
 
         return [
             'success' => true,
@@ -52,11 +101,14 @@ final class StripePayment implements PaymentInterface
             'status' => 'pending_payment',
             'payment_status' => 'pending',
             'requires_redirect' => true,
-            'redirect_url' => isset($result['checkout_url']) ? (string) $result['checkout_url'] : '',
-            'checkout_url' => isset($result['checkout_url']) ? (string) $result['checkout_url'] : '',
+            'redirect_url' => $checkoutUrl,
+            'checkout_url' => $checkoutUrl,
             'transaction_id' => $transactionId,
             'session_id' => $transactionId,
             'expires_at' => isset($result['expires_at']) ? (string) $result['expires_at'] : '',
+            'provider_mode' => (string) ($attempt['attempt_provider_mode'] ?? ''),
+            'account_fingerprint' => (string) ($attempt['attempt_account_fingerprint'] ?? ''),
+            'provider_reference' => $transactionId,
         ];
     }
 

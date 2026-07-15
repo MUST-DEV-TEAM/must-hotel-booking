@@ -157,6 +157,50 @@ final class PaymentRepository extends AbstractRepository
         return $this->normalizeIds(\is_array($rows) ? $rows : []);
     }
 
+    /** @return array<int, array<string, mixed>> */
+    public function getPaymentAttemptRows(string $method, string $attemptReference): array
+    {
+        $method = \sanitize_key($method);
+        $attemptReference = \trim($attemptReference);
+        if ($method === '' || $attemptReference === '' || !$this->paymentsTableExists()) {
+            return [];
+        }
+        $hasAttemptReference = $this->paymentColumnExists('provider_attempt_reference');
+        $where = $hasAttemptReference
+            ? '(provider_attempt_reference = %s OR (provider_attempt_reference = \'\' AND transaction_id = %s))'
+            : 'transaction_id = %s';
+        $args = $hasAttemptReference
+            ? [$method, $attemptReference, $attemptReference]
+            : [$method, $attemptReference];
+        $rows = $this->wpdb->get_results(
+            $this->wpdb->prepare(
+                'SELECT * FROM ' . $this->table('payments') . ' WHERE method = %s AND ' . $where . ' ORDER BY reservation_id, id',
+                $args
+            ),
+            ARRAY_A
+        );
+        return \is_array($rows) ? $rows : [];
+    }
+
+    /** @param array<int, int> $paymentIds @param array<string, mixed> $paymentData */
+    public function updatePaymentAttemptRows(array $paymentIds, array $paymentData): bool
+    {
+        $paymentIds = $this->normalizeIds($paymentIds);
+        $paymentData = $this->filterExistingPaymentColumns($paymentData);
+        if (empty($paymentIds) || empty($paymentData)) {
+            return false;
+        }
+        $updated = $this->wpdb->query(
+            $this->wpdb->prepare(
+                'UPDATE ' . $this->table('payments') . ' SET '
+                . \implode(', ', \array_map(static function (string $column): string { return $column . ' = %s'; }, \array_keys($paymentData)))
+                . ' WHERE id IN (' . \implode(', ', \array_fill(0, \count($paymentIds), '%d')) . ')',
+                \array_merge(\array_values($paymentData), $paymentIds)
+            )
+        );
+        return \is_int($updated);
+    }
+
     /**
      * @return array<string, mixed>|null
      */
@@ -646,7 +690,7 @@ final class PaymentRepository extends AbstractRepository
                 continue;
             }
 
-            if (\in_array($field, ['reservation_id', 'provider_fee_absorbed_by_customer'], true)) {
+            if (\in_array($field, ['reservation_id', 'provider_fee_absorbed_by_customer', 'attempt_group_amount_minor'], true)) {
                 $formats[] = '%d';
                 continue;
             }

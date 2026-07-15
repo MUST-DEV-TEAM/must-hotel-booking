@@ -897,11 +897,37 @@ function get_pending_confirmation_page_view_data(): array
                         $reservation_ids = [];
                         $created_new_draft = false;
                         $stripe_coupon_ids = [];
-                        if (
-                            !empty($pending_payment['reservation_ids']) &&
-                            BookingStatusEngine::areReusablePendingPaymentReservations((array) $pending_payment['reservation_ids'])
-                        ) {
-                            $reservation_ids = \array_map('intval', (array) $pending_payment['reservation_ids']);
+                        $reused_payment_result = null;
+                        $has_pending_attempt = !empty($pending_payment['reservation_ids']) || (string) ($pending_payment['session_id'] ?? '') !== '';
+                        if ($has_pending_attempt) {
+                            $reuse = PaymentEngine::validateReusablePendingPaymentAttempt(
+                                $pending_payment,
+                                $payment_method,
+                                $total_amount,
+                                $currency,
+                                (string) ($payment_creation_options['confirmation_flow'] ?? '')
+                            );
+                            if (!empty($reuse['exact'])) {
+                                $reservation_ids = \array_map('intval', (array) ($reuse['reservation_ids'] ?? []));
+                                $checkout_mode = (string) ($reuse['checkout_mode'] ?? $pending_payment['checkout_mode'] ?? '');
+                                $checkout_url = (string) ($pending_payment['checkout_url'] ?? '');
+                                $reused_payment_result = [
+                                    'success' => true,
+                                    'reused' => true,
+                                    'session_id' => (string) ($reuse['provider_reference'] ?? ''),
+                                    'transaction_id' => (string) ($reuse['provider_reference'] ?? ''),
+                                    'checkout_url' => $checkout_url,
+                                    'redirect_url' => $checkout_url,
+                                    'checkout_mode' => $checkout_mode,
+                                    'expires_at' => (string) ($reuse['expires_at'] ?? ''),
+                                    'requires_redirect' => $checkout_mode !== 'embedded_sdk',
+                                    'requires_embedded_checkout' => $checkout_mode === 'embedded_sdk',
+                                ];
+                            } elseif (!empty($reuse['restart_allowed']) && !empty($reuse['reservation_ids'])) {
+                                $reservation_ids = \array_map('intval', (array) $reuse['reservation_ids']);
+                            } else {
+                                $messages[] = \__('The previous payment attempt no longer matches this booking and needs hotel review before another payment can be started.', 'must-hotel-booking');
+                            }
                         } else {
                             $result = create_checkout_reservations(
                                 $context,
@@ -936,23 +962,37 @@ function get_pending_confirmation_page_view_data(): array
                             }
                         }
                         if (!empty($reservation_ids) && empty($messages)) {
-                            $payment_result = PaymentEngine::processPayment(
-                                $payment_method,
-                                $reservation_ids,
-                                $total_amount,
-                                [
-                                    'guest_form' => $confirmation_guest_form,
-                                    'currency' => $currency,
-                                    'coupon_ids' => $stripe_coupon_ids,
-                                ]
-                            );
+                            $payment_result = \is_array($reused_payment_result)
+                                ? $reused_payment_result
+                                : PaymentEngine::processPayment(
+                                    $payment_method,
+                                    $reservation_ids,
+                                    $total_amount,
+                                    [
+                                        'guest_form' => $confirmation_guest_form,
+                                        'currency' => $currency,
+                                        'coupon_ids' => $stripe_coupon_ids,
+                                    ]
+                                );
                             if (empty($payment_result['success'])) {
-                                if ($created_new_draft) {
+                                if ($created_new_draft && empty($payment_result['provider_attempt_created'])) {
                                     BookingStatusEngine::failPendingPaymentReservations(
                                         $reservation_ids,
                                         PaymentEngine::normalizeMethod($payment_method) === 'pokpay' ? 'pokpay' : 'stripe',
                                         'payment_failed'
                                     );
+                                }
+                                if (!empty($payment_result['provider_attempt_created'])) {
+                                    $pending_payment = PaymentEngine::normalizePendingPaymentFlowData([
+                                        'method' => $payment_method,
+                                        'flow' => (string) ($payment_creation_options['confirmation_flow'] ?? ''),
+                                        'reservation_ids' => $reservation_ids,
+                                        'session_id' => (string) ($payment_result['session_id'] ?? $payment_result['provider_reference'] ?? ''),
+                                        'checkout_mode' => (string) ($payment_result['checkout_mode'] ?? ''),
+                                        'expires_at' => (string) ($payment_result['expires_at'] ?? ''),
+                                        'created_at' => \current_time('mysql'),
+                                    ]);
+                                    update_booking_selection_flow_data(['pending_payment' => $pending_payment]);
                                 }
                                 $messages[] = isset($payment_result['message']) && (string) $payment_result['message'] !== ''
                                     ? (string) $payment_result['message']
@@ -960,6 +1000,7 @@ function get_pending_confirmation_page_view_data(): array
                             } else {
                                 $pending_payment = PaymentEngine::normalizePendingPaymentFlowData([
                                     'method' => $payment_method,
+                                    'flow' => (string) ($payment_creation_options['confirmation_flow'] ?? ''),
                                     'reservation_ids' => $reservation_ids,
                                     'session_id' => (string) ($payment_result['session_id'] ?? $payment_result['transaction_id'] ?? ''),
                                     'checkout_url' => (string) ($payment_result['checkout_url'] ?? $payment_result['redirect_url'] ?? ''),
@@ -988,20 +1029,25 @@ function get_pending_confirmation_page_view_data(): array
                                 if ($gateway === 'pokpay' && !empty($payment_result['requires_embedded_checkout'])) {
                                     $messages[] = \__('Complete your secure PokPay card payment below.', 'must-hotel-booking');
                                 } else {
-                                    if ($created_new_draft) {
+                                    $has_provider_attempt = (string) ($payment_result['session_id'] ?? $payment_result['transaction_id'] ?? $payment_result['provider_reference'] ?? '') !== '';
+                                    if ($created_new_draft && !$has_provider_attempt) {
                                         BookingStatusEngine::failPendingPaymentReservations(
                                             $reservation_ids,
                                             $gateway === 'pokpay' ? 'pokpay' : 'stripe',
                                             'payment_failed'
                                         );
                                     }
-                                    update_booking_selection_flow_data([
-                                        'pending_payment' => PaymentEngine::getEmptyPendingPaymentFlowData(),
-                                    ]);
-                                    $pending_payment = PaymentEngine::getEmptyPendingPaymentFlowData();
-                                    $messages[] = $gateway === 'pokpay'
-                                        ? \__('PokPay checkout could not be started. Please try again.', 'must-hotel-booking')
-                                        : \__('The online payment provider returned an invalid checkout response. Please try again.', 'must-hotel-booking');
+                                    if (!$has_provider_attempt) {
+                                        update_booking_selection_flow_data([
+                                            'pending_payment' => PaymentEngine::getEmptyPendingPaymentFlowData(),
+                                        ]);
+                                        $pending_payment = PaymentEngine::getEmptyPendingPaymentFlowData();
+                                    }
+                                    $messages[] = $has_provider_attempt
+                                        ? \__('The payment provider created an attempt without a usable checkout response. Do not retry until the hotel reviews it.', 'must-hotel-booking')
+                                        : ($gateway === 'pokpay'
+                                            ? \__('PokPay checkout could not be started. Please try again.', 'must-hotel-booking')
+                                            : \__('The online payment provider returned an invalid checkout response. Please try again.', 'must-hotel-booking'));
                                 }
                             }
                         }

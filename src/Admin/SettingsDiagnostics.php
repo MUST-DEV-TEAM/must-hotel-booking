@@ -10,6 +10,8 @@ use MustHotelBooking\Engine\EmailEngine;
 use MustHotelBooking\Engine\EmailLayoutEngine;
 use MustHotelBooking\Engine\LockEngine;
 use MustHotelBooking\Engine\PaymentEngine;
+use MustHotelBooking\Engine\PaymentEnvironmentCompatibilityPolicy;
+use MustHotelBooking\Database\PaidProviderObservationRepository;
 use MustHotelBooking\Provider\Clock\ClockConnectionDiagnostic;
 use MustHotelBooking\Provider\Clock\ClockCatalogService;
 use MustHotelBooking\Provider\Clock\ClockSyncScheduler;
@@ -48,6 +50,8 @@ final class SettingsDiagnostics
             ['label' => 'Availability', 'table_name' => $wpdb->prefix . 'must_availability', 'exists' => $availabilityRepository->availabilityTableExists()],
             ['label' => 'Locks', 'table_name' => $wpdb->prefix . 'mhb_inventory_locks', 'exists' => $inventoryRepository->inventoryLocksTableExists()],
             ['label' => 'Payments', 'table_name' => $wpdb->prefix . 'must_payments', 'exists' => $paymentRepository->paymentsTableExists()],
+            ['label' => 'Paid Provider Observations', 'table_name' => $wpdb->prefix . 'must_paid_provider_observations', 'exists' => self::tableExists($wpdb->prefix . 'must_paid_provider_observations')],
+            ['label' => 'Paid Provider Observation Allocations', 'table_name' => $wpdb->prefix . 'must_paid_provider_observation_allocations', 'exists' => self::tableExists($wpdb->prefix . 'must_paid_provider_observation_allocations')],
             ['label' => 'Activity Log', 'table_name' => $wpdb->prefix . 'must_activity_log', 'exists' => $activityRepository->activityTableExists()],
             ['label' => 'Taxes', 'table_name' => $wpdb->prefix . 'must_taxes', 'exists' => self::tableExists($wpdb->prefix . 'must_taxes')],
             ['label' => 'Coupons', 'table_name' => $wpdb->prefix . 'must_coupons', 'exists' => self::tableExists($wpdb->prefix . 'must_coupons')],
@@ -149,6 +153,7 @@ final class SettingsDiagnostics
         $pokpayConfigured = PaymentEngine::isPokPayConfigured();
         $paymentPolicy = PaymentEngine::getPublicCheckoutPaymentPolicy();
         $lastPublicBookingPayment = self::getLastPublicBookingPaymentSummary();
+        $paidObservationCounts = (new PaidProviderObservationRepository())->getStatusCounts();
 
         if ($stripeEnabled && !$stripeConfigured) {
             $warnings++;
@@ -186,6 +191,11 @@ final class SettingsDiagnostics
             'deposit_required' => !empty(MustBookingConfig::get_setting('deposit_required', false)),
             'deposit_type' => (string) MustBookingConfig::get_setting('deposit_type', 'percentage'),
             'deposit_value' => (float) MustBookingConfig::get_setting('deposit_value', 0),
+            'paid_provider_observation_counts' => $paidObservationCounts,
+            'paid_provider_manual_review_total' => (int) ($paidObservationCounts['manual_review'] ?? 0),
+            'paid_provider_open_total' => (int) ($paidObservationCounts['manual_review'] ?? 0)
+                + (int) ($paidObservationCounts['partial_manual_review'] ?? 0)
+                + (int) ($paidObservationCounts['processing_pending'] ?? 0),
         ];
 
         $updater = Updater::getStatus();
@@ -280,6 +290,13 @@ final class SettingsDiagnostics
             'timezone' => MustBookingConfig::get_timezone(),
             'date_picker_calendar_layout' => MustBookingConfig::get_date_picker_calendar_layout(),
         ];
+        $clockIdentity = (new PaymentEnvironmentCompatibilityPolicy())->currentClockIdentity();
+        $approvedClockTarget = PaymentEnvironmentCompatibilityPolicy::getApprovedClockTarget(PaymentEnvironmentCompatibilityPolicy::configuredSiteEnvironment());
+        $environment['clock_payment_target_environment'] = (string) ($clockIdentity['environment'] ?? '');
+        $environment['clock_payment_target_fingerprint'] = (string) ($clockIdentity['target_fingerprint'] ?? '');
+        $environment['clock_payment_target_approved'] = $approvedClockTarget !== ''
+            && (string) ($clockIdentity['target_fingerprint'] ?? '') !== ''
+            && \hash_equals($approvedClockTarget, (string) $clockIdentity['target_fingerprint']);
 
         $providerSummary = ClockConnectionDiagnostic::getConfigSummary();
         $configuredMode = (string) ($providerSummary['provider_mode'] ?? ProviderManager::getConfiguredMode());

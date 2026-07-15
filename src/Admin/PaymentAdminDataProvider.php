@@ -16,6 +16,7 @@ final class PaymentAdminDataProvider
     private \MustHotelBooking\Database\ClockFolioAccountingRepository $clockFolioAccountingRepository;
     private \MustHotelBooking\Database\ReservationRepository $reservationRepository;
     private \MustHotelBooking\Database\ActivityRepository $activityRepository;
+    private \MustHotelBooking\Database\PaidProviderObservationRepository $paidProviderObservationRepository;
     private ProviderRequestLogRepository $providerRequestLogRepository;
 
     public function __construct()
@@ -25,6 +26,7 @@ final class PaymentAdminDataProvider
         $this->clockFolioAccountingRepository = \MustHotelBooking\Engine\get_clock_folio_accounting_repository();
         $this->reservationRepository = \MustHotelBooking\Engine\get_reservation_repository();
         $this->activityRepository = \MustHotelBooking\Engine\get_activity_repository();
+        $this->paidProviderObservationRepository = new \MustHotelBooking\Database\PaidProviderObservationRepository();
         $this->providerRequestLogRepository = new ProviderRequestLogRepository();
     }
 
@@ -50,6 +52,7 @@ final class PaymentAdminDataProvider
             $providerPayment = ProviderReservationView::paymentContext($row, $state);
             $clockAccountingRows = $reservationId > 0 ? $this->clockFolioAccountingRepository->getForReservation($reservationId) : [];
             $refundRows = $reservationId > 0 ? $this->refundRepository->getRefundsForReservation($reservationId) : [];
+            $paidObservations = $reservationId > 0 ? $this->paidProviderObservationRepository->getForReservation($reservationId) : [];
             $clockAccountingStatuses = [];
 
             foreach ($clockAccountingRows as $clockAccountingRow) {
@@ -75,6 +78,13 @@ final class PaymentAdminDataProvider
                     $state['needs_review'] = true;
                     break;
                 }
+            }
+            $openPaidObservations = \array_values(\array_filter($paidObservations, static function (array $observation): bool {
+                return \sanitize_key((string) ($observation['recovery_status'] ?? '')) !== 'resolved';
+            }));
+            if (!empty($openPaidObservations)) {
+                $state['needs_review'] = true;
+                $state['provider_paid_observation'] = true;
             }
 
             if (!$this->matchesDerivedFilters($state, $filters)) {
@@ -344,6 +354,7 @@ final class PaymentAdminDataProvider
         $paymentRows = $this->paymentRepository->getPaymentsForReservation($reservationId);
         $refundRows = $this->refundRepository->getRefundsForReservation($reservationId);
         $clockAccountingRows = $this->clockFolioAccountingRepository->getForReservation($reservationId);
+        $paidObservations = $this->paidProviderObservationRepository->getForReservation($reservationId);
         $state = PaymentStatusService::buildReservationPaymentState($reservation, $paymentRows);
         $providerContext = ProviderReservationView::metadata($reservation);
         $providerPayment = ProviderReservationView::paymentContext($reservation, $state);
@@ -387,6 +398,14 @@ final class PaymentAdminDataProvider
                 $state['warnings'][] = \__('Provider fee is unknown for this paid online payment. Default refunds need manual review until the fee snapshot is available.', 'must-hotel-booking');
                 break;
             }
+        }
+        $openPaidObservations = \array_values(\array_filter($paidObservations, static function (array $observation): bool {
+            return \sanitize_key((string) ($observation['recovery_status'] ?? '')) !== 'resolved';
+        }));
+        if (!empty($openPaidObservations)) {
+            $state['needs_review'] = true;
+            $state['provider_paid_observation'] = true;
+            $state['warnings'][] = \__('The payment provider authoritatively reported money paid, but booking confirmation or Clock fulfilment is incomplete. Do not collect another payment; review the integrity reason and provider record.', 'must-hotel-booking');
         }
 
         foreach ($clockAccountingRows as $clockAccountingRow) {
@@ -434,6 +453,7 @@ final class PaymentAdminDataProvider
                 ? (string) $reservation['room_name']
                 : \__('Unassigned', 'must-hotel-booking'),
             'payments' => $paymentRows,
+            'paid_provider_observations' => $paidObservations,
             'refunds' => $refundRows,
             'clock_accounting' => $clockAccountingRows,
             'timeline' => $timeline,

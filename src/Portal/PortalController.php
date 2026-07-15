@@ -906,11 +906,25 @@ final class PortalController
             ]
         );
         if (empty($paymentResult['success'])) {
-            BookingStatusEngine::failPendingPaymentReservations(
-                $reservationIds,
-                'stripe',
-                'payment_failed'
-            );
+            if (empty($paymentResult['provider_attempt_created'])) {
+                BookingStatusEngine::failPendingPaymentReservations(
+                    $reservationIds,
+                    'stripe',
+                    'payment_failed'
+                );
+            }
+            if (!empty($paymentResult['provider_attempt_created'])) {
+                \MustHotelBooking\Frontend\update_booking_selection_flow_data([
+                    'pending_payment' => PaymentEngine::normalizePendingPaymentFlowData([
+                        'method' => 'stripe',
+                        'flow' => (string) ($paymentCreationOptions['confirmation_flow'] ?? 'website_online_stripe'),
+                        'reservation_ids' => $reservationIds,
+                        'session_id' => (string) ($paymentResult['session_id'] ?? $paymentResult['provider_reference'] ?? ''),
+                        'expires_at' => (string) ($paymentResult['expires_at'] ?? ''),
+                        'created_at' => \current_time('mysql'),
+                    ]),
+                ]);
+            }
             return [
                 'success' => false,
                 'errors' => [
@@ -930,6 +944,7 @@ final class PortalController
         \MustHotelBooking\Frontend\update_booking_selection_flow_data([
             'pending_payment' => PaymentEngine::normalizePendingPaymentFlowData([
                 'method' => 'stripe',
+                'flow' => (string) ($paymentCreationOptions['confirmation_flow'] ?? 'website_online_stripe'),
                 'reservation_ids' => $reservationIds,
                 'session_id' => (string) ($paymentResult['session_id'] ?? $paymentResult['transaction_id'] ?? ''),
                 'checkout_url' => $stripeCheckoutUrl,

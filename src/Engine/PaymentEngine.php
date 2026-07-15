@@ -20,6 +20,7 @@ final class PaymentEngine
     {
         return [
             'method' => '',
+            'flow' => '',
             'reservation_ids' => [],
             'session_id' => '',
             'checkout_url' => '',
@@ -49,6 +50,7 @@ final class PaymentEngine
             : [];
         return [
             'method' => isset($value['method']) ? \sanitize_key((string) $value['method']) : '',
+            'flow' => isset($value['flow']) ? \sanitize_key((string) $value['flow']) : '',
             'reservation_ids' => $reservationIds,
             'session_id' => isset($value['session_id']) ? \sanitize_text_field((string) $value['session_id']) : '',
             'checkout_url' => isset($value['checkout_url']) ? \esc_url_raw((string) $value['checkout_url']) : '',
@@ -730,11 +732,39 @@ final class PaymentEngine
      */
     public static function processPayment(string $method, array $reservationIds, float $amount, array $context = []): array
     {
+        $method = self::normalizeMethod($method);
+        $reservationIds = self::normalizeReservationIds($reservationIds);
+        if (!\in_array($method, ['stripe', 'pokpay'], true)) {
+            return self::getGateway($method)->processPayment([
+                'reservation_ids' => $reservationIds,
+                'method' => $method,
+            ], $amount, $context);
+        }
+        $currency = \strtoupper(\sanitize_text_field((string) ($context['currency'] ?? MustBookingConfig::get_currency())));
+        $checkoutMode = $method === 'pokpay' ? self::getPokPayCheckoutMode() : 'hosted_redirect';
+        $attempt = (new PaymentAttemptIntegrity())->prepare($method, $reservationIds, $amount, $currency, $checkoutMode);
+        if (empty($attempt['allowed'])) {
+            return [
+                'success' => false,
+                'state' => 'integrity_error',
+                'retryable' => false,
+                'reason_code' => (string) ($attempt['reason_code'] ?? 'payment_target_incompatible'),
+                'message' => \__('Online checkout is blocked because the payment and reservation targets cannot be proven compatible. Ask the hotel to review its payment settings.', 'must-hotel-booking'),
+            ];
+        }
+        $context['currency'] = $currency;
+        $context['payment_attempt'] = (array) ($attempt['attempt'] ?? []);
         $payload = [
-            'reservation_ids' => self::normalizeReservationIds($reservationIds),
-            'method' => \sanitize_key($method),
+            'reservation_ids' => $reservationIds,
+            'method' => $method,
         ];
         return self::getGateway($method)->processPayment($payload, $amount, $context);
+    }
+
+    /** @param array<string, mixed> $pending @return array<string, mixed> */
+    public static function validateReusablePendingPaymentAttempt(array $pending, string $method, float $amount, string $currency, string $flow): array
+    {
+        return (new PaymentAttemptIntegrity())->validateReusable($pending, $method, $amount, $currency, $flow);
     }
     /**
      * @param array<int, int> $reservationIds
@@ -798,14 +828,22 @@ final class PaymentEngine
             ];
         }
         $session = isset($sessionResponse['session']) && \is_array($sessionResponse['session']) ? $sessionResponse['session'] : [];
-        $binding = self::validateStripeSessionFacts($session, $reservationIds);
-        if (empty($binding['success'])) {
-            return $binding;
-        }
         $paymentStatus = isset($session['payment_status']) ? (string) $session['payment_status'] : '';
         $sessionStatus = isset($session['status']) ? (string) $session['status'] : '';
+        $transactionId = isset($session['payment_intent']) && (string) $session['payment_intent'] !== ''
+            ? (string) $session['payment_intent']
+            : $sessionId;
+        $binding = self::validateStripeSessionFacts($session, $reservationIds);
+        if (empty($binding['success'])) {
+            if ($paymentStatus === 'paid' && $sessionStatus === 'complete') {
+                $facts = self::buildStripePaidObservationFacts($session, $transactionId, $sessionId);
+                $observation = self::persistPaidProviderFailure('stripe', $reservationIds, $facts, (string) ($binding['reason_code'] ?? 'stripe_session_binding_failed'), self::getReservationIdsFromStripeSession($session));
+                $binding['provider_paid'] = true;
+                $binding['paid_observation_persisted'] = !empty($observation['success']);
+            }
+            return $binding;
+        }
         if ($paymentStatus === 'paid' && $sessionStatus === 'complete') {
-            $transactionId = isset($session['payment_intent']) ? (string) $session['payment_intent'] : $sessionId;
             if (!$allowSuccessMutation) {
                 return [
                     'success' => true,
@@ -819,14 +857,27 @@ final class PaymentEngine
                 ];
             }
             if (!self::reservationPaymentIdsMatchTransaction($reservationIds, 'stripe', $sessionId)) {
+                $facts = self::buildStripePaidObservationFacts($session, $transactionId, $sessionId);
+                $observation = self::persistPaidProviderFailure('stripe', $reservationIds, $facts, 'stripe_payment_binding_mismatch', self::getReservationIdsFromStripeSession($session));
                 return [
                     'success' => false,
                     'state' => 'integrity_error',
+                    'provider_paid' => true,
+                    'paid_observation_persisted' => !empty($observation['success']),
                     'message' => \__('Stripe session is not bound to this local payment reservation.', 'must-hotel-booking'),
                     'reason_code' => 'stripe_payment_binding_mismatch',
                 ];
             }
-            $completion = self::completeVerifiedOnlinePayment('stripe', $reservationIds, $transactionId, $sessionId, false);
+            $completion = self::completeVerifiedOnlinePayment(
+                'stripe',
+                $reservationIds,
+                $transactionId,
+                $sessionId,
+                false,
+                'authoritative_provider_reread',
+                '',
+                self::buildStripePaidObservationFacts($session, $transactionId, $sessionId)
+            );
             if (empty($completion['success'])) {
                 return $completion;
             }
@@ -1443,8 +1494,12 @@ final class PaymentEngine
         $status = isset($orderResponse['status']) ? \strtoupper((string) $orderResponse['status']) : '';
         if (\in_array($status, ['CAPTURED', 'PAID', 'COMPLETED'], true)) {
             $order = isset($orderResponse['order']) && \is_array($orderResponse['order']) ? $orderResponse['order'] : [];
+            $paidFacts = self::buildPokPayPaidObservationFacts($order, $orderId);
             $binding = self::validatePokPayOrderBinding($order, $orderId, $reservationIds);
             if (empty($binding['success'])) {
+                $observation = self::persistPaidProviderFailure('pokpay', $reservationIds, $paidFacts, (string) ($binding['reason_code'] ?? 'pokpay_order_binding_failed'));
+                $binding['provider_paid'] = true;
+                $binding['paid_observation_persisted'] = !empty($observation['success']);
                 return $binding;
             }
             if (self::providerPaymentAlreadyCompleted($reservationIds, 'pokpay', $orderId)) {
@@ -1453,7 +1508,16 @@ final class PaymentEngine
                     'state' => 'paid',
                 ];
             }
-            $completion = self::completeVerifiedOnlinePayment('pokpay', $reservationIds, $orderId, $orderId, $allowClockRetry);
+            $completion = self::completeVerifiedOnlinePayment(
+                'pokpay',
+                $reservationIds,
+                $orderId,
+                $orderId,
+                $allowClockRetry,
+                'authoritative_provider_reread',
+                '',
+                $paidFacts
+            );
             if (empty($completion['success'])) {
                 return $completion;
             }
@@ -2324,6 +2388,22 @@ final class PaymentEngine
         }
         $reservationIds = self::getReservationIdsFromStripeSession($object);
         if (empty($reservationIds)) {
+            if ($type === 'checkout.session.completed'
+                && (string) ($object['payment_status'] ?? '') === 'paid'
+                && (string) ($object['status'] ?? '') === 'complete') {
+                $sessionId = isset($object['id']) ? (string) $object['id'] : '';
+                $transactionId = isset($object['payment_intent']) && (string) $object['payment_intent'] !== ''
+                    ? (string) $object['payment_intent']
+                    : $sessionId;
+                $facts = self::buildStripePaidObservationFacts($object, $transactionId, $sessionId, 'stripe_signed_webhook', (string) ($event['id'] ?? ''));
+                $observation = self::persistPaidProviderFailure('stripe', [], $facts, 'stripe_reservation_metadata_missing', []);
+                return new \WP_REST_Response([
+                    'success' => true,
+                    'state' => 'manual_review',
+                    'provider_paid' => true,
+                    'paid_observation_persisted' => !empty($observation['success']),
+                ], 200);
+            }
             return new \WP_REST_Response(['success' => true], 200);
         }
         if ($type === 'checkout.session.completed') {
@@ -2338,17 +2418,34 @@ final class PaymentEngine
             }
             $binding = self::validateStripeSessionFacts($object, $reservationIds);
             if (empty($binding['success'])) {
+                $facts = self::buildStripePaidObservationFacts($object, $transactionId, $sessionId, 'stripe_signed_webhook', (string) ($event['id'] ?? ''));
+                $observation = self::persistPaidProviderFailure('stripe', $reservationIds, $facts, (string) ($binding['reason_code'] ?? 'stripe_session_binding_failed'), self::getReservationIdsFromStripeSession($object));
+                $binding['provider_paid'] = true;
+                $binding['paid_observation_persisted'] = !empty($observation['success']);
                 return new \WP_REST_Response($binding, 409);
             }
             if (!self::reservationPaymentIdsMatchTransaction($reservationIds, 'stripe', $sessionId)) {
+                $facts = self::buildStripePaidObservationFacts($object, $transactionId, $sessionId, 'stripe_signed_webhook', (string) ($event['id'] ?? ''));
+                $observation = self::persistPaidProviderFailure('stripe', $reservationIds, $facts, 'stripe_payment_binding_mismatch', self::getReservationIdsFromStripeSession($object));
                 return new \WP_REST_Response([
                     'success' => false,
                     'state' => 'integrity_error',
+                    'provider_paid' => true,
+                    'paid_observation_persisted' => !empty($observation['success']),
                     'message' => \__('Stripe session is not bound to this local payment reservation.', 'must-hotel-booking'),
                     'reason_code' => 'stripe_payment_binding_mismatch',
                 ], 409);
             }
-            $completion = self::completeVerifiedOnlinePayment('stripe', $reservationIds, $transactionId, $sessionId, true, 'stripe_signed_webhook');
+            $completion = self::completeVerifiedOnlinePayment(
+                'stripe',
+                $reservationIds,
+                $transactionId,
+                $sessionId,
+                true,
+                'stripe_signed_webhook',
+                (string) ($event['id'] ?? ''),
+                self::buildStripePaidObservationFacts($object, $transactionId, $sessionId, 'stripe_signed_webhook', (string) ($event['id'] ?? ''))
+            );
             if (empty($completion['success'])) {
                 return new \WP_REST_Response(
                     $completion,
@@ -2358,6 +2455,14 @@ final class PaymentEngine
             }
             (new PaymentProviderFeeService())->captureStripeFeeSnapshotForReservations($reservationIds, $object);
         } elseif ($type === 'checkout.session.expired') {
+            $sessionId = isset($object['id']) ? (string) $object['id'] : '';
+            if (!self::reservationPaymentIdsMatchTransaction($reservationIds, 'stripe', $sessionId)) {
+                return new \WP_REST_Response([
+                    'success' => false,
+                    'state' => 'integrity_error',
+                    'message' => \__('Expired Stripe session is not bound to this local payment reservation.', 'must-hotel-booking'),
+                ], 409);
+            }
             BookingStatusEngine::failPendingStripeReservations($reservationIds, 'expired');
         }
         return new \WP_REST_Response(['success' => true], 200);
@@ -2458,7 +2563,9 @@ final class PaymentEngine
         string $transactionId,
         string $providerReference,
         bool $allowClockRetry,
-        string $verificationSource = 'authoritative_provider_reread'
+        string $verificationSource = 'authoritative_provider_reread',
+        string $providerEventReference = '',
+        array $observedFacts = []
     ): array {
         $method = self::normalizeMethod($method);
         $reservationIds = self::normalizeReservationIds($reservationIds);
@@ -2470,12 +2577,23 @@ final class PaymentEngine
             ];
         }
 
-        $verifiedFacts = self::buildVerifiedPaymentFacts($method, $reservationIds, $transactionId, $providerReference, $verificationSource);
+        $verifiedFacts = self::buildVerifiedPaymentFacts($method, $reservationIds, $transactionId, $providerReference, $verificationSource, $providerEventReference);
+        foreach (['provider_mode', 'provider_account_fingerprint', 'total_amount_minor', 'currency', 'provider_completed_at'] as $observedField) {
+            if (\array_key_exists($observedField, $observedFacts) && (string) $observedFacts[$observedField] !== '') {
+                $verifiedFacts[$observedField] = $observedFacts[$observedField];
+            }
+        }
+        $verifiedFacts['observed_reservation_ids'] = isset($observedFacts['observed_reservation_ids']) && \is_array($observedFacts['observed_reservation_ids'])
+            ? $observedFacts['observed_reservation_ids']
+            : $reservationIds;
         if (empty($verifiedFacts['server_verified'])) {
+            $observation = self::persistPaidProviderFailure($method, $reservationIds, $verifiedFacts, 'verified_payment_facts_incomplete');
             return [
                 'success' => false,
                 'state' => 'manual_review',
                 'retryable' => false,
+                'provider_paid' => true,
+                'paid_observation_persisted' => !empty($observation['success']),
                 'message' => \__('The authoritative payment result could not be bound to this reservation group.', 'must-hotel-booking'),
             ];
         }
@@ -2490,7 +2608,23 @@ final class PaymentEngine
                 'state' => 'manual_review',
                 'retryable' => false,
                 'reason_code' => (string) ($durableOwnership['reason_code'] ?? ''),
+                'provider_paid' => true,
+                'paid_observation_persisted' => !empty($durableOwnership['paid_observation_persisted']),
                 'message' => \__('Verified payment ownership could not be recorded safely.', 'must-hotel-booking'),
+            ];
+        }
+        $attemptRows = get_payment_repository()->getPaymentAttemptRows($method, $providerReference);
+        $attemptPaymentIds = \array_values(\array_filter(\array_map('intval', \array_column($attemptRows, 'id'))));
+        if (empty($attemptPaymentIds) || !get_payment_repository()->updatePaymentAttemptRows($attemptPaymentIds, ['attempt_status' => 'verified', 'attempt_failure_code' => ''])) {
+            $observation = self::persistPaidProviderFailure($method, $reservationIds, $verifiedFacts, 'verified_attempt_status_persistence_failed');
+            return [
+                'success' => false,
+                'state' => 'manual_review',
+                'retryable' => false,
+                'provider_paid' => true,
+                'paid_observation_persisted' => !empty($observation['success']),
+                'reason_code' => 'verified_attempt_status_persistence_failed',
+                'message' => \__('Payment was verified, but its attempt status could not be stored safely.', 'must-hotel-booking'),
             ];
         }
 
@@ -2510,30 +2644,45 @@ final class PaymentEngine
                 $providerReference
             );
             if (empty($durableVerification['success'])) {
-                return $durableVerification;
+                $observation = self::persistPaidProviderFailure($method, $reservationIds, $verifiedFacts, (string) ($durableVerification['reason_code'] ?? $durableVerification['state'] ?? 'clock_verification_persistence_failed'));
+                return \array_merge($durableVerification, [
+                    'provider_paid' => true,
+                    'paid_observation_persisted' => !empty($observation['success']),
+                ]);
             }
             $reservations = new \MustHotelBooking\Provider\Clock\ClockReservationProvider();
-            if (!$reservations instanceof \MustHotelBooking\Provider\Clock\ClockReservationProvider) {
-                return [
-                    'success' => false,
-                    'state' => 'pending_fulfilment',
-                    'retryable' => false,
-                    'message' => \__('Clock reservation fulfillment is unavailable.', 'must-hotel-booking'),
-                ];
-            }
             $clockResult = $reservations->fulfillPendingOnlinePayment($reservationIds, $method, $providerReference, $allowClockRetry);
             if (empty($clockResult['success'])) {
-                return $clockResult;
+                $recoveryStatus = !empty($clockResult['retryable'])
+                    ? 'processing_pending'
+                    : ((string) ($clockResult['state'] ?? '') === 'partial_manual_review' ? 'partial_manual_review' : 'manual_review');
+                $observation = self::persistPaidProviderFailure(
+                    $method,
+                    $reservationIds,
+                    $verifiedFacts,
+                    (string) ($clockResult['reason_code'] ?? $clockResult['state'] ?? 'clock_fulfilment_failed'),
+                    isset($clockResult['fulfilled_reservation_ids']) && \is_array($clockResult['fulfilled_reservation_ids']) ? $clockResult['fulfilled_reservation_ids'] : [],
+                    $recoveryStatus
+                );
+                return \array_merge($clockResult, [
+                    'provider_paid' => true,
+                    'paid_observation_persisted' => !empty($observation['success']),
+                ]);
             }
         }
 
         $completion = (new OnlinePaymentVerificationService())->recordAndConfirm($method, $reservationIds, $verifiedFacts);
         if (empty($completion['success']) || !self::allReservationsConfirmed($reservationIds)) {
+            $observation = !empty($completion['paid_observation_persisted'])
+                ? ['success' => true]
+                : self::persistPaidProviderFailure($method, $reservationIds, $verifiedFacts, (string) ($completion['reason_code'] ?? 'confirmation_incomplete'));
             return [
                 'success' => false,
                 'state' => 'manual_review',
                 'retryable' => false,
                 'reason_code' => (string) ($completion['reason_code'] ?? ''),
+                'provider_paid' => true,
+                'paid_observation_persisted' => !empty($observation['success']),
                 'message' => \__('Payment was verified, but local confirmation was blocked and requires review.', 'must-hotel-booking'),
             ];
         }
@@ -2541,22 +2690,40 @@ final class PaymentEngine
         if (\function_exists('MustHotelBooking\\Frontend\\clear_booking_selection')) {
             \MustHotelBooking\Frontend\clear_booking_selection(false);
         }
+        (new \MustHotelBooking\Database\PaidProviderObservationRepository())->markResolved(
+            $method,
+            $transactionId,
+            (string) ($verifiedFacts['provider_mode'] ?? ''),
+            (string) ($verifiedFacts['provider_account_fingerprint'] ?? '')
+        );
         return [
             'success' => true,
             'state' => 'paid',
         ];
     }
 
+    /** @param array<int, int> $reservationIds @param array<string, mixed> $facts @return array<string, mixed> */
+    private static function persistPaidProviderFailure(string $method, array $reservationIds, array $facts, string $reasonCode, array $observedReservationIds = [], string $recoveryStatus = 'manual_review'): array
+    {
+        return (new PaidProviderOutcomeService())->persist(
+            $method,
+            $reservationIds,
+            $facts,
+            $reasonCode,
+            $observedReservationIds,
+            $recoveryStatus
+        );
+    }
+
     /** @param array<int, int> $reservationIds @return array<string, mixed> */
-    private static function buildVerifiedPaymentFacts(string $method, array $reservationIds, string $transactionId, string $providerReference, string $verificationSource): array
+    private static function buildVerifiedPaymentFacts(string $method, array $reservationIds, string $transactionId, string $providerReference, string $verificationSource, string $providerEventReference = ''): array
     {
         $currency = \strtoupper(\sanitize_text_field((string) MustBookingConfig::get_currency()));
         $total = self::sumReservationTotals($reservationIds);
         $environment = self::getActiveSiteEnvironment();
-        $mode = $method === 'stripe'
-            ? ($environment === 'production' ? 'live' : 'test')
-            : self::getPokPayApiEnvironment($environment);
-        $fingerprint = self::paymentProviderAccountFingerprint($method, $environment);
+        $identity = (new PaymentEnvironmentCompatibilityPolicy())->currentGatewayIdentity($method, $environment);
+        $mode = (string) ($identity['mode'] ?? '');
+        $fingerprint = (string) ($identity['account_fingerprint'] ?? '');
         return [
             'server_verified' => $currency !== '' && $total !== null && $total > 0.0 && $transactionId !== '' && $providerReference !== '' && $fingerprint !== '',
             'provider_transaction_reference' => \sanitize_text_field($transactionId),
@@ -2566,9 +2733,47 @@ final class PaymentEngine
             'total_amount_minor' => $total !== null ? self::convertAmountToMinorUnits($total, $currency) : -1,
             'currency' => $currency,
             'verification_source' => \sanitize_key($verificationSource) ?: 'authoritative_provider_reread',
-            'provider_event_reference' => '',
+            'provider_event_reference' => \sanitize_text_field($providerEventReference),
             'raw_response_hash' => '',
             'provider_completed_at' => '',
+        ];
+    }
+
+    /** @param array<string, mixed> $session @return array<string, mixed> */
+    private static function buildStripePaidObservationFacts(array $session, string $transactionId, string $sessionId, string $verificationSource = 'authoritative_provider_reread', string $providerEventReference = ''): array
+    {
+        $identity = (new PaymentEnvironmentCompatibilityPolicy())->currentGatewayIdentity('stripe');
+        return [
+            'provider_transaction_reference' => \sanitize_text_field($transactionId),
+            'provider_attempt_reference' => \sanitize_text_field($sessionId),
+            'provider_mode' => isset($session['livemode']) ? (!empty($session['livemode']) ? 'live' : 'test') : (string) ($identity['mode'] ?? ''),
+            'provider_account_fingerprint' => (string) ($identity['account_fingerprint'] ?? ''),
+            'total_amount_minor' => isset($session['amount_total']) && \is_numeric($session['amount_total']) ? (int) $session['amount_total'] : -1,
+            'currency' => \strtoupper(\sanitize_text_field((string) ($session['currency'] ?? ''))),
+            'provider_completed_at' => isset($session['created']) && \is_numeric($session['created']) ? \gmdate('Y-m-d H:i:s', (int) $session['created']) : '',
+            'verification_source' => \sanitize_key($verificationSource),
+            'provider_event_reference' => \sanitize_text_field($providerEventReference),
+        ];
+    }
+
+    /** @param array<string, mixed> $order @return array<string, mixed> */
+    private static function buildPokPayPaidObservationFacts(array $order, string $orderId): array
+    {
+        $identity = (new PaymentEnvironmentCompatibilityPolicy())->currentGatewayIdentity('pokpay');
+        $currency = \strtoupper(self::firstTextValue($order, ['currencyCode', 'currency', 'currency_code']));
+        $amount = self::firstNumericValue($order, ['amount', 'amountPaid', 'amount_paid', 'finalAmount', 'final_amount']);
+        $completedAt = self::firstTextValue($order, ['completedAt', 'completed_at', 'capturedAt', 'captured_at']);
+        $completedTimestamp = $completedAt !== '' ? \strtotime($completedAt) : false;
+        return [
+            'provider_transaction_reference' => \sanitize_text_field($orderId),
+            'provider_attempt_reference' => \sanitize_text_field($orderId),
+            'provider_mode' => (string) ($identity['mode'] ?? ''),
+            'provider_account_fingerprint' => (string) ($identity['account_fingerprint'] ?? ''),
+            'total_amount_minor' => $amount !== null && $currency !== '' ? self::convertAmountToMinorUnits($amount, $currency) : -1,
+            'currency' => $currency,
+            'provider_completed_at' => $completedTimestamp !== false ? \gmdate('Y-m-d H:i:s', $completedTimestamp) : '',
+            'verification_source' => 'authoritative_provider_reread',
+            'provider_event_reference' => '',
         ];
     }
 
@@ -2872,13 +3077,8 @@ final class PaymentEngine
 
     private static function paymentProviderAccountFingerprint(string $method, string $environment): string
     {
-        $credentials = $method === 'stripe'
-            ? self::getStripeEnvironmentCredentials($environment)
-            : self::getPokPayEnvironmentCredentials($environment);
-        $identity = $method === 'stripe'
-            ? (string) ($credentials['publishable_key'] ?? '')
-            : (string) ($credentials['merchant_id'] ?? '') . '|' . (string) ($credentials['key_id'] ?? '');
-        return \hash('sha256', $method . '|' . $environment . '|' . $identity);
+        $identity = (new PaymentEnvironmentCompatibilityPolicy())->currentGatewayIdentity($method, $environment);
+        return (string) ($identity['account_fingerprint'] ?? '');
     }
 
     /** @param array<int, int> $reservationIds */

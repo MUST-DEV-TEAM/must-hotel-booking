@@ -12,6 +12,9 @@ Notable product, architecture, integration, operational, compatibility, and secu
 - Record per-room Clock fulfillment and route expired, ambiguous, persistence-failed, or partial outcomes to manual review.
 - Centralize every first confirmed-equivalent transition behind immutable flow-specific authorization and reject direct repository bypasses while preserving already-confirmed idempotency.
 - Bind each Stripe/PokPay transaction and pending attempt to one environment/account, exact reservation set, per-reservation allocation, amount and currency before Clock fulfillment; paid evidence alone emits no booking-success side effects.
+- Reuse pending checkout only when its durable payment-row allocation, booking snapshot, provider mode/credential fingerprint, checkout mode, expiry, explicit site environment and approved Clock target still match; superseded attempts retain their original ownership.
+- Fail closed before Clock creation when gateway/site/Clock environments or the approved Clock property/account fingerprint differ from attempt time.
+- Persist idempotent provider-paid observations and expected/observed allocations for integrity, local-persistence, confirmation, ambiguous/failed Clock and partial multi-room outcomes without firing payment, accounting, confirmation or email hooks.
 - Route public/staff pay-at-hotel, Clock imports and explicit administrative recovery through the same confirmation boundary, with activity-log decisions and post-commit confirmation email.
 
 ### Security
@@ -24,6 +27,7 @@ Notable product, architecture, integration, operational, compatibility, and secu
 
 - Add idempotent public-access grant/context tables and additive Clock fulfillment key, owner, claim, lease, and lease-index schema repair, including equal-version upgrades.
 - Add idempotent confirmation flow/claim/source/timestamp columns and immutable payment-verification group/allocation tables with uniqueness repair on fresh and equal-version upgrades.
+- Add immutable attempt-identity columns to existing payment rows plus provider-paid observation/allocation evidence tables, with additive fresh-install and equal-version repair and legacy-row defaults.
 
 ## 0.4.90 - 2026-07-13
 

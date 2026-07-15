@@ -92,11 +92,13 @@ See [ADR-0002](decisions/ADR-0002-final-live-quote-revalidation.md).
 
 ### Online payment initiation
 
-1. Create reusable pending reservation/payment records.
-2. Create a Stripe Checkout Session or PokPay SDK order and save its reference.
+1. Create pending reservation records and compute the server-owned target identity from the explicit site environment, gateway credentials, exact reservation totals/snapshot, and approved Clock property/account when required.
+2. Create a Stripe Checkout Session or PokPay SDK order, then store its immutable attempt identity and exact payment-row allocation on new payment rows.
 3. Redirect only to an allowlisted HTTPS provider host.
 4. Keep inventory blocked while the attempt is pending.
 5. Expiration/failure moves reservations to `expired` or `payment_failed` and releases inventory.
+
+A pending attempt is reusable only when its durable reference, provider/mode/credential fingerprint, checkout mode, unexpired deadline, reservation/payment allocation, minor-unit total, currency, booking snapshot, site environment, and Clock target still match. A mismatch supersedes the attempt without overwriting its provider ownership; only an otherwise unchanged pending reservation set may start a new authoritative attempt. Legacy or incomplete attempt rows fail closed for review.
 
 Pending-payment cleanup runs through WP-Cron and a bounded age threshold. Rows with durable verified-payment evidence or a pending/manual Clock fulfillment are not ordinary expired checkout attempts; manual-review outcomes require explicit reconciliation.
 
@@ -106,7 +108,7 @@ Current Clock mode follows payment-first ordering:
 
 ```mermaid
 flowchart LR
-    A["Pending local reservation and payment"] --> B["Provider payment reread and binding checks"]
+    A["Exact pending attempt and allocation"] --> B["Provider payment reread, attempt and target checks"]
     B -->|"not authoritative"| C["Remain pending or fail/expire"]
     B -->|"verified paid"| D["Claim provider payment and exact allocation"]
     D --> E["Persist paid projection without success hooks"]
@@ -122,6 +124,7 @@ Every first transition to a confirmed-equivalent state is owned by `ReservationC
 ### Idempotency present
 
 - Gateway callbacks reread provider state and validate reservation binding, amount, and currency.
+- Verified completion rechecks the attempt-time provider mode/credential fingerprint, explicit site environment, Clock environment, and approved Clock target before durable ownership or any Clock create.
 - Existing paid payment/confirmed reservation state short-circuits repeated completion.
 - One provider transaction is uniquely owned by one environment/account and exact deterministic allocation; the same pending payment row cannot be allocated to another group.
 - Clock fulfillment uses an atomic owner-token lease; a second callback receives `in_progress` and cannot create.
@@ -132,6 +135,7 @@ Every first transition to a confirmed-equivalent state is owned by `ReservationC
 ### Recovery and atomicity boundaries
 
 - Authoritative gateway evidence is stored as an immutable ownership/allocation group and, for Clock recovery, in reservation provider metadata before any Clock write. Paid evidence alone does not confirm, show success, consume confirmation side effects, or emit payment/accounting hooks.
+- If authoritative paid status is known but attempt/allocation/amount/currency/target compatibility, local persistence, confirmation, or Clock fulfilment fails, one idempotent paid-provider observation records the paid facts and recovery state. Replays update that evidence; it emits no payment/confirmation hooks and is marked resolved only after full completion.
 - Only the active lease owner can reach the Clock create boundary or persist returned Clock identifiers.
 - Expired leases, ambiguous provider responses, and local persistence failures enter `manual_review`; another create is forbidden until Clock is reread and reconciled.
 - If a Clock reconciliation write succeeds but its requested local lifecycle transition is blocked, the operation returns failure, stores `manual_review`, and does not present the reservation set as fully confirmed.

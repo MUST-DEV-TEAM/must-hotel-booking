@@ -30,8 +30,12 @@ final class OnlinePaymentVerificationService
         if (!\in_array($provider, ['stripe', 'pokpay'], true) || empty($reservationIds) || empty($verified['server_verified'])) {
             return $this->failure('provider_verification_missing');
         }
+        $attemptValidation = (new PaymentAttemptIntegrity())->validateFinalization($provider, $reservationIds, $verified);
+        if (empty($attemptValidation['allowed'])) {
+            return $this->paidFailure($provider, $reservationIds, $verified, (string) ($attemptValidation['reason_code'] ?? 'verified_attempt_mismatch'));
+        }
         if (!$this->reservations->beginTransaction()) {
-            return $this->failure('transaction_start_failed');
+            return $this->paidFailure($provider, $reservationIds, $verified, 'transaction_start_failed');
         }
 
         $paymentEvents = [];
@@ -249,7 +253,7 @@ final class OnlinePaymentVerificationService
             }
         } catch (\Throwable $error) {
             $this->reservations->rollback();
-            return $this->failure($error->getMessage());
+            return $this->paidFailure($provider, $reservationIds, $verified, $error->getMessage());
         }
         foreach ($paymentEvents as $event) {
             \do_action('must_hotel_booking/payment_recorded', $event);
@@ -273,5 +277,28 @@ final class OnlinePaymentVerificationService
     private function failure(string $reason): array
     {
         return ['success' => false, 'state' => 'manual_review', 'retryable' => false, 'reason_code' => \sanitize_key($reason)];
+    }
+
+    /** @param array<int, int> $reservationIds @param array<string, mixed> $verified */
+    private function paidFailure(string $provider, array $reservationIds, array $verified, string $reason): array
+    {
+        $observation = (new PaidProviderOutcomeService())->persist(
+            $provider,
+            $reservationIds,
+            $verified,
+            $reason,
+            isset($verified['observed_reservation_ids']) && \is_array($verified['observed_reservation_ids'])
+                ? $verified['observed_reservation_ids']
+                : $reservationIds
+        );
+        return [
+            'success' => false,
+            'state' => 'manual_review',
+            'retryable' => false,
+            'provider_paid' => true,
+            'paid_observation_persisted' => !empty($observation['success']),
+            'reason_code' => \sanitize_key($reason),
+            'observation_reason_code' => (string) ($observation['reason_code'] ?? ''),
+        ];
     }
 }

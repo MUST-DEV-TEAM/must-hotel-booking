@@ -66,7 +66,9 @@ Clock can be configured to fall back to local behavior when unavailable. That op
 | Reservation | Local row in `must_reservations`; may be local, a pending Clock mirror, or a Clock mirror with provider IDs. |
 | Booking ID | Local human-facing `MHB-...` reference; not the same as a Clock booking ID or payment transaction ID. |
 | Payment row | Local ledger projection in `must_payments`; distinct from reservation `payment_status`. |
+| Pending payment attempt | Immutable attempt-time identity stored on its payment rows: provider reference/mode/credential fingerprint, exact reservation/payment allocation, total/currency, checkout mode, expiry, booking snapshot, site environment, and Clock target when required. |
 | Payment verification group | Immutable Stripe/PokPay ownership row bound to provider mode/account, transaction, attempt, exact reservation allocation, total, and currency. |
+| Paid-provider observation | Idempotent evidence that the gateway is authoritatively paid while allocation, compatibility, confirmation, or Clock fulfilment remains incomplete; it is not a second payment ledger or confirmation authority. |
 | Refund row | Explicit refund/review state in `must_refunds`; cancellation alone is not a refund. |
 | Provider mapping | Local/external identity mapping in `mhb_provider_mappings`. |
 | Accounting row | Clock payment/refund posting and verification state in `must_clock_folio_accounting`. |
@@ -81,11 +83,11 @@ Clock can be configured to fall back to local behavior when unavailable. That op
 
 ## Current environments
 
-Code supports local, staging and production payment credential slots, plus Clock sandbox, production and custom endpoints. The current saved environment, callback reachability, credentials, API rights, WordPress cron configuration, database version/shape, and theme overrides are **unverified**.
+Code supports finite local, staging and production payment credential slots, plus Clock sandbox, production and custom endpoints. Online attempts require an explicitly saved site environment; Clock-backed payment also requires the compatible sandbox/production mode and a human-approved fingerprint of the configured Clock property/account target. Attempt-time gateway credentials and complete target identity are rechecked before verified ownership or Clock creation. The current saved environment, target approval, callback reachability, credentials, API rights, WordPress cron configuration, database version/shape, and theme overrides are **unverified**.
 
 ## Current limitations and unresolved risks
 
-1. The confirmation grants, callback binding, immutable payment ownership, central first-confirmation authorization, repository guard, and fulfillment leases have received static review only; database concurrency and provider behavior are not certified.
+1. The confirmation grants, exact pending-attempt binding, environment/Clock-target gate, paid-provider observations, immutable payment ownership, central first-confirmation authorization, repository guard, and fulfillment leases have received static review only; database concurrency and provider behavior are not certified.
 2. There is no automatic recovery worker for Clock fulfillment held in `manual_review`; staff must reread Clock before any approved recovery create.
 3. Concurrent refund and ambiguous Clock accounting retries retain unresolved idempotency risk outside this integration.
 4. Selected local rate-plan propagation and final cancellation-policy comparison have code/documentation discrepancies requiring focused tests.

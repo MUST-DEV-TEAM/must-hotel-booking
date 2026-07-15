@@ -102,7 +102,7 @@ final class BookingStatusEngine
     /**
      * @param array<int, int> $reservationIds
      */
-    public static function createPaymentRows(array $reservationIds, string $method, string $status, string $transactionId = '', bool $dispatchHooks = true): array
+    public static function createPaymentRows(array $reservationIds, string $method, string $status, string $transactionId = '', bool $dispatchHooks = true, array $attemptData = []): array
     {
         $reservationRows = self::getPaymentReservationRows($reservationIds);
         $currency = \class_exists(MustBookingConfig::class) ? MustBookingConfig::get_currency() : 'USD';
@@ -120,7 +120,7 @@ final class BookingStatusEngine
             $existingPaymentId = $transactionId !== ''
                 ? $paymentRepository->getLatestPaymentIdForReservationMethodTransaction($reservationId, $method, $transactionId)
                 : 0;
-            if ($existingPaymentId <= 0) {
+            if ($existingPaymentId <= 0 && ($transactionId === '' || empty($attemptData))) {
                 $existingPaymentId = $paymentRepository->getLatestPaymentIdForReservationMethod($reservationId, $method);
             }
             $paymentData = [
@@ -130,6 +130,17 @@ final class BookingStatusEngine
                 'status' => $status,
                 'transaction_id' => $transactionId,
             ];
+            foreach ([
+                'provider_attempt_reference', 'attempt_status', 'attempt_site_environment', 'attempt_provider_mode',
+                'attempt_account_fingerprint', 'attempt_checkout_mode', 'attempt_clock_environment',
+                'attempt_clock_target_fingerprint', 'attempt_reservation_set_hash', 'attempt_allocation_set_hash',
+                'attempt_group_amount_minor', 'attempt_currency', 'attempt_expires_at',
+                'attempt_booking_snapshot_hash', 'attempt_failure_code',
+            ] as $attemptField) {
+                if (\array_key_exists($attemptField, $attemptData)) {
+                    $paymentData[$attemptField] = $attemptData[$attemptField];
+                }
+            }
 
             if ($status === 'paid') {
                 $paymentData['paid_at'] = \current_time('mysql');
@@ -137,6 +148,13 @@ final class BookingStatusEngine
 
             if ($existingPaymentId > 0) {
                 $existingPayment = $paymentRepository->getPayment($existingPaymentId);
+
+                if (\is_array($existingPayment)
+                    && \in_array(\sanitize_key((string) ($existingPayment['status'] ?? '')), ['paid', 'refunded'], true)
+                    && !\in_array(\sanitize_key($status), ['paid', 'refunded'], true)) {
+                    $outcome['already'][] = $reservationId;
+                    continue;
+                }
 
                 if (
                     \is_array($existingPayment)
@@ -200,6 +218,16 @@ final class BookingStatusEngine
                 }
             } else {
                 $outcome['failed'][] = $reservationId;
+            }
+        }
+
+        if ($transactionId !== '' && !empty($attemptData) && empty($outcome['failed'])) {
+            $attemptRows = $paymentRepository->getPaymentAttemptRows($method, $transactionId);
+            $allocationHash = (new PaymentAttemptIntegrity())->allocationHash($attemptRows);
+            $paymentIds = \array_values(\array_filter(\array_map('intval', \array_column($attemptRows, 'id'))));
+            if ($allocationHash === '' || \count($attemptRows) !== \count($reservationRows)
+                || !$paymentRepository->updatePaymentAttemptRows($paymentIds, ['attempt_allocation_set_hash' => $allocationHash])) {
+                $outcome['failed'] = \array_values(\array_unique(\array_merge($outcome['failed'], \array_map('intval', $reservationIds))));
             }
         }
 

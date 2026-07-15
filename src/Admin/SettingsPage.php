@@ -8,6 +8,7 @@ use MustHotelBooking\Engine\EmailEngine;
 use MustHotelBooking\Engine\EmailLayoutEngine;
 use MustHotelBooking\Engine\LockEngine;
 use MustHotelBooking\Engine\PaymentEngine;
+use MustHotelBooking\Engine\PaymentEnvironmentCompatibilityPolicy;
 use MustHotelBooking\Provider\Clock\ClockConfig;
 use MustHotelBooking\Provider\Clock\ClockCatalogService;
 use MustHotelBooking\Provider\Clock\ClockConnectionDiagnostic;
@@ -329,12 +330,21 @@ final class SettingsPage
             ];
         }
         $task = isset($source['maintenance_task']) ? \sanitize_key((string) \wp_unslash($source['maintenance_task'])) : '';
-        $allowedTasks = ['reinstall_pages', 'reschedule_cron', 'cleanup_expired_locks', 'send_test_email', 'flush_portal_routes', 'repair_inventory_mirror', 'apply_clock_api_defaults', 'test_clock_connection', 'fetch_clock_catalog', 'clock_full_sync', 'run_clock_catalog_sync_now', 'run_clock_availability_rate_sync_now', 'run_clock_reservation_fallback_sync_now', 'repair_clock_sync_schedules', 'run_provider_sync_jobs', 'queue_clock_reservation_refresh'];
+        $allowedTasks = ['reinstall_pages', 'reschedule_cron', 'cleanup_expired_locks', 'send_test_email', 'flush_portal_routes', 'repair_inventory_mirror', 'apply_clock_api_defaults', 'approve_clock_payment_target', 'test_clock_connection', 'fetch_clock_catalog', 'clock_full_sync', 'run_clock_catalog_sync_now', 'run_clock_availability_rate_sync_now', 'run_clock_reservation_fallback_sync_now', 'repair_clock_sync_schedules', 'run_provider_sync_jobs', 'queue_clock_reservation_refresh'];
         if (!\in_array($task, $allowedTasks, true)) {
             return [
                 'tab' => $tab,
                 'notice' => '',
                 'errors' => [\__('Unknown maintenance action.', 'must-hotel-booking')],
+                'forms' => [],
+            ];
+        }
+        if ($task === 'approve_clock_payment_target') {
+            $approved = !$persist || PaymentEnvironmentCompatibilityPolicy::approveCurrentClockTarget(PaymentEnvironmentCompatibilityPolicy::configuredSiteEnvironment());
+            return [
+                'tab' => $tab,
+                'notice' => $approved ? 'clock_payment_target_approved' : '',
+                'errors' => $approved ? [] : [\__('The current Clock property/account identity is incomplete and could not be approved for payments.', 'must-hotel-booking')],
                 'forms' => [],
             ];
         }
@@ -2112,6 +2122,7 @@ final class SettingsPage
             'clock_catalog_fetched' => \__('Clock catalog fetched and cached for mapping.', 'must-hotel-booking'),
             'clock_catalog_fetched_with_warnings' => \__('Clock catalog fetch completed with warnings. Review the catalog diagnostics below.', 'must-hotel-booking'),
             'clock_api_defaults_applied' => \__('Clock API defaults applied. Enter the PMS/Base API URLs, API user, and API key, then save and test the connection.', 'must-hotel-booking'),
+            'clock_payment_target_approved' => \__('The current Clock property/account target was approved for online-payment fulfilment in this site environment.', 'must-hotel-booking'),
             'clock_full_sync_completed' => \__('Clock full sync completed. Catalog was refreshed and missing local Clock mappings/imports were created where safe.', 'must-hotel-booking'),
             'clock_sync_action_completed' => \__('Clock sync action completed. Review sync diagnostics for status, counts, and sanitized errors.', 'must-hotel-booking'),
             'clock_sync_schedules_repaired' => \__('Clock sync schedules were repaired from the saved settings.', 'must-hotel-booking'),
@@ -3381,6 +3392,13 @@ final class SettingsPage
         echo '<form method="post" action="' . \esc_url(get_admin_settings_page_url(['tab' => 'provider'])) . '" class="must-settings-secondary-action">';
         \wp_nonce_field('must_settings_maintenance_action', 'must_settings_nonce');
         echo '<input type="hidden" name="must_settings_action" value="maintenance_action" />';
+        echo '<input type="hidden" name="maintenance_task" value="approve_clock_payment_target" />';
+        echo '<input type="hidden" name="return_tab" value="provider" />';
+        echo '<button type="submit" class="button button-secondary">' . \esc_html__('Approve current Clock payment target', 'must-hotel-booking') . '</button>';
+        echo '</form>';
+        echo '<form method="post" action="' . \esc_url(get_admin_settings_page_url(['tab' => 'provider'])) . '" class="must-settings-secondary-action">';
+        \wp_nonce_field('must_settings_maintenance_action', 'must_settings_nonce');
+        echo '<input type="hidden" name="must_settings_action" value="maintenance_action" />';
         echo '<input type="hidden" name="maintenance_task" value="apply_clock_api_defaults" />';
         echo '<input type="hidden" name="return_tab" value="provider" />';
         echo '<button type="submit" class="button button-secondary">' . \esc_html__('Apply Clock API defaults', 'must-hotel-booking') . '</button>';
@@ -4333,6 +4351,8 @@ final class SettingsPage
         echo '<article class="must-settings-summary-card"><span class="must-settings-summary-label">' . \esc_html__('Plugin version', 'must-hotel-booking') . '</span><strong>' . \esc_html((string) ($environment['plugin_version'] ?? '')) . '</strong></article>';
         echo '<article class="must-settings-summary-card"><span class="must-settings-summary-label">' . \esc_html__('DB version', 'must-hotel-booking') . '</span><strong>' . \esc_html((string) ($environment['database_version'] ?? '')) . '</strong></article>';
         echo '<article class="must-settings-summary-card"><span class="must-settings-summary-label">' . \esc_html__('Rooms', 'must-hotel-booking') . '</span><strong>' . \esc_html((string) ($environment['room_count'] ?? 0)) . '</strong></article>';
+        echo '<article class="must-settings-summary-card"><span class="must-settings-summary-label">' . \esc_html__('Paid-provider reviews', 'must-hotel-booking') . '</span><strong>' . \esc_html((string) ($payments['paid_provider_open_total'] ?? 0)) . '</strong></article>';
+        echo '<article class="must-settings-summary-card"><span class="must-settings-summary-label">' . \esc_html__('Clock payment target', 'must-hotel-booking') . '</span><strong>' . \esc_html(!empty($environment['clock_payment_target_approved']) ? __('Approved', 'must-hotel-booking') : __('Not approved', 'must-hotel-booking')) . '</strong></article>';
         echo '<article class="must-settings-summary-card"><span class="must-settings-summary-label">' . \esc_html__('Cron', 'must-hotel-booking') . '</span><strong>' . \esc_html((string) ($cron['next_run'] ?? '')) . '</strong></article>';
         echo '<article class="must-settings-summary-card"><span class="must-settings-summary-label">' . \esc_html__('Booking protection', 'must-hotel-booking') . '</span><strong>' . \esc_html(!empty($antiAbuse['enabled']) ? __('Enabled', 'must-hotel-booking') : __('Disabled', 'must-hotel-booking')) . '</strong></article>';
         echo '<article class="must-settings-summary-card"><span class="must-settings-summary-label">' . \esc_html__('Recent blocked attempts', 'must-hotel-booking') . '</span><strong>' . \esc_html((string) ($antiAbuse['recent_blocked_total'] ?? 0)) . '</strong></article>';
