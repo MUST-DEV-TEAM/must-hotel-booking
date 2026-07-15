@@ -33,11 +33,12 @@ Activation performs table installation, current payment-policy migration/repair,
 
 ## Upgrade and database behavior
 
-The plugin stores its database version in `must_hotel_booking_db_version`. On `plugins_loaded`, an older stored version runs the full idempotent installer. Payment/refund, public-access, and Clock-fulfillment lease schema repair also run at the current version so partially upgraded installations receive additive columns, indexes, and grant/context tables.
+The plugin stores its database version in `must_hotel_booking_db_version`. On `plugins_loaded`, an older stored version runs the full idempotent installer. Payment/refund, public-access, Clock-fulfillment lease, and confirmation-integrity schema repair also run at the current version so partially upgraded installations receive additive columns, indexes, ownership/allocation tables, and grant/context tables.
 
-- The base installer defines 28 `dbDelta()` tables, and the additive public-access repair creates two more grant/context tables; no plugin table uses foreign keys.
+- The base installer defines 30 `dbDelta()` tables, and the additive public-access repair creates two more grant/context tables; no plugin table uses foreign keys.
 - Public access adds `must_public_booking_access` and `must_public_booking_access_contexts`; tokens/selectors are stored only as hashes.
 - Clock fulfillment adds `provider_fulfilment_key`, `provider_fulfilment_owner`, claim/lease timestamps, and an expiry index to `must_reservations` without renaming or dropping legacy data.
+- Confirmation integrity adds finite flow/source/claim/timestamp columns to `must_reservations`, plus `must_payment_verification_groups` and `must_payment_verifications`. Unique ownership, payment, claim and group/reservation indexes prevent reassignment. Confirmed legacy rows remain untouched; a pending legacy row is classified only by an exact trusted gateway-attempt, Clock-import, staff-offline or authorized recovery path.
 - There is no ordered numbered migration ledger; the plugin release version is also the migration version.
 - Historical schema code is not obsolete merely because current installations may already contain its changes.
 - Deactivation unschedules plugin cron hooks and flushes rewrites; it does not delete operational data.
@@ -212,9 +213,9 @@ SSH or database access must be explicitly authorized and read-only by default.
 1. Freeze automatic/manual retries for the affected correlation set.
 2. Preserve gateway object/event evidence, pending payment/reservation rows, provider logs, and Clock IDs if any.
 3. Verify reservation allocation, amount, currency, environment/account, and transaction identity.
-4. Inspect durable `online_payment_verification`, provider sync state, fulfillment key/owner/lease, and per-room fulfillment outcome.
+4. Inspect the immutable payment verification group/allocation, durable `online_payment_verification`, confirmation flow/claim/source, provider sync state, fulfillment key/owner/lease, and per-room fulfillment outcome.
 5. Determine whether Clock wrote a booking before any new create attempt. An expired lease or `manual_review` is a stop condition, not retry permission.
-6. Reconcile through an approved manual/recovery plan. Do not mark paid or create another booking by inference.
+6. Reconcile through an approved manual/recovery plan. An administrative recovery must remain explicit, capability-authorized and activity-logged; do not mark paid, reclassify a known online flow, or create another booking by inference.
 
 ### Duplicate or partial Clock fulfillment
 

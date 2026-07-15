@@ -3,6 +3,7 @@
 namespace MustHotelBooking\Admin;
 
 use MustHotelBooking\Core\ReservationStatus;
+use MustHotelBooking\Core\StaffAccess;
 use MustHotelBooking\Engine\BookingLifecycleSyncService;
 use MustHotelBooking\Engine\BookingStatusEngine;
 use MustHotelBooking\Engine\EmailEngine;
@@ -266,9 +267,20 @@ final class ReservationAdminActions
             $paymentStatus = 'unpaid';
         }
 
-        BookingStatusEngine::updateReservationStatuses([$reservationId], 'confirmed', $paymentStatus);
+        $result = BookingStatusEngine::updateReservationStatuses(
+            [$reservationId],
+            'confirmed',
+            $paymentStatus,
+            true,
+            [
+                'command' => 'administrative_recovery',
+                'source' => 'admin',
+                'approved_flow' => 'administrative_recovery',
+                'authorized' => \current_user_can('manage_options') || \current_user_can(StaffAccess::CAP_RESERVATION_EDIT_BASIC),
+            ]
+        );
 
-        return true;
+        return !empty($result['updated']) || !empty($result['already']);
     }
 
     private function markReservationPending(int $reservationId): bool

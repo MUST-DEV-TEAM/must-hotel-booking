@@ -856,6 +856,7 @@ final class PortalController
                     'anti_abuse_prechecked' => true,
                     'reservation_status' => (string) $paymentCreationOptions['reservation_status'],
                     'payment_status' => (string) $paymentCreationOptions['payment_status'],
+                    'confirmation_flow' => (string) $paymentCreationOptions['confirmation_flow'],
                     'clear_selection' => false,
                     'increment_coupon_usage' => false,
                     'booking_source' => self::normalizeQuickBookingSource((string) ($form['booking_source'] ?? 'staff_portal')),
@@ -1289,8 +1290,21 @@ final class PortalController
             $status = \sanitize_key((string) ($reservation['status'] ?? ''));
             $paymentStatus = \sanitize_key((string) ($reservation['payment_status'] ?? ''));
             if ($transition === 'confirm' && !\in_array($status, ['cancelled', 'blocked', 'confirmed', 'completed'], true)) {
-                BookingStatusEngine::updateReservationStatuses([$reservationId], 'confirmed', $paymentStatus !== '' ? $paymentStatus : 'unpaid');
-                $notice = 'reservation_confirmed';
+                $confirmation = BookingStatusEngine::updateReservationStatuses(
+                    [$reservationId],
+                    'confirmed',
+                    $paymentStatus !== '' ? $paymentStatus : 'unpaid',
+                    true,
+                    [
+                        'command' => 'administrative_recovery',
+                        'source' => 'staff_portal',
+                        'approved_flow' => 'administrative_recovery',
+                        'authorized' => \current_user_can($capability) || \current_user_can('manage_options'),
+                    ]
+                );
+                $notice = !empty($confirmation['updated']) || !empty($confirmation['already'])
+                    ? 'reservation_confirmed'
+                    : 'portal_action_failed';
             }
             if ($transition === 'cancel' && !\in_array($status, ['cancelled', 'blocked', 'completed'], true)) {
                 if (!empty($reservation['cancellation_requested'])) {

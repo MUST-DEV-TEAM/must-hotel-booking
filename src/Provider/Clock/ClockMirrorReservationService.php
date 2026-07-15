@@ -100,6 +100,7 @@ final class ClockMirrorReservationService
             'coupon_code' => $couponCode,
             'coupon_discount_total' => $couponDiscountTotal,
             'payment_status' => isset($options['payment_status']) ? \sanitize_key((string) $options['payment_status']) : 'pending',
+            'confirmation_flow' => isset($options['confirmation_flow']) ? \sanitize_key((string) $options['confirmation_flow']) : 'legacy',
             'provider' => ProviderManager::CLOCK_MODE,
             'provider_booking_id' => $providerBookingId,
             'provider_reservation_id' => $providerReservationId,

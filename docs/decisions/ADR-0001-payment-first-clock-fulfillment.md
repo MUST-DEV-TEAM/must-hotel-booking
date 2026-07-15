@@ -20,10 +20,10 @@ For the standard Stripe or PokPay path in Clock booking mode:
 1. Persist traceable pending local reservation and payment state.
 2. Treat browser returns, redirects, and payment initiation as non-authoritative.
 3. Establish payment success through the provider-specific verified completion path.
-4. Transactionally persist the verified method, provider references, allocation, amount, currency, environment/account fingerprint, and reservation group without confirming the booking or emitting payment/accounting hooks.
+4. Transactionally claim the provider transaction for one mode/account and exact deterministic reservation allocation, update its bound payment projections, and persist Clock-recovery evidence without confirming the booking or emitting payment/accounting hooks.
 5. Acquire an expiring owner-token lease; only that active owner may issue the Clock create and persist returned identifiers.
 6. Treat an active competing callback as `in_progress`; treat expired, ambiguous, persistence-failed, or partial outcomes as manual review requiring Clock reread.
-7. After the required provider result is durably available, lock the exact reservation rows and commit local paid rows plus confirmation state as one serialized transaction.
+7. After the required provider result is durable and Clock fulfillment has succeeded when required, lock the exact reservation rows and commit first confirmation only through the central immutable authorization policy.
 8. Emit payment/accounting and confirmation/email hooks only after that local transaction commits; a concurrent callback observes the committed rows and emits no duplicate events.
 
 Offline and on-request modes retain their separate lifecycle rules. They must not be described as verified online payment flows.
@@ -52,7 +52,9 @@ Offline and on-request modes retain their separate lifecycle rules. They must no
 
 - Verification must bind gateway, transaction/order identity, amount, currency, environment, and intended reservation allocation.
 - Fulfillment claims are exclusive owner-token leases; a repeated payment reference does not grant ownership.
-- Local paid-row and confirmation writes are serialized under exact reservation-row locks, with hooks deferred until commit.
+- Provider-payment ownership and allocations are immutable and unique; confirmation authorization is scoped to the exact reservation, verification group, claim and allocation-set hash.
+- The repository rejects direct first-confirmation writes, while already-confirmed idempotent updates remain compatible.
+- Payment and confirmation hooks are deferred until authorized confirmation commits.
 - Retry must reread provider state before issuing a new create request.
 - Provider idempotency must be transmitted when the provider supports it, not only logged locally.
 - Ambiguous or partial outcomes require durable recovery/manual-review state; they must not be reported as success.

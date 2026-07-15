@@ -24,6 +24,7 @@ This register contains durable project decisions supported by current source, Gi
 
 | D-018 | 2026-07-15 | Accepted | Authorize public confirmation and cancellation with opaque, hashed, expiring grants scoped to an exact reservation set and exchanged for per-tab contexts. | Numeric IDs and browser return parameters are not authorization. | Public booking access | — | Static code review |
 | D-019 | 2026-07-15 | Accepted | Persist verified gateway evidence before Clock writes, serialize fulfillment with an owner-token lease, and serialize post-provider local completion before emitting hooks; ambiguous, expired, persistence-failed, or partial outcomes stop in manual review. | Cross-system writes cannot be atomic and concurrent callbacks can duplicate reservations, ledger rows, or side effects without explicit ownership. | Booking and payment | [ADR-0001](decisions/ADR-0001-payment-first-clock-fulfillment.md) | Static code review |
+| D-020 | 2026-07-15 | Accepted | Require every first confirmed-equivalent transition to carry an immutable central authorization; enforce the boundary again in the reservation repository and give each provider payment one exact durable ownership/allocation group. | Direct callers, payment reuse, and group drift could otherwise confirm the wrong reservation or emit success side effects without authoritative ownership. | Reservation confirmation and payments | [ADR-0001](decisions/ADR-0001-payment-first-clock-fulfillment.md) | Static code review |
 
 ## Current non-decisions
 

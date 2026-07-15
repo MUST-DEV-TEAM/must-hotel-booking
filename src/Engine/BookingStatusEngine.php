@@ -10,7 +10,7 @@ final class BookingStatusEngine
     /**
      * @param array<int, int> $reservationIds
      */
-    public static function updateReservationStatuses(array $reservationIds, string $status, string $paymentStatus, bool $dispatchHooks = true): array
+    public static function updateReservationStatuses(array $reservationIds, string $status, string $paymentStatus, bool $dispatchHooks = true, array $confirmationContext = []): array
     {
         $reservationRows = self::getPaymentReservationRows($reservationIds);
         $reservationRepository = get_reservation_repository();
@@ -30,12 +30,22 @@ final class BookingStatusEngine
                 continue;
             }
 
-            if (
-                !ReservationStatus::isConfirmed($previousStatus)
-                && ReservationStatus::isConfirmed($status)
-                && self::isBlockedOnlineClockConfirmation($reservationId, $paymentStatus)
-            ) {
-                $outcome['blocked'][] = $reservationId;
+            if (!ReservationStatus::isConfirmed($previousStatus) && ReservationStatus::isConfirmed($status)) {
+                $context = $confirmationContext;
+                if (!$dispatchHooks) {
+                    $context['defer_event'] = true;
+                }
+                $result = (new ReservationConfirmationService())->confirm($reservationId, $status, $paymentStatus, $context);
+                if (empty($result['success'])) {
+                    $outcome['blocked'][] = $reservationId;
+                    continue;
+                }
+                if (empty($result['changed'])) {
+                    $outcome['already'][] = $reservationId;
+                    continue;
+                }
+                $outcome['updated'][] = $reservationId;
+                $outcome['events'][] = ['hook' => 'must_hotel_booking/reservation_confirmed', 'reservation_id' => $reservationId];
                 continue;
             }
 
@@ -52,15 +62,6 @@ final class BookingStatusEngine
                 }
             }
 
-            if (
-                !ReservationStatus::isConfirmed($previousStatus) &&
-                ReservationStatus::isConfirmed($status)
-            ) {
-                $outcome['events'][] = ['hook' => 'must_hotel_booking/reservation_confirmed', 'reservation_id' => $reservationId];
-                if ($dispatchHooks) {
-                    \do_action('must_hotel_booking/reservation_confirmed', $reservationId);
-                }
-            }
         }
 
         return $outcome;
@@ -295,16 +296,21 @@ final class BookingStatusEngine
         $statuses = [];
         $paymentStatuses = [];
         $providerSyncStatuses = [];
+        $allConfirmed = true;
 
         foreach ($reservations as $reservation) {
             if (!\is_array($reservation)) {
+                $allConfirmed = false;
                 continue;
             }
 
-            $statuses[] = isset($reservation['status']) ? \sanitize_key((string) $reservation['status']) : '';
+            $status = isset($reservation['status']) ? \sanitize_key((string) $reservation['status']) : '';
+            $statuses[] = $status;
+            $allConfirmed = $allConfirmed && ReservationStatus::isConfirmed($status);
             $paymentStatuses[] = isset($reservation['payment_status']) ? \sanitize_key((string) $reservation['payment_status']) : '';
             $providerSyncStatuses[] = isset($reservation['provider_sync_status']) ? \sanitize_key((string) $reservation['provider_sync_status']) : '';
         }
+        $allConfirmed = $allConfirmed && !empty($statuses) && \count($statuses) === \count($reservations);
 
         if (\in_array('manual_review', $providerSyncStatuses, true)) {
             return [
@@ -331,6 +337,13 @@ final class BookingStatusEngine
             return [
                 'heading' => \__('Payment Failed', 'must-hotel-booking'),
                 'message' => \__('We could not confirm your payment. Please try again.', 'must-hotel-booking'),
+            ];
+        }
+
+        if (!$allConfirmed) {
+            return [
+                'heading' => \__('Booking Review Required', 'must-hotel-booking'),
+                'message' => \__('This reservation group is not fully confirmed. If payment was collected, do not pay again; the hotel must review the incomplete booking.', 'must-hotel-booking'),
             ];
         }
 
@@ -363,38 +376,4 @@ final class BookingStatusEngine
         return get_reservation_repository()->getReservationsByIds($reservationIds);
     }
 
-    private static function isBlockedOnlineClockConfirmation(int $reservationId, string $targetPaymentStatus): bool
-    {
-        $reservation = get_reservation_repository()->getReservation($reservationId);
-        if (!\is_array($reservation) || \sanitize_key((string) ($reservation['provider'] ?? '')) !== 'clock') {
-            return false;
-        }
-
-        $providerBookingId = \trim((string) ($reservation['provider_booking_id'] ?? ''));
-        $providerReservationId = \trim((string) ($reservation['provider_reservation_id'] ?? ''));
-        if ($providerBookingId === '' && $providerReservationId === '') {
-            return true;
-        }
-
-        $onlinePayment = false;
-        $paidPayment = false;
-        foreach (get_payment_repository()->getPaymentsForReservation($reservationId) as $payment) {
-            if (!\is_array($payment)) {
-                continue;
-            }
-            $method = \sanitize_key((string) ($payment['method'] ?? ''));
-            if (!\in_array($method, ['stripe', 'pokpay'], true)) {
-                continue;
-            }
-            $onlinePayment = true;
-            if (
-                \sanitize_key((string) ($payment['status'] ?? '')) === 'paid'
-                && \trim((string) ($payment['transaction_id'] ?? '')) !== ''
-            ) {
-                $paidPayment = true;
-            }
-        }
-
-        return $onlinePayment && (!$paidPayment || \sanitize_key($targetPaymentStatus) !== 'paid');
-    }
 }

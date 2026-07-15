@@ -2,7 +2,7 @@
 
 namespace MustHotelBooking\Engine\Payment;
 
-use MustHotelBooking\Engine\BookingStatusEngine;
+use MustHotelBooking\Engine\OfflinePaymentConfirmationService;
 
 final class CashPayment implements PaymentInterface
 {
@@ -25,7 +25,19 @@ final class CashPayment implements PaymentInterface
             return $validation + ['method' => $this->method];
         }
 
-        BookingStatusEngine::createPaymentRows($reservationIds, $this->method, 'pending');
+        $confirmation = (new OfflinePaymentConfirmationService())->confirm(
+            $reservationIds,
+            'unpaid',
+            ['source' => 'public_checkout']
+        );
+        if (empty($confirmation['success'])) {
+            return [
+                'success' => false,
+                'method' => $this->method,
+                'message' => \__('The pay-at-hotel booking could not be confirmed safely.', 'must-hotel-booking'),
+                'reason_code' => (string) ($confirmation['reason_code'] ?? ''),
+            ];
+        }
 
         return [
             'success' => true,

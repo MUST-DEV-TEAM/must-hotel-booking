@@ -42,6 +42,7 @@ final class Plugin
             \MustHotelBooking\Database\ensure_payment_release_schema();
             \MustHotelBooking\Database\ensure_public_access_schema();
             \MustHotelBooking\Database\ensure_clock_fulfilment_schema();
+            \MustHotelBooking\Database\ensure_confirmation_integrity_schema();
             return;
         }
 

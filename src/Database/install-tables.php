@@ -349,6 +349,10 @@ function install_tables(): void
         coupon_code VARCHAR(100) NOT NULL DEFAULT '',
         coupon_discount_total DECIMAL(12,2) NOT NULL DEFAULT 0.00,
         payment_status VARCHAR(50) NOT NULL DEFAULT 'unpaid',
+        confirmation_flow VARCHAR(50) NOT NULL DEFAULT 'legacy',
+        confirmation_claim_id BIGINT(20) UNSIGNED NOT NULL DEFAULT 0,
+        confirmation_source VARCHAR(80) NOT NULL DEFAULT '',
+        confirmed_at DATETIME NULL DEFAULT NULL,
         checked_in_at DATETIME NULL,
         checked_out_at DATETIME NULL,
         cancellation_requested TINYINT(1) NOT NULL DEFAULT 0,
@@ -381,6 +385,8 @@ function install_tables(): void
         KEY status (status),
         KEY booking_source (booking_source),
         KEY payment_status (payment_status),
+        KEY confirmation_flow (confirmation_flow),
+        KEY confirmation_claim_id (confirmation_claim_id),
         KEY coupon_id (coupon_id),
         KEY coupon_code (coupon_code),
         KEY cancellation_requested (cancellation_requested),
@@ -472,6 +478,46 @@ function install_tables(): void
         KEY transaction_id (transaction_id),
         KEY provider_fee_status (provider_fee_status),
         KEY provider_balance_transaction_id (provider_balance_transaction_id)
+    ) {$charset_collate};";
+
+    $tables[] = "CREATE TABLE {$prefix}must_payment_verification_groups (
+        id BIGINT(20) UNSIGNED NOT NULL AUTO_INCREMENT,
+        provider VARCHAR(50) NOT NULL,
+        provider_mode VARCHAR(30) NOT NULL,
+        provider_account_fingerprint VARCHAR(64) NOT NULL,
+        provider_transaction_reference VARCHAR(191) NOT NULL,
+        provider_attempt_reference VARCHAR(191) NOT NULL,
+        total_amount_minor BIGINT(20) NOT NULL,
+        currency VARCHAR(10) NOT NULL,
+        ownership_key VARCHAR(64) NOT NULL,
+        allocation_set_hash VARCHAR(64) NOT NULL,
+        allocation_count SMALLINT(5) UNSIGNED NOT NULL,
+        verification_source VARCHAR(80) NOT NULL,
+        provider_event_reference VARCHAR(191) NOT NULL DEFAULT '',
+        raw_response_hash VARCHAR(64) NOT NULL DEFAULT '',
+        provider_completed_at DATETIME NULL DEFAULT NULL,
+        verified_at DATETIME NOT NULL,
+        created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        PRIMARY KEY  (id),
+        UNIQUE KEY ownership_key (ownership_key),
+        KEY provider_reference (provider, provider_transaction_reference),
+        KEY provider_attempt_reference (provider_attempt_reference)
+    ) {$charset_collate};";
+
+    $tables[] = "CREATE TABLE {$prefix}must_payment_verifications (
+        id BIGINT(20) UNSIGNED NOT NULL AUTO_INCREMENT,
+        verification_group_id BIGINT(20) UNSIGNED NOT NULL,
+        payment_id BIGINT(20) UNSIGNED NOT NULL,
+        reservation_id BIGINT(20) UNSIGNED NOT NULL,
+        amount_minor BIGINT(20) NOT NULL,
+        currency VARCHAR(10) NOT NULL,
+        claim_hash VARCHAR(64) NOT NULL,
+        created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        PRIMARY KEY  (id),
+        UNIQUE KEY claim_hash (claim_hash),
+        UNIQUE KEY payment_id (payment_id),
+        UNIQUE KEY group_reservation (verification_group_id, reservation_id),
+        KEY reservation_id (reservation_id)
     ) {$charset_collate};";
 
     $tables[] = "CREATE TABLE {$prefix}must_refunds (
@@ -791,6 +837,7 @@ function install_tables(): void
     ensure_public_access_schema($wpdb);
     ensure_payment_release_schema($wpdb);
     ensure_clock_fulfilment_schema($wpdb);
+    ensure_confirmation_integrity_schema($wpdb);
 
     (new AccommodationCategoryUpgradeService($wpdb))->run();
 
@@ -941,6 +988,78 @@ function ensure_clock_fulfilment_schema(?\wpdb $wpdb_instance = null): void
         $db->prefix . 'must_reservations',
         ['provider_fulfilment_lease' => 'provider_fulfilment_lease_expires_at']
     );
+}
+
+/**
+ * Repair the additive confirmation-authorization shape independently of the
+ * release version so equal-version upgrades cannot retain a partial schema.
+ */
+function ensure_confirmation_integrity_schema(?\wpdb $wpdb_instance = null): void
+{
+    global $wpdb;
+
+    $db = $wpdb_instance ?: $wpdb;
+    ensure_table_columns(
+        $db,
+        $db->prefix . 'must_reservations',
+        [
+            'confirmation_flow' => "VARCHAR(50) NOT NULL DEFAULT 'legacy'",
+            'confirmation_claim_id' => 'BIGINT(20) UNSIGNED NOT NULL DEFAULT 0',
+            'confirmation_source' => "VARCHAR(80) NOT NULL DEFAULT ''",
+            'confirmed_at' => 'DATETIME NULL DEFAULT NULL',
+        ]
+    );
+    ensure_table_indexes(
+        $db,
+        $db->prefix . 'must_reservations',
+        [
+            'confirmation_flow' => 'confirmation_flow',
+            'confirmation_claim_id' => 'confirmation_claim_id',
+        ]
+    );
+
+    require_once ABSPATH . 'wp-admin/includes/upgrade.php';
+    $collation = $db->get_charset_collate();
+    $groups = $db->prefix . 'must_payment_verification_groups';
+    $allocations = $db->prefix . 'must_payment_verifications';
+    \dbDelta("CREATE TABLE {$groups} (
+        id BIGINT(20) UNSIGNED NOT NULL AUTO_INCREMENT,
+        provider VARCHAR(50) NOT NULL,
+        provider_mode VARCHAR(30) NOT NULL,
+        provider_account_fingerprint VARCHAR(64) NOT NULL,
+        provider_transaction_reference VARCHAR(191) NOT NULL,
+        provider_attempt_reference VARCHAR(191) NOT NULL,
+        total_amount_minor BIGINT(20) NOT NULL,
+        currency VARCHAR(10) NOT NULL,
+        ownership_key VARCHAR(64) NOT NULL,
+        allocation_set_hash VARCHAR(64) NOT NULL,
+        allocation_count SMALLINT(5) UNSIGNED NOT NULL,
+        verification_source VARCHAR(80) NOT NULL,
+        provider_event_reference VARCHAR(191) NOT NULL DEFAULT '',
+        raw_response_hash VARCHAR(64) NOT NULL DEFAULT '',
+        provider_completed_at DATETIME NULL DEFAULT NULL,
+        verified_at DATETIME NOT NULL,
+        created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        PRIMARY KEY  (id),
+        UNIQUE KEY ownership_key (ownership_key),
+        KEY provider_reference (provider, provider_transaction_reference),
+        KEY provider_attempt_reference (provider_attempt_reference)
+    ) {$collation};");
+    \dbDelta("CREATE TABLE {$allocations} (
+        id BIGINT(20) UNSIGNED NOT NULL AUTO_INCREMENT,
+        verification_group_id BIGINT(20) UNSIGNED NOT NULL,
+        payment_id BIGINT(20) UNSIGNED NOT NULL,
+        reservation_id BIGINT(20) UNSIGNED NOT NULL,
+        amount_minor BIGINT(20) NOT NULL,
+        currency VARCHAR(10) NOT NULL,
+        claim_hash VARCHAR(64) NOT NULL,
+        created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        PRIMARY KEY  (id),
+        UNIQUE KEY claim_hash (claim_hash),
+        UNIQUE KEY payment_id (payment_id),
+        UNIQUE KEY group_reservation (verification_group_id, reservation_id),
+        KEY reservation_id (reservation_id)
+    ) {$collation};");
 }
 
 /**

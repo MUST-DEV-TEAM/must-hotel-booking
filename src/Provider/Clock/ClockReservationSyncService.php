@@ -252,11 +252,12 @@ final class ClockReservationSyncService
             'checkin' => $arrival,
             'checkout' => $departure,
             'guests' => $guestCount,
-            'status' => $localStatus,
+            'status' => \MustHotelBooking\Core\ReservationStatus::isConfirmed($localStatus) ? 'pending' : $localStatus,
             'booking_source' => 'clock_pms',
             'notes' => $this->firstString($booking, ['note', 'notes']),
             'total_price' => $totalPrice,
             'payment_status' => $paymentStatus,
+            'confirmation_flow' => 'clock_import',
             'provider' => ProviderManager::CLOCK_MODE,
             'provider_booking_id' => $providerBookingId,
             'provider_reservation_id' => $providerBookingId,
@@ -274,6 +275,22 @@ final class ClockReservationSyncService
                 'success' => false,
                 'message' => \__('Clock booking was fetched, but the local mirror reservation could not be created.', 'must-hotel-booking'),
             ];
+        }
+
+        if (\MustHotelBooking\Core\ReservationStatus::isConfirmed($localStatus)) {
+            $transition = (new \MustHotelBooking\Engine\BookingLifecycleSyncService())->applyReservationStatusTransition(
+                $reservationId,
+                $localStatus,
+                $paymentStatus,
+                [
+                    'source' => $source === 'bulk_sync' ? 'clock_refresh' : 'clock_sync',
+                    'operation' => 'status_transition',
+                    'idempotency_key' => 'clock-booking-create-' . $providerBookingId . '-' . $localStatus . '-' . $paymentStatus,
+                ]
+            );
+            if (empty($transition['success'])) {
+                return ['success' => false, 'message' => \__('Clock mirror was created, but its confirmed status was blocked for integrity review.', 'must-hotel-booking'), 'reservation_id' => $reservationId];
+            }
         }
 
         return [

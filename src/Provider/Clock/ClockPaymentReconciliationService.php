@@ -569,7 +569,13 @@ final class ClockPaymentReconciliationService
             ];
         }
         $providerState = $this->providerState($response->getData());
-        $this->updateMetadata($reservationId, $row, $action, $idempotencyKey, true, 'synced', '', $providerState);
+        if (!$this->updateMetadata($reservationId, $row, $action, $idempotencyKey, true, 'synced', '', $providerState)) {
+            return [
+                'success' => false,
+                'retry' => false,
+                'message' => \__('Clock was updated, but the local reconciliation state could not be committed safely and requires integrity review.', 'must-hotel-booking'),
+            ];
+        }
         $pricingResult = $this->refreshPricingAfterStayUpdate($reservationId, $row, $action, $idempotencyKey, true);
         return [
             'success' => true,
@@ -735,7 +741,13 @@ final class ClockPaymentReconciliationService
             }
             $providerState = (array) ($postWriteState['state'] ?? []);
         }
-        $this->updateMetadata($reservationId, $row, $action, $idempotencyKey, true, 'synced', '', $providerState);
+        if (!$this->updateMetadata($reservationId, $row, $action, $idempotencyKey, true, 'synced', '', $providerState)) {
+            return [
+                'success' => false,
+                'queued' => false,
+                'message' => \__('Clock was updated, but the local reconciliation state could not be committed safely and requires integrity review.', 'must-hotel-booking'),
+            ];
+        }
         $pricingResult = $this->refreshPricingAfterStayUpdate($reservationId, $row, $action, $idempotencyKey, true);
         return [
             'success' => true,
@@ -1314,7 +1326,7 @@ final class ClockPaymentReconciliationService
      * @param array<string, mixed> $action
      * @param array<string, mixed> $providerState
      */
-    private function updateMetadata(int $reservationId, array $row, array $action, string $idempotencyKey, bool $success, string $syncStatus, string $syncError = '', array $providerState = []): void
+    private function updateMetadata(int $reservationId, array $row, array $action, string $idempotencyKey, bool $success, string $syncStatus, string $syncError = '', array $providerState = []): bool
     {
         $metadata = $this->decodeMetadata($row['provider_metadata'] ?? null);
         $targetProviderStatus = (string) ($action['target_provider_status'] ?? '');
@@ -1366,7 +1378,7 @@ final class ClockPaymentReconciliationService
         $metadata[$requiredFlag] = !$success && $syncStatus !== 'local_only';
         $applyTargetState = $success || $syncStatus === 'local_only';
         $reservationRepository = \MustHotelBooking\Engine\get_reservation_repository();
-        $reservationRepository->updateProviderMetadata($reservationId, [
+        if (!$reservationRepository->updateProviderMetadata($reservationId, [
             'provider_status' => $applyTargetState
                 ? $this->firstString(
                     $providerState,
@@ -1385,9 +1397,11 @@ final class ClockPaymentReconciliationService
             'provider_synced_at' => $success || $syncStatus === 'local_only' ? $this->now() : null,
             'provider_sync_error' => $syncError,
             'provider_metadata' => $metadata,
-        ]);
+        ])) {
+            return false;
+        }
         if ($success && $targetLocalStatus !== '') {
-            (new \MustHotelBooking\Engine\BookingLifecycleSyncService($reservationRepository))->applyReservationStatusTransition(
+            $lifecycle = (new \MustHotelBooking\Engine\BookingLifecycleSyncService($reservationRepository))->applyReservationStatusTransition(
                 $reservationId,
                 $targetLocalStatus,
                 $targetLocalPaymentStatus !== '' ? $targetLocalPaymentStatus : (string) ($row['payment_status'] ?? ''),
@@ -1397,6 +1411,17 @@ final class ClockPaymentReconciliationService
                     'idempotency_key' => $idempotencyKey,
                 ]
             );
+            if (empty($lifecycle['success'])) {
+                $metadata[$metadataKey]['success'] = false;
+                $metadata[$metadataKey]['local_transition_error'] = 'confirmation_integrity_blocked';
+                $metadata[$requiredFlag] = true;
+                $reservationRepository->updateProviderMetadata($reservationId, [
+                    'provider_sync_status' => 'manual_review',
+                    'provider_sync_error' => 'local_confirmation_transition_blocked',
+                    'provider_metadata' => $metadata,
+                ]);
+                return false;
+            }
         }
         if ($success) {
             $updates = [];
@@ -1425,6 +1450,7 @@ final class ClockPaymentReconciliationService
                 $this->applyLocalGuestUpdate($reservationId, $row, $targetGuest);
             }
         }
+        return true;
     }
     /**
      * @param array<string, mixed> $row

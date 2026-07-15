@@ -353,9 +353,40 @@ final class PaymentAdminActions
             ];
         }
 
+        if (!$this->reservationRepository->beginTransaction()) {
+            return [
+                'success' => false,
+                'message' => \__('Unable to start the payment transaction.', 'must-hotel-booking'),
+            ];
+        }
+
+        $lockedReservation = $this->reservationRepository->getReservationForUpdate($reservationId);
+        if (!\is_array($lockedReservation)) {
+            $this->reservationRepository->rollback();
+            return ['success' => false, 'message' => \__('Reservation not found.', 'must-hotel-booking')];
+        }
+        if (ProviderReservationView::isProviderBacked($lockedReservation)) {
+            $this->reservationRepository->rollback();
+            return ['success' => false, 'message' => \__('Provider-backed reservations cannot accept this local payment action.', 'must-hotel-booking')];
+        }
+        $state = PaymentStatusService::buildReservationPaymentState(
+            $lockedReservation,
+            $this->paymentRepository->getPaymentsForReservation($reservationId)
+        );
+        $amountDue = (float) ($state['amount_due'] ?? 0.0);
+        $reservationStatus = \sanitize_key((string) ($lockedReservation['status'] ?? ''));
+        if ($amountDue <= 0.0 || $amount > $amountDue || \in_array($reservationStatus, ['cancelled', 'blocked'], true)) {
+            $this->reservationRepository->rollback();
+            return [
+                'success' => false,
+                'message' => \__('The reservation balance or status changed before the payment could be recorded.', 'must-hotel-booking'),
+            ];
+        }
+
         $paymentId = $this->createLedgerPaymentRow($reservationId, $amount, $method, 'paid', $transactionId);
 
         if ($paymentId <= 0) {
+            $this->reservationRepository->rollback();
             return [
                 'success' => false,
                 'message' => \__('Unable to record the payment ledger row.', 'must-hotel-booking'),
@@ -367,7 +398,32 @@ final class PaymentAdminActions
         $paymentStatus = $updatedAmountDue > 0.0 ? 'partially_paid' : 'paid';
         $targetReservationStatus = $this->resolveCollectedReservationStatus($reservationStatus);
 
-        BookingStatusEngine::updateReservationStatuses([$reservationId], $targetReservationStatus, $paymentStatus);
+        if (!\MustHotelBooking\Core\ReservationStatus::isConfirmed($reservationStatus) && \MustHotelBooking\Core\ReservationStatus::isConfirmed($targetReservationStatus)) {
+            $confirmation = (new \MustHotelBooking\Engine\ReservationConfirmationService())->confirm(
+                $reservationId,
+                $targetReservationStatus,
+                $paymentStatus,
+                [
+                    'command' => 'offline_confirmation',
+                    'source' => 'admin',
+                    'approved_flow' => 'staff_offline',
+                ]
+            );
+            if (empty($confirmation['success'])) {
+                $this->reservationRepository->rollback();
+                return ['success' => false, 'message' => \__('The payment and reservation confirmation were blocked for integrity review.', 'must-hotel-booking')];
+            }
+        } else {
+            $statusResult = BookingStatusEngine::updateReservationStatuses([$reservationId], $targetReservationStatus, $paymentStatus);
+            if (!empty($statusResult['blocked']) || !empty($statusResult['failed'])) {
+                $this->reservationRepository->rollback();
+                return ['success' => false, 'message' => \__('The payment and reservation update could not be recorded safely.', 'must-hotel-booking')];
+            }
+        }
+        if (!$this->reservationRepository->commit()) {
+            $this->reservationRepository->rollback();
+            return ['success' => false, 'message' => \__('The payment transaction could not be committed.', 'must-hotel-booking')];
+        }
         $this->dispatchPaymentRecordedEvent($paymentId, $reservationId, $amount, $method, 'paid', $transactionId);
 
         return [
@@ -470,9 +526,15 @@ final class PaymentAdminActions
             return false;
         }
 
+        if (!\MustHotelBooking\Core\ReservationStatus::isConfirmed($currentStatus)) {
+            if ($method !== 'pay_at_hotel') {
+                return false;
+            }
+            $result = (new \MustHotelBooking\Engine\OfflinePaymentConfirmationService())->confirm([$reservationId], 'paid', ['source' => 'admin']);
+            return !empty($result['success']);
+        }
         BookingStatusEngine::updateReservationStatuses([$reservationId], $targetStatus, 'paid');
         BookingStatusEngine::createPaymentRows([$reservationId], $method, 'paid', $transactionId);
-
         return true;
     }
 
@@ -484,6 +546,10 @@ final class PaymentAdminActions
             ? 'confirmed'
             : $currentStatus;
 
+        if (!\MustHotelBooking\Core\ReservationStatus::isConfirmed($currentStatus) && \MustHotelBooking\Core\ReservationStatus::isConfirmed($targetStatus)) {
+            $result = (new \MustHotelBooking\Engine\OfflinePaymentConfirmationService())->confirm([$reservationId], 'unpaid', ['source' => 'admin']);
+            return !empty($result['success']);
+        }
         $updated = $this->reservationRepository->updateReservationStatus($reservationId, $targetStatus, 'unpaid');
 
         if (!$updated) {
@@ -515,9 +581,12 @@ final class PaymentAdminActions
         $currentStatus = \sanitize_key((string) ($reservation['status'] ?? ''));
         $targetStatus = $currentStatus === 'completed' ? 'completed' : 'confirmed';
 
+        if (!\MustHotelBooking\Core\ReservationStatus::isConfirmed($currentStatus)) {
+            $result = (new \MustHotelBooking\Engine\OfflinePaymentConfirmationService())->confirm([$reservationId], 'unpaid', ['source' => 'admin']);
+            return !empty($result['success']);
+        }
         BookingStatusEngine::updateReservationStatuses([$reservationId], $targetStatus, 'unpaid');
-        BookingStatusEngine::createPaymentRows([$reservationId], 'pay_at_hotel', 'unpaid');
-
+        BookingStatusEngine::createPaymentRows([$reservationId], 'pay_at_hotel', 'pending');
         return true;
     }
 

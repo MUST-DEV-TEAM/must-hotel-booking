@@ -415,14 +415,18 @@ final class ReservationRepository extends AbstractRepository
         $couponCode = isset($reservationData['coupon_code']) ? (string) $reservationData['coupon_code'] : '';
         $couponDiscountTotal = isset($reservationData['coupon_discount_total']) ? (float) $reservationData['coupon_discount_total'] : 0.0;
         $paymentStatus = isset($reservationData['payment_status']) ? (string) $reservationData['payment_status'] : 'unpaid';
+        $confirmationFlow = $this->normalizeConfirmationFlow((string) ($reservationData['confirmation_flow'] ?? 'legacy'));
+        if (\MustHotelBooking\Core\ReservationStatus::isConfirmed($status)) {
+            return 0;
+        }
         $createdAt = isset($reservationData['created_at']) ? (string) $reservationData['created_at'] : \current_time('mysql');
         $statuses = $this->normalizeNonBlockingStatuses($nonBlockingStatuses);
         $availabilityColumn = $assignedRoomId > 0 ? 'assigned_room_id' : 'room_id';
         $availabilityTargetId = $assignedRoomId > 0 ? $assignedRoomId : $roomId;
         $sql = $this->wpdb->prepare(
             'INSERT INTO ' . $this->table('reservations') . '
-                (booking_id, room_id, room_type_id, assigned_room_id, rate_plan_id, guest_id, checkin, checkout, guests, status, booking_source, notes, total_price, coupon_id, coupon_code, coupon_discount_total, payment_status, created_at)
-            SELECT %s, %d, %d, %d, %d, %d, %s, %s, %d, %s, %s, %s, %f, %d, %s, %f, %s, %s
+                (booking_id, room_id, room_type_id, assigned_room_id, rate_plan_id, guest_id, checkin, checkout, guests, status, booking_source, notes, total_price, coupon_id, coupon_code, coupon_discount_total, payment_status, confirmation_flow, created_at)
+            SELECT %s, %d, %d, %d, %d, %d, %s, %s, %d, %s, %s, %s, %f, %d, %s, %f, %s, %s, %s
             WHERE NOT EXISTS (
                 SELECT 1
                 FROM ' . $this->table('reservations') . ' r
@@ -449,6 +453,7 @@ final class ReservationRepository extends AbstractRepository
             $couponCode,
             $couponDiscountTotal,
             $paymentStatus,
+            $confirmationFlow,
             $createdAt,
             $availabilityTargetId,
             $checkout,
@@ -484,6 +489,10 @@ final class ReservationRepository extends AbstractRepository
         $couponCode = isset($reservationData['coupon_code']) ? (string) $reservationData['coupon_code'] : '';
         $couponDiscountTotal = isset($reservationData['coupon_discount_total']) ? (float) $reservationData['coupon_discount_total'] : 0.0;
         $paymentStatus = isset($reservationData['payment_status']) ? (string) $reservationData['payment_status'] : 'unpaid';
+        $confirmationFlow = $this->normalizeConfirmationFlow((string) ($reservationData['confirmation_flow'] ?? 'legacy'));
+        if (\MustHotelBooking\Core\ReservationStatus::isConfirmed($status)) {
+            return 0;
+        }
         $providerMetadata = $this->providerJson($reservationData['provider_metadata'] ?? null);
         $createdAt = isset($reservationData['created_at']) ? (string) $reservationData['created_at'] : $now;
         $statuses = $this->normalizeNonBlockingStatuses($nonBlockingStatuses);
@@ -493,8 +502,8 @@ final class ReservationRepository extends AbstractRepository
         $availabilityTargetId = $assignedRoomId > 0 ? $assignedRoomId : $roomId;
         $sql = $this->wpdb->prepare(
             'INSERT INTO ' . $this->table('reservations') . '
-                (booking_id, room_id, room_type_id, assigned_room_id, rate_plan_id, guest_id, checkin, checkout, guests, status, total_price, coupon_id, coupon_code, coupon_discount_total, payment_status, provider_metadata, created_at)
-            SELECT %s, %d, %d, %d, %d, %d, %s, %s, %d, %s, %f, %d, %s, %f, %s, %s, %s
+                (booking_id, room_id, room_type_id, assigned_room_id, rate_plan_id, guest_id, checkin, checkout, guests, status, total_price, coupon_id, coupon_code, coupon_discount_total, payment_status, confirmation_flow, provider_metadata, created_at)
+            SELECT %s, %d, %d, %d, %d, %d, %s, %s, %d, %s, %f, %d, %s, %f, %s, %s, %s, %s
             WHERE EXISTS (
                 SELECT 1
                 FROM ' . $locksTable . ' l
@@ -528,6 +537,7 @@ final class ReservationRepository extends AbstractRepository
             $couponCode,
             $couponDiscountTotal,
             $paymentStatus,
+            $confirmationFlow,
             $providerMetadata,
             $createdAt,
             $lockRoomId,
@@ -579,6 +589,7 @@ final class ReservationRepository extends AbstractRepository
             'coupon_code' => isset($reservationData['coupon_code']) ? (string) $reservationData['coupon_code'] : '',
             'coupon_discount_total' => isset($reservationData['coupon_discount_total']) ? (float) $reservationData['coupon_discount_total'] : 0.0,
             'payment_status' => isset($reservationData['payment_status']) ? (string) $reservationData['payment_status'] : 'unpaid',
+            'confirmation_flow' => $this->normalizeConfirmationFlow((string) ($reservationData['confirmation_flow'] ?? 'clock_import')),
             'provider' => $this->providerKey((string) ($reservationData['provider'] ?? 'local'), 50),
             'provider_booking_id' => $this->providerText((string) ($reservationData['provider_booking_id'] ?? ''), 191),
             'provider_reservation_id' => $this->providerText((string) ($reservationData['provider_reservation_id'] ?? ''), 191),
@@ -591,6 +602,9 @@ final class ReservationRepository extends AbstractRepository
             'provider_metadata' => $this->providerJson($reservationData['provider_metadata'] ?? null),
             'created_at' => isset($reservationData['created_at']) ? (string) $reservationData['created_at'] : \current_time('mysql'),
         ];
+        if (\MustHotelBooking\Core\ReservationStatus::isConfirmed((string) $data['status'])) {
+            return 0;
+        }
         $inserted = $this->wpdb->insert(
             $this->table('reservations'),
             $data,
@@ -1605,6 +1619,14 @@ final class ReservationRepository extends AbstractRepository
         if ($reservationId <= 0 || empty($reservationData) || !$this->reservationsTableExists()) {
             return false;
         }
+        if (\array_intersect(['confirmation_flow', 'confirmation_claim_id', 'confirmation_source', 'confirmed_at'], \array_keys($reservationData))) {
+            $this->logUnauthorizedConfirmation($reservationId, 'protected_confirmation_metadata_update');
+            return false;
+        }
+        if (isset($reservationData['status']) && $this->isFirstConfirmedTransition($reservationId, (string) $reservationData['status'])) {
+            $this->logUnauthorizedConfirmation($reservationId, 'generic_repository_update');
+            return false;
+        }
         $updated = $this->wpdb->update(
             $this->table('reservations'),
             $reservationData,
@@ -2154,7 +2176,7 @@ final class ReservationRepository extends AbstractRepository
             return [];
         }
         $sql = $this->wpdb->prepare(
-            'SELECT id, booking_id, room_id, room_type_id, assigned_room_id, rate_plan_id, guest_id, checkin, checkout, guests, status, total_price, coupon_id, coupon_code, coupon_discount_total, payment_status, created_at
+            'SELECT id, booking_id, room_id, room_type_id, assigned_room_id, rate_plan_id, guest_id, checkin, checkout, guests, status, booking_source, total_price, coupon_id, coupon_code, coupon_discount_total, payment_status, confirmation_flow, confirmation_claim_id, confirmation_source, confirmed_at, created_at
             FROM ' . $this->table('reservations') . '
             WHERE id IN (' . $this->buildIntegerPlaceholders($reservationIds) . ')
             ORDER BY id ASC',
@@ -2168,6 +2190,103 @@ final class ReservationRepository extends AbstractRepository
         if ($reservationId <= 0) {
             return false;
         }
+        if ($this->isFirstConfirmedTransition($reservationId, $status)) {
+            $this->logUnauthorizedConfirmation($reservationId, 'status_repository_update');
+            return false;
+        }
+        return $this->persistStatus($reservationId, $status, $paymentStatus);
+    }
+
+    public function persistAuthorizedConfirmation(
+        int $reservationId,
+        string $status,
+        string $paymentStatus,
+        ?\MustHotelBooking\Engine\ReservationConfirmationAuthorization $authorization = null
+    ): bool {
+        if ($reservationId <= 0 || !\MustHotelBooking\Core\ReservationStatus::isConfirmed($status) || !$authorization || !$authorization->matchesTarget($reservationId, $status, $paymentStatus)) {
+            return false;
+        }
+        $current = $this->getReservationForUpdate($reservationId);
+        if (
+            !\is_array($current)
+            || !$authorization->matchesReservation($current)
+            || $authorization->source() === ''
+            || $authorization->flow() !== \sanitize_key((string) ($current['confirmation_flow'] ?? 'legacy'))
+        ) {
+            return false;
+        }
+        if ($authorization->isOnline()) {
+            $count = (int) $this->wpdb->get_var($this->wpdb->prepare(
+                'SELECT COUNT(*) FROM ' . $this->table('payment_verifications') . ' v
+                 INNER JOIN ' . $this->table('payment_verification_groups') . ' g ON g.id = v.verification_group_id
+                 WHERE v.verification_group_id = %d AND v.reservation_id = %d AND v.payment_id = %d AND v.claim_hash = %s
+                   AND g.allocation_set_hash = %s AND g.allocation_count = (SELECT COUNT(*) FROM ' . $this->table('payment_verifications') . ' WHERE verification_group_id = g.id)',
+                $authorization->verificationGroupId(),
+                $reservationId,
+                $authorization->paymentId(),
+                $authorization->claimHash(),
+                $authorization->allocationSetHash()
+            ));
+            if ($count !== 1) {
+                return false;
+            }
+        } elseif ($authorization->isOffline()) {
+            $expectedPaymentStatus = \sanitize_key($paymentStatus) === 'unpaid' ? 'pending' : 'paid';
+            $count = (int) $this->wpdb->get_var($this->wpdb->prepare(
+                'SELECT COUNT(*) FROM ' . $this->table('payments') . ' WHERE id = %d AND reservation_id = %d AND method = %s AND status = %s',
+                $authorization->paymentId(),
+                $reservationId,
+                'pay_at_hotel',
+                $expectedPaymentStatus
+            ));
+            if ($count !== 1) {
+                return false;
+            }
+        }
+        $confirmationClaimId = $authorization->isOnline()
+            ? $authorization->verificationGroupId()
+            : ($authorization->isOffline() ? $authorization->paymentId() : 0);
+        $data = [
+            'status' => \sanitize_key($status),
+            'payment_status' => \sanitize_key($paymentStatus),
+            'confirmation_claim_id' => $confirmationClaimId,
+            'confirmation_source' => $authorization->source(),
+            'confirmed_at' => \current_time('mysql'),
+        ];
+        $updated = $this->wpdb->update(
+            $this->table('reservations'),
+            $data,
+            ['id' => $reservationId, 'status' => (string) ($current['status'] ?? '')],
+            ['%s', '%s', '%d', '%s', '%s'],
+            ['%d', '%s']
+        );
+        return $updated === 1;
+    }
+
+    public function setConfirmationFlowForFirstConfirmation(int $reservationId, string $flow): bool
+    {
+        $flow = $this->normalizeConfirmationFlow($flow);
+        if ($reservationId <= 0 || !\in_array($flow, ['website_online_stripe', 'website_online_pokpay', 'clock_import', 'administrative_recovery', 'staff_offline'], true)) {
+            return false;
+        }
+        $updated = $this->wpdb->query($this->wpdb->prepare(
+            'UPDATE ' . $this->table('reservations') . ' SET confirmation_flow = %s WHERE id = %d AND confirmation_flow IN (%s, %s) AND status NOT IN (%s, %s)',
+            $flow,
+            $reservationId,
+            '',
+            'legacy',
+            'confirmed',
+            'completed'
+        ));
+        if ($updated === 1) {
+            return true;
+        }
+        $current = (string) $this->wpdb->get_var($this->wpdb->prepare('SELECT confirmation_flow FROM ' . $this->table('reservations') . ' WHERE id = %d', $reservationId));
+        return $current === $flow;
+    }
+
+    private function persistStatus(int $reservationId, string $status, string $paymentStatus): bool
+    {
         $data = [
             'status' => $status,
         ];
@@ -2184,6 +2303,40 @@ final class ReservationRepository extends AbstractRepository
             ['%d']
         );
         return \is_int($updated);
+    }
+
+    private function isFirstConfirmedTransition(int $reservationId, string $targetStatus): bool
+    {
+        if (!\MustHotelBooking\Core\ReservationStatus::isConfirmed($targetStatus)) {
+            return false;
+        }
+        $current = (string) $this->wpdb->get_var($this->wpdb->prepare('SELECT status FROM ' . $this->table('reservations') . ' WHERE id = %d', $reservationId));
+        return !\MustHotelBooking\Core\ReservationStatus::isConfirmed($current);
+    }
+
+    private function normalizeConfirmationFlow(string $flow): string
+    {
+        $flow = \sanitize_key($flow);
+        return \in_array($flow, ['website_online_stripe', 'website_online_pokpay', 'website_offline_pay_at_hotel', 'staff_offline', 'clock_import', 'administrative_recovery', 'legacy'], true)
+            ? $flow
+            : 'legacy';
+    }
+
+    private function logUnauthorizedConfirmation(int $reservationId, string $source): void
+    {
+        (new ActivityRepository())->createActivity([
+            'event_type' => 'confirmation_blocked',
+            'severity' => 'warning',
+            'entity_type' => 'reservation',
+            'entity_id' => $reservationId,
+            'reference' => 'confirmation-integrity',
+            'message' => 'unauthorized_first_confirmation',
+            'context_json' => \wp_json_encode([
+                'reservation_ids' => [$reservationId],
+                'source' => $source,
+                'reason_code' => 'authorization_missing',
+            ]),
+        ]);
     }
     public function updateReservationNotes(int $reservationId, string $notes): bool
     {

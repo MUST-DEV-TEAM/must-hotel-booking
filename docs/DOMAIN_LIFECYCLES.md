@@ -86,7 +86,7 @@ See [ADR-0002](decisions/ADR-0002-final-live-quote-revalidation.md).
 |---|---|---|---|---|
 | Stripe | `pending_payment` / payment `pending` | Stripe session reread is `complete` and `paid`, metadata/reservation set, amount, and currency match | Provider fulfillment when required, paid row, confirmed status, hooks/email/accounting work | Redirect parameters alone are not proof. |
 | PokPay | `pending_payment` / payment `pending` | PokPay order reread is captured/paid/completed and order binding, amount, and currency match | Same high-level completion path | Browser return and webhook body are correlated to a provider reread. |
-| Pay at hotel | `confirmed` / `unpaid` when explicitly enabled | Authorized offline booking command | Confirmation hooks/email and inventory block | It is not an online verified-payment flow. |
+| Pay at hotel | `pending` / `unpaid` when explicitly enabled | Atomic offline service records the exact pay-at-hotel row and receives central authorization | Post-commit payment/confirmation hooks, email and inventory block | It is not an online verified-payment flow or a generic bypass. |
 | Admin/staff quick booking | Uses capability/nonce-protected operational flow; Clock mode has provider readiness requirements | Authorized command plus provider result when Clock owns the reservation | Reservation/activity/email/provider side effects | Must not bypass provider/lifecycle policy. |
 | Separate on-request public mode | Not found as a distinct current booking mode | Not applicable | Not applicable | Do not document aspirational on-request behavior as implemented. |
 
@@ -108,31 +108,33 @@ Current Clock mode follows payment-first ordering:
 flowchart LR
     A["Pending local reservation and payment"] --> B["Provider payment reread and binding checks"]
     B -->|"not authoritative"| C["Remain pending or fail/expire"]
-    B -->|"verified paid"| D["Persist verified-payment evidence"]
-    D --> E["Acquire owner-token lease"]
-    E --> H["Create and persist Clock identifiers"]
+    B -->|"verified paid"| D["Claim provider payment and exact allocation"]
+    D --> E["Persist paid projection without success hooks"]
+    E --> J["Acquire owner-token lease"]
+    J --> H["Create and persist Clock identifiers"]
     H --> I["Lock exact reservation set"]
-    I --> F["Commit paid row and confirmation"]
+    I --> F["Authorize and commit first confirmation"]
     F --> G["Emit payment and confirmation hooks"]
 ```
 
-`BookingStatusEngine` blocks a first online Clock confirmation if provider IDs are absent, or if there is no paid Stripe/PokPay row with a transaction reference. This guard is useful but is not a centralized immutable authorization system.
+Every first transition to a confirmed-equivalent state is owned by `ReservationConfirmationService` and an immutable, reservation-scoped authorization. `ReservationRepository` rejects direct first-confirmation writes, including generic status updates; already-confirmed idempotent updates remain allowed. Online authorization requires the matching immutable verification group/allocation, while offline, provider-sync and administrative recovery use finite explicit flows.
 
 ### Idempotency present
 
 - Gateway callbacks reread provider state and validate reservation binding, amount, and currency.
 - Existing paid payment/confirmed reservation state short-circuits repeated completion.
-- Payment rows are reused by method/transaction where possible.
+- One provider transaction is uniquely owned by one environment/account and exact deterministic allocation; the same pending payment row cannot be allocated to another group.
 - Clock fulfillment uses an atomic owner-token lease; a second callback receives `in_progress` and cannot create.
 - Matching verified-payment evidence is idempotent and cannot overwrite an active claim or synced provider state.
-- Exact reservation-row locks serialize local paid-row and confirmation persistence; hooks are deferred until the winning transaction commits.
+- Exact reservation-row locks serialize ownership/allocation and later confirmation persistence; hooks are deferred until the authorized confirmation transaction commits.
 - Provider request, sync job, and accounting repositories store correlation/idempotency information.
 
 ### Recovery and atomicity boundaries
 
-- Authoritative gateway evidence is stored transactionally in reservation provider metadata before any Clock write; this evidence does not confirm the booking or emit payment/accounting hooks.
+- Authoritative gateway evidence is stored as an immutable ownership/allocation group and, for Clock recovery, in reservation provider metadata before any Clock write. Paid evidence alone does not confirm, show success, consume confirmation side effects, or emit payment/accounting hooks.
 - Only the active lease owner can reach the Clock create boundary or persist returned Clock identifiers.
 - Expired leases, ambiguous provider responses, and local persistence failures enter `manual_review`; another create is forbidden until Clock is reread and reconciled.
+- If a Clock reconciliation write succeeds but its requested local lifecycle transition is blocked, the operation returns failure, stores `manual_review`, and does not present the reservation set as fully confirmed.
 - Clock request logging records idempotency information, but the API client does not generally transmit a provider idempotency header.
 - Multi-room Clock creation is not one provider transaction. Each completed room is recorded, and any partial group is reported as partial manual review rather than complete success.
 - No runtime or provider certification is established by this integration review.
@@ -148,11 +150,11 @@ Cancellation review and execution use separate purposes. The execution grant is 
 ## Admin and staff transitions
 
 - Admin and staff handlers use nonces and capability/portal permission checks for their defined actions.
-- Provider-backed manual payment actions are rejected by the dedicated admin payment path, and online Clock confirmation is guarded when provider IDs/paid evidence are absent.
+- Provider-backed manual payment actions are rejected by the dedicated admin payment path. Staff/admin recovery must use an explicit authorized flow; it cannot reclassify a known online flow as offline or bypass provider evidence.
 - Staff front desk cancellation can enter an approval queue; authorized approval performs the cancellation lifecycle.
 - Check-in/check-out/completion, room moves, payment recording, and housekeeping actions remain separate permissions and states.
 
-`BookingStatusEngine` reports updated, already-applied, blocked, and failed IDs. `BookingLifecycleSyncService` rereads the row and returns failure when a requested transition was not persisted.
+`BookingStatusEngine` reports updated, already-applied, blocked, and failed IDs. `BookingLifecycleSyncService` routes Clock-import first confirmation through the central provider-sync command, rereads the row, and returns failure when a requested transition was not persisted. Confirmation email is dispatched only from the committed confirmation hook; reservation creation is not an email trigger.
 
 ## Cancellation lifecycle
 

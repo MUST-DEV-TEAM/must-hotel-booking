@@ -545,6 +545,7 @@ final class ClockReservationProvider implements ReservationProviderInterface
         $options = $request->getOptions();
         $reservationStatus = isset($options['reservation_status']) ? \sanitize_key((string) $options['reservation_status']) : 'pending';
         $paymentStatus = isset($options['payment_status']) ? \sanitize_key((string) $options['payment_status']) : 'pending';
+        $confirmationFlow = isset($options['confirmation_flow']) ? \sanitize_key((string) $options['confirmation_flow']) : 'legacy';
         $deferClockCreation = $reservationStatus === 'pending_payment' && $paymentStatus === 'pending';
         $clearSelection = !isset($options['clear_selection']) || (bool) $options['clear_selection'];
         $clockStatus = 'expected';
@@ -691,6 +692,7 @@ final class ClockReservationProvider implements ReservationProviderInterface
                 'booking_id' => $websiteBookingReference,
                 'reservation_status' => $reservationStatus,
                 'payment_status' => $paymentStatus,
+                'confirmation_flow' => $confirmationFlow,
                 'coupon_code' => $couponCode,
             ];
             if ($deferClockCreation) {

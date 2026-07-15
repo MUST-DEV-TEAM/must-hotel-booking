@@ -60,6 +60,7 @@ Logical settings include Stripe enablement; test/live publishable keys, secret k
 - Local reservation/payment IDs are bound to the Checkout Session metadata and pending payment transaction reference.
 - Completion rereads the session and requires `payment_status=paid`, session `status=complete`, the same reservation set, expected amount, expected currency, and matching local session reference.
 - The PaymentIntent ID becomes the paid transaction reference when present.
+- The configured credential path supplies a non-secret account fingerprint and provider mode; both are part of immutable ownership together with the Checkout Session attempt reference.
 - Stripe webhook payloads require a valid `Stripe-Signature` under the configured tolerance.
 - Current handlers cover Checkout Session completion/expiration and refund/charge refund events.
 
@@ -67,7 +68,8 @@ Logical settings include Stripe enablement; test/live publishable keys, secret k
 
 - Outbound responses mark network failures, HTTP 429, and 5xx as retryable; general API calls do not blindly retry.
 - Refund creation transmits a stable Stripe `Idempotency-Key`.
-- Existing paid rows plus confirmed reservations short-circuit repeated completion; otherwise exact reservation-row locks serialize paid-row/confirmation persistence and defer hooks until commit.
+- A unique verification group owns the PaymentIntent for one provider mode/account and exact Session-bound reservation allocation. Replays must match every field and per-reservation amount.
+- Paid rows and ownership commit before Clock fulfillment without success hooks; centralized confirmation and hooks occur only after Clock fulfillment succeeds when Clock is required.
 - Clock-backed completion persists verified-payment evidence before fulfillment and uses an exclusive owner-token lease. Runtime concurrency behavior remains to be certified.
 
 ### Error handling and reconciliation
@@ -93,6 +95,7 @@ The plugin authenticates through the provider SDK login, caches the bearer token
 ### Identifiers and verification
 
 - The SDK-order ID is saved as the pending transaction/provider reference.
+- The order is also bound to the configured PokPay environment and merchant/key fingerprint used for the authoritative reread.
 - Finalization rereads the order and accepts captured/paid/completed provider state only when order, local reservation allocation, amount, and currency match.
 - Redirect/fail/webhook URLs are generated server-side.
 - Checkout URLs are restricted to approved HTTPS PokPay/RPay host families.
@@ -102,6 +105,7 @@ The plugin authenticates through the provider SDK login, caches the bearer token
 
 - Token authentication may retry once after refreshing credentials.
 - A webhook does not trust its body as paid evidence; it locates the known order and rereads the provider.
+- Immutable ownership rejects reuse of the order/payment for another reservation set, amount, currency, environment, account, or allocation.
 - SDK-order creation and refund requests store local correlation/idempotency data but do not transmit a provider idempotency key in current code.
 
 ### Current risks and unknowns
@@ -182,7 +186,7 @@ Widgets check Elementor availability before registration and reuse plugin-manage
 
 ## Email
 
-`EmailEngine` builds configured guest/admin lifecycle messages and passes them to `wp_mail()`. Logical settings include sender name/address, reply-to, layout, logo, colors, footer, template enablement, and content. A successful `wp_mail()` call is only handoff evidence. Failures are logged through activity/diagnostic paths; no durable outbound email retry queue was found.
+`EmailEngine` builds configured guest/admin lifecycle messages and passes them to `wp_mail()`. Automated confirmation email listens only to the committed confirmation hook and rechecks durable confirmation eligibility; reservation creation and paid evidence are not email authority. Logical settings include sender name/address, reply-to, layout, logo, colors, footer, template enablement, and content. A successful `wp_mail()` call is only handoff evidence. Failures are logged through activity/diagnostic paths; no durable outbound email retry queue was found.
 
 ## GitHub updater
 

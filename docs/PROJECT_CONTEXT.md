@@ -2,8 +2,8 @@
 
 ## Evidence baseline
 
-- Integration branch inspected: `codex/clock-certification-code-integration`.
-- Base commit: `a920db3`; the integration changes are currently uncommitted.
+- Integration branch inspected: `codex/final-confirmation-integrity-integration`.
+- Base commit: `9f591c69419bcc45a050ee26b42a39e094d4d10c`; the integration changes are currently uncommitted.
 - Plugin header and version constant: `0.4.90`.
 - Evidence date: 2026-07-15.
 - Current executable source outranks documentation. Production configuration and database state were not inspected.
@@ -17,10 +17,10 @@ MUST Hotel Booking is a WordPress plugin for hotel sales and operations. It cove
 | Capability | Status | Evidence-based boundary |
 | --- | --- | --- |
 | Local public booking | Implemented | Managed booking pages, local availability/quote/reservation providers, locks, pricing, coupons, checkout and confirmation exist. |
-| Clock-backed public booking | Implemented; certification pending | Online payment uses a local pending mirror, durable verified-payment evidence, an exclusive Clock-fulfillment lease, serialized post-provider local completion, and manual-review boundaries for expired, ambiguous, or partial outcomes. Runtime/provider acceptance remains unverified. |
+| Clock-backed public booking | Implemented; certification pending | Online payment uses a local pending mirror, immutable payment ownership/allocation, durable Clock-recovery evidence, an exclusive Clock-fulfillment lease, centralized first-confirmation authorization, and manual-review boundaries for expired, ambiguous, or partial outcomes. Runtime/provider acceptance remains unverified. |
 | Stripe | Implemented | Checkout sessions, signed webhooks, return verification, refunds, fee snapshots, and Clock accounting exist. Production configuration is unknown. |
 | PokPay | Implemented | SDK order creation/fetch/finalization, embedded/redirect modes, refund attempt/manual fallback, and credential verification exist. Production configuration is unknown. |
-| Pay at Hotel | Implemented, opt-in | Disabled by default. Explicit enablement creates confirmed/unpaid reservations and manual cash refund behavior. |
+| Pay at Hotel | Implemented, opt-in | Disabled by default. Explicit enablement creates pending/unpaid reservations, then the atomic offline owner records the pay-at-hotel row and authorizes confirmation; cash refunds remain manual. |
 | On-request booking | Not found as a distinct public mode | Do not equate staff cancellation approval or Pay at Hotel with a separate on-request lifecycle. |
 | WordPress admin | Implemented | Reservations, provider logs, calendar, accommodations, pricing, availability, payments, email, guests, coupons, reports and settings. |
 | Staff portal | Implemented, configurable | `/staff` and `/staff-login`; nine capability-gated modules. |
@@ -66,6 +66,7 @@ Clock can be configured to fall back to local behavior when unavailable. That op
 | Reservation | Local row in `must_reservations`; may be local, a pending Clock mirror, or a Clock mirror with provider IDs. |
 | Booking ID | Local human-facing `MHB-...` reference; not the same as a Clock booking ID or payment transaction ID. |
 | Payment row | Local ledger projection in `must_payments`; distinct from reservation `payment_status`. |
+| Payment verification group | Immutable Stripe/PokPay ownership row bound to provider mode/account, transaction, attempt, exact reservation allocation, total, and currency. |
 | Refund row | Explicit refund/review state in `must_refunds`; cancellation alone is not a refund. |
 | Provider mapping | Local/external identity mapping in `mhb_provider_mappings`. |
 | Accounting row | Clock payment/refund posting and verification state in `must_clock_folio_accounting`. |
@@ -75,7 +76,7 @@ Clock can be configured to fall back to local behavior when unavailable. That op
 
 - Clock mode: Clock owns Clock identifiers, live availability/restrictions, provider reservation state, and supported provider amendments.
 - Website: WordPress owns presentation/content, managed pages, local mirror state, staff UI, and operational metadata.
-- Payment providers/local ledger: Stripe/PokPay results and local payment/refund rows own payment transaction evidence.
+- Payment providers/local ledger: Stripe/PokPay results establish external truth; immutable verification groups/allocations own local confirmation authority, while payment/refund rows remain ledger projections.
 - A Clock booking status, folio balance, browser return, or local reservation flag is not interchangeable with payment proof.
 
 ## Current environments
@@ -84,7 +85,7 @@ Code supports local, staging and production payment credential slots, plus Clock
 
 ## Current limitations and unresolved risks
 
-1. The new confirmation grants, callback binding, verified-payment persistence, and fulfillment leases have received static review only; database concurrency and provider behavior are not certified.
+1. The confirmation grants, callback binding, immutable payment ownership, central first-confirmation authorization, repository guard, and fulfillment leases have received static review only; database concurrency and provider behavior are not certified.
 2. There is no automatic recovery worker for Clock fulfillment held in `manual_review`; staff must reread Clock before any approved recovery create.
 3. Concurrent refund and ambiguous Clock accounting retries retain unresolved idempotency risk outside this integration.
 4. Selected local rate-plan propagation and final cancellation-policy comparison have code/documentation discrepancies requiring focused tests.

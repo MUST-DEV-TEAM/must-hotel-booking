@@ -169,16 +169,18 @@ final class EmailEngine
     }
     public static function registerHooks(): void
     {
-        \add_action('must_hotel_booking/reservation_created', [self::class, 'handleReservationCreatedNotifications'], 10, 1);
         \add_action('must_hotel_booking/reservation_confirmed', [self::class, 'handleReservationConfirmedNotifications'], 10, 1);
         \add_action('must_hotel_booking/reservation_cancelled', [self::class, 'handleReservationCancelledNotifications'], 10, 1);
     }
     public static function handleReservationCreatedNotifications(int $reservationId): void
     {
-        self::sendConfirmedReservationNotifications($reservationId);
+        // Creation is not confirmation; retained as a compatibility callback only.
     }
     public static function handleReservationConfirmedNotifications(int $reservationId): void
     {
+        if (!(new ReservationConfirmationService())->isNotificationEligible($reservationId)) {
+            return;
+        }
         self::sendConfirmedReservationNotifications($reservationId);
     }
     public static function handleReservationCancelledNotifications(int $reservationId): void

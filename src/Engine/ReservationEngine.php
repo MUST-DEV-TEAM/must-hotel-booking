@@ -783,6 +783,9 @@ final class ReservationEngine
         $bookingSource = isset($options['booking_source'])
             ? \sanitize_key((string) $options['booking_source'])
             : 'website';
+        $confirmationFlow = isset($options['confirmation_flow'])
+            ? \sanitize_key((string) $options['confirmation_flow'])
+            : 'legacy';
         $notes = isset($options['notes'])
             ? \sanitize_textarea_field((string) $options['notes'])
             : '';
@@ -926,7 +929,8 @@ final class ReservationEngine
                 $notes,
                 [
                     'pricing_snapshot' => $pricingSnapshot,
-                ]
+                ],
+                $confirmationFlow
             );
 
             if ($reservationId <= 0) {
@@ -1005,7 +1009,8 @@ final class ReservationEngine
         int $ratePlanId = 0,
         string $bookingSource = 'website',
         string $notes = '',
-        array $providerMetadata = []
+        array $providerMetadata = [],
+        string $confirmationFlow = 'legacy'
     ): int {
         if (
             $roomId <= 0 ||
@@ -1057,6 +1062,7 @@ final class ReservationEngine
                 'total_price' => $totalPrice,
                 'payment_status' => $paymentStatus,
                 'provider_metadata' => $providerMetadata,
+                'confirmation_flow' => $confirmationFlow,
                 'created_at' => $now,
             ],
             $sessionId,
@@ -1091,7 +1097,8 @@ final class ReservationEngine
         string $reservationStatus = 'pending',
         string $bookingSource = 'website',
         string $notes = '',
-        int $ratePlanId = 0
+        int $ratePlanId = 0,
+        string $confirmationFlow = 'legacy'
     ): int {
         if (
             $roomId <= 0 ||
@@ -1136,6 +1143,7 @@ final class ReservationEngine
                 'notes' => $notes,
                 'total_price' => $totalPrice,
                 'payment_status' => $paymentStatus,
+                'confirmation_flow' => $confirmationFlow,
                 'created_at' => \current_time('mysql'),
             ],
             self::getNonBlockingReservationStatuses()

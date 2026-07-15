@@ -692,7 +692,7 @@ final class PaymentEngine
         return MustBookingConfig::build_public_rest_url('must-hotel-booking/v1/stripe/webhook');
     }
     /**
-     * @return array{reservation_status: string, payment_status: string, clear_selection: bool, increment_coupon_usage: bool}
+     * @return array{reservation_status: string, payment_status: string, confirmation_flow: string, clear_selection: bool, increment_coupon_usage: bool}
      */
     public static function getReservationCreationOptions(string $method): array
     {
@@ -701,13 +701,15 @@ final class PaymentEngine
             return [
                 'reservation_status' => 'pending_payment',
                 'payment_status' => 'pending',
+                'confirmation_flow' => 'website_online_' . $gateway,
                 'clear_selection' => false,
                 'increment_coupon_usage' => false,
             ];
         }
         return [
-            'reservation_status' => 'confirmed',
+            'reservation_status' => 'pending',
             'payment_status' => 'unpaid',
+            'confirmation_flow' => 'website_offline_pay_at_hotel',
             'clear_selection' => true,
             'increment_coupon_usage' => true,
         ];
@@ -2325,6 +2327,9 @@ final class PaymentEngine
             return new \WP_REST_Response(['success' => true], 200);
         }
         if ($type === 'checkout.session.completed') {
+            if ((string) ($object['payment_status'] ?? '') !== 'paid' || (string) ($object['status'] ?? '') !== 'complete') {
+                return new \WP_REST_Response(['success' => true, 'state' => 'pending'], 200);
+            }
             $paymentIntent = isset($object['payment_intent']) ? (string) $object['payment_intent'] : '';
             $sessionId = isset($object['id']) ? (string) $object['id'] : '';
             $transactionId = $paymentIntent !== '' ? $paymentIntent : $sessionId;
@@ -2343,7 +2348,7 @@ final class PaymentEngine
                     'reason_code' => 'stripe_payment_binding_mismatch',
                 ], 409);
             }
-            $completion = self::completeVerifiedOnlinePayment('stripe', $reservationIds, $transactionId, $sessionId, true);
+            $completion = self::completeVerifiedOnlinePayment('stripe', $reservationIds, $transactionId, $sessionId, true, 'stripe_signed_webhook');
             if (empty($completion['success'])) {
                 return new \WP_REST_Response(
                     $completion,
@@ -2452,7 +2457,8 @@ final class PaymentEngine
         array $reservationIds,
         string $transactionId,
         string $providerReference,
-        bool $allowClockRetry
+        bool $allowClockRetry,
+        string $verificationSource = 'authoritative_provider_reread'
     ): array {
         $method = self::normalizeMethod($method);
         $reservationIds = self::normalizeReservationIds($reservationIds);
@@ -2461,6 +2467,30 @@ final class PaymentEngine
                 'success' => false,
                 'state' => 'integrity_error',
                 'message' => \__('The verified payment data is incomplete.', 'must-hotel-booking'),
+            ];
+        }
+
+        $verifiedFacts = self::buildVerifiedPaymentFacts($method, $reservationIds, $transactionId, $providerReference, $verificationSource);
+        if (empty($verifiedFacts['server_verified'])) {
+            return [
+                'success' => false,
+                'state' => 'manual_review',
+                'retryable' => false,
+                'message' => \__('The authoritative payment result could not be bound to this reservation group.', 'must-hotel-booking'),
+            ];
+        }
+        $durableOwnership = (new OnlinePaymentVerificationService())->recordAndConfirm(
+            $method,
+            $reservationIds,
+            $verifiedFacts + ['defer_confirmation' => true]
+        );
+        if (empty($durableOwnership['success'])) {
+            return [
+                'success' => false,
+                'state' => 'manual_review',
+                'retryable' => false,
+                'reason_code' => (string) ($durableOwnership['reason_code'] ?? ''),
+                'message' => \__('Verified payment ownership could not be recorded safely.', 'must-hotel-booking'),
             ];
         }
 
@@ -2497,68 +2527,16 @@ final class PaymentEngine
             }
         }
 
-        $repository = get_reservation_repository();
-        if (!$repository->beginTransaction()) {
+        $completion = (new OnlinePaymentVerificationService())->recordAndConfirm($method, $reservationIds, $verifiedFacts);
+        if (empty($completion['success']) || !self::allReservationsConfirmed($reservationIds)) {
             return [
                 'success' => false,
                 'state' => 'manual_review',
                 'retryable' => false,
-                'message' => \__('Verified payment completion could not be serialized safely.', 'must-hotel-booking'),
-            ];
-        }
-        foreach ($reservationIds as $reservationId) {
-            if (!\is_array($repository->getReservationForUpdate((int) $reservationId))) {
-                $repository->rollback();
-                return [
-                    'success' => false,
-                    'state' => 'manual_review',
-                    'retryable' => false,
-                    'message' => \__('A verified payment reservation could not be locked for completion.', 'must-hotel-booking'),
-                ];
-            }
-        }
-
-        $paymentOutcome = BookingStatusEngine::createPaymentRows($reservationIds, $method, 'paid', $transactionId, false);
-        if (!empty($paymentOutcome['failed'])) {
-            $repository->rollback();
-            return [
-                'success' => false,
-                'state' => 'manual_review',
-                'retryable' => false,
-                'message' => \__('Payment was verified, but its local payment evidence could not be completed safely.', 'must-hotel-booking'),
-            ];
-        }
-        $statusOutcome = BookingStatusEngine::updateReservationStatuses($reservationIds, 'confirmed', 'paid', false);
-        if (!empty($statusOutcome['blocked']) || !empty($statusOutcome['failed'])) {
-            $repository->rollback();
-            return [
-                'success' => false,
-                'state' => 'manual_review',
-                'retryable' => false,
+                'reason_code' => (string) ($completion['reason_code'] ?? ''),
                 'message' => \__('Payment was verified, but local confirmation was blocked and requires review.', 'must-hotel-booking'),
             ];
         }
-        if (!self::allReservationsConfirmed($reservationIds)) {
-            $repository->rollback();
-            return [
-                'success' => false,
-                'state' => 'manual_review',
-                'retryable' => false,
-                'message' => \__('Payment was verified, but the reservation could not be confirmed safely.', 'must-hotel-booking'),
-            ];
-        }
-        if (!$repository->commit()) {
-            $repository->rollback();
-            return [
-                'success' => false,
-                'state' => 'manual_review',
-                'retryable' => false,
-                'message' => \__('Verified payment completion could not be committed safely.', 'must-hotel-booking'),
-            ];
-        }
-
-        BookingStatusEngine::dispatchPaymentRecordedEvents($paymentOutcome);
-        BookingStatusEngine::dispatchReservationStatusEvents($statusOutcome);
 
         if (\function_exists('MustHotelBooking\\Frontend\\clear_booking_selection')) {
             \MustHotelBooking\Frontend\clear_booking_selection(false);
@@ -2566,6 +2544,31 @@ final class PaymentEngine
         return [
             'success' => true,
             'state' => 'paid',
+        ];
+    }
+
+    /** @param array<int, int> $reservationIds @return array<string, mixed> */
+    private static function buildVerifiedPaymentFacts(string $method, array $reservationIds, string $transactionId, string $providerReference, string $verificationSource): array
+    {
+        $currency = \strtoupper(\sanitize_text_field((string) MustBookingConfig::get_currency()));
+        $total = self::sumReservationTotals($reservationIds);
+        $environment = self::getActiveSiteEnvironment();
+        $mode = $method === 'stripe'
+            ? ($environment === 'production' ? 'live' : 'test')
+            : self::getPokPayApiEnvironment($environment);
+        $fingerprint = self::paymentProviderAccountFingerprint($method, $environment);
+        return [
+            'server_verified' => $currency !== '' && $total !== null && $total > 0.0 && $transactionId !== '' && $providerReference !== '' && $fingerprint !== '',
+            'provider_transaction_reference' => \sanitize_text_field($transactionId),
+            'provider_attempt_reference' => \sanitize_text_field($providerReference),
+            'provider_mode' => $mode,
+            'provider_account_fingerprint' => $fingerprint,
+            'total_amount_minor' => $total !== null ? self::convertAmountToMinorUnits($total, $currency) : -1,
+            'currency' => $currency,
+            'verification_source' => \sanitize_key($verificationSource) ?: 'authoritative_provider_reread',
+            'provider_event_reference' => '',
+            'raw_response_hash' => '',
+            'provider_completed_at' => '',
         ];
     }
 
@@ -2981,15 +2984,16 @@ final class PaymentEngine
     {
         $method = \sanitize_key($method);
         $transactionId = \sanitize_text_field($transactionId);
-        if ($method === '' || $transactionId === '' || !self::sameReservationIds(
-            get_payment_repository()->findReservationIdsByTransactionId($transactionId),
-            $reservationIds
-        )) {
+        if ($method === '' || $transactionId === '') {
             return false;
         }
-
+        $normalizedReservationIds = self::normalizeReservationIds($reservationIds);
+        $paymentIdsMatch = self::sameReservationIds(
+            get_payment_repository()->findReservationIdsByTransactionId($transactionId),
+            $normalizedReservationIds
+        );
         $paymentsByReservation = get_payment_repository()->getPaymentsForReservationIds($reservationIds);
-        foreach (self::normalizeReservationIds($reservationIds) as $reservationId) {
+        foreach ($normalizedReservationIds as $reservationId) {
             $matched = false;
             foreach ((array) ($paymentsByReservation[$reservationId] ?? []) as $payment) {
                 if (
@@ -3002,10 +3006,41 @@ final class PaymentEngine
                 }
             }
             if (!$matched) {
-                return false;
+                $paymentIdsMatch = false;
+                break;
             }
         }
-        return true;
+        if ($paymentIdsMatch) {
+            return true;
+        }
+
+        $verifications = new \MustHotelBooking\Database\PaymentVerificationRepository();
+        $groupId = 0;
+        foreach ($normalizedReservationIds as $reservationId) {
+            $matchedEvidence = null;
+            foreach ($verifications->getForReservation($reservationId) as $evidence) {
+                if (
+                    \sanitize_key((string) ($evidence['provider'] ?? '')) === $method
+                    && \sanitize_text_field((string) ($evidence['provider_attempt_reference'] ?? '')) === $transactionId
+                ) {
+                    $matchedEvidence = $evidence;
+                    break;
+                }
+            }
+            if (!\is_array($matchedEvidence)) {
+                return false;
+            }
+            $candidateGroupId = (int) ($matchedEvidence['verification_group_id'] ?? 0);
+            if ($candidateGroupId <= 0 || ($groupId > 0 && $groupId !== $candidateGroupId)) {
+                return false;
+            }
+            $groupId = $candidateGroupId;
+        }
+        $ownedIds = \array_map(static function (array $row): int {
+            return (int) ($row['reservation_id'] ?? 0);
+        }, $verifications->getAllocations($groupId));
+        \sort($ownedIds);
+        return $ownedIds === $normalizedReservationIds;
     }
 
     /**

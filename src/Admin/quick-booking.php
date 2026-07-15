@@ -290,7 +290,7 @@ function create_admin_quick_booking_reservation(array $form): int
 
     $total_price = get_admin_quick_booking_total_price($room_id, $checkin, $checkout, $guests);
 
-    return ReservationEngine::createReservationWithoutLock(
+    $reservationId = ReservationEngine::createReservationWithoutLock(
         $room_id,
         $guest_id,
         $checkin,
@@ -298,10 +298,17 @@ function create_admin_quick_booking_reservation(array $form): int
         $guests,
         $total_price,
         'unpaid',
-        'confirmed',
+        'pending',
         $booking_source,
-        $notes
+        $notes,
+        0,
+        'staff_offline'
     );
+    if ($reservationId <= 0) {
+        return 0;
+    }
+    $confirmation = (new \MustHotelBooking\Engine\OfflinePaymentConfirmationService())->confirm([$reservationId], 'unpaid', ['source' => 'admin']);
+    return !empty($confirmation['success']) ? $reservationId : 0;
 }
 
 /**
@@ -412,8 +419,9 @@ function create_admin_quick_booking_clock_reservation(array $form): int
             $guest_form,
             '',
             [
-                'reservation_status' => 'confirmed',
+                'reservation_status' => 'pending',
                 'payment_status' => 'unpaid',
+                'confirmation_flow' => 'staff_offline',
                 'clear_selection' => true,
             ]
         )
@@ -429,7 +437,11 @@ function create_admin_quick_booking_clock_reservation(array $form): int
         ? \array_values(\array_filter(\array_map('intval', $result['reservation_ids'])))
         : [];
 
-    return isset($reservation_ids[0]) ? (int) $reservation_ids[0] : 0;
+    if (empty($reservation_ids)) {
+        return 0;
+    }
+    $confirmation = (new \MustHotelBooking\Engine\OfflinePaymentConfirmationService())->confirm($reservation_ids, 'unpaid', ['source' => 'admin']);
+    return !empty($confirmation['success']) ? (int) $reservation_ids[0] : 0;
 }
 
 /**

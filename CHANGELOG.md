@@ -10,6 +10,9 @@ Notable product, architecture, integration, operational, compatibility, and secu
 - Persist authoritative verified-payment evidence before Clock fulfillment, serialize creation with an owner-token lease, and expose truthful blocked/failed lifecycle outcomes.
 - Serialize local paid-row and confirmation persistence under exact reservation-row locks, deferring payment/accounting and confirmation/email hooks until commit.
 - Record per-room Clock fulfillment and route expired, ambiguous, persistence-failed, or partial outcomes to manual review.
+- Centralize every first confirmed-equivalent transition behind immutable flow-specific authorization and reject direct repository bypasses while preserving already-confirmed idempotency.
+- Bind each Stripe/PokPay transaction and pending attempt to one environment/account, exact reservation set, per-reservation allocation, amount and currency before Clock fulfillment; paid evidence alone emits no booking-success side effects.
+- Route public/staff pay-at-hotel, Clock imports and explicit administrative recovery through the same confirmation boundary, with activity-log decisions and post-commit confirmation email.
 
 ### Security
 
@@ -20,6 +23,7 @@ Notable product, architecture, integration, operational, compatibility, and secu
 ### Database
 
 - Add idempotent public-access grant/context tables and additive Clock fulfillment key, owner, claim, lease, and lease-index schema repair, including equal-version upgrades.
+- Add idempotent confirmation flow/claim/source/timestamp columns and immutable payment-verification group/allocation tables with uniqueness repair on fresh and equal-version upgrades.
 
 ## 0.4.90 - 2026-07-13
 

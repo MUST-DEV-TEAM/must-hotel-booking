@@ -91,7 +91,9 @@ final class BookingLifecycleSyncService
         BookingStatusEngine::updateReservationStatuses(
             [$reservationId],
             $targetStatus,
-            $targetPaymentStatus
+            $targetPaymentStatus,
+            true,
+            $this->confirmationContext($reservation, $context)
         );
         $updatedReservation = $this->reservations->getReservation($reservationId);
         if (!\is_array($updatedReservation)) {
@@ -141,6 +143,15 @@ final class BookingLifecycleSyncService
             'changed' => true,
             'message' => '',
         ];
+    }
+    /** @param array<string, mixed> $reservation @param array<string, mixed> $context @return array<string, mixed> */
+    private function confirmationContext(array $reservation, array $context): array
+    {
+        $source = \sanitize_key((string) ($context['source'] ?? ''));
+        if (\in_array($source, ['clock_webhook', 'clock_refresh', 'clock_sync'], true) && \sanitize_key((string) ($reservation['booking_source'] ?? '')) === 'clock_pms') {
+            return ['command' => 'provider_sync', 'source' => $source, 'approved_flow' => 'clock_import'];
+        }
+        return ['command' => '', 'source' => $source];
     }
     /** @param array<string, mixed> $reservation @param array<string, mixed> $context */
     private function ensureCancellationMoneyReview(array $reservation, array $context): void
