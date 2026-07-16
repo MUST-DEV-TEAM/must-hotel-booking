@@ -85,7 +85,10 @@ final class PokPayPayment implements PaymentInterface
                 'message' => \__('PokPay created an order response without a usable reference. Do not retry until the hotel reviews it.', 'must-hotel-booking'),
             ];
         }
-        $attempt['attempt_expires_at'] = (string) ($result['expires_at'] ?? $attempt['attempt_expires_at']);
+        $providerExpiresAt = \trim((string) ($result['expires_at'] ?? ''));
+        if ($providerExpiresAt !== '') {
+            $attempt['attempt_expires_at'] = $providerExpiresAt;
+        }
         $paymentRepository = \MustHotelBooking\Engine\get_payment_repository();
         $attemptRows = $paymentRepository->getPaymentAttemptRows($this->method, $provisionalReference);
         $paymentIds = \array_values(\array_filter(\array_map('intval', \array_column($attemptRows, 'id'))));

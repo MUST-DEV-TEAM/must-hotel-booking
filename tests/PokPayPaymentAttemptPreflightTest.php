@@ -103,6 +103,7 @@ namespace MustHotelBooking\Engine {
     {
         public static int $providerCreateCalls = 0;
         public static bool $allowPreflight = true;
+        public static string $providerExpiresAt = '';
         /** @var array<int, array<string, mixed>> */
         public static array $rowsAtProviderCreate = [];
 
@@ -124,7 +125,7 @@ namespace MustHotelBooking\Engine {
 
         public static function getPendingPaymentCleanupMinutes(): int
         {
-            return 30;
+            return 180;
         }
 
         /** @param array<string, mixed> $pending @param array<int, int> $reservationIds */
@@ -132,7 +133,11 @@ namespace MustHotelBooking\Engine {
         {
             unset($amount, $currency, $flow);
             $rows = get_payment_repository()->getPaymentAttemptRows($method, (string) ($pending['session_id'] ?? ''));
-            return self::$allowPreflight && \count($rows) === \count((array) ($pending['reservation_ids'] ?? []))
+            $expiresAt = isset($rows[0]['attempt_expires_at']) ? \strtotime((string) $rows[0]['attempt_expires_at']) : false;
+            return self::$allowPreflight
+                && \count($rows) === \count((array) ($pending['reservation_ids'] ?? []))
+                && $expiresAt !== false
+                && $expiresAt > \time()
                 ? ['allowed' => true]
                 : ['allowed' => false];
         }
@@ -147,7 +152,7 @@ namespace MustHotelBooking\Engine {
                 'success' => true,
                 'order_id' => 'sdk-order-1',
                 'checkout_url' => 'https://pay-staging.pokpay.io/sdk-orders/sdk-order-1',
-                'expires_at' => '2026-10-01 12:00:00',
+                'expires_at' => self::$providerExpiresAt,
             ];
         }
 
@@ -188,6 +193,7 @@ namespace {
     $failures = [];
 
     \MustHotelBooking\Engine\FakePaymentRuntime::$repository = new \MustHotelBooking\Engine\FakePaymentRepository();
+    \MustHotelBooking\Engine\PaymentEngine::$providerExpiresAt = \gmdate('Y-m-d H:i:s', \time() + 10800);
     $gateway = new \MustHotelBooking\Engine\Payment\PokPayPayment();
     $result = $gateway->processPayment(['reservation_ids' => [147]], 450.0, ['currency' => 'EUR', 'payment_attempt' => $attempt]);
     $providerSnapshot = \MustHotelBooking\Engine\PaymentEngine::$rowsAtProviderCreate[0] ?? [];
@@ -211,7 +217,22 @@ namespace {
     \MustHotelBooking\Engine\FakePaymentRuntime::$repository = new \MustHotelBooking\Engine\FakePaymentRepository();
     \MustHotelBooking\Engine\PaymentEngine::$providerCreateCalls = 0;
     \MustHotelBooking\Engine\PaymentEngine::$rowsAtProviderCreate = [];
+    \MustHotelBooking\Engine\PaymentEngine::$allowPreflight = true;
+    \MustHotelBooking\Engine\PaymentEngine::$providerExpiresAt = '';
+    $missingProviderExpiry = $gateway->processPayment(['reservation_ids' => [147]], 450.0, ['currency' => 'EUR', 'payment_attempt' => $attempt]);
+    $missingExpiryStored = \MustHotelBooking\Engine\FakePaymentRuntime::$repository->rows[0] ?? [];
+    if (empty($missingProviderExpiry['success'])
+        || \MustHotelBooking\Engine\PaymentEngine::$providerCreateCalls !== 1
+        || \strtotime((string) ($missingExpiryStored['attempt_expires_at'] ?? '')) === false
+        || \strtotime((string) ($missingExpiryStored['attempt_expires_at'] ?? '')) <= \time()) {
+        $failures[] = 'A missing provider expiry must preserve the validated provisional expiry through the provider-reference rebind.';
+    }
+
+    \MustHotelBooking\Engine\FakePaymentRuntime::$repository = new \MustHotelBooking\Engine\FakePaymentRepository();
+    \MustHotelBooking\Engine\PaymentEngine::$providerCreateCalls = 0;
+    \MustHotelBooking\Engine\PaymentEngine::$rowsAtProviderCreate = [];
     \MustHotelBooking\Engine\PaymentEngine::$allowPreflight = false;
+    \MustHotelBooking\Engine\PaymentEngine::$providerExpiresAt = \gmdate('Y-m-d H:i:s', \time() + 10800);
     $blocked = $gateway->processPayment(['reservation_ids' => [147]], 450.0, ['currency' => 'EUR', 'payment_attempt' => $attempt]);
     if (!empty($blocked['success']) || \MustHotelBooking\Engine\PaymentEngine::$providerCreateCalls !== 0) {
         $failures[] = 'PokPay must not create a provider order when immutable binding reread fails.';
