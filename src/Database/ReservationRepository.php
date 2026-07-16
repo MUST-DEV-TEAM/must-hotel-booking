@@ -2176,7 +2176,7 @@ final class ReservationRepository extends AbstractRepository
             return [];
         }
         $sql = $this->wpdb->prepare(
-            'SELECT id, booking_id, room_id, room_type_id, assigned_room_id, rate_plan_id, guest_id, checkin, checkout, guests, status, booking_source, total_price, coupon_id, coupon_code, coupon_discount_total, payment_status, confirmation_flow, confirmation_claim_id, confirmation_source, confirmed_at, created_at
+            'SELECT id, booking_id, room_id, room_type_id, assigned_room_id, rate_plan_id, guest_id, checkin, checkout, guests, status, booking_source, provider, total_price, coupon_id, coupon_code, coupon_discount_total, payment_status, confirmation_flow, confirmation_claim_id, confirmation_source, confirmed_at, created_at
             FROM ' . $this->table('reservations') . '
             WHERE id IN (' . $this->buildIntegerPlaceholders($reservationIds) . ')
             ORDER BY id ASC',
