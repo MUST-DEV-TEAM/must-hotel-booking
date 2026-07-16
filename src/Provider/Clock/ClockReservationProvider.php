@@ -981,8 +981,14 @@ final class ClockReservationProvider implements ReservationProviderInterface
         }
         $roomMapping = isset($selection['room_mapping']) && \is_array($selection['room_mapping']) ? $selection['room_mapping'] : null;
         $physicalMapping = isset($selection['physical_mapping']) && \is_array($selection['physical_mapping']) ? $selection['physical_mapping'] : null;
+        $snapshotRoomMapping = isset($metadata['room_mapping']) && \is_array($metadata['room_mapping'])
+            ? $metadata['room_mapping']
+            : [];
         $snapshotPhysicalMapping = isset($metadata['physical_mapping']) && \is_array($metadata['physical_mapping'])
             ? $metadata['physical_mapping']
+            : [];
+        $snapshotRatePlanMapping = isset($metadata['rate_plan_mapping']) && \is_array($metadata['rate_plan_mapping'])
+            ? $metadata['rate_plan_mapping']
             : [];
         $ratePlanMapping = $this->ratePlanMappingForPricing($pricing, $ratePlanId);
         $resolvedRatePlanId = $ratePlanId > 0 ? $ratePlanId : (int) ($ratePlanMapping['local_id'] ?? 0);
@@ -998,10 +1004,14 @@ final class ClockReservationProvider implements ReservationProviderInterface
             return ['success' => false, 'message' => \__('Clock could not restore the exact selected room after payment.', 'must-hotel-booking')];
         }
         if (
-            (string) ($snapshotPhysicalMapping['external_id'] ?? '') !== ''
-            && (string) ($snapshotPhysicalMapping['external_id'] ?? '') !== (string) ($physicalMapping['external_id'] ?? '')
+            (string) ($snapshotRoomMapping['external_id'] ?? '') === ''
+            || (string) ($snapshotPhysicalMapping['external_id'] ?? '') === ''
+            || (string) ($snapshotRatePlanMapping['external_id'] ?? '') === ''
+            || (string) ($snapshotRoomMapping['external_id'] ?? '') !== (string) ($roomMapping['external_id'] ?? '')
+            || (string) ($snapshotPhysicalMapping['external_id'] ?? '') !== (string) ($physicalMapping['external_id'] ?? '')
+            || (string) ($snapshotRatePlanMapping['external_id'] ?? '') !== (string) ($ratePlanMapping['external_id'] ?? '')
         ) {
-            return ['success' => false, 'message' => \__('The exact selected Clock room mapping changed after payment.', 'must-hotel-booking')];
+            return ['success' => false, 'message' => \__('The saved Clock room or rate mapping is incomplete or changed after payment.', 'must-hotel-booking')];
         }
 
         $validatedRoom = [

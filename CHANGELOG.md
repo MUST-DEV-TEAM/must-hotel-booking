@@ -17,6 +17,11 @@ Notable product, architecture, integration, operational, compatibility, and secu
 - Persist idempotent provider-paid observations and expected/observed allocations for integrity, local-persistence, confirmation, ambiguous/failed Clock and partial multi-room outcomes without firing payment, accounting, confirmation or email hooks.
 - Route public/staff pay-at-hotel, Clock imports and explicit administrative recovery through the same confirmation boundary, with activity-log decisions and post-commit confirmation email.
 
+### Fixed
+
+- Validate selected Clock physical-room availability with `rooms[]` across search, final checkout, disabled dates, and paid fulfilment; type-level availability no longer makes an exact-room selection bookable.
+- Bind Clock-backed payment attempts to versioned exact-room allocation, stay, guest, amount, and physical/type/rate mapping evidence, and stop fulfilment before provider creation when those mappings drift.
+
 ### Security
 
 - Replace numeric public confirmation/cancellation access with opaque, hashed, expiring reservation-set grants and per-tab cookie-bound contexts.

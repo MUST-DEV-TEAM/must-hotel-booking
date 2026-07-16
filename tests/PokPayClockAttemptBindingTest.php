@@ -16,8 +16,10 @@ $reservationBody = $reservationStart !== false && $reservationEnd !== false
     ? \substr($reservations, $reservationStart, $reservationEnd - $reservationStart)
     : '';
 
-if ($reservationBody === '' || \strpos($reservationBody, 'provider,') === false) {
-    $failures[] = 'Payment-attempt reservation hydration must include the reservation provider.';
+foreach (['provider,', 'room_type_id', 'assigned_room_id', 'guests', 'provider_metadata'] as $field) {
+    if ($reservationBody === '' || \strpos($reservationBody, $field) === false) {
+        $failures[] = 'Payment-attempt reservation hydration must include ' . $field . '.';
+    }
 }
 
 $paymentStart = \strpos($pokpay, 'public function processPayment');

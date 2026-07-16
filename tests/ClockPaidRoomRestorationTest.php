@@ -21,7 +21,11 @@ if ($method === '') {
         "(int) (\$selection['physical_room_id'] ?? 0) !== \$assignedRoomId",
         "(int) (\$selection['room_type_id'] ?? 0) !== \$roomId",
         "(int) (\$metadata['physical_room_id'] ?? 0) !== \$assignedRoomId",
+        "\$snapshotRoomMapping = isset(\$metadata['room_mapping'])",
         "(string) (\$snapshotPhysicalMapping['external_id'] ?? '') !== (string) (\$physicalMapping['external_id'] ?? '')",
+        "\$snapshotRatePlanMapping = isset(\$metadata['rate_plan_mapping'])",
+        "(string) (\$snapshotRoomMapping['external_id'] ?? '') !== (string) (\$roomMapping['external_id'] ?? '')",
+        "(string) (\$snapshotRatePlanMapping['external_id'] ?? '') !== (string) (\$ratePlanMapping['external_id'] ?? '')",
     ] as $marker) {
         if (\strpos($method, $marker) === false) {
             $failures[] = 'Paid Clock fulfilment must restore and validate the immutable assigned physical room: ' . $marker;

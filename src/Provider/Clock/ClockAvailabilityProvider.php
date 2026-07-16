@@ -15,6 +15,9 @@ use MustHotelBooking\Provider\Storage\ProviderMappingRepository;
 
 final class ClockAvailabilityProvider implements AvailabilityProviderInterface
 {
+    private const AVAILABILITY_SELECTOR_ROOMS = 'rooms';
+    private const AVAILABILITY_SELECTOR_ROOM_TYPES = 'room_types';
+
     /** @var ClockApiClient */
     private $client;
 
@@ -53,6 +56,7 @@ final class ClockAvailabilityProvider implements AvailabilityProviderInterface
             $request->getCheckout(),
             $rateIds,
             $this->mappedExternalIds($mapped),
+            self::AVAILABILITY_SELECTOR_ROOMS,
             'clock.rates_availability.search'
         );
 
@@ -66,9 +70,10 @@ final class ClockAvailabilityProvider implements AvailabilityProviderInterface
         foreach ($mapped as $row) {
             $room = isset($row['room']) && \is_array($row['room']) ? $row['room'] : [];
             $mapping = isset($row['mapping']) && \is_array($row['mapping']) ? $row['mapping'] : [];
+            $availabilityMapping = isset($row['availability_mapping']) && \is_array($row['availability_mapping']) ? $row['availability_mapping'] : [];
             $selection = isset($row['selection']) && \is_array($row['selection']) ? $row['selection'] : [];
             $physicalMapping = isset($selection['physical_mapping']) && \is_array($selection['physical_mapping']) ? $selection['physical_mapping'] : [];
-            $availability = $this->findAvailabilityForMapping($items, $mapping, \count($mapped) === 1 ? $response->getData() : null);
+            $availability = $this->findAvailabilityForMapping($items, $availabilityMapping, \count($mapped) === 1 ? $response->getData() : null);
 
             if (!$this->isAvailableForStay($availability, $request->getCheckin(), $request->getCheckout())) {
                 continue;
@@ -145,11 +150,15 @@ public function getDisabledDates(DisabledDatesRequest $request): array
         return $this->disabledDatesFailOpen('clock_rates_availability_not_configured');
     }
 
-    $roomTypeIds = $this->roomTypeIdsForDisabledDates($request);
+    $availabilityTarget = $this->availabilityTargetForDisabledDates($request);
+    $availabilityIds = isset($availabilityTarget['ids']) && \is_array($availabilityTarget['ids'])
+        ? $availabilityTarget['ids']
+        : [];
+    $availabilitySelector = isset($availabilityTarget['selector']) ? (string) $availabilityTarget['selector'] : '';
     $rateIds = $this->mappedRateIds();
 
-    if (empty($roomTypeIds) || empty($rateIds)) {
-        return $this->disabledDatesFailOpen(empty($roomTypeIds) ? 'clock_room_mapping_missing' : 'clock_rate_mapping_missing');
+    if (empty($availabilityIds) || empty($rateIds)) {
+        return $this->disabledDatesFailOpen(empty($availabilityIds) ? 'clock_room_mapping_missing' : 'clock_rate_mapping_missing');
     }
 
     try {
@@ -162,7 +171,8 @@ public function getDisabledDates(DisabledDatesRequest $request): array
         $startDate,
         $endDate,
         $rateIds,
-        $roomTypeIds,
+        $availabilityIds,
+        $availabilitySelector,
         'clock.rates_availability.disabled_dates'
     );
 
@@ -244,7 +254,11 @@ public function getDisabledDates(DisabledDatesRequest $request): array
         }
 
         $selection = $this->roomSelection->resolve($roomId);
-        $mapping = \is_array($selection) && isset($selection['room_mapping']) && \is_array($selection['room_mapping']) ? $selection['room_mapping'] : null;
+        $isPhysical = \is_array($selection) && !empty($selection['is_physical']);
+        $mapping = $isPhysical && isset($selection['physical_mapping']) && \is_array($selection['physical_mapping'])
+            ? $selection['physical_mapping']
+            : (\is_array($selection) && isset($selection['room_mapping']) && \is_array($selection['room_mapping']) ? $selection['room_mapping'] : null);
+        $selector = $isPhysical ? self::AVAILABILITY_SELECTOR_ROOMS : self::AVAILABILITY_SELECTOR_ROOM_TYPES;
         $rateIds = $this->mappedRateIds();
 
         if (!\is_array($selection) || !$this->hasExternalId($mapping) || empty($rateIds)) {
@@ -256,6 +270,7 @@ public function getDisabledDates(DisabledDatesRequest $request): array
             $checkout,
             $rateIds,
             [(string) ($mapping['external_id'] ?? '')],
+            $selector,
             $bypassCache
                 ? 'clock.rates_availability.final_revalidation'
                 : 'clock.rates_availability.check',
@@ -284,7 +299,7 @@ public function getDisabledDates(DisabledDatesRequest $request): array
     }
 
     /**
-     * @return array<int, array{room: array<string, mixed>, mapping: array<string, mixed>, selection: array<string, mixed>}>
+     * @return array<int, array{room: array<string, mixed>, mapping: array<string, mixed>, availability_mapping: array<string, mixed>, selection: array<string, mixed>}>
      */
     private function mappedSelectionsForSearch(AvailabilitySearchRequest $request): array
     {
@@ -346,19 +361,21 @@ public function getDisabledDates(DisabledDatesRequest $request): array
         foreach ($selections as $selection) {
             $room = isset($selection['room']) && \is_array($selection['room']) ? $selection['room'] : [];
             $mapping = isset($selection['room_mapping']) && \is_array($selection['room_mapping']) ? $selection['room_mapping'] : [];
+            $availabilityMapping = isset($selection['physical_mapping']) && \is_array($selection['physical_mapping']) ? $selection['physical_mapping'] : [];
             $maxGuests = isset($room['max_guests']) ? (int) $room['max_guests'] : 0;
 
             if ($maxGuests > 0 && $request->getGuests() > $maxGuests) {
                 continue;
             }
 
-            if (!$this->hasExternalId($mapping)) {
+            if (empty($selection['is_physical']) || !$this->hasExternalId($mapping) || !$this->hasExternalId($availabilityMapping)) {
                 continue;
             }
 
             $mapped[] = [
                 'room' => $room,
                 'mapping' => $mapping,
+                'availability_mapping' => $availabilityMapping,
                 'selection' => $selection,
             ];
         }
@@ -367,7 +384,7 @@ public function getDisabledDates(DisabledDatesRequest $request): array
     }
 
     /**
-     * @param array<int, array{room: array<string, mixed>, mapping: array<string, mixed>, selection: array<string, mixed>}> $mapped
+     * @param array<int, array{room: array<string, mixed>, mapping: array<string, mixed>, availability_mapping: array<string, mixed>, selection: array<string, mixed>}> $mapped
      * @return array<int, string>
      */
     private function mappedExternalIds(array $mapped): array
@@ -375,7 +392,7 @@ public function getDisabledDates(DisabledDatesRequest $request): array
         $ids = [];
 
         foreach ($mapped as $row) {
-            $mapping = $row['mapping'];
+            $mapping = $row['availability_mapping'];
             $externalId = (string) ($mapping['external_id'] ?? '');
 
             if ($externalId !== '') {
@@ -584,19 +601,30 @@ public function getDisabledDates(DisabledDatesRequest $request): array
 
     /**
      * @param array<int, string> $rateIds
-     * @param array<int, string> $roomTypeIds
+     * @param array<int, string> $availabilityIds
      */
     private function ratesAvailabilityRequest(
         string $from,
         string $to,
         array $rateIds,
-        array $roomTypeIds,
+        array $availabilityIds,
+        string $selector,
         string $operation,
         bool $bypassCache = false
     ): ClockApiResponse
     {
+        if (!$this->isAvailabilitySelector($selector) || empty($this->numericIds($availabilityIds))) {
+            return new ClockApiResponse(
+                0,
+                '',
+                null,
+                'clock_availability_selector_invalid',
+                'Clock availability requires one explicit room or room-type selector.'
+            );
+        }
+
         return $this->client->get(
-            $this->ratesAvailabilityPathWithQuery($from, $to, $rateIds, $roomTypeIds),
+            $this->ratesAvailabilityPathWithQuery($from, $to, $rateIds, $availabilityIds, $selector),
             [],
             $operation,
             [
@@ -629,14 +657,19 @@ public function getDisabledDates(DisabledDatesRequest $request): array
     }
 
     /**
-     * Clock documents rates_availability as GET with rates[]=ID and room_types[]=ID.
+     * Clock documents rates_availability as GET with rates[]=ID and either
+     * rooms[]=ID or room_types[]=ID.
      * WordPress add_query_arg serializes arrays as rates[0]=ID, which Clock rejects.
      *
      * @param array<int, string> $rateIds
-     * @param array<int, string> $roomTypeIds
+     * @param array<int, string> $availabilityIds
      */
-    private function ratesAvailabilityPathWithQuery(string $from, string $to, array $rateIds, array $roomTypeIds): string
+    private function ratesAvailabilityPathWithQuery(string $from, string $to, array $rateIds, array $availabilityIds, string $selector): string
     {
+        if (!$this->isAvailabilitySelector($selector)) {
+            return '';
+        }
+
         $parts = [
             $this->queryPair('from', $from),
             $this->queryPair('to', $to),
@@ -646,11 +679,16 @@ public function getDisabledDates(DisabledDatesRequest $request): array
             $parts[] = $this->queryPair('rates[]', $rateId);
         }
 
-        foreach ($this->numericIds($roomTypeIds) as $roomTypeId) {
-            $parts[] = $this->queryPair('room_types[]', $roomTypeId);
+        foreach ($this->numericIds($availabilityIds) as $availabilityId) {
+            $parts[] = $this->queryPair($selector . '[]', $availabilityId);
         }
 
         return $this->appendQuery(ClockConfig::ratesAvailabilityPath(), $parts);
+    }
+
+    private function isAvailabilitySelector(string $selector): bool
+    {
+        return \in_array($selector, [self::AVAILABILITY_SELECTOR_ROOMS, self::AVAILABILITY_SELECTOR_ROOM_TYPES], true);
     }
 
     /** @param array<int, string> $parts */
@@ -698,16 +736,22 @@ public function getDisabledDates(DisabledDatesRequest $request): array
         return \array_values($ids);
     }
 
-    /** @return array<int, string> */
-    private function roomTypeIdsForDisabledDates(DisabledDatesRequest $request): array
+    /** @return array{selector:string,ids:array<int, string>} */
+    private function availabilityTargetForDisabledDates(DisabledDatesRequest $request): array
     {
         $roomId = $request->getRoomId();
 
         if ($roomId > 0) {
             $selection = $this->roomSelection->resolve($roomId);
-            $mapping = \is_array($selection) && isset($selection['room_mapping']) && \is_array($selection['room_mapping']) ? $selection['room_mapping'] : null;
+            $isPhysical = \is_array($selection) && !empty($selection['is_physical']);
+            $mapping = $isPhysical && isset($selection['physical_mapping']) && \is_array($selection['physical_mapping'])
+                ? $selection['physical_mapping']
+                : (\is_array($selection) && isset($selection['room_mapping']) && \is_array($selection['room_mapping']) ? $selection['room_mapping'] : null);
 
-            return $this->hasExternalId($mapping) ? [(string) ($mapping['external_id'] ?? '')] : [];
+            return [
+                'selector' => $isPhysical ? self::AVAILABILITY_SELECTOR_ROOMS : self::AVAILABILITY_SELECTOR_ROOM_TYPES,
+                'ids' => $this->hasExternalId($mapping) ? [(string) ($mapping['external_id'] ?? '')] : [],
+            ];
         }
 
         $category = RoomCatalog::normalizeBookingCategory($request->getCategory());
@@ -715,10 +759,16 @@ public function getDisabledDates(DisabledDatesRequest $request): array
         if (RoomCatalog::isRoomTypeBookingValue($category)) {
             $mapping = $this->catalog->findAccommodationMapping(RoomCatalog::resolveBookingRoomTypeId($category));
 
-            return $this->hasExternalId($mapping) ? [(string) ($mapping['external_id'] ?? '')] : [];
+            return [
+                'selector' => self::AVAILABILITY_SELECTOR_ROOM_TYPES,
+                'ids' => $this->hasExternalId($mapping) ? [(string) ($mapping['external_id'] ?? '')] : [],
+            ];
         }
 
-        return $this->mappedAccommodationIds();
+        return [
+            'selector' => self::AVAILABILITY_SELECTOR_ROOM_TYPES,
+            'ids' => $this->mappedAccommodationIds(),
+        ];
     }
 
     /** @param array<string, mixed> $selection */

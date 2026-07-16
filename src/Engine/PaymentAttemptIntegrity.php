@@ -41,6 +41,10 @@ final class PaymentAttemptIntegrity
         if (empty($target['allowed'])) {
             return $target;
         }
+        $bookingSnapshotHash = $this->bookingSnapshotHash($rows, $currency);
+        if ($bookingSnapshotHash === '') {
+            return $this->deny('attempt_booking_snapshot_invalid');
+        }
         return [
             'allowed' => true,
             'reason_code' => '',
@@ -58,7 +62,7 @@ final class PaymentAttemptIntegrity
                 'attempt_group_amount_minor' => $amountMinor,
                 'attempt_currency' => $currency,
                 'attempt_expires_at' => '',
-                'attempt_booking_snapshot_hash' => $this->bookingSnapshotHash($rows, $currency),
+                'attempt_booking_snapshot_hash' => $bookingSnapshotHash,
                 'attempt_failure_code' => '',
             ],
         ];
@@ -239,18 +243,74 @@ final class PaymentAttemptIntegrity
     {
         $snapshot = [];
         foreach ($rows as $row) {
+            $provider = \sanitize_key((string) ($row['provider'] ?? ''));
+            $metadata = $this->providerMetadata($row['provider_metadata'] ?? null);
+            $roomMappingId = $this->mappingExternalId($metadata['room_mapping'] ?? null);
+            $physicalMappingId = $this->mappingExternalId($metadata['physical_mapping'] ?? null);
+            $rateMappingId = $this->mappingExternalId($metadata['rate_plan_mapping'] ?? null);
+            $roomTypeId = (int) ($row['room_type_id'] ?? 0);
+            $assignedRoomId = (int) ($row['assigned_room_id'] ?? 0);
+            $guests = (int) ($row['guests'] ?? 0);
+
+            if (
+                $provider === ProviderManager::CLOCK_MODE
+                && (
+                    $roomTypeId <= 0
+                    || $assignedRoomId <= 0
+                    || $guests <= 0
+                    || $roomMappingId === ''
+                    || $physicalMappingId === ''
+                    || $rateMappingId === ''
+                )
+            ) {
+                return '';
+            }
+
             $snapshot[] = [
-                (int) ($row['id'] ?? 0),
-                (int) ($row['room_id'] ?? 0),
-                (int) ($row['rate_plan_id'] ?? 0),
-                \sanitize_key((string) ($row['provider'] ?? '')),
-                (string) ($row['checkin'] ?? ''),
-                (string) ($row['checkout'] ?? ''),
-                CurrencyMinorUnits::toMinor((float) ($row['total_price'] ?? 0.0), $currency),
+                'reservation_id' => (int) ($row['id'] ?? 0),
+                'room_id' => (int) ($row['room_id'] ?? 0),
+                'room_type_id' => $roomTypeId,
+                'assigned_room_id' => $assignedRoomId,
+                'rate_plan_id' => (int) ($row['rate_plan_id'] ?? 0),
+                'provider' => $provider,
+                'checkin' => (string) ($row['checkin'] ?? ''),
+                'checkout' => (string) ($row['checkout'] ?? ''),
+                'guests' => $guests,
+                'total_minor' => CurrencyMinorUnits::toMinor((float) ($row['total_price'] ?? 0.0), $currency),
+                'clock_room_mapping_id' => $roomMappingId,
+                'clock_physical_mapping_id' => $physicalMappingId,
+                'clock_rate_mapping_id' => $rateMappingId,
             ];
         }
-        \sort($snapshot);
-        return \hash('sha256', (string) \wp_json_encode($snapshot));
+        \usort($snapshot, static function (array $left, array $right): int {
+            return ((int) ($left['reservation_id'] ?? 0)) <=> ((int) ($right['reservation_id'] ?? 0));
+        });
+        return \hash('sha256', (string) \wp_json_encode([
+            'version' => 'exact_room_v2',
+            'reservations' => $snapshot,
+        ]));
+    }
+
+    /** @param mixed $value @return array<string, mixed> */
+    private function providerMetadata($value): array
+    {
+        if (\is_array($value)) {
+            return $value;
+        }
+        if (!\is_string($value) || \trim($value) === '') {
+            return [];
+        }
+        $decoded = \json_decode($value, true);
+        return \is_array($decoded) ? $decoded : [];
+    }
+
+    /** @param mixed $mapping */
+    private function mappingExternalId($mapping): string
+    {
+        if (!\is_array($mapping) || !isset($mapping['external_id']) || !\is_scalar($mapping['external_id'])) {
+            return '';
+        }
+        return \trim((string) $mapping['external_id']);
     }
 
     /** @param array<int, int> $ids */

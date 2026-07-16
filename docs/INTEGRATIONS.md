@@ -98,7 +98,7 @@ The plugin authenticates through the provider SDK login, caches the bearer token
 ### Identifiers and verification
 
 - The SDK-order ID is saved as the pending transaction/provider reference.
-- Each SDK order is durably bound to one exact payment-row allocation, checkout mode, expiry, booking snapshot, explicit site environment, credential fingerprint, and Clock target when required.
+- Each SDK order is durably bound to one exact payment-row allocation, checkout mode, expiry, versioned booking snapshot, explicit site environment, credential fingerprint, and Clock target when required. For Clock-backed exact-room attempts, the snapshot includes the local type/physical allocation, stay, guests, amount, rate plan, and normalized physical-room, accommodation/type, and rate external IDs.
 - The order is also bound to the configured PokPay environment and merchant/key fingerprint used for the authoritative reread.
 - Finalization rereads the order and accepts captured/paid/completed provider state only when order, local reservation allocation, amount, and currency match.
 - Redirect/fail/webhook URLs are generated server-side.
@@ -143,7 +143,8 @@ Outbound API calls use a two-request HTTP Digest challenge flow. `ClockEndpointR
 - Safe GET operations can retry once after HTTP 429 and can use bounded request/transient caches.
 - Writes are not automatically retried because timeout-after-write is ambiguous.
 - Final availability/quote/guarantee checks explicitly bypass caches.
-- Exact-room creation requires room-type, physical-room, and rate mapping; the website booking reference is sent in provider reference/note fields.
+- Exact physical-room availability sends the selected Clock physical-room IDs through `rooms[]` and correlates results to those IDs. `room_types[]` remains valid for type-level contexts but cannot satisfy an exact-room search, checkout, disabled-date, or paid-fulfilment decision.
+- Exact-room creation requires room-type, physical-room, and rate mapping. Fulfilment requires all three current external IDs to match the saved attempt-time snapshots, then sends the type as `arrival_room_type_id` and the physical room as `arrival_room_id`; a different returned room is not accepted as substitution.
 - Cancellation and amendment paths reread before retry and verify provider state after writes.
 - Local idempotency keys are logged, but a general provider idempotency header is not transmitted.
 
