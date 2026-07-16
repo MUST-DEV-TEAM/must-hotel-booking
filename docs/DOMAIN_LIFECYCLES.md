@@ -100,7 +100,7 @@ See [ADR-0002](decisions/ADR-0002-final-live-quote-revalidation.md).
 
 A pending attempt is reusable only when its durable reference, provider/mode/credential fingerprint, checkout mode, unexpired deadline, reservation/payment allocation, minor-unit total, currency, booking snapshot, site environment, and Clock target still match. A mismatch supersedes the attempt without overwriting its provider ownership; only an otherwise unchanged pending reservation set may start a new authoritative attempt. Legacy or incomplete attempt rows fail closed for review.
 
-Pending-payment cleanup runs through WP-Cron and a bounded age threshold. Rows with durable verified-payment evidence or a pending/manual Clock fulfillment are not ordinary expired checkout attempts; manual-review outcomes require explicit reconciliation.
+Pending-payment cleanup runs through WP-Cron and a bounded age threshold. A Clock-backed `pending_fulfilment` row may resume only when its complete immutable verification group, paid/verified attempt, unchanged pending reservation state, no refund, and current approved target all still match; it then uses the normal Clock lease and confirmation owners without a payment-provider reread or correlation search. Rows with active/expired/ambiguous/manual Clock fulfillment are not ordinary expired checkout attempts; manual-review outcomes require explicit reconciliation.
 
 ## Verified online completion and Clock fulfillment
 
