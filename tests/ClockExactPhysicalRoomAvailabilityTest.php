@@ -32,7 +32,7 @@ namespace MustHotelBooking\Core {
         public static function resolveBookingRoomTypeId(string $category): int { return (int) \substr($category, \strlen('room-type:')); }
         public static function isBookingAllCategory(string $category): bool { return $category === 'all'; }
         public static function isClockBackendMode(): bool { return true; }
-        public static function getClockBookingRoomTypes(): array { return ['room-type:10' => []]; }
+        public static function getClockBookingRoomTypes(): array { return ['room-type:10' => [], 'room-type:11' => []]; }
     }
 
     final class RoomData
@@ -76,11 +76,20 @@ namespace MustHotelBooking\Engine {
 namespace MustHotelBooking\Provider\Storage {
     final class ProviderMappingRepository
     {
+        /** @var array<int, array<string, mixed>> */
+        public static array $rateMappings = [[
+            'local_id' => 30,
+            'external_id' => '900',
+            'external_parent_id' => '1001',
+            'status' => 'active',
+            'metadata' => ['public_visible' => 'yes', 'bookable_type' => 'Pms::RoomType'],
+        ]];
+
         public function listForProvider(string $provider, string $entityType): array
         {
             unset($provider);
             return $entityType === 'rate_plan'
-                ? [['external_id' => '900']]
+                ? self::$rateMappings
                 : [];
         }
     }
@@ -91,6 +100,7 @@ namespace MustHotelBooking\Provider\Clock {
     {
         public static function isConfigured(): bool { return true; }
         public static function ratesAvailabilityPath(): string { return '/rates_availability'; }
+        public static function roomStatusesPath(): string { return '/room_statuses'; }
     }
 
     final class ClockCatalogService
@@ -98,7 +108,17 @@ namespace MustHotelBooking\Provider\Clock {
         public function __construct(?ClockApiClient $client = null) { unset($client); }
         public function findAccommodationMapping(int $roomTypeId): ?array
         {
-            return $roomTypeId === 10 ? ['external_id' => '1001'] : null;
+            if ($roomTypeId === 10) {
+                return ['external_id' => '1001'];
+            }
+
+            return $roomTypeId === 11 ? ['external_id' => '1002'] : null;
+        }
+        public function findRatePlanMapping(int $ratePlanId): ?array
+        {
+            return $ratePlanId === 30
+                ? ['local_id' => 30, 'external_id' => '900', 'external_parent_id' => '1001', 'status' => 'active', 'metadata' => ['public_visible' => 'yes', 'bookable_type' => 'Pms::RoomType']]
+                : null;
         }
     }
 
@@ -145,6 +165,7 @@ namespace {
     require __DIR__ . '/../src/Provider/Dto/AvailabilitySearchRequest.php';
     require __DIR__ . '/../src/Provider/Dto/DisabledDatesRequest.php';
     require __DIR__ . '/../src/Provider/Clock/ClockApiResponse.php';
+    require __DIR__ . '/../src/Provider/Clock/ClockRoomStatusService.php';
     require __DIR__ . '/../src/Provider/Clock/ClockAvailabilityProvider.php';
 
     use MustHotelBooking\Engine\InventoryEngine;
@@ -157,38 +178,50 @@ namespace {
     use MustHotelBooking\Provider\Dto\DisabledDatesRequest;
     use MustHotelBooking\Provider\Storage\ProviderMappingRepository;
 
-    function exact_room_selection(int $localId, string $externalId): array
+    function exact_room_selection(int $localId, string $externalId, int $typeId = 10, string $typeExternalId = '1001'): array
     {
         return [
             'selection_id' => $localId,
-            'room_id' => 10,
-            'room_type_id' => 10,
+            'room_id' => $typeId,
+            'room_type_id' => $typeId,
             'physical_room_id' => $localId,
             'is_physical' => true,
             'room' => [
                 'id' => $localId,
-                'room_type_id' => 10,
+                'room_type_id' => $typeId,
                 'physical_room_id' => $localId,
                 'name' => 'Physical ' . $localId,
                 'max_guests' => 2,
             ],
-            'room_mapping' => ['id' => 11, 'external_id' => '1001', 'external_code' => 'STANDARD'],
+            'room_mapping' => ['id' => $typeId + 1, 'external_id' => $typeExternalId, 'external_code' => 'TYPE-' . $typeExternalId],
             'physical_mapping' => ['id' => $localId + 100, 'external_id' => $externalId, 'external_code' => 'ROOM-' . $externalId],
         ];
     }
 
-    function availability_item(string $externalId, bool $firstNight, bool $secondNight = true): array
+    function availability_item(bool $firstNight, bool $secondNight = true, string $rateId = '900', string $typeId = '1001'): array
     {
         return [
-            'type' => 'Room',
-            'id' => $externalId,
+            'type' => 'Pms::RoomType',
+            'id' => $typeId,
             'rates' => [
-                '900' => [
+                $rateId => [
                     '2026-08-01' => ['free' => $firstNight],
                     '2026-08-02' => ['free' => $secondNight],
                 ],
             ],
         ];
+    }
+
+    function room_statuses(bool $roomAAvailable, bool $roomBAvailable = false, string $typeId = '1001'): array
+    {
+        return [[
+            'room_type_id' => $typeId,
+            'room_type' => 'Standard',
+            'rooms' => [
+                ['id' => 501, 'number' => '101', 'available' => $roomAAvailable],
+                ['id' => 502, 'number' => '102', 'available' => $roomBAvailable],
+            ],
+        ]];
     }
 
     function decoded_path(array $call): string
@@ -203,10 +236,8 @@ namespace {
     InventoryEngine::$rooms = [['id' => 21], ['id' => 22]];
 
     $client = new ClockApiClient();
-    $client->responses[] = new ClockApiResponse(200, '', [
-        availability_item('501', true),
-        availability_item('502', false),
-    ]);
+    $client->responses[] = new ClockApiResponse(200, '', [availability_item(true)]);
+    $client->responses[] = new ClockApiResponse(200, '', room_statuses(true, false));
     $provider = new ClockAvailabilityProvider($client, new ClockCatalogService($client), new ProviderMappingRepository(), new ClockRoomSelection());
     $rooms = $provider->getAvailableRooms(new AvailabilitySearchRequest('2026-08-01', '2026-08-03', 2, 'room-type:10'));
     $failures = [];
@@ -215,26 +246,37 @@ namespace {
     if (\count($rooms) !== 1 || (int) ($rooms[0]['id'] ?? 0) !== 21) {
         $failures[] = 'Search must correlate Clock availability to each exact physical room.';
     }
-    foreach (['rates[]=900', 'rooms[]=501', 'rooms[]=502'] as $expectedPair) {
+    foreach (['rates[]=900', 'room_types[]=1001', 'adults=2'] as $expectedPair) {
         if (\strpos($searchPath, $expectedPair) === false) {
-            $failures[] = 'Physical search query is missing ' . $expectedPair . '.';
+            $failures[] = 'Type-level search query is missing ' . $expectedPair . '.';
         }
     }
-    if (\strpos($searchPath, 'room_types[]=') !== false) {
-        $failures[] = 'Physical search must not validate availability with room_types[].';
+    if (\strpos($searchPath, 'rooms[]=') !== false) {
+        $failures[] = 'rates_availability must never receive physical rooms[] for exact-room search.';
+    }
+    $statusCall = $client->calls[1] ?? [];
+    if (($statusCall['path'] ?? '') !== '/room_statuses'
+        || ($statusCall['query'] ?? []) !== ['from' => '2026-08-01', 'to' => '2026-08-02', 'room_type_id' => '1001']) {
+        $failures[] = 'Single-type search must validate the inclusive occupied range through room_statuses.';
     }
 
-    $client->responses[] = new ClockApiResponse(200, '', [availability_item('501', true)]);
-    if (!$provider->checkAvailabilityFresh(21, '2026-08-01', '2026-08-03', 'exact-room-session')) {
+    $client->responses[] = new ClockApiResponse(200, '', [availability_item(true)]);
+    $client->responses[] = new ClockApiResponse(200, '', room_statuses(true));
+    if (!$provider->checkAvailabilityFresh(21, '2026-08-01', '2026-08-03', 'exact-room-session', 2, 30, 'final_revalidation')) {
         $failures[] = 'Fresh validation must accept an available exact physical room.';
     }
-    $freshCall = $client->calls[1] ?? [];
+    $freshCall = $client->calls[2] ?? [];
     $freshPath = decoded_path($freshCall);
-    if (\strpos($freshPath, 'rooms[]=501') === false || \strpos($freshPath, 'room_types[]=') !== false) {
-        $failures[] = 'Fresh exact-room validation must query only rooms[]=501.';
+    if (\strpos($freshPath, 'room_types[]=1001') === false || \strpos($freshPath, 'rooms[]=') !== false || \strpos($freshPath, 'rates[]=900') === false) {
+        $failures[] = 'Fresh exact-room validation must use its parent type and exact selected rate.';
     }
     if (empty($freshCall['options']['bypass_cache'])) {
-        $failures[] = 'Fresh exact-room validation must bypass the Clock availability cache.';
+        $failures[] = 'Fresh exact-room rate validation must bypass the Clock availability cache.';
+    }
+    $freshStatusCall = $client->calls[3] ?? [];
+    if (($freshStatusCall['query'] ?? []) !== ['from' => '2026-08-01', 'to' => '2026-08-02', 'room_type_id' => '1001']
+        || empty($freshStatusCall['options']['bypass_cache'])) {
+        $failures[] = 'Fresh exact-room status validation must target the parent type and bypass cache.';
     }
 
     $client->responses[] = new ClockApiResponse(0, '', null, 'http_request_failed', 'Connection failed.');
@@ -244,23 +286,243 @@ namespace {
     if ($provider->getLastAvailabilityFailureReason() !== 'provider_unconfirmed') {
         $failures[] = 'An exact-room provider transport failure must be distinguished from confirmed unavailability.';
     }
-    $transportFailurePath = decoded_path($client->calls[2] ?? []);
-    if (\strpos($transportFailurePath, 'rooms[]=501') === false || \strpos($transportFailurePath, 'room_types[]=') !== false) {
-        $failures[] = 'Transport-failure validation must preserve exact rooms[] selection.';
+    $transportFailurePath = decoded_path($client->calls[4] ?? []);
+    if (\strpos($transportFailurePath, 'room_types[]=1001') === false || \strpos($transportFailurePath, 'rooms[]=') !== false) {
+        $failures[] = 'Transport-failure validation must preserve parent-type selection.';
     }
 
     $client->responses[] = new ClockApiResponse(200, '', [
         [
-            'type' => 'Room',
-            'id' => '501',
+            'type' => 'Pms::RoomType',
+            'id' => '1001',
             'rates' => ['900' => ['2026-07-16' => ['free' => true]]],
         ],
     ]);
     $provider->getDisabledDates(new DisabledDatesRequest('', 2, 1, 21, 'room-type:10', 1));
-    $disabledPath = decoded_path($client->calls[3] ?? []);
-    if (\strpos($disabledPath, 'rooms[]=501') === false || \strpos($disabledPath, 'room_types[]=') !== false) {
-        $failures[] = 'A physical-room disabled-date request must query its exact Clock room.';
+    $disabledPath = decoded_path($client->calls[5] ?? []);
+    if (\strpos($disabledPath, 'room_types[]=1001') === false || \strpos($disabledPath, 'rooms[]=') !== false) {
+        $failures[] = 'A physical-room disabled-date request must remain advisory at its parent type.';
     }
+
+    $calendarClient = new ClockApiClient();
+    $calendarClient->responses[] = new ClockApiResponse(200, '', [[
+        'type' => 'Pms::RoomType',
+        'id' => '1001',
+        'rates' => ['900' => ['2026-07-16' => ['free' => true, 'stop_sale' => true]]],
+    ]]);
+    $calendarProvider = new ClockAvailabilityProvider($calendarClient, new ClockCatalogService($calendarClient), new ProviderMappingRepository(), new ClockRoomSelection());
+    $restrictedCalendar = $calendarProvider->getDisabledDates(new DisabledDatesRequest('', 2, 1, 21, 'room-type:10', 1));
+    if (!\in_array('2026-07-16', (array) ($restrictedCalendar['disabled_checkin_dates'] ?? []), true)) {
+        $failures[] = 'The advisory calendar must not let free=true override a same-date stop-sale restriction.';
+    }
+
+    InventoryEngine::$rooms = [['id' => 22]];
+    $calendarClient = new ClockApiClient();
+    $calendarClient->responses[] = new ClockApiResponse(200, '', [[
+        'type' => 'Pms::RoomType',
+        'id' => '1001',
+        'rates' => ['900' => ['2026-07-16' => ['free' => true]]],
+    ]]);
+    $calendarProvider = new ClockAvailabilityProvider($calendarClient, new ClockCatalogService($calendarClient), new ProviderMappingRepository(), new ClockRoomSelection());
+    $localConflictCalendar = $calendarProvider->getDisabledDates(new DisabledDatesRequest('', 2, 1, 21, 'room-type:10', 1));
+    if (!\in_array('2026-07-16', (array) ($localConflictCalendar['disabled_checkin_dates'] ?? []), true)) {
+        $failures[] = 'The advisory calendar must merge local exact-room conflicts into type/rate dates.';
+    }
+    InventoryEngine::$rooms = [['id' => 21], ['id' => 22]];
+
+    $caseClient = new ClockApiClient();
+    $caseClient->responses[] = new ClockApiResponse(200, '', [availability_item(true, false)]);
+    $caseProvider = new ClockAvailabilityProvider($caseClient, new ClockCatalogService($caseClient), new ProviderMappingRepository(), new ClockRoomSelection());
+    if ($caseProvider->checkAvailabilityFresh(21, '2026-08-01', '2026-08-03', '', 2, 30)) {
+        $failures[] = 'Every occupied date must have free=true for the exact selected rate.';
+    }
+    if ($caseProvider->getLastAvailabilityFailureReason() !== 'unavailable' || \count($caseClient->calls) !== 1) {
+        $failures[] = 'An explicit rate failure must be unavailable and stop before room_statuses.';
+    }
+
+    $restrictedRate = availability_item(true);
+    $restrictedRate['rates']['900']['2026-08-01']['stop_sale'] = true;
+    $caseClient = new ClockApiClient();
+    $caseClient->responses[] = new ClockApiResponse(200, '', [$restrictedRate]);
+    $caseProvider = new ClockAvailabilityProvider($caseClient, new ClockCatalogService($caseClient), new ProviderMappingRepository(), new ClockRoomSelection());
+    if ($caseProvider->checkAvailabilityFresh(21, '2026-08-01', '2026-08-03', '', 2, 30)
+        || $caseProvider->getLastAvailabilityFailureReason() !== 'unavailable') {
+        $failures[] = 'Stop-sale and contradictory rate restrictions must be confirmed unavailable.';
+    }
+
+    $closedDepartureRate = availability_item(true);
+    $closedDepartureRate['rates']['900']['2026-08-03'] = ['free' => true, 'closed_for_departure' => true];
+    $caseClient = new ClockApiClient();
+    $caseClient->responses[] = new ClockApiResponse(200, '', [$closedDepartureRate]);
+    $caseProvider = new ClockAvailabilityProvider($caseClient, new ClockCatalogService($caseClient), new ProviderMappingRepository(), new ClockRoomSelection());
+    if ($caseProvider->checkAvailabilityFresh(21, '2026-08-01', '2026-08-03', '', 2, 30)
+        || $caseProvider->getLastAvailabilityFailureReason() !== 'unavailable'
+        || \count($caseClient->calls) !== 1) {
+        $failures[] = 'A closed departure on the checkout date must fail before room_statuses.';
+    }
+
+    $erroredRate = availability_item(true);
+    $erroredRate['rates']['900']['errors'] = ['restricted'];
+    $caseClient = new ClockApiClient();
+    $caseClient->responses[] = new ClockApiResponse(200, '', [$erroredRate]);
+    $caseProvider = new ClockAvailabilityProvider($caseClient, new ClockCatalogService($caseClient), new ProviderMappingRepository(), new ClockRoomSelection());
+    if ($caseProvider->checkAvailabilityFresh(21, '2026-08-01', '2026-08-03', '', 2, 30)
+        || $caseProvider->getLastAvailabilityFailureReason() !== 'unavailable'
+        || \count($caseClient->calls) !== 1) {
+        $failures[] = 'A non-empty applicable rate error must fail before room_statuses.';
+    }
+
+    $caseClient = new ClockApiClient();
+    $caseProvider = new ClockAvailabilityProvider($caseClient, new ClockCatalogService($caseClient), new ProviderMappingRepository(), new ClockRoomSelection());
+    if ($caseProvider->checkAvailabilityFresh(21, '2026-08-01', '2026-08-03', '', 2, 31)
+        || $caseProvider->getLastAvailabilityFailureReason() !== 'provider_unconfirmed'
+        || !empty($caseClient->calls)) {
+        $failures[] = 'An unmapped selected rate must fail unconfirmed before any Clock request.';
+    }
+
+    $caseClient = new ClockApiClient();
+    $caseProvider = new ClockAvailabilityProvider($caseClient, new ClockCatalogService($caseClient), new ProviderMappingRepository(), new ClockRoomSelection());
+    if ($caseProvider->checkAvailabilityFresh(21, '2026-08-01', '2026-08-03', '', 2, 0)
+        || $caseProvider->getLastAvailabilityFailureReason() !== 'provider_unconfirmed'
+        || !empty($caseClient->calls)) {
+        $failures[] = 'A final write-boundary validation without an exact selected rate must fail before provider requests.';
+    }
+
+    $caseClient = new ClockApiClient();
+    $caseClient->responses[] = new ClockApiResponse(200, '', [[
+        'type' => 'Pms::RoomType',
+        'id' => '1001',
+        'rates' => ['900' => ['2026-08-01' => ['free' => true]]],
+    ]]);
+    $caseProvider = new ClockAvailabilityProvider($caseClient, new ClockCatalogService($caseClient), new ProviderMappingRepository(), new ClockRoomSelection());
+    if ($caseProvider->checkAvailabilityFresh(21, '2026-08-01', '2026-08-03', '', 2, 30)) {
+        $failures[] = 'A selected rate with a missing occupied date must fail closed.';
+    }
+    if ($caseProvider->getLastAvailabilityFailureReason() !== 'provider_unconfirmed') {
+        $failures[] = 'Missing selected-rate date evidence must be provider-unconfirmed.';
+    }
+
+    $caseClient = new ClockApiClient();
+    $caseClient->responses[] = new ClockApiResponse(200, '', [availability_item(true)]);
+    $caseClient->responses[] = new ClockApiResponse(200, '', [[
+        'room_type_id' => '1001',
+        'rooms' => [['id' => 999, 'available' => true]],
+    ]]);
+    $caseProvider = new ClockAvailabilityProvider($caseClient, new ClockCatalogService($caseClient), new ProviderMappingRepository(), new ClockRoomSelection());
+    if ($caseProvider->checkAvailabilityFresh(21, '2026-08-01', '2026-08-03', '', 2, 30)) {
+        $failures[] = 'A missing exact physical-room row must never inherit type availability.';
+    }
+    if ($caseProvider->getLastAvailabilityFailureReason() !== 'provider_unconfirmed') {
+        $failures[] = 'A missing exact physical-room row must be provider-unconfirmed.';
+    }
+
+    $caseClient = new ClockApiClient();
+    $caseClient->responses[] = new ClockApiResponse(200, '', [availability_item(true)]);
+    $caseClient->responses[] = new ClockApiResponse(200, '', room_statuses(false));
+    $caseProvider = new ClockAvailabilityProvider($caseClient, new ClockCatalogService($caseClient), new ProviderMappingRepository(), new ClockRoomSelection());
+    if ($caseProvider->checkAvailabilityFresh(21, '2026-08-01', '2026-08-03', '', 2, 30)) {
+        $failures[] = 'An explicit exact physical-room available=false must fail closed.';
+    }
+    if ($caseProvider->getLastAvailabilityFailureReason() !== 'unavailable') {
+        $failures[] = 'An explicit physical status false must be confirmed unavailable.';
+    }
+
+    ProviderMappingRepository::$rateMappings[0]['external_parent_id'] = '9999';
+    $caseClient = new ClockApiClient();
+    $caseProvider = new ClockAvailabilityProvider($caseClient, new ClockCatalogService($caseClient), new ProviderMappingRepository(), new ClockRoomSelection());
+    if ($caseProvider->getAvailableRooms(new AvailabilitySearchRequest('2026-08-01', '2026-08-03', 2, 'room-type:10')) !== []
+        || $caseProvider->getLastAvailabilityFailureReason() !== 'provider_unconfirmed'
+        || !empty($caseClient->calls)) {
+        $failures[] = 'A rate whose mapped parent differs from the selected type must fail before provider requests.';
+    }
+    ProviderMappingRepository::$rateMappings[0]['external_parent_id'] = '1001';
+
+    ProviderMappingRepository::$rateMappings[0]['metadata']['public_visible'] = 'unknown';
+    $caseClient = new ClockApiClient();
+    $caseProvider = new ClockAvailabilityProvider($caseClient, new ClockCatalogService($caseClient), new ProviderMappingRepository(), new ClockRoomSelection());
+    if ($caseProvider->getAvailableRooms(new AvailabilitySearchRequest('2026-08-01', '2026-08-03', 2, 'room-type:10')) !== []
+        || $caseProvider->getLastAvailabilityFailureReason() !== 'provider_unconfirmed'
+        || !empty($caseClient->calls)) {
+        $failures[] = 'A rate without confirmed public WBE visibility must not satisfy availability.';
+    }
+    ProviderMappingRepository::$rateMappings[0]['metadata']['public_visible'] = 'yes';
+
+    ProviderMappingRepository::$rateMappings[0]['status'] = '';
+    $caseClient = new ClockApiClient();
+    $caseProvider = new ClockAvailabilityProvider($caseClient, new ClockCatalogService($caseClient), new ProviderMappingRepository(), new ClockRoomSelection());
+    if ($caseProvider->getAvailableRooms(new AvailabilitySearchRequest('2026-08-01', '2026-08-03', 2, 'room-type:10')) !== []
+        || !empty($caseClient->calls)) {
+        $failures[] = 'A rate without an explicit active status must not satisfy availability.';
+    }
+    ProviderMappingRepository::$rateMappings[0]['status'] = 'active';
+
+    ProviderMappingRepository::$rateMappings[0]['metadata'] = [
+        'public_visible' => 'yes',
+        'metadata' => ['bookable_type' => 'Pms::RoomType', 'active' => false],
+    ];
+    $caseClient = new ClockApiClient();
+    $caseProvider = new ClockAvailabilityProvider($caseClient, new ClockCatalogService($caseClient), new ProviderMappingRepository(), new ClockRoomSelection());
+    if ($caseProvider->getAvailableRooms(new AvailabilitySearchRequest('2026-08-01', '2026-08-03', 2, 'room-type:10')) !== []
+        || !empty($caseClient->calls)) {
+        $failures[] = 'A nested provider active=false signal must reject the WBE rate.';
+    }
+
+    ProviderMappingRepository::$rateMappings[0]['metadata'] = [
+        'public_visible' => 'yes',
+        'clock_catalog_item' => ['metadata' => ['bookable_type' => 'Pms::Room']],
+    ];
+    $caseClient = new ClockApiClient();
+    $caseProvider = new ClockAvailabilityProvider($caseClient, new ClockCatalogService($caseClient), new ProviderMappingRepository(), new ClockRoomSelection());
+    if ($caseProvider->getAvailableRooms(new AvailabilitySearchRequest('2026-08-01', '2026-08-03', 2, 'room-type:10')) !== []
+        || !empty($caseClient->calls)) {
+        $failures[] = 'Nested catalog metadata for a non-room-type rate must be rejected.';
+    }
+    ProviderMappingRepository::$rateMappings[0]['metadata'] = [
+        'public_visible' => 'yes',
+        'bookable_type' => 'Pms::RoomType',
+    ];
+
+    $caseClient = new ClockApiClient();
+    $caseProvider = new ClockAvailabilityProvider($caseClient, new ClockCatalogService($caseClient), new ProviderMappingRepository(), new ClockRoomSelection());
+    if ($caseProvider->getAvailableRooms(new AvailabilitySearchRequest('2026-08-01', '2026-08-03', 3, 'room-type:10')) !== []
+        || $caseProvider->getLastAvailabilityFailureReason() !== 'unavailable'
+        || !empty($caseClient->calls)) {
+        $failures[] = 'A local capacity failure must be confirmed unavailable without provider requests.';
+    }
+
+    $roomC = exact_room_selection(23, '601', 11, '1002');
+    ClockRoomSelection::$selections[23] = $roomC;
+    ClockRoomSelection::$selectionsByType = [10 => [$roomA, $roomB], 11 => [$roomC]];
+    InventoryEngine::$rooms = [['id' => 21], ['id' => 22], ['id' => 23]];
+    ProviderMappingRepository::$rateMappings[] = [
+        'local_id' => 31,
+        'external_id' => '901',
+        'external_parent_id' => '1002',
+        'status' => 'active',
+        'metadata' => ['public_visible' => 'yes', 'bookable_type' => 'Pms::RoomType'],
+    ];
+    $mixedClient = new ClockApiClient();
+    $mixedClient->responses[] = new ClockApiResponse(200, '', [
+        availability_item(true),
+        availability_item(true, true, '901', '1002'),
+    ]);
+    $mixedClient->responses[] = new ClockApiResponse(200, '', [
+        room_statuses(true, false)[0],
+        ['room_type_id' => '1002', 'rooms' => [['id' => 601, 'available' => true]]],
+    ]);
+    $mixedProvider = new ClockAvailabilityProvider($mixedClient, new ClockCatalogService($mixedClient), new ProviderMappingRepository(), new ClockRoomSelection());
+    $mixedRooms = $mixedProvider->getAvailableRooms(new AvailabilitySearchRequest('2026-08-01', '2026-08-03', 2, 'all'));
+    if (\count($mixedRooms) !== 2) {
+        $failures[] = 'Mixed-type search must match confirmed physical rooms from each candidate type.';
+    }
+    if (\array_key_exists('room_type_id', $mixedClient->calls[1]['query'] ?? [])) {
+        $failures[] = 'Mixed-type search must make one unfiltered room_statuses range request.';
+    }
+
+    ClockRoomSelection::$selections = [21 => $roomA, 22 => $roomB];
+    ClockRoomSelection::$selectionsByType = [10 => [$roomA, $roomB]];
+    InventoryEngine::$rooms = [['id' => 21], ['id' => 22]];
+    ProviderMappingRepository::$rateMappings = [ProviderMappingRepository::$rateMappings[0]];
 
     $missingPhysical = $roomA;
     $missingPhysical['physical_mapping'] = null;

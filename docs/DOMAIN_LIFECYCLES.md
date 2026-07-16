@@ -49,8 +49,9 @@ A public search supplies check-in, check-out, and party size through managed boo
 - Invalid dates, insufficient capacity, expired locks, inactive rooms, and blocking reservations stop the flow.
 - Unavailable dates must remain unavailable throughout range selection; UI appearance is not an availability authority.
 - A lock reduces race exposure but is not a substitute for final availability validation.
-- In Clock exact-room mode, a physical selection is queried and matched by its Clock physical-room ID through `rooms[]`; `room_types[]` is reserved for legitimate type-level context and cannot make a physical room bookable.
-- A physical selection must have both Clock physical-room and accommodation/type mappings. Missing, ambiguous, or mismatched physical availability fails closed without substituting another room of the same type.
+- In Clock exact-room mode, `rates_availability` proves parent-type/rate sellability through `room_types[]`, while `room_statuses` separately proves that the exact mapped physical room is available for the complete occupied-night range. Neither source can substitute for the other.
+- A physical selection must have Clock physical-room, accommodation/type, and applicable rate mappings whose parent IDs agree. Missing, ambiguous, malformed, or mismatched evidence is provider-unconfirmed and fails closed without substituting another room of the same type.
+- The long disabled-date calendar is advisory: it combines type/rate daily data with local exact-room conflicts and does not precompute Clock physical-room status. Every selected range must still pass `room_statuses` before continuation or a write boundary.
 - For deferred Clock payment checkout, the current session's unexpired exact physical-room locks are converted to all pending local mirrors in one database transaction. Physical-room mutexes serialize competing sessions; any overlapping blocking reservation, expired/missing/wrong-owner lock, insert error, or commit error rolls back the complete room set before payment initiation.
 - `fallback_to_local_when_clock_unavailable` is configurable but normally false. Enabling it can split provider ownership and must be treated as an explicit operational risk.
 
@@ -68,7 +69,7 @@ Checkout has a valid selection, guest form, currency, and calculated room items.
 
 - `BookingQuoteDraft` stores a signed, expiring draft of reviewed pricing and policy data.
 - Intermediate Clock quote reads may be cached briefly.
-- The final Clock boundary requests fresh availability, price, and guarantee information with caches bypassed. For a physical selection, the availability request contains the exact Clock room ID in `rooms[]`.
+- The final Clock boundary requests fresh type/rate availability, exact physical-room status, price, and guarantee information with caches bypassed. The selected local rate plan must map to the parent type, and the exact physical-room row must be `available=true` for the inclusive occupied-night range.
 - A changed total, currency, or required guarantee stops before payment/provider writes and requires guest review.
 
 ### Forbidden transitions

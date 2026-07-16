@@ -16,6 +16,8 @@ foreach ([
     "'availability_status' => \$availabilityStatus",
     "\$availabilityStatus = 'provider_unconfirmed';",
     "\$availabilityStatus = 'unavailable';",
+    "\$rooms = \$availabilityProvider->getAvailableRooms(",
+    "if (empty(\$rooms) && \$failureReason === 'provider_unconfirmed')",
 ] as $expected) {
     if (strpos($ajax, $expected) === false) {
         $failures[] = 'AJAX exact-room availability status is missing: ' . $expected;

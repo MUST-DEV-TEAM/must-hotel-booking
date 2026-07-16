@@ -17,7 +17,8 @@ if ($method === '') {
     foreach ([
         '$assignedRoomId = isset($reservation[\'assigned_room_id\']) ? (int) $reservation[\'assigned_room_id\'] : 0;',
         '$selection = $this->roomSelection->resolve($assignedRoomId);',
-        '$this->availability->checkAvailabilityFresh($assignedRoomId, $checkin, $checkout, LockEngine::getOrCreateSessionId())',
+        '$this->availability->checkAvailabilityFresh(',
+        "'paid_fulfilment'",
         "(int) (\$selection['physical_room_id'] ?? 0) !== \$assignedRoomId",
         "(int) (\$selection['room_type_id'] ?? 0) !== \$roomId",
         "(int) (\$metadata['physical_room_id'] ?? 0) !== \$assignedRoomId",

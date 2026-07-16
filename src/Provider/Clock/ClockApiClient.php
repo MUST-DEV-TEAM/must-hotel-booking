@@ -381,6 +381,10 @@ final class ClockApiClient
             return \max(0, \min(900, (int) $options['cache_ttl']));
         }
 
+        if ($endpointName === 'room_statuses') {
+            return 15;
+        }
+
         return \in_array(
             $endpointName,
             ['room_types', 'rooms', 'rates', 'rate_plans', 'wbe_room_type_rates', 'payment_sub_types', 'rates_availability', 'products'],

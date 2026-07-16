@@ -684,11 +684,14 @@ final class AvailabilityAjaxController
                 }
             }
         } else {
-            $rooms = self::get_available_rooms_for_ajax(
-                $checkin,
-                $checkout,
-                $resolvedRoomCount > 1 ? 1 : $guests,
-                $accommodationType
+            $availabilityProvider = self::availabilityProvider();
+            $rooms = $availabilityProvider->getAvailableRooms(
+                new AvailabilitySearchRequest(
+                    $checkin,
+                    $checkout,
+                    $resolvedRoomCount > 1 ? 1 : $guests,
+                    $accommodationType
+                )
             );
 
             if ($resolvedRoomCount > 1 && !AvailabilityEngine::canRoomSetHostParty($rooms, $guests, $resolvedRoomCount)) {
@@ -696,14 +699,24 @@ final class AvailabilityAjaxController
             }
 
             if (empty($rooms)) {
-                $message = AvailabilityEngine::getAccommodationEmptyResultsMessage(
-                    [
-                        'guests' => $guests,
-                        'room_count' => $roomCount,
-                        'accommodation_type' => $accommodationType,
-                    ],
-                    $resolvedRoomCount
-                );
+                $failureReason = \method_exists($availabilityProvider, 'getLastAvailabilityFailureReason')
+                    ? (string) $availabilityProvider->getLastAvailabilityFailureReason()
+                    : '';
+
+                if (empty($rooms) && $failureReason === 'provider_unconfirmed') {
+                    $message = \__('Availability could not be confirmed. Please try again.', 'must-hotel-booking');
+                    $availabilityStatus = 'provider_unconfirmed';
+                } else {
+                    $message = AvailabilityEngine::getAccommodationEmptyResultsMessage(
+                        [
+                            'guests' => $guests,
+                            'room_count' => $roomCount,
+                            'accommodation_type' => $accommodationType,
+                        ],
+                        $resolvedRoomCount
+                    );
+                    $availabilityStatus = 'unavailable';
+                }
             }
         }
 

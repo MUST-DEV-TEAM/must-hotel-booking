@@ -19,7 +19,7 @@ Notable product, architecture, integration, operational, compatibility, and secu
 
 ### Fixed
 
-- Validate selected Clock physical-room availability with `rooms[]` across search, final checkout, disabled dates, and paid fulfilment; type-level availability no longer makes an exact-room selection bookable.
+- Restore Clock exact physical-room availability by requiring parent type/rate sellability from `rates_availability` plus the selected physical room's inclusive-range `room_statuses` evidence across search, final checkout, and paid fulfilment; keep the disabled-date calendar advisory and fail closed on unconfirmed selected-stay evidence.
 - Bind Clock-backed payment attempts to versioned exact-room allocation, stay, guest, amount, and physical/type/rate mapping evidence, and stop fulfilment before provider creation when those mappings drift.
 - Atomically convert session-owned exact physical-room locks into the complete Clock pending-mirror set, rejecting local overlaps and rolling back every room before payment initiation when conversion fails.
 - Distinguish an unconfirmed exact-room Clock availability request from confirmed unavailability, keeping the guest on the calendar with a retry action when provider transport fails.

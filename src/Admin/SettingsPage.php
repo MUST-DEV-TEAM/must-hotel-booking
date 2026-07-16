@@ -597,6 +597,7 @@ final class SettingsPage
             'clock_rooms_path' => '/rooms',
             'clock_rates_path' => '/rates',
             'clock_rates_availability_path' => '/rates_availability',
+            'clock_room_statuses_path' => '/room_statuses',
             'clock_products_path' => '/products',
             'clock_reservation_create_path' => '/bookings/',
             'clock_reservation_fetch_path' => '/bookings/{booking_id}',
@@ -1806,6 +1807,7 @@ final class SettingsPage
         $form['clock_rooms_path'] = ClockConfig::normalizeOptionalPath((string) \wp_unslash($source['clock_rooms_path'] ?? ($form['clock_rooms_path'] ?? '')));
         $form['clock_rates_path'] = ClockConfig::normalizeOptionalPath((string) \wp_unslash($source['clock_rates_path'] ?? ($form['clock_rates_path'] ?? '')));
         $form['clock_rates_availability_path'] = ClockConfig::normalizeOptionalPath((string) \wp_unslash($source['clock_rates_availability_path'] ?? ($form['clock_rates_availability_path'] ?? '')));
+        $form['clock_room_statuses_path'] = ClockConfig::normalizeOptionalPath((string) \wp_unslash($source['clock_room_statuses_path'] ?? ($form['clock_room_statuses_path'] ?? '')));
         $form['clock_products_path'] = ClockConfig::normalizeOptionalPath((string) \wp_unslash($source['clock_products_path'] ?? ($form['clock_products_path'] ?? '')));
         $form['clock_wbe_room_type_rates_path'] = ClockConfig::normalizeOptionalPath((string) \wp_unslash($source['clock_wbe_room_type_rates_path'] ?? ($form['clock_wbe_room_type_rates_path'] ?? '')));
         $form['clock_rate_plans_path'] = ClockConfig::normalizeOptionalPath((string) \wp_unslash($source['clock_rate_plans_path'] ?? ($form['clock_rate_plans_path'] ?? '')));
@@ -1900,6 +1902,7 @@ final class SettingsPage
             $form['clock_rooms_path'] = $form['clock_rooms_path'] ?: '/rooms';
             $form['clock_rates_path'] = $form['clock_rates_path'] ?: '/rates';
             $form['clock_rates_availability_path'] = $form['clock_rates_availability_path'] ?: '/rates_availability';
+            $form['clock_room_statuses_path'] = $form['clock_room_statuses_path'] ?: '/room_statuses';
             $form['clock_products_path'] = $form['clock_products_path'] ?: '/products';
             $form['clock_reservation_create_path'] = $form['clock_reservation_create_path'] ?: '/bookings/';
             $form['clock_reservation_fetch_path'] = $form['clock_reservation_fetch_path'] ?: '/bookings/{booking_id}';
@@ -3301,6 +3304,7 @@ final class SettingsPage
             self::renderField(['label' => __('Physical rooms path', 'must-hotel-booking'), 'name' => 'clock_rooms_path', 'value' => $form['clock_rooms_path'] ?? '/rooms']);
             self::renderField(['label' => __('Rates path', 'must-hotel-booking'), 'name' => 'clock_rates_path', 'value' => $form['clock_rates_path'] ?? '/rates']);
             self::renderField(['label' => __('Rates availability path', 'must-hotel-booking'), 'name' => 'clock_rates_availability_path', 'value' => $form['clock_rates_availability_path'] ?? '/rates_availability']);
+            self::renderField(['label' => __('Room statuses path', 'must-hotel-booking'), 'name' => 'clock_room_statuses_path', 'value' => $form['clock_room_statuses_path'] ?? '/room_statuses']);
             self::renderField(['label' => __('Products path', 'must-hotel-booking'), 'name' => 'clock_products_path', 'value' => $form['clock_products_path'] ?? '/products']);
             self::renderField(['label' => __('Reservation create path', 'must-hotel-booking'), 'name' => 'clock_reservation_create_path', 'value' => $form['clock_reservation_create_path'] ?? '/bookings/']);
             self::renderField(['label' => __('Reservation fetch path', 'must-hotel-booking'), 'name' => 'clock_reservation_fetch_path', 'value' => $form['clock_reservation_fetch_path'] ?? '/bookings/{booking_id}']);
@@ -3503,6 +3507,7 @@ final class SettingsPage
             $hidden['clock_rooms_path'] = (string) ($form['clock_rooms_path'] ?? '/rooms');
             $hidden['clock_rates_path'] = (string) ($form['clock_rates_path'] ?? '/rates');
             $hidden['clock_rates_availability_path'] = (string) ($form['clock_rates_availability_path'] ?? '/rates_availability');
+            $hidden['clock_room_statuses_path'] = (string) ($form['clock_room_statuses_path'] ?? '/room_statuses');
             $hidden['clock_products_path'] = (string) ($form['clock_products_path'] ?? '/products');
             $hidden['clock_rate_plans_path'] = (string) ($form['clock_rate_plans_path'] ?? '/rate_plans');
             $hidden['clock_reservation_create_path'] = (string) ($form['clock_reservation_create_path'] ?? '/bookings/');

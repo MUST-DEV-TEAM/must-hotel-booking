@@ -606,14 +606,30 @@ final class ClockReservationProvider implements ReservationProviderInterface
             if (!$this->ensureLocalRoomLock($roomId, (string) $context['checkin'], (string) $context['checkout'], $lockSessionId)) {
                 return $this->errorResult([\__('One of your selected room locks has expired. Please return to accommodation and confirm your selection again.', 'must-hotel-booking')]);
             }
-            if (!$this->availability->checkAvailabilityFresh($roomId, (string) $context['checkin'], (string) $context['checkout'], $lockSessionId)) {
-                return $this->errorResult([\__('One of your selected rooms is no longer available. Return to checkout and choose an available room. No reservation or payment was created.', 'must-hotel-booking')]);
+            $roomGuests = isset($roomGuestCounts[$roomId]) ? (int) $roomGuestCounts[$roomId] : (int) $context['guests'];
+            if (!$this->availability->checkAvailabilityFresh(
+                $roomId,
+                (string) $context['checkin'],
+                (string) $context['checkout'],
+                $lockSessionId,
+                $roomGuests,
+                $ratePlanId,
+                'final_revalidation'
+            )) {
+                $failureReason = \method_exists($this->availability, 'getLastAvailabilityFailureReason')
+                    ? (string) $this->availability->getLastAvailabilityFailureReason()
+                    : '';
+                $message = $failureReason === 'provider_unconfirmed'
+                    ? \__('Availability could not be confirmed. Please try again. No reservation or payment was created.', 'must-hotel-booking')
+                    : \__('One of your selected rooms is no longer available. Return to checkout and choose an available room. No reservation or payment was created.', 'must-hotel-booking');
+
+                return $this->errorResult([$message]);
             }
             $pricing = $this->quote->calculateTotalFresh(
                 $roomId,
                 (string) $context['checkin'],
                 (string) $context['checkout'],
-                isset($roomGuestCounts[$roomId]) ? (int) $roomGuestCounts[$roomId] : (int) $context['guests'],
+                $roomGuests,
                 $couponCode,
                 $ratePlanId
             );
@@ -906,7 +922,7 @@ final class ClockReservationProvider implements ReservationProviderInterface
                     $reservationIds,
                     $fulfilledReservationIds,
                     (string) ($result['message'] ?? \__('Clock reservation creation could be ambiguous after payment verification.', 'must-hotel-booking')),
-                    'clock_create_requires_reread'
+                    (string) ($result['reason_code'] ?? 'clock_create_requires_reread')
                 );
             }
             $fulfilledReservationIds[] = $reservationId;
@@ -1006,8 +1022,28 @@ final class ClockReservationProvider implements ReservationProviderInterface
             return ['success' => false, 'message' => \__('The saved guest details are incomplete for Clock fulfillment.', 'must-hotel-booking')];
         }
 
-        if (!$this->availability->checkAvailabilityFresh($assignedRoomId, $checkin, $checkout, LockEngine::getOrCreateSessionId())) {
-            return ['success' => false, 'message' => \__('The selected room is no longer available in Clock after payment verification.', 'must-hotel-booking')];
+        if (!$this->availability->checkAvailabilityFresh(
+            $assignedRoomId,
+            $checkin,
+            $checkout,
+            LockEngine::getOrCreateSessionId(),
+            $guests,
+            $ratePlanId,
+            'paid_fulfilment'
+        )) {
+            $failureReason = \method_exists($this->availability, 'getLastAvailabilityFailureReason')
+                ? (string) $this->availability->getLastAvailabilityFailureReason()
+                : '';
+
+            return [
+                'success' => false,
+                'reason_code' => $failureReason === 'provider_unconfirmed'
+                    ? 'clock_exact_room_provider_unconfirmed'
+                    : 'clock_exact_room_unavailable',
+                'message' => $failureReason === 'provider_unconfirmed'
+                    ? \__('Clock could not confirm exact-room availability after payment verification.', 'must-hotel-booking')
+                    : \__('The selected room is no longer available in Clock after payment verification.', 'must-hotel-booking'),
+            ];
         }
 
         $pricing = $this->quote->calculateTotalFresh($roomId, $checkin, $checkout, $guests, $couponCode, $ratePlanId);
@@ -1023,7 +1059,11 @@ final class ClockReservationProvider implements ReservationProviderInterface
 
         $selection = $this->roomSelection->resolve($assignedRoomId);
         if (!\is_array($selection)) {
-            return ['success' => false, 'message' => \__('The selected Clock room mapping could not be restored.', 'must-hotel-booking')];
+            return [
+                'success' => false,
+                'reason_code' => 'clock_exact_room_mapping_missing',
+                'message' => \__('The selected Clock room mapping could not be restored.', 'must-hotel-booking'),
+            ];
         }
         $roomMapping = isset($selection['room_mapping']) && \is_array($selection['room_mapping']) ? $selection['room_mapping'] : null;
         $physicalMapping = isset($selection['physical_mapping']) && \is_array($selection['physical_mapping']) ? $selection['physical_mapping'] : null;
@@ -1039,7 +1079,11 @@ final class ClockReservationProvider implements ReservationProviderInterface
         $ratePlanMapping = $this->ratePlanMappingForPricing($pricing, $ratePlanId);
         $resolvedRatePlanId = $ratePlanId > 0 ? $ratePlanId : (int) ($ratePlanMapping['local_id'] ?? 0);
         if (!$this->hasExternalId($roomMapping) || !$this->hasExternalId($ratePlanMapping)) {
-            return ['success' => false, 'message' => \__('Clock mapping is missing for the paid reservation.', 'must-hotel-booking')];
+            return [
+                'success' => false,
+                'reason_code' => 'clock_exact_room_mapping_missing',
+                'message' => \__('Clock mapping is missing for the paid reservation.', 'must-hotel-booking'),
+            ];
         }
         if (
             empty($selection['is_physical'])
@@ -1047,7 +1091,11 @@ final class ClockReservationProvider implements ReservationProviderInterface
             || (int) ($selection['room_type_id'] ?? 0) !== $roomId
             || !$this->hasExternalId($physicalMapping)
         ) {
-            return ['success' => false, 'message' => \__('Clock could not restore the exact selected room after payment.', 'must-hotel-booking')];
+            return [
+                'success' => false,
+                'reason_code' => 'clock_exact_room_mapping_missing',
+                'message' => \__('Clock could not restore the exact selected room after payment.', 'must-hotel-booking'),
+            ];
         }
         if (
             (string) ($snapshotRoomMapping['external_id'] ?? '') === ''
@@ -1057,7 +1105,11 @@ final class ClockReservationProvider implements ReservationProviderInterface
             || (string) ($snapshotPhysicalMapping['external_id'] ?? '') !== (string) ($physicalMapping['external_id'] ?? '')
             || (string) ($snapshotRatePlanMapping['external_id'] ?? '') !== (string) ($ratePlanMapping['external_id'] ?? '')
         ) {
-            return ['success' => false, 'message' => \__('The saved Clock room or rate mapping is incomplete or changed after payment.', 'must-hotel-booking')];
+            return [
+                'success' => false,
+                'reason_code' => 'clock_exact_room_mapping_drift',
+                'message' => \__('The saved Clock room or rate mapping is incomplete or changed after payment.', 'must-hotel-booking'),
+            ];
         }
 
         $validatedRoom = [

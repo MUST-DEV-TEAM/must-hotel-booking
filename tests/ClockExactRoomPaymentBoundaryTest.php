@@ -236,6 +236,7 @@ namespace MustHotelBooking\Provider\Clock {
     final class ClockAvailabilityProvider
     {
         public bool $available = false;
+        public string $lastFailureReason = 'unavailable';
         /** @var array<int, array<string, mixed>> */
         public array $freshCalls = [];
         public function checkAvailability(int $roomId, string $checkin, string $checkout, string $sessionId = ''): bool
@@ -243,9 +244,21 @@ namespace MustHotelBooking\Provider\Clock {
             unset($roomId, $checkin, $checkout, $sessionId);
             return $this->available;
         }
-        public function checkAvailabilityFresh(int $roomId, string $checkin, string $checkout, string $sessionId = ''): bool
+        public function getLastAvailabilityFailureReason(): string
         {
-            $this->freshCalls[] = compact('roomId', 'checkin', 'checkout', 'sessionId');
+            return $this->lastFailureReason;
+        }
+        public function checkAvailabilityFresh(
+            int $roomId,
+            string $checkin,
+            string $checkout,
+            string $sessionId = '',
+            int $guests = 1,
+            int $ratePlanId = 0,
+            string $operationContext = 'final_revalidation'
+        ): bool
+        {
+            $this->freshCalls[] = compact('roomId', 'checkin', 'checkout', 'sessionId', 'guests', 'ratePlanId', 'operationContext');
             return $this->available;
         }
     }
@@ -412,6 +425,11 @@ namespace {
     if (\count($availability->freshCalls) !== 1 || (int) ($availability->freshCalls[0]['roomId'] ?? 0) !== 21) {
         $failures[] = 'Checkout final validation must use the selected physical room.';
     }
+    if ((int) ($availability->freshCalls[0]['guests'] ?? 0) !== 2
+        || (int) ($availability->freshCalls[0]['ratePlanId'] ?? 0) !== 30
+        || (string) ($availability->freshCalls[0]['operationContext'] ?? '') !== 'final_revalidation') {
+        $failures[] = 'Checkout final validation must use its exact guests, selected rate, and operation context.';
+    }
 
     $confirmation = (string) \file_get_contents(__DIR__ . '/../src/Frontend/confirmation-page.php');
     $reservationCall = \strpos($confirmation, 'create_checkout_reservations(');
@@ -508,6 +526,31 @@ namespace {
     }
     if (\count($availability->freshCalls) !== 1 || (int) ($availability->freshCalls[0]['roomId'] ?? 0) !== 21) {
         $failures[] = 'Paid fulfilment final validation must use the assigned physical room.';
+    }
+    if ((int) ($availability->freshCalls[0]['guests'] ?? 0) !== 2
+        || (int) ($availability->freshCalls[0]['ratePlanId'] ?? 0) !== 30
+        || (string) ($availability->freshCalls[0]['operationContext'] ?? '') !== 'paid_fulfilment') {
+        $failures[] = 'Paid fulfilment validation must use saved guests, rate, and paid operation context.';
+    }
+
+    $boundaryRepository = new BoundaryReservationRepository();
+    $boundaryRepository->reservation = boundary_reservation();
+    $client = new ClockApiClient();
+    $availability = new ClockAvailabilityProvider();
+    $availability->lastFailureReason = 'provider_unconfirmed';
+    $quote = new ClockQuoteProvider();
+    $mirror = new ClockMirrorReservationService();
+    $selection = new ClockRoomSelection();
+    $selection->selection = boundary_selection();
+    $paidUnconfirmed = boundary_provider($client, $availability, $quote, $mirror, $selection)
+        ->fulfillPendingOnlinePayment([77], 'pokpay', 'order-77');
+    if (!empty($paidUnconfirmed['success'])
+        || (string) ($paidUnconfirmed['state'] ?? '') !== 'manual_review'
+        || (string) ($paidUnconfirmed['reason_code'] ?? '') !== 'clock_exact_room_provider_unconfirmed') {
+        $failures[] = 'Paid unconfirmed provider evidence must fail closed with a precise manual-review reason.';
+    }
+    if ($client->createCalls !== 0 || $boundaryRepository->manualReviewWrites !== 1) {
+        $failures[] = 'Paid unconfirmed evidence must stop before Clock POST and persist manual review.';
     }
 
     $boundaryRepository = new BoundaryReservationRepository();

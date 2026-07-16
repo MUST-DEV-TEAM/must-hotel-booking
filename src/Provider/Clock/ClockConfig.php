@@ -11,6 +11,7 @@ final class ClockConfig
         'rooms' => '/rooms',
         'rates' => '/rates',
         'rates_availability' => '/rates_availability',
+        'room_statuses' => '/room_statuses',
         'products' => '/products',
         'wbe_room_type_rates' => '/rates',
         'rate_plans' => '/rate_plans',
@@ -134,6 +135,10 @@ final class ClockConfig
     public static function ratesAvailabilityPath(): string
     {
         return self::catalogPaths()['rates_availability'];
+    }
+    public static function roomStatusesPath(): string
+    {
+        return self::catalogPaths()['room_statuses'];
     }
     public static function productsPath(): string
     {
@@ -279,6 +284,7 @@ final class ClockConfig
             'rooms' => self::pathOrDefault((string) ($settings['clock_rooms_path'] ?? ''), self::CATALOG_DEFAULT_PATHS['rooms']),
             'rates' => self::pathOrDefault((string) ($settings['clock_rates_path'] ?? ''), self::CATALOG_DEFAULT_PATHS['rates']),
             'rates_availability' => self::pathOrDefault((string) ($settings['clock_rates_availability_path'] ?? ''), self::CATALOG_DEFAULT_PATHS['rates_availability']),
+            'room_statuses' => self::pathOrDefault((string) ($settings['clock_room_statuses_path'] ?? ''), self::CATALOG_DEFAULT_PATHS['room_statuses']),
             'products' => self::pathOrDefault((string) ($settings['clock_products_path'] ?? ''), self::CATALOG_DEFAULT_PATHS['products']),
             'wbe_room_type_rates' => self::pathOrDefault((string) ($settings['clock_wbe_room_type_rates_path'] ?? ''), self::CATALOG_DEFAULT_PATHS['wbe_room_type_rates']),
             'rate_plans' => self::pathOrDefault((string) ($settings['clock_rate_plans_path'] ?? ''), self::CATALOG_DEFAULT_PATHS['rate_plans']),
@@ -405,6 +411,9 @@ final class ClockConfig
         if (self::ratesAvailabilityPath() === '') {
             $errors[] = \__('Clock rates availability endpoint path is not configured.', 'must-hotel-booking');
         }
+        if (self::roomStatusesPath() === '') {
+            $errors[] = \__('Clock room statuses endpoint path is not configured.', 'must-hotel-booking');
+        }
         if (self::productsPath() === '') {
             $errors[] = \__('Clock products endpoint path is not configured.', 'must-hotel-booking');
         }
@@ -516,6 +525,7 @@ final class ClockConfig
             'clock_catalog_paths_configured' => $configuredCatalogPaths,
             'clock_catalog_endpoints' => self::catalogEndpoints(),
             'clock_rates_availability_path' => $catalogPaths['rates_availability'],
+            'clock_room_statuses_path' => $catalogPaths['room_statuses'],
             'clock_products_path' => $catalogPaths['products'],
             'clock_public_booking_paths_configured' => $configuredPublicBookingPaths,
             'clock_public_booking_configured' => self::isPublicBookingConfigured(),

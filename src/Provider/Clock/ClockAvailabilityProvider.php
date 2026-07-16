@@ -15,7 +15,6 @@ use MustHotelBooking\Provider\Storage\ProviderMappingRepository;
 
 final class ClockAvailabilityProvider implements AvailabilityProviderInterface
 {
-    private const AVAILABILITY_SELECTOR_ROOMS = 'rooms';
     private const AVAILABILITY_SELECTOR_ROOM_TYPES = 'room_types';
 
     /** @var ClockApiClient */
@@ -30,27 +29,50 @@ final class ClockAvailabilityProvider implements AvailabilityProviderInterface
     /** @var ClockRoomSelection */
     private $roomSelection;
 
+    /** @var ClockRoomStatusService */
+    private $roomStatuses;
+
     /** @var string */
     private $lastAvailabilityFailureReason = '';
 
-    public function __construct(?ClockApiClient $client = null, ?ClockCatalogService $catalog = null, ?ProviderMappingRepository $mappings = null, ?ClockRoomSelection $roomSelection = null)
+    public function __construct(
+        ?ClockApiClient $client = null,
+        ?ClockCatalogService $catalog = null,
+        ?ProviderMappingRepository $mappings = null,
+        ?ClockRoomSelection $roomSelection = null,
+        ?ClockRoomStatusService $roomStatuses = null
+    )
     {
         $this->client = $client ?: new ClockApiClient();
         $this->catalog = $catalog ?: new ClockCatalogService($this->client);
         $this->mappings = $mappings ?: new ProviderMappingRepository();
         $this->roomSelection = $roomSelection ?: new ClockRoomSelection($this->catalog, $this->mappings);
+        $this->roomStatuses = $roomStatuses ?: new ClockRoomStatusService($this->client);
     }
 
     public function getAvailableRooms(AvailabilitySearchRequest $request): array
     {
-        if (!$this->isConfiguredForRatesAvailability() || !$this->isValidStay($request->getCheckin(), $request->getCheckout())) {
+        $this->lastAvailabilityFailureReason = '';
+
+        if (!$this->isConfiguredForExactAvailability() || !$this->isValidStay($request->getCheckin(), $request->getCheckout())) {
+            $this->lastAvailabilityFailureReason = 'provider_unconfirmed';
             return [];
         }
 
         $mapped = $this->mappedSelectionsForSearch($request);
-        $rateIds = $this->mappedRateIds();
+        $roomTypeIds = $this->mappedExternalIds($mapped);
+        $rateMappings = $this->mappedRateMappings($roomTypeIds);
+        $rateIds = $this->externalIdsFromMappings($rateMappings);
 
-        if (empty($mapped) || empty($rateIds)) {
+        if (empty($mapped)) {
+            if ($this->lastAvailabilityFailureReason === '') {
+                $this->lastAvailabilityFailureReason = 'provider_unconfirmed';
+            }
+            return [];
+        }
+
+        if (empty($roomTypeIds) || empty($rateIds)) {
+            $this->lastAvailabilityFailureReason = 'provider_unconfirmed';
             return [];
         }
 
@@ -58,17 +80,34 @@ final class ClockAvailabilityProvider implements AvailabilityProviderInterface
             $request->getCheckin(),
             $request->getCheckout(),
             $rateIds,
-            $this->mappedExternalIds($mapped),
-            self::AVAILABILITY_SELECTOR_ROOMS,
-            'clock.rates_availability.search'
+            $roomTypeIds,
+            self::AVAILABILITY_SELECTOR_ROOM_TYPES,
+            'clock.rates_availability.search',
+            false,
+            $request->getGuests()
         );
 
         if (!$response->isSuccess()) {
+            $this->lastAvailabilityFailureReason = 'provider_unconfirmed';
             return [];
         }
 
-        $items = $this->extractItems($response->getData());
+        $statusFilter = \count($roomTypeIds) === 1 ? $roomTypeIds[0] : '';
+        $statusResult = $this->roomStatuses->fetch(
+            $request->getCheckin(),
+            $this->inclusiveCheckout($request->getCheckout()),
+            $statusFilter,
+            false,
+            'clock.room_statuses.search'
+        );
+
+        if (($statusResult['status'] ?? '') !== 'confirmed') {
+            $this->lastAvailabilityFailureReason = 'provider_unconfirmed';
+            return [];
+        }
+
         $available = [];
+        $hasUnconfirmed = false;
 
         foreach ($mapped as $row) {
             $room = isset($row['room']) && \is_array($row['room']) ? $row['room'] : [];
@@ -76,9 +115,33 @@ final class ClockAvailabilityProvider implements AvailabilityProviderInterface
             $availabilityMapping = isset($row['availability_mapping']) && \is_array($row['availability_mapping']) ? $row['availability_mapping'] : [];
             $selection = isset($row['selection']) && \is_array($row['selection']) ? $row['selection'] : [];
             $physicalMapping = isset($selection['physical_mapping']) && \is_array($selection['physical_mapping']) ? $selection['physical_mapping'] : [];
-            $availability = $this->findAvailabilityForMapping($items, $availabilityMapping, \count($mapped) === 1 ? $response->getData() : null);
+            $typeId = (string) ($mapping['external_id'] ?? '');
+            $candidateRateMappings = $this->rateMappingsForType($rateMappings, $typeId);
+            $rateResult = $this->rateAvailabilityResult(
+                $response->getData(),
+                $typeId,
+                $candidateRateMappings,
+                $request->getCheckin(),
+                $request->getCheckout()
+            );
 
-            if (!$this->isAvailableForStay($availability, $request->getCheckin(), $request->getCheckout())) {
+            if (($rateResult['status'] ?? '') === 'provider_unconfirmed') {
+                $hasUnconfirmed = true;
+                continue;
+            }
+
+            if (($rateResult['status'] ?? '') !== 'available') {
+                continue;
+            }
+
+            $physicalResult = $this->physicalRoomStatusResult($statusResult, $typeId, (string) ($availabilityMapping['external_id'] ?? ''));
+
+            if (($physicalResult['status'] ?? '') === 'provider_unconfirmed') {
+                $hasUnconfirmed = true;
+                continue;
+            }
+
+            if (($physicalResult['status'] ?? '') !== 'available') {
                 continue;
             }
 
@@ -86,7 +149,7 @@ final class ClockAvailabilityProvider implements AvailabilityProviderInterface
                 continue;
             }
 
-            $room['available_count'] = !empty($selection['is_physical']) ? 1 : $this->availableCount($availability);
+            $room['available_count'] = 1;
             $room['provider'] = 'clock';
             $room['provider_mapping_id'] = isset($mapping['id']) ? (int) $mapping['id'] : 0;
             $room['provider_room_type_id'] = (string) ($mapping['external_id'] ?? '');
@@ -95,6 +158,10 @@ final class ClockAvailabilityProvider implements AvailabilityProviderInterface
                 ? (string) ($physicalMapping['external_id'] ?? '')
                 : (string) ($mapping['external_id'] ?? '');
             $available[] = $room;
+        }
+
+        if (empty($available)) {
+            $this->lastAvailabilityFailureReason = $hasUnconfirmed ? 'provider_unconfirmed' : 'unavailable';
         }
 
         return $available;
@@ -118,7 +185,7 @@ final class ClockAvailabilityProvider implements AvailabilityProviderInterface
             return null;
         }
 
-        if (!$this->checkAvailability($roomId, $checkin, $checkout)) {
+        if (!$this->checkAvailabilityWithCacheMode($roomId, $checkin, $checkout, '', false, $guests, 0, 'check')) {
             return null;
         }
 
@@ -143,6 +210,7 @@ final class ClockAvailabilityProvider implements AvailabilityProviderInterface
 
 public function getDisabledDates(DisabledDatesRequest $request): array
 {
+    $this->lastAvailabilityFailureReason = '';
     $windowDays = \max(1, \min(365, $request->getWindowDays()));
     $today = \function_exists('current_time') ? \current_time('Y-m-d') : \gmdate('Y-m-d');
 
@@ -166,7 +234,7 @@ public function getDisabledDates(DisabledDatesRequest $request): array
         ? $availabilityTarget['ids']
         : [];
     $availabilitySelector = isset($availabilityTarget['selector']) ? (string) $availabilityTarget['selector'] : '';
-    $rateIds = $this->mappedRateIds();
+    $rateIds = $this->externalIdsFromMappings($this->mappedRateMappings($availabilityIds));
 
     if (empty($availabilityIds) || empty($rateIds)) {
         return $this->disabledDatesFailOpen(empty($availabilityIds) ? 'clock_room_mapping_missing' : 'clock_rate_mapping_missing');
@@ -184,7 +252,9 @@ public function getDisabledDates(DisabledDatesRequest $request): array
         $rateIds,
         $availabilityIds,
         $availabilitySelector,
-        'clock.rates_availability.disabled_dates'
+        'clock.rates_availability.disabled_dates',
+        false,
+        $request->getGuests()
     );
 
     if (!$response->isSuccess()) {
@@ -244,12 +314,42 @@ public function getDisabledDates(DisabledDatesRequest $request): array
 }
     public function checkAvailability(int $roomId, string $checkin, string $checkout, string $excludeSessionId = ''): bool
     {
-        return $this->checkAvailabilityWithCacheMode($roomId, $checkin, $checkout, $excludeSessionId, false);
+        return $this->checkAvailabilityWithCacheMode($roomId, $checkin, $checkout, $excludeSessionId, false, 1, 0, 'check');
     }
 
-    public function checkAvailabilityFresh(int $roomId, string $checkin, string $checkout, string $excludeSessionId = ''): bool
+    public function checkAvailabilityFresh(
+        int $roomId,
+        string $checkin,
+        string $checkout,
+        string $excludeSessionId = '',
+        int $guests = 1,
+        int $ratePlanId = 0,
+        string $operationContext = 'final_revalidation'
+    ): bool
     {
-        return $this->checkAvailabilityWithCacheMode($roomId, $checkin, $checkout, $excludeSessionId, true);
+        $operationContext = \function_exists('sanitize_key')
+            ? \sanitize_key($operationContext)
+            : \strtolower((string) \preg_replace('/[^a-z0-9_\-]/i', '', $operationContext));
+
+        if (!\in_array($operationContext, ['final_revalidation', 'paid_fulfilment'], true)) {
+            $operationContext = 'final_revalidation';
+        }
+
+        if ($ratePlanId <= 0) {
+            $this->lastAvailabilityFailureReason = 'provider_unconfirmed';
+            return false;
+        }
+
+        return $this->checkAvailabilityWithCacheMode(
+            $roomId,
+            $checkin,
+            $checkout,
+            $excludeSessionId,
+            true,
+            \max(1, $guests),
+            \max(0, $ratePlanId),
+            $operationContext
+        );
     }
 
     private function checkAvailabilityWithCacheMode(
@@ -257,39 +357,58 @@ public function getDisabledDates(DisabledDatesRequest $request): array
         string $checkin,
         string $checkout,
         string $excludeSessionId,
-        bool $bypassCache
+        bool $bypassCache,
+        int $guests,
+        int $ratePlanId,
+        string $operationContext
     ): bool
     {
         $this->lastAvailabilityFailureReason = '';
 
-        if (!$this->isConfiguredForRatesAvailability() || !$this->isValidStay($checkin, $checkout)) {
+        if (!$this->isConfiguredForExactAvailability() || !$this->isValidStay($checkin, $checkout)) {
             $this->lastAvailabilityFailureReason = 'provider_unconfirmed';
             return false;
         }
 
         $selection = $this->roomSelection->resolve($roomId);
         $isPhysical = \is_array($selection) && !empty($selection['is_physical']);
-        $mapping = $isPhysical && isset($selection['physical_mapping']) && \is_array($selection['physical_mapping'])
+        $typeMapping = \is_array($selection) && isset($selection['room_mapping']) && \is_array($selection['room_mapping'])
+            ? $selection['room_mapping']
+            : null;
+        $physicalMapping = $isPhysical && isset($selection['physical_mapping']) && \is_array($selection['physical_mapping'])
             ? $selection['physical_mapping']
-            : (\is_array($selection) && isset($selection['room_mapping']) && \is_array($selection['room_mapping']) ? $selection['room_mapping'] : null);
-        $selector = $isPhysical ? self::AVAILABILITY_SELECTOR_ROOMS : self::AVAILABILITY_SELECTOR_ROOM_TYPES;
-        $rateIds = $this->mappedRateIds();
+            : null;
+        $typeId = \is_array($typeMapping) ? (string) ($typeMapping['external_id'] ?? '') : '';
+        $rateMappings = $this->mappedRateMappings($typeId !== '' ? [$typeId] : [], $ratePlanId);
+        $rateIds = $this->externalIdsFromMappings($rateMappings);
+        $room = \is_array($selection) && isset($selection['room']) && \is_array($selection['room']) ? $selection['room'] : [];
+        $maxGuests = isset($room['max_guests']) ? (int) $room['max_guests'] : 0;
 
-        if (!\is_array($selection) || !$this->hasExternalId($mapping) || empty($rateIds)) {
+        if (!\is_array($selection)
+            || !$isPhysical
+            || !$this->hasExternalId($typeMapping)
+            || !$this->hasExternalId($physicalMapping)
+            || empty($rateIds)) {
             $this->lastAvailabilityFailureReason = 'provider_unconfirmed';
             return false;
         }
+
+        if ($maxGuests > 0 && $guests > $maxGuests) {
+            $this->lastAvailabilityFailureReason = 'unavailable';
+            return false;
+        }
+
+        $operationSuffix = $bypassCache ? $operationContext : 'check';
 
         $response = $this->ratesAvailabilityRequest(
             $checkin,
             $checkout,
             $rateIds,
-            [(string) ($mapping['external_id'] ?? '')],
-            $selector,
-            $bypassCache
-                ? 'clock.rates_availability.final_revalidation'
-                : 'clock.rates_availability.check',
-            $bypassCache
+            [$typeId],
+            self::AVAILABILITY_SELECTOR_ROOM_TYPES,
+            'clock.rates_availability.' . $operationSuffix,
+            $bypassCache,
+            $guests
         );
 
         if (!$response->isSuccess()) {
@@ -297,10 +416,32 @@ public function getDisabledDates(DisabledDatesRequest $request): array
             return false;
         }
 
-        $availability = $this->findAvailabilityForMapping($this->extractItems($response->getData()), $mapping, $response->getData());
+        $rateResult = $this->rateAvailabilityResult($response->getData(), $typeId, $rateMappings, $checkin, $checkout);
 
-        if (!$this->isAvailableForStay($availability, $checkin, $checkout)) {
-            $this->lastAvailabilityFailureReason = 'unavailable';
+        if (($rateResult['status'] ?? '') !== 'available') {
+            $this->lastAvailabilityFailureReason = ($rateResult['status'] ?? '') === 'unavailable'
+                ? 'unavailable'
+                : 'provider_unconfirmed';
+            return false;
+        }
+
+        $statusResult = $this->roomStatuses->fetch(
+            $checkin,
+            $this->inclusiveCheckout($checkout),
+            $typeId,
+            $bypassCache,
+            'clock.room_statuses.' . $operationSuffix
+        );
+        $physicalResult = $this->physicalRoomStatusResult(
+            $statusResult,
+            $typeId,
+            (string) ($physicalMapping['external_id'] ?? '')
+        );
+
+        if (($physicalResult['status'] ?? '') !== 'available') {
+            $this->lastAvailabilityFailureReason = ($physicalResult['status'] ?? '') === 'unavailable'
+                ? 'unavailable'
+                : 'provider_unconfirmed';
             return false;
         }
 
@@ -331,6 +472,8 @@ public function getDisabledDates(DisabledDatesRequest $request): array
         $category = RoomCatalog::normalizeBookingCategory($request->getCategory());
         $selections = [];
         $mapped = [];
+        $hasSelection = false;
+        $hasCapacityEligibleSelection = false;
 
         if (RoomCatalog::isRoomTypeBookingValue($category)) {
             $roomTypeId = RoomCatalog::resolveBookingRoomTypeId($category);
@@ -384,6 +527,7 @@ public function getDisabledDates(DisabledDatesRequest $request): array
         }
 
         foreach ($selections as $selection) {
+            $hasSelection = true;
             $room = isset($selection['room']) && \is_array($selection['room']) ? $selection['room'] : [];
             $mapping = isset($selection['room_mapping']) && \is_array($selection['room_mapping']) ? $selection['room_mapping'] : [];
             $availabilityMapping = isset($selection['physical_mapping']) && \is_array($selection['physical_mapping']) ? $selection['physical_mapping'] : [];
@@ -392,6 +536,8 @@ public function getDisabledDates(DisabledDatesRequest $request): array
             if ($maxGuests > 0 && $request->getGuests() > $maxGuests) {
                 continue;
             }
+
+            $hasCapacityEligibleSelection = true;
 
             if (empty($selection['is_physical']) || !$this->hasExternalId($mapping) || !$this->hasExternalId($availabilityMapping)) {
                 continue;
@@ -403,6 +549,10 @@ public function getDisabledDates(DisabledDatesRequest $request): array
                 'availability_mapping' => $availabilityMapping,
                 'selection' => $selection,
             ];
+        }
+
+        if (empty($mapped) && $hasSelection && !$hasCapacityEligibleSelection) {
+            $this->lastAvailabilityFailureReason = 'unavailable';
         }
 
         return $mapped;
@@ -417,7 +567,7 @@ public function getDisabledDates(DisabledDatesRequest $request): array
         $ids = [];
 
         foreach ($mapped as $row) {
-            $mapping = $row['availability_mapping'];
+            $mapping = $row['mapping'];
             $externalId = (string) ($mapping['external_id'] ?? '');
 
             if ($externalId !== '') {
@@ -619,9 +769,187 @@ public function getDisabledDates(DisabledDatesRequest $request): array
         return false;
     }
 
+    /**
+     * @param mixed $data
+     * @param array<int, array<string, mixed>> $rateMappings
+     * @return array{status:string,reason:string,rate_id:string}
+     */
+    private function rateAvailabilityResult(
+        $data,
+        string $roomTypeId,
+        array $rateMappings,
+        string $checkin,
+        string $checkout
+    ): array {
+        $unconfirmed = ['status' => 'provider_unconfirmed', 'reason' => 'rate_evidence_missing', 'rate_id' => ''];
+        if (!\is_array($data) || \array_values($data) !== $data || empty($rateMappings)) {
+            return $unconfirmed;
+        }
+
+        $matches = [];
+        foreach ($data as $item) {
+            if (!\is_array($item)
+                || !isset($item['id'])
+                || !\is_scalar($item['id'])
+                || (string) $item['id'] !== $roomTypeId) {
+                continue;
+            }
+
+            if (!isset($item['type']) || !\is_scalar($item['type']) || (string) $item['type'] !== 'Pms::RoomType') {
+                return ['status' => 'provider_unconfirmed', 'reason' => 'rate_resource_malformed', 'rate_id' => ''];
+            }
+
+            $matches[] = $item;
+        }
+
+        if (\count($matches) !== 1 || !isset($matches[0]['rates']) || !\is_array($matches[0]['rates'])) {
+            return $unconfirmed;
+        }
+
+        $stayDates = $this->stayDates($checkin, $checkout);
+        if (empty($stayDates)) {
+            return $unconfirmed;
+        }
+
+        $rates = $matches[0]['rates'];
+        $hasUnconfirmed = false;
+
+        foreach ($rateMappings as $mapping) {
+            $rateId = (string) ($mapping['external_id'] ?? '');
+            if ($rateId === '' || !\array_key_exists($rateId, $rates) || !\is_array($rates[$rateId])) {
+                $hasUnconfirmed = true;
+                continue;
+            }
+
+            $rateRows = $rates[$rateId];
+            $rateUnconfirmed = false;
+            $rateUnavailable = $this->hasContradictoryRateRestriction($rateRows);
+
+            if (!$rateUnavailable) {
+                foreach ($stayDates as $date) {
+                    if (!isset($rateRows[$date]) || !\is_array($rateRows[$date]) || !\array_key_exists('free', $rateRows[$date]) || !\is_bool($rateRows[$date]['free'])) {
+                        $rateUnconfirmed = true;
+                        break;
+                    }
+
+                    if ($rateRows[$date]['free'] !== true || $this->hasContradictoryRateRestriction($rateRows[$date])) {
+                        $rateUnavailable = true;
+                        break;
+                    }
+                }
+            }
+
+            if (!$rateUnconfirmed
+                && !$rateUnavailable
+                && isset($rateRows[$checkout])
+                && \is_array($rateRows[$checkout])
+                && $this->hasClosedDepartureRestriction($rateRows[$checkout])) {
+                $rateUnavailable = true;
+            }
+
+            if (!$rateUnconfirmed && !$rateUnavailable) {
+                return ['status' => 'available', 'reason' => 'confirmed', 'rate_id' => $rateId];
+            }
+
+            if ($rateUnconfirmed) {
+                $hasUnconfirmed = true;
+            }
+        }
+
+        return $hasUnconfirmed
+            ? $unconfirmed
+            : ['status' => 'unavailable', 'reason' => 'rate_unavailable', 'rate_id' => ''];
+    }
+
+    /** @param array<string, mixed> $entry */
+    private function hasContradictoryRateRestriction(array $entry): bool
+    {
+        foreach (['error', 'errors'] as $key) {
+            if (!\array_key_exists($key, $entry)) {
+                continue;
+            }
+
+            $error = $entry[$key];
+            if ((\is_array($error) && !empty($error)) || (\is_scalar($error) && \trim((string) $error) !== '')) {
+                return true;
+            }
+        }
+
+        foreach (['stop_sale', 'stop_sell', 'stop_sales', 'closed', 'closed_arrival', 'closed_departure', 'closed_for_arrival', 'closed_for_departure', 'closed_to_arrival', 'closed_to_departure', 'cta', 'ctd'] as $key) {
+            if (\array_key_exists($key, $entry) && $this->truthy($entry[$key])) {
+                return true;
+            }
+        }
+
+        foreach (['restrictions', 'restriction'] as $key) {
+            if (isset($entry[$key]) && \is_array($entry[$key]) && $this->hasContradictoryRateRestriction($entry[$key])) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /** @param array<string, mixed> $entry */
+    private function hasClosedDepartureRestriction(array $entry): bool
+    {
+        foreach (['closed_departure', 'closed_for_departure', 'closed_to_departure', 'ctd'] as $key) {
+            if (\array_key_exists($key, $entry) && $this->truthy($entry[$key])) {
+                return true;
+            }
+        }
+
+        foreach (['restrictions', 'restriction'] as $key) {
+            if (isset($entry[$key]) && \is_array($entry[$key]) && $this->hasClosedDepartureRestriction($entry[$key])) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /**
+     * @param array<string, mixed> $statusResult
+     * @return array{status:string,reason:string,rate_id:string}
+     */
+    private function physicalRoomStatusResult(array $statusResult, string $roomTypeId, string $physicalRoomId): array
+    {
+        if (($statusResult['status'] ?? '') !== 'confirmed') {
+            return ['status' => 'provider_unconfirmed', 'reason' => (string) ($statusResult['reason'] ?? 'status_unconfirmed'), 'rate_id' => ''];
+        }
+
+        $rooms = isset($statusResult['rooms']) && \is_array($statusResult['rooms']) ? $statusResult['rooms'] : [];
+        if ($physicalRoomId === '' || !isset($rooms[$physicalRoomId]) || !\is_array($rooms[$physicalRoomId])) {
+            return ['status' => 'provider_unconfirmed', 'reason' => 'physical_room_missing', 'rate_id' => ''];
+        }
+
+        $room = $rooms[$physicalRoomId];
+        if ((string) ($room['room_type_id'] ?? '') !== $roomTypeId || !\array_key_exists('available', $room) || !\is_bool($room['available'])) {
+            return ['status' => 'provider_unconfirmed', 'reason' => 'physical_room_mismatch', 'rate_id' => ''];
+        }
+
+        return $room['available']
+            ? ['status' => 'available', 'reason' => 'confirmed', 'rate_id' => '']
+            : ['status' => 'unavailable', 'reason' => 'physical_room_unavailable', 'rate_id' => ''];
+    }
+
+    private function inclusiveCheckout(string $checkout): string
+    {
+        try {
+            return (new \DateTimeImmutable($checkout))->modify('-1 day')->format('Y-m-d');
+        } catch (\Exception $exception) {
+            return '';
+        }
+    }
+
     private function isConfiguredForRatesAvailability(): bool
     {
         return ClockConfig::isConfigured() && ClockConfig::ratesAvailabilityPath() !== '';
+    }
+
+    private function isConfiguredForExactAvailability(): bool
+    {
+        return $this->isConfiguredForRatesAvailability() && ClockConfig::roomStatusesPath() !== '';
     }
 
     /**
@@ -635,7 +963,8 @@ public function getDisabledDates(DisabledDatesRequest $request): array
         array $availabilityIds,
         string $selector,
         string $operation,
-        bool $bypassCache = false
+        bool $bypassCache = false,
+        int $adults = 1
     ): ClockApiResponse
     {
         if (!$this->isAvailabilitySelector($selector) || empty($this->numericIds($availabilityIds))) {
@@ -644,12 +973,12 @@ public function getDisabledDates(DisabledDatesRequest $request): array
                 '',
                 null,
                 'clock_availability_selector_invalid',
-                'Clock availability requires one explicit room or room-type selector.'
+                'Clock rate availability requires one or more explicit room-type selectors.'
             );
         }
 
         return $this->client->get(
-            $this->ratesAvailabilityPathWithQuery($from, $to, $rateIds, $availabilityIds, $selector),
+            $this->ratesAvailabilityPathWithQuery($from, $to, $rateIds, $availabilityIds, $selector, $adults),
             [],
             $operation,
             [
@@ -678,6 +1007,8 @@ public function getDisabledDates(DisabledDatesRequest $request): array
             }
         }
 
+        \ksort($out, \SORT_NUMERIC);
+
         return \array_values($out);
     }
 
@@ -689,7 +1020,14 @@ public function getDisabledDates(DisabledDatesRequest $request): array
      * @param array<int, string> $rateIds
      * @param array<int, string> $availabilityIds
      */
-    private function ratesAvailabilityPathWithQuery(string $from, string $to, array $rateIds, array $availabilityIds, string $selector): string
+    private function ratesAvailabilityPathWithQuery(
+        string $from,
+        string $to,
+        array $rateIds,
+        array $availabilityIds,
+        string $selector,
+        int $adults = 1
+    ): string
     {
         if (!$this->isAvailabilitySelector($selector)) {
             return '';
@@ -708,12 +1046,14 @@ public function getDisabledDates(DisabledDatesRequest $request): array
             $parts[] = $this->queryPair($selector . '[]', $availabilityId);
         }
 
+        $parts[] = $this->queryPair('adults', (string) \max(1, $adults));
+
         return $this->appendQuery(ClockConfig::ratesAvailabilityPath(), $parts);
     }
 
     private function isAvailabilitySelector(string $selector): bool
     {
-        return \in_array($selector, [self::AVAILABILITY_SELECTOR_ROOMS, self::AVAILABILITY_SELECTOR_ROOM_TYPES], true);
+        return $selector === self::AVAILABILITY_SELECTOR_ROOM_TYPES;
     }
 
     /** @param array<int, string> $parts */
@@ -729,20 +1069,175 @@ public function getDisabledDates(DisabledDatesRequest $request): array
         return \rawurlencode($key) . '=' . \rawurlencode($value);
     }
 
-    /** @return array<int, string> */
-    private function mappedRateIds(): array
+    /**
+     * @param array<int, string> $roomTypeIds
+     * @return array<int, array<string, mixed>>
+     */
+    private function mappedRateMappings(array $roomTypeIds, int $selectedRatePlanId = 0): array
+    {
+        $typeSet = [];
+
+        foreach ($this->numericIds($roomTypeIds) as $roomTypeId) {
+            $typeSet[$roomTypeId] = true;
+        }
+
+        if (empty($typeSet)) {
+            return [];
+        }
+
+        $mappings = $selectedRatePlanId > 0
+            ? [$this->catalog->findRatePlanMapping($selectedRatePlanId)]
+            : $this->mappings->listForProvider(ProviderManager::CLOCK_MODE, 'rate_plan');
+        $out = [];
+
+        foreach ($mappings as $mapping) {
+            if (!\is_array($mapping) || !$this->isApplicablePublicRateMapping($mapping)) {
+                continue;
+            }
+
+            $parentId = \trim((string) ($mapping['external_parent_id'] ?? ''));
+            $externalId = \trim((string) ($mapping['external_id'] ?? ''));
+
+            if ($externalId !== '' && isset($typeSet[$parentId])) {
+                $out[$externalId] = $mapping;
+            }
+        }
+
+        \ksort($out, \SORT_NUMERIC);
+
+        return \array_values($out);
+    }
+
+    /** @param array<string, mixed> $mapping */
+    private function isApplicablePublicRateMapping(array $mapping): bool
+    {
+        $status = \strtolower(\trim((string) ($mapping['status'] ?? '')));
+        if (!\in_array($status, ['1', 'true', 'active', 'enabled', 'open', 'published'], true)) {
+            return false;
+        }
+
+        $metadata = $this->mappingMetadata($mapping);
+        if ($this->hasInactiveProviderRateSignal($metadata)) {
+            return false;
+        }
+
+        $visibility = $this->nestedMappingMetadataScalar($metadata, ['public_visible']);
+        if ($visibility === '' || !$this->truthy($visibility)) {
+            return false;
+        }
+
+        $bookableType = $this->nestedMappingMetadataScalar($metadata, ['bookable_type']);
+
+        return $bookableType === 'Pms::RoomType';
+    }
+
+    /**
+     * @param array<string, mixed> $metadata
+     * @param array<int, string> $keys
+     */
+    private function nestedMappingMetadataScalar(array $metadata, array $keys): string
+    {
+        foreach ($this->mappingMetadataSources($metadata) as $source) {
+            foreach ($keys as $key) {
+                if (\array_key_exists($key, $source) && \is_scalar($source[$key])) {
+                    return \trim((string) $source[$key]);
+                }
+            }
+        }
+
+        return '';
+    }
+
+    /** @param array<string, mixed> $metadata */
+    private function hasInactiveProviderRateSignal(array $metadata): bool
+    {
+        foreach ($this->mappingMetadataSources($metadata) as $source) {
+            foreach (['active', 'enabled'] as $key) {
+                if (\array_key_exists($key, $source) && \is_scalar($source[$key]) && !$this->truthy($source[$key])) {
+                    return true;
+                }
+            }
+
+            foreach (['status', 'state'] as $key) {
+                if (!\array_key_exists($key, $source) || !\is_scalar($source[$key])) {
+                    continue;
+                }
+
+                $status = \strtolower(\trim((string) $source[$key]));
+                if (!\in_array($status, ['1', 'true', 'active', 'enabled', 'open', 'published'], true)) {
+                    return true;
+                }
+            }
+        }
+
+        return false;
+    }
+
+    /** @param array<string, mixed> $metadata @return array<int, array<string, mixed>> */
+    private function mappingMetadataSources(array $metadata): array
+    {
+        $sources = [$metadata];
+
+        if (isset($metadata['metadata']) && \is_array($metadata['metadata'])) {
+            $sources[] = $metadata['metadata'];
+        }
+
+        if (isset($metadata['clock_catalog_item']) && \is_array($metadata['clock_catalog_item'])) {
+            $sources[] = $metadata['clock_catalog_item'];
+
+            if (isset($metadata['clock_catalog_item']['metadata']) && \is_array($metadata['clock_catalog_item']['metadata'])) {
+                $sources[] = $metadata['clock_catalog_item']['metadata'];
+            }
+        }
+
+        return $sources;
+    }
+
+    /** @param array<string, mixed> $mapping @return array<string, mixed> */
+    private function mappingMetadata(array $mapping): array
+    {
+        $metadata = $mapping['metadata'] ?? [];
+
+        if (\is_array($metadata)) {
+            return $metadata;
+        }
+
+        if (\is_string($metadata) && $metadata !== '') {
+            $decoded = \json_decode($metadata, true);
+
+            return \is_array($decoded) ? $decoded : [];
+        }
+
+        return [];
+    }
+
+    /** @param array<int, array<string, mixed>> $mappings @return array<int, string> */
+    private function externalIdsFromMappings(array $mappings): array
     {
         $ids = [];
 
-        foreach ($this->mappings->listForProvider(ProviderManager::CLOCK_MODE, 'rate_plan') as $mapping) {
+        foreach ($mappings as $mapping) {
             $externalId = \trim((string) ($mapping['external_id'] ?? ''));
-
             if ($externalId !== '') {
                 $ids[$externalId] = $externalId;
             }
         }
 
-        return \array_values($ids);
+        return $this->numericIds(\array_values($ids));
+    }
+
+    /**
+     * @param array<int, array<string, mixed>> $mappings
+     * @return array<int, array<string, mixed>>
+     */
+    private function rateMappingsForType(array $mappings, string $roomTypeId): array
+    {
+        return \array_values(\array_filter(
+            $mappings,
+            static function (array $mapping) use ($roomTypeId): bool {
+                return (string) ($mapping['external_parent_id'] ?? '') === $roomTypeId;
+            }
+        ));
     }
 
     /** @return array<int, string> */
@@ -768,13 +1263,12 @@ public function getDisabledDates(DisabledDatesRequest $request): array
 
         if ($roomId > 0) {
             $selection = $this->roomSelection->resolve($roomId);
-            $isPhysical = \is_array($selection) && !empty($selection['is_physical']);
-            $mapping = $isPhysical && isset($selection['physical_mapping']) && \is_array($selection['physical_mapping'])
-                ? $selection['physical_mapping']
-                : (\is_array($selection) && isset($selection['room_mapping']) && \is_array($selection['room_mapping']) ? $selection['room_mapping'] : null);
+            $mapping = \is_array($selection) && isset($selection['room_mapping']) && \is_array($selection['room_mapping'])
+                ? $selection['room_mapping']
+                : null;
 
             return [
-                'selector' => $isPhysical ? self::AVAILABILITY_SELECTOR_ROOMS : self::AVAILABILITY_SELECTOR_ROOM_TYPES,
+                'selector' => self::AVAILABILITY_SELECTOR_ROOM_TYPES,
                 'ids' => $this->hasExternalId($mapping) ? [(string) ($mapping['external_id'] ?? '')] : [],
             ];
         }
@@ -977,7 +1471,13 @@ public function getDisabledDates(DisabledDatesRequest $request): array
             return;
         }
 
-        $signal = $this->availabilitySignal($entry);
+        if ($this->hasContradictoryRateRestriction($entry)) {
+            $signal = false;
+        } elseif (\array_key_exists('free', $entry)) {
+            $signal = \is_bool($entry['free']) ? $entry['free'] : false;
+        } else {
+            $signal = $this->availabilitySignal($entry);
+        }
 
         if ($signal === null) {
             foreach ($entry as $child) {
