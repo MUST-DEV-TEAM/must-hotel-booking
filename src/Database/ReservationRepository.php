@@ -391,6 +391,70 @@ final class ReservationRepository extends AbstractRepository
             ? ['outcome' => 'claimed', 'lease_expires_at' => $leaseExpiresAt]
             : ['outcome' => 'in_progress'];
     }
+
+    /**
+     * Claim a first-time Clock create that was held for manual review before
+     * any provider request was sent. Callers must prove that boundary before
+     * invoking this explicit recovery claim.
+     *
+     * @return array{outcome: string, lease_expires_at?: string}
+     */
+    public function claimManualReviewClockReservation(int $reservationId, string $claimKey, string $ownerToken, int $leaseSeconds = 300): array
+    {
+        $claimKey = $this->providerText($claimKey, 191);
+        $ownerToken = $this->providerText($ownerToken, 64);
+        if ($reservationId <= 0 || $claimKey === '' || $ownerToken === '') {
+            return ['outcome' => 'blocked'];
+        }
+
+        $reservation = $this->getReservation($reservationId);
+        if (!\is_array($reservation)
+            || \trim((string) ($reservation['provider_booking_id'] ?? '')) !== ''
+            || \trim((string) ($reservation['provider_reservation_id'] ?? '')) !== ''
+            || \sanitize_key((string) ($reservation['status'] ?? '')) !== 'pending_payment'
+            || \sanitize_key((string) ($reservation['payment_status'] ?? '')) !== 'pending'
+            || \sanitize_key((string) ($reservation['provider_sync_status'] ?? '')) !== 'manual_review'
+        ) {
+            return ['outcome' => 'blocked'];
+        }
+
+        $now = \current_time('mysql', true);
+        $leaseSeconds = \max(60, \min(900, $leaseSeconds));
+        $leaseExpiresAt = \gmdate('Y-m-d H:i:s', \time() + $leaseSeconds);
+        $updated = $this->wpdb->query(
+            $this->wpdb->prepare(
+                'UPDATE ' . $this->table('reservations') . '
+                SET provider_sync_status = %s,
+                    provider_sync_error = %s,
+                    provider_fulfilment_key = %s,
+                    provider_fulfilment_owner = %s,
+                    provider_fulfilment_claimed_at = %s,
+                    provider_fulfilment_lease_expires_at = %s
+                WHERE id = %d
+                    AND status = %s
+                    AND payment_status = %s
+                    AND provider_booking_id = %s
+                    AND provider_reservation_id = %s
+                    AND provider_sync_status = %s',
+                'creating',
+                '',
+                $claimKey,
+                $ownerToken,
+                $now,
+                $leaseExpiresAt,
+                $reservationId,
+                'pending_payment',
+                'pending',
+                '',
+                '',
+                'manual_review'
+            )
+        );
+
+        return $updated === 1
+            ? ['outcome' => 'claimed', 'lease_expires_at' => $leaseExpiresAt]
+            : ['outcome' => 'in_progress'];
+    }
     /**
      * @param array<string, mixed> $reservationData
      * @param array<int, string> $nonBlockingStatuses

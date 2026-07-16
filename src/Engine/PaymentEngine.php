@@ -3083,6 +3083,77 @@ final class PaymentEngine
     }
 
     /**
+     * Explicit internal recovery for a paid Clock fulfilment that stopped
+     * before its first provider create request. This is intentionally not
+     * registered as a public route or automatic retry path.
+     *
+     * @return array<string, mixed>
+     */
+    public static function reconcileManualReviewClockFulfilment(int $reservationId): array
+    {
+        if ($reservationId <= 0) {
+            return ['success' => false, 'state' => 'blocked'];
+        }
+
+        $reservations = get_reservation_repository();
+        $reservation = $reservations->getReservation($reservationId);
+        if (
+            !\is_array($reservation)
+            || \sanitize_key((string) ($reservation['provider'] ?? '')) !== ProviderManager::CLOCK_MODE
+            || \sanitize_key((string) ($reservation['status'] ?? '')) !== 'pending_payment'
+            || \sanitize_key((string) ($reservation['payment_status'] ?? '')) !== 'pending'
+            || \sanitize_key((string) ($reservation['provider_sync_status'] ?? '')) !== 'manual_review'
+            || \trim((string) ($reservation['provider_booking_id'] ?? '')) !== ''
+            || \trim((string) ($reservation['provider_reservation_id'] ?? '')) !== ''
+        ) {
+            return ['success' => false, 'state' => 'blocked'];
+        }
+
+        $metadata = self::decodeProviderMetadata((string) ($reservation['provider_metadata'] ?? ''));
+        $fulfilment = isset($metadata['clock_fulfilment']) && \is_array($metadata['clock_fulfilment'])
+            ? $metadata['clock_fulfilment']
+            : [];
+        if (
+            \sanitize_key((string) ($fulfilment['state'] ?? '')) !== 'manual_review'
+            || \sanitize_key((string) ($fulfilment['reason'] ?? '')) !== 'clock_create_requires_reread'
+        ) {
+            return ['success' => false, 'state' => 'blocked'];
+        }
+
+        $allocations = (new \MustHotelBooking\Database\PaymentVerificationRepository())->getForReservation($reservationId);
+        $allocation = \count($allocations) === 1 && \is_array($allocations[0]) ? $allocations[0] : [];
+        $method = \sanitize_key((string) ($allocation['provider'] ?? ''));
+        $attemptReference = \sanitize_text_field((string) ($allocation['provider_attempt_reference'] ?? ''));
+        $claimKey = $method !== '' && $attemptReference !== ''
+            ? 'mhb-clock-payment-' . \substr(\hash('sha256', $reservationId . '|' . $method . '|' . $attemptReference), 0, 48)
+            : '';
+        $logs = new ProviderRequestLogRepository();
+        if (
+            !\in_array($method, ['stripe', 'pokpay'], true)
+            || $claimKey === ''
+            || !\hash_equals((string) ($reservation['provider_fulfilment_key'] ?? ''), $claimKey)
+            || !$logs->providerRequestLogsTableExists()
+            || $logs->hasLog(ProviderManager::CLOCK_MODE, 'clock.reservation_create', 'outbound', $claimKey)
+        ) {
+            return ['success' => false, 'state' => 'blocked'];
+        }
+
+        if (!self::resumeVerifiedPendingClockFulfilment([$reservationId], true)) {
+            return ['success' => false, 'state' => 'blocked'];
+        }
+
+        $reloaded = $reservations->getReservation($reservationId);
+        $confirmed = \is_array($reloaded)
+            && \trim((string) ($reloaded['provider_booking_id'] ?? '')) !== ''
+            && ReservationStatus::isConfirmed((string) ($reloaded['status'] ?? ''));
+
+        return [
+            'success' => $confirmed,
+            'state' => \is_array($reloaded) ? \sanitize_key((string) ($reloaded['provider_sync_status'] ?? '')) : 'blocked',
+        ];
+    }
+
+    /**
      * Resume a Clock create only when the payment verification transaction has
      * already committed its exact ownership/allocation evidence. This is the
      * recovery path for a request interruption between durable verification and
@@ -3090,7 +3161,7 @@ final class PaymentEngine
      *
      * @param array<int, int> $reservationIds
      */
-    private static function resumeVerifiedPendingClockFulfilment(array $reservationIds): bool
+    private static function resumeVerifiedPendingClockFulfilment(array $reservationIds, bool $allowManualReviewRecovery = false): bool
     {
         $reservationIds = self::normalizeReservationIds($reservationIds);
         if (empty($reservationIds)) {
@@ -3112,12 +3183,15 @@ final class PaymentEngine
 
         foreach ($reservationIds as $reservationId) {
             $reservation = $reservations->getReservation($reservationId);
+            if (!\is_array($reservation)) {
+                return false;
+            }
+            $syncStatus = \sanitize_key((string) ($reservation['provider_sync_status'] ?? ''));
             if (
-                !\is_array($reservation)
-                || \sanitize_key((string) ($reservation['provider'] ?? '')) !== ProviderManager::CLOCK_MODE
+                \sanitize_key((string) ($reservation['provider'] ?? '')) !== ProviderManager::CLOCK_MODE
                 || \sanitize_key((string) ($reservation['status'] ?? '')) !== 'pending_payment'
                 || \sanitize_key((string) ($reservation['payment_status'] ?? '')) !== 'pending'
-                || \sanitize_key((string) ($reservation['provider_sync_status'] ?? '')) !== 'pending_fulfilment'
+                || ($allowManualReviewRecovery ? $syncStatus !== 'manual_review' : $syncStatus !== 'pending_fulfilment')
                 || \trim((string) ($reservation['provider_booking_id'] ?? '')) !== ''
                 || \trim((string) ($reservation['provider_reservation_id'] ?? '')) !== ''
             ) {
@@ -3211,7 +3285,8 @@ final class PaymentEngine
         $clockResult = (new \MustHotelBooking\Provider\Clock\ClockReservationProvider())->fulfillPendingOnlinePayment(
             $reservationIds,
             $method,
-            $attemptReference
+            $attemptReference,
+            $allowManualReviewRecovery
         );
         if (empty($clockResult['success'])) {
             return true;

@@ -139,6 +139,18 @@ if (($first['outcome'] ?? '') !== 'claimed' || ($second['outcome'] ?? '') !== 'i
     $failures[] = 'Only one logical claimant may acquire the atomic Clock lease.';
 }
 
+$manualReviewDb = new ClockFulfilmentLeaseClaimTestWpdb(clock_lease_claim_row('manual_review', '2099-01-01 00:00:00'));
+$manualReviewRepository = new \MustHotelBooking\Database\ReservationRepository($manualReviewDb);
+$manualReviewClaim = $manualReviewRepository->claimManualReviewClockReservation(150, $claimKey, $owner);
+$manualReviewSecondClaim = $manualReviewRepository->claimManualReviewClockReservation(150, $claimKey, 'owner-b');
+if (($manualReviewClaim['outcome'] ?? '') !== 'claimed'
+    || ($manualReviewSecondClaim['outcome'] ?? '') !== 'blocked'
+    || \count($manualReviewDb->queries) !== 1
+    || \strpos($manualReviewDb->queries[0] ?? '', "provider_sync_status = 'manual_review'") === false
+) {
+    $failures[] = 'An explicit first-time manual-review recovery must acquire one atomic lease and cannot replace an active claim.';
+}
+
 $provider = (string) \file_get_contents(__DIR__ . '/../src/Provider/Clock/ClockReservationProvider.php');
 $claimPosition = \strpos($provider, 'claimPendingClockReservation');
 $createPosition = \strpos($provider, 'createClockReservationForPendingPayment');

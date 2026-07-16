@@ -130,6 +130,39 @@ final class ProviderRequestLogRepository extends AbstractRepository
         return $count > 0;
     }
 
+    public function hasLog(string $provider, string $operation, string $direction, string $idempotencyKey): bool
+    {
+        if (!$this->providerRequestLogsTableExists()) {
+            return false;
+        }
+
+        $provider = $this->key($provider, 50);
+        $operation = $this->text($operation, 100);
+        $direction = $this->key($direction, 20);
+        $idempotencyKey = $this->text($idempotencyKey, 191);
+
+        if ($provider === '' || $operation === '' || $idempotencyKey === '') {
+            return false;
+        }
+
+        $count = (int) $this->wpdb->get_var(
+            $this->wpdb->prepare(
+                'SELECT COUNT(*)
+                FROM ' . $this->tableName() . '
+                WHERE provider = %s
+                    AND operation = %s
+                    AND direction = %s
+                    AND idempotency_key = %s',
+                $provider,
+                $operation,
+                \in_array($direction, ['inbound', 'outbound'], true) ? $direction : 'inbound',
+                $idempotencyKey
+            )
+        );
+
+        return $count > 0;
+    }
+
     public function acquireIdempotencyLock(string $idempotencyKey, int $timeoutSeconds = 2): bool
     {
         $idempotencyKey = $this->text($idempotencyKey, 191);
