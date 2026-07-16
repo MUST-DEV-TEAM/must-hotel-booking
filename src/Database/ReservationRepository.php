@@ -368,7 +368,7 @@ final class ReservationRepository extends AbstractRepository
                     AND provider_booking_id = %s
                     AND provider_reservation_id = %s
                     AND provider_sync_status IN (%s, %s, %s)
-                    AND (provider_fulfilment_lease_expires_at IS NULL OR provider_fulfilment_lease_expires_at = %s OR provider_fulfilment_lease_expires_at <= %s)',
+                    AND (provider_fulfilment_lease_expires_at IS NULL OR provider_fulfilment_lease_expires_at <= %s)',
                 'creating',
                 '',
                 $claimKey,
@@ -383,7 +383,6 @@ final class ReservationRepository extends AbstractRepository
                 '',
                 'pending_payment',
                 'pending_fulfilment',
-                '',
                 $now
             )
         );
