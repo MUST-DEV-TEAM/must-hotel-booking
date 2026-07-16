@@ -96,6 +96,12 @@ namespace MustHotelBooking\Engine {
         public static function buildReservationNote(int $roomId, array $guestForm): string { unset($roomId, $guestForm); return 'Website booking'; }
     }
 
+    final class PaymentEngine
+    {
+        public static int $pokPayOrderCreates = 0;
+        public static function processPayment(): void { self::$pokPayOrderCreates++; }
+    }
+
     final class BoundaryReservationRepository
     {
         /** @var array<string, mixed> */
@@ -164,6 +170,7 @@ namespace MustHotelBooking\Frontend {
         ]];
     }
     function combine_checkout_phone_value(array $guestForm): string { unset($guestForm); return ''; }
+    function clear_booking_selection(bool $releaseLocks = true): void { unset($releaseLocks); }
 }
 
 namespace MustHotelBooking\Provider\Clock {
@@ -259,12 +266,26 @@ namespace MustHotelBooking\Provider\Clock {
     final class ClockMirrorReservationService
     {
         public int $creates = 0;
+        public int $batchCreates = 0;
+        /** @var array<string, mixed> */
+        public array $batchResult = ['success' => true, 'reason_code' => '', 'reservation_ids' => [77]];
+        /** @var array<int, array<string, mixed>> */
+        public array $batchRooms = [];
+        public string $batchSessionId = '';
         public function generateBookingReference(): string { return 'WEB-BOUNDARY'; }
         public function createMirrorReservation(array $context, array $guest, int $guestId, array $room, array $provider, array $options): int
         {
             unset($context, $guest, $guestId, $room, $provider, $options);
             $this->creates++;
             return 77;
+        }
+        public function createPendingMirrorReservationsFromLocks(array $context, array $guest, int $guestId, array $rooms, array $options, string $sessionId): array
+        {
+            unset($context, $guest, $guestId, $options);
+            $this->batchCreates++;
+            $this->batchRooms = $rooms;
+            $this->batchSessionId = $sessionId;
+            return $this->batchResult;
         }
     }
 
@@ -299,6 +320,7 @@ namespace {
     require __DIR__ . '/../src/Provider/Clock/ClockReservationProvider.php';
 
     use MustHotelBooking\Engine\BoundaryReservationRepository;
+    use MustHotelBooking\Engine\PaymentEngine;
     use MustHotelBooking\Engine\ReservationEngine;
     use MustHotelBooking\Provider\Clock\ClockApiClient;
     use MustHotelBooking\Provider\Clock\ClockAvailabilityProvider;
@@ -384,7 +406,7 @@ namespace {
     if (empty($checkoutResult['errors'])) {
         $failures[] = 'Unavailable exact-room checkout must return a controlled failure.';
     }
-    if (ReservationEngine::$guestCreates !== 0 || $mirror->creates !== 0 || $quote->freshCalls !== 0 || $client->createCalls !== 0) {
+    if (ReservationEngine::$guestCreates !== 0 || $mirror->creates !== 0 || $mirror->batchCreates !== 0 || $quote->freshCalls !== 0 || $client->createCalls !== 0) {
         $failures[] = 'Exact-room checkout must fail before guest, mirror, quote-write, payment, or Clock creation boundaries.';
     }
     if (\count($availability->freshCalls) !== 1 || (int) ($availability->freshCalls[0]['roomId'] ?? 0) !== 21) {
@@ -396,6 +418,76 @@ namespace {
     $paymentCall = \strpos($confirmation, 'PaymentEngine::processPayment');
     if ($reservationCall === false || $paymentCall === false || $reservationCall > $paymentCall) {
         $failures[] = 'PokPay order creation must remain downstream of successful local reservation creation.';
+    }
+
+    $client = new ClockApiClient();
+    $availability = new ClockAvailabilityProvider();
+    $availability->available = true;
+    $quote = new ClockQuoteProvider();
+    $quote->pricing = [
+        'success' => true,
+        'total_price' => 200.0,
+        'guarantee_policy_id' => 44,
+        'provider_rate_id' => '900',
+    ];
+    $mirror = new ClockMirrorReservationService();
+    $mirror->batchResult = ['success' => false, 'reason_code' => 'lock_unavailable', 'reservation_ids' => []];
+    $selection = new ClockRoomSelection();
+    $selection->selection = boundary_selection();
+    PaymentEngine::$pokPayOrderCreates = 0;
+    $conversionFailure = boundary_provider($client, $availability, $quote, $mirror, $selection)->createReservations(
+        new ReservationCreateRequest($context, $guestForm, '', [
+            'reservation_status' => 'pending_payment',
+            'payment_status' => 'pending',
+        ])
+    );
+    if (empty($conversionFailure['errors']) && !empty($conversionFailure['reservation_ids'])) {
+        PaymentEngine::processPayment();
+    }
+    if (empty($conversionFailure['errors']) || !empty($conversionFailure['reservation_ids'])) {
+        $failures[] = 'Atomic lock-conversion failure must return an error and no reservation IDs.';
+    }
+    if ($mirror->batchCreates !== 1 || $mirror->creates !== 0 || $client->createCalls !== 0) {
+        $failures[] = 'Deferred checkout must use one batch mirror call and no single-mirror or Clock create call.';
+    }
+    if ($mirror->batchSessionId !== 'boundary-session' || (int) ($mirror->batchRooms[0]['physical_room_id'] ?? 0) !== 21) {
+        $failures[] = 'Deferred checkout must pass the captured session and exact physical room to atomic conversion.';
+    }
+    if (PaymentEngine::$pokPayOrderCreates !== 0) {
+        $failures[] = 'Atomic lock-conversion failure must create zero PokPay orders.';
+    }
+
+    $client = new ClockApiClient();
+    $availability = new ClockAvailabilityProvider();
+    $availability->available = true;
+    $quote = new ClockQuoteProvider();
+    $quote->pricing = [
+        'success' => true,
+        'total_price' => 200.0,
+        'guarantee_policy_id' => 44,
+        'provider_rate_id' => '900',
+    ];
+    $mirror = new ClockMirrorReservationService();
+    $selection = new ClockRoomSelection();
+    $selection->selection = boundary_selection();
+    PaymentEngine::$pokPayOrderCreates = 0;
+    $conversionSuccess = boundary_provider($client, $availability, $quote, $mirror, $selection)->createReservations(
+        new ReservationCreateRequest($context, $guestForm, '', [
+            'reservation_status' => 'pending_payment',
+            'payment_status' => 'pending',
+        ])
+    );
+    if (empty($conversionSuccess['errors']) && !empty($conversionSuccess['reservation_ids'])) {
+        PaymentEngine::processPayment();
+    }
+    if (!empty($conversionSuccess['errors']) || ($conversionSuccess['reservation_ids'] ?? []) !== [77]) {
+        $failures[] = 'Successful atomic conversion must return the complete reservation set.';
+    }
+    if ($mirror->batchCreates !== 1 || $client->createCalls !== 0) {
+        $failures[] = 'Successful pending conversion must still make no Clock create call.';
+    }
+    if (PaymentEngine::$pokPayOrderCreates !== 1) {
+        $failures[] = 'The modeled PokPay boundary must remain downstream of successful atomic conversion.';
     }
 
     $boundaryRepository = new BoundaryReservationRepository();

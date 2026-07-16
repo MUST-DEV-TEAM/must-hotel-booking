@@ -51,6 +51,7 @@ A public search supplies check-in, check-out, and party size through managed boo
 - A lock reduces race exposure but is not a substitute for final availability validation.
 - In Clock exact-room mode, a physical selection is queried and matched by its Clock physical-room ID through `rooms[]`; `room_types[]` is reserved for legitimate type-level context and cannot make a physical room bookable.
 - A physical selection must have both Clock physical-room and accommodation/type mappings. Missing, ambiguous, or mismatched physical availability fails closed without substituting another room of the same type.
+- For deferred Clock payment checkout, the current session's unexpired exact physical-room locks are converted to all pending local mirrors in one database transaction. Physical-room mutexes serialize competing sessions; any overlapping blocking reservation, expired/missing/wrong-owner lock, insert error, or commit error rolls back the complete room set before payment initiation.
 - `fallback_to_local_when_clock_unavailable` is configurable but normally false. Enabling it can split provider ownership and must be treated as an explicit operational risk.
 
 ### Known defect
@@ -94,7 +95,7 @@ See [ADR-0002](decisions/ADR-0002-final-live-quote-revalidation.md).
 
 ### Online payment initiation
 
-1. Create pending reservation records and compute the server-owned target identity from the explicit site environment, gateway credentials, exact reservation totals/snapshot, and approved Clock property/account when required.
+1. Create pending reservation records and compute the server-owned target identity from the explicit site environment, gateway credentials, exact reservation totals/snapshot, and approved Clock property/account when required. Clock mode atomically consumes the current session's exact physical-room locks while creating the complete pending mirror set; failure returns no reservation allocation and does not initiate payment.
 2. Create a Stripe Checkout Session or PokPay SDK order, then store its immutable attempt identity and exact payment-row allocation on new payment rows.
 3. Redirect only to an allowlisted HTTPS provider host.
 4. Keep inventory blocked while the attempt is pending.
