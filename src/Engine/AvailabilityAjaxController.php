@@ -659,17 +659,29 @@ final class AvailabilityAjaxController
 
         $rooms = [];
         $message = '';
+        $availabilityStatus = '';
         $resolvedRoomCount = $roomId > 0
             ? 1
             : BookingRules::resolveRoomCount($guests, $roomCount, $accommodationType);
 
         if ($roomId > 0) {
-            $room = self::availabilityProvider()->getAvailableRoomById($roomId, $checkin, $checkout, $guests);
+            $availabilityProvider = self::availabilityProvider();
+            $room = $availabilityProvider->getAvailableRoomById($roomId, $checkin, $checkout, $guests);
 
             if (\is_array($room)) {
                 $rooms[] = $room;
             } else {
-                $message = \__('The selected room is not available for the chosen dates and party size.', 'must-hotel-booking');
+                $failureReason = \method_exists($availabilityProvider, 'getLastAvailabilityFailureReason')
+                    ? (string) $availabilityProvider->getLastAvailabilityFailureReason()
+                    : '';
+
+                if ($failureReason === 'provider_unconfirmed') {
+                    $message = \__('Availability could not be confirmed. Please try again.', 'must-hotel-booking');
+                    $availabilityStatus = 'provider_unconfirmed';
+                } else {
+                    $message = \__('The selected room is not available for the chosen dates and party size.', 'must-hotel-booking');
+                    $availabilityStatus = 'unavailable';
+                }
             }
         } else {
             $rooms = self::get_available_rooms_for_ajax(
@@ -774,6 +786,7 @@ final class AvailabilityAjaxController
             'guests' => $guests,
             'room_count' => $roomCount,
             'accommodation_type' => $accommodationType,
+            'availability_status' => $availabilityStatus,
             'message' => $message,
             'rooms' => $payload,
         ]);

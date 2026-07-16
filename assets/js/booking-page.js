@@ -13,6 +13,7 @@
         currentStep: 1,
         previewCheckout: '',
         lastAvailabilityMessage: '',
+        lastAvailabilityStatus: '',
         disabledCheckinDates: [],
         disabledCheckoutDates: []
     };
@@ -1075,6 +1076,7 @@ function markUnavailableDayElement(dayElement, unavailableDates) {
             return Promise.resolve([]);
         }
         setMessage(messagesEl, '', '');
+        state.lastAvailabilityStatus = '';
         setLoading(loadingEl, true);
         var params = new URLSearchParams();
         params.append('action', String(config.availabilityAction));
@@ -1105,6 +1107,9 @@ function markUnavailableDayElement(dayElement, unavailableDates) {
             }
             var rooms = Array.isArray(payload.data.rooms) ? payload.data.rooms : [];
             state.lastAvailabilityMessage = typeof payload.data.message === 'string' ? payload.data.message : '';
+            state.lastAvailabilityStatus = typeof payload.data.availability_status === 'string'
+                ? payload.data.availability_status
+                : '';
             syncHiddenSelectionFields(context);
             if (!suppressRender) {
                 renderRooms(roomListEl, noRoomsEl, resultsEl, rooms, context);
@@ -1115,6 +1120,7 @@ function markUnavailableDayElement(dayElement, unavailableDates) {
                 return [];
             }
             state.lastAvailabilityMessage = '';
+            state.lastAvailabilityStatus = 'provider_unconfirmed';
             setMessage(
                 messagesEl,
                 (config.strings && config.strings.requestFailed) || 'Unable to load availability.',
@@ -1545,6 +1551,30 @@ function markUnavailableDayElement(dayElement, unavailableDates) {
         if (!form || !checkinInput || !checkoutInput || !guestsInput || !roomListEl || !noRoomsEl || !resultsEl) {
             return;
         }
+        function setFixedRoomContinueState(nextState) {
+            if (!isFixedRoomMode()) {
+                return;
+            }
+            var submitButton = form.querySelector('.must-booking-check-availability');
+            if (!submitButton) {
+                return;
+            }
+            var label = submitButton.querySelector('span');
+            var strings = config.strings || {};
+            var stateName = String(nextState || 'ready');
+            var disabled = stateName === 'unavailable';
+            submitButton.disabled = disabled;
+            submitButton.classList.toggle('is-disabled', disabled);
+            submitButton.classList.toggle('is-retry', stateName === 'provider_unconfirmed');
+            submitButton.setAttribute('aria-disabled', disabled ? 'true' : 'false');
+            if (label) {
+                label.textContent = stateName === 'provider_unconfirmed'
+                    ? String(strings.retryAvailability || 'Retry Availability')
+                    : (stateName === 'unavailable'
+                        ? String(strings.chooseOtherDates || 'Choose Other Dates')
+                        : String(strings.continueToGuestInfo || 'Continue to Guest Information'));
+            }
+        }
         if (config.initial && typeof config.initial === 'object') {
             if (!checkinInput.value && isValidDateString(config.initial.checkin || '')) {
                 checkinInput.value = String(config.initial.checkin);
@@ -1577,6 +1607,7 @@ function markUnavailableDayElement(dayElement, unavailableDates) {
             updateResultsSummary(context, accommodationTypeSelect);
             updateRangeHighlights(context.checkin, context.checkout, state.previewCheckout);
             setCurrentStep(1, resultsEl);
+            setFixedRoomContinueState('ready');
             if (source === 'checkin' || source === 'guests' || source === 'accommodation_type' || source === 'room_count') {
                 fetchDisabledDates(context).finally(function () {
                     var updatedContext = getContext(checkinInput, checkoutInput, guestsInput, accommodationTypeSelect, roomCountSelect);
@@ -1626,6 +1657,7 @@ function markUnavailableDayElement(dayElement, unavailableDates) {
                             redirectToCheckout(context);
                             return;
                         }
+                        setFixedRoomContinueState(state.lastAvailabilityStatus === 'provider_unconfirmed' ? 'provider_unconfirmed' : 'unavailable');
                         setMessage(
                             messagesEl,
                             state.lastAvailabilityMessage || ((config.strings && config.strings.noRooms) || 'No rooms are available for the selected dates.'),

@@ -30,6 +30,9 @@ final class ClockAvailabilityProvider implements AvailabilityProviderInterface
     /** @var ClockRoomSelection */
     private $roomSelection;
 
+    /** @var string */
+    private $lastAvailabilityFailureReason = '';
+
     public function __construct(?ClockApiClient $client = null, ?ClockCatalogService $catalog = null, ?ProviderMappingRepository $mappings = null, ?ClockRoomSelection $roomSelection = null)
     {
         $this->client = $client ?: new ClockApiClient();
@@ -99,16 +102,19 @@ final class ClockAvailabilityProvider implements AvailabilityProviderInterface
 
     public function getAvailableRoomById(int $roomId, string $checkin, string $checkout, int $guests = 1): ?array
     {
+        $this->lastAvailabilityFailureReason = '';
         $selection = $this->roomSelection->resolve($roomId);
         $room = \is_array($selection) && isset($selection['room']) && \is_array($selection['room']) ? $selection['room'] : null;
 
         if (!\is_array($room)) {
+            $this->lastAvailabilityFailureReason = 'unavailable';
             return null;
         }
 
         $maxGuests = isset($room['max_guests']) ? (int) $room['max_guests'] : 0;
 
         if ($maxGuests > 0 && \max(1, $guests) > $maxGuests) {
+            $this->lastAvailabilityFailureReason = 'unavailable';
             return null;
         }
 
@@ -128,6 +134,11 @@ final class ClockAvailabilityProvider implements AvailabilityProviderInterface
             : (\is_array($mapping) ? (string) ($mapping['external_id'] ?? '') : '');
 
         return $room;
+    }
+
+    public function getLastAvailabilityFailureReason(): string
+    {
+        return $this->lastAvailabilityFailureReason;
     }
 
 public function getDisabledDates(DisabledDatesRequest $request): array
@@ -249,7 +260,10 @@ public function getDisabledDates(DisabledDatesRequest $request): array
         bool $bypassCache
     ): bool
     {
+        $this->lastAvailabilityFailureReason = '';
+
         if (!$this->isConfiguredForRatesAvailability() || !$this->isValidStay($checkin, $checkout)) {
+            $this->lastAvailabilityFailureReason = 'provider_unconfirmed';
             return false;
         }
 
@@ -262,6 +276,7 @@ public function getDisabledDates(DisabledDatesRequest $request): array
         $rateIds = $this->mappedRateIds();
 
         if (!\is_array($selection) || !$this->hasExternalId($mapping) || empty($rateIds)) {
+            $this->lastAvailabilityFailureReason = 'provider_unconfirmed';
             return false;
         }
 
@@ -278,13 +293,23 @@ public function getDisabledDates(DisabledDatesRequest $request): array
         );
 
         if (!$response->isSuccess()) {
+            $this->lastAvailabilityFailureReason = 'provider_unconfirmed';
             return false;
         }
 
         $availability = $this->findAvailabilityForMapping($this->extractItems($response->getData()), $mapping, $response->getData());
 
-        return $this->isAvailableForStay($availability, $checkin, $checkout)
-            && $this->isSelectionLocallyAvailable($selection, $checkin, $checkout, $excludeSessionId);
+        if (!$this->isAvailableForStay($availability, $checkin, $checkout)) {
+            $this->lastAvailabilityFailureReason = 'unavailable';
+            return false;
+        }
+
+        if (!$this->isSelectionLocallyAvailable($selection, $checkin, $checkout, $excludeSessionId)) {
+            $this->lastAvailabilityFailureReason = 'unavailable';
+            return false;
+        }
+
+        return true;
     }
 
     public function checkBookingRestrictions(int $roomId, string $checkin, string $checkout): bool

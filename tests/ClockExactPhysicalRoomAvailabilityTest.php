@@ -237,6 +237,18 @@ namespace {
         $failures[] = 'Fresh exact-room validation must bypass the Clock availability cache.';
     }
 
+    $client->responses[] = new ClockApiResponse(0, '', null, 'http_request_failed', 'Connection failed.');
+    if ($provider->getAvailableRoomById(21, '2026-08-01', '2026-08-03', 1) !== null) {
+        $failures[] = 'An exact-room provider transport failure must not return a room as available.';
+    }
+    if ($provider->getLastAvailabilityFailureReason() !== 'provider_unconfirmed') {
+        $failures[] = 'An exact-room provider transport failure must be distinguished from confirmed unavailability.';
+    }
+    $transportFailurePath = decoded_path($client->calls[2] ?? []);
+    if (\strpos($transportFailurePath, 'rooms[]=501') === false || \strpos($transportFailurePath, 'room_types[]=') !== false) {
+        $failures[] = 'Transport-failure validation must preserve exact rooms[] selection.';
+    }
+
     $client->responses[] = new ClockApiResponse(200, '', [
         [
             'type' => 'Room',
@@ -245,7 +257,7 @@ namespace {
         ],
     ]);
     $provider->getDisabledDates(new DisabledDatesRequest('', 2, 1, 21, 'room-type:10', 1));
-    $disabledPath = decoded_path($client->calls[2] ?? []);
+    $disabledPath = decoded_path($client->calls[3] ?? []);
     if (\strpos($disabledPath, 'rooms[]=501') === false || \strpos($disabledPath, 'room_types[]=') !== false) {
         $failures[] = 'A physical-room disabled-date request must query its exact Clock room.';
     }
