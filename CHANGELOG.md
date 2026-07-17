@@ -2,9 +2,14 @@
 
 Notable product, architecture, integration, operational, compatibility, and security changes are recorded here. Exact implementation history remains in Git.
 
-## Unreleased
+## 0.4.92 - 2026-07-17
 
 ### Changed
+
+- Hardened Clock/refund idempotency, payment failure state transitions, transactional failure cleanup, PHP 7.4 compatibility, keyboard focus, and configurable cancellation-policy messaging.
+- Aligned Clock Digest authentication, HTTPS endpoint containment, API-type configuration validation, shared-worker five-call-per-second throttling, and 429 backoff with the official API contract.
+- Removed the undocumented Clock idempotency header; local idempotency remains durable evidence and ambiguous writes now require authoritative reread or manual review.
+- Require exact Clock folio credit-item correlation by provider reference, amount, currency, and real item ID; balance-only recovery and synthetic provider IDs are no longer accepted.
 
 - Consolidated repository documentation into the canonical structure routed by `docs/INDEX.md`; no runtime behavior changed.
 - Persist authoritative verified-payment evidence before Clock fulfillment, serialize creation with an owner-token lease, and expose truthful blocked/failed lifecycle outcomes.
@@ -28,6 +33,7 @@ Notable product, architecture, integration, operational, compatibility, and secu
 
 - Replace numeric public confirmation/cancellation access with opaque, hashed, expiring reservation-set grants and per-tab cookie-bound contexts.
 - Bind PokPay finalize/success handling to the authorized exact reservation set and stored order; failure/cancel returns do not mutate local booking state.
+- Bind signed Clock SNS notifications to either the configured exact Topic ARN or complete HTTP Basic credentials.
 - Redact access tokens and other sensitive URL/query values from provider diagnostics.
 
 ### Database

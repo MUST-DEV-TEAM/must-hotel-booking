@@ -119,6 +119,11 @@ namespace MustHotelBooking\Engine {
             unset($draft, $roomId, $pricing);
             return true;
         }
+        public static function cancellationPolicyMatches(array $draft, int $roomId, array $pricing): bool
+        {
+            unset($draft, $roomId, $pricing);
+            return true;
+        }
     }
 
     final class LockEngine

@@ -121,7 +121,9 @@ namespace {
         'body' => '{"error":{"code":"KEY_REJECTED","message":"Key rejected"}}',
     ];
     $accessTokenMethod = new \ReflectionMethod(PaymentEngine::class, 'getPokPayAccessToken');
-    $accessTokenMethod->setAccessible(true);
+    if (\PHP_VERSION_ID < 80100) {
+        $accessTokenMethod->setAccessible(true);
+    }
     $accessTokenResult = $accessTokenMethod->invoke(null, 'staging');
     $automaticRejected = PaymentEngine::getPokPayCredentialState('staging');
     if (!empty($accessTokenResult['success']) || (string) ($automaticRejected['status'] ?? '') !== 'rejected') {

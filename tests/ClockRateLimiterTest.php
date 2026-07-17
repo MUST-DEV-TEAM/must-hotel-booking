@@ -7,6 +7,7 @@ namespace {
     }
 
     $GLOBALS['mhb_clock_test_transients'] = [];
+    $GLOBALS['mhb_clock_test_options'] = [];
 
     function get_transient(string $key)
     {
@@ -17,6 +18,27 @@ namespace {
     {
         unset($expiration);
         $GLOBALS['mhb_clock_test_transients'][$key] = $value;
+        return true;
+    }
+
+    function add_option(string $key, $value, string $deprecated = '', string $autoload = 'yes'): bool
+    {
+        unset($deprecated, $autoload);
+        if (\array_key_exists($key, $GLOBALS['mhb_clock_test_options'])) {
+            return false;
+        }
+        $GLOBALS['mhb_clock_test_options'][$key] = $value;
+        return true;
+    }
+
+    function get_option(string $key, $default = false)
+    {
+        return $GLOBALS['mhb_clock_test_options'][$key] ?? $default;
+    }
+
+    function delete_option(string $key): bool
+    {
+        unset($GLOBALS['mhb_clock_test_options'][$key]);
         return true;
     }
 
@@ -58,8 +80,11 @@ namespace {
     if ($limiter->retryDelayMicroseconds(1, '2') !== 2000000) {
         $failures[] = 'Retry-After seconds must be honored exactly.';
     }
-    if ($limiter->retryDelayMicroseconds(2, '') <= $limiter->retryDelayMicroseconds(1, '')) {
-        $failures[] = '429 backoff must increase exponentially by attempt.';
+    if ($limiter->retryDelayMicroseconds(1, '') !== 500000 || $limiter->retryDelayMicroseconds(2, '') !== 1000000) {
+        $failures[] = 'Clock 429 fallback delay must equal the retry counter multiplied by 500ms.';
+    }
+    if (!empty($GLOBALS['mhb_clock_test_options'])) {
+        $failures[] = 'Clock shared rate-limit reservation lock must be released after each slot is reserved.';
     }
 
     if ($failures) {

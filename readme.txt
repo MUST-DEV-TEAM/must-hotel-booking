@@ -4,7 +4,7 @@ Tags: hotel, booking, reservation, accommodation
 Requires at least: 5.0
 Tested up to: 6.0
 Requires PHP: 7.4
-Stable tag: 0.4.90
+Stable tag: 0.4.92
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -31,6 +31,10 @@ Main features include:
 5. When updating, upload the new release ZIP or use the configured updater, then review **Diagnostics & Maintenance** after the update completes.
 
 == Changelog ==
+
+= 0.4.92 =
+* Aligned Clock transport, endpoint validation, rate-limit handling, write recovery, and folio credit-item reconciliation with the official Clock API contract.
+* Added production safeguards for refunds, payment-failure transactions, PHP 7.4 compatibility, public booking access, cancellation-policy revalidation, and keyboard focus.
 
 = 0.4.88 =
 * Fixed : Sychronization
@@ -207,7 +211,7 @@ Main features include:
 * Fixed provider-backed Stripe refunds from the staff portal so Clock-backed reservations can be refunded from the Payments workspace instead of being incorrectly redirected as read-only.
 
 = 0.4.31 =
-* Fixed staff portal login so valid staff users are no longer incorrectly blocked with ìNo portal modules are currently enabled for your account.î
+* Fixed staff portal login so valid staff users are no longer incorrectly blocked with ‚ÄúNo portal modules are currently enabled for your account.‚Äù
 
 = 0.4.30 =
 * Use website-local accommodation images and amenities for Clock physical room displays
@@ -475,4 +479,3 @@ Main features include:
 
 = 0.3.18 =
 * Maintenance release and plugin structure cleanup for WordPress conventions.
-

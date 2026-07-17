@@ -130,6 +130,7 @@ final class PaymentRefundService
             'stripe_payment_intent_id' => $transactionId,
             'amount' => $amount,
             'currency' => $currency,
+            'idempotency_key' => $this->refundIdempotencyKey('stripe', $reservationId, $transactionId, $amount),
             ] + $feeService->refundBreakdownData($breakdown) + [
             'reason' => $reason,
             'refund_type' => $refundType,
@@ -148,12 +149,24 @@ final class PaymentRefundService
         $refundId = \is_array($review)
             ? (int) ($review['id'] ?? 0)
             : (\is_array($retryableRefund) ? (int) ($retryableRefund['id'] ?? 0) : 0);
-        if ($refundId > 0) {
-            unset($refundData['created_at']);
-            $this->refunds->updateRefund($refundId, $refundData);
-        } else {
-            $refundId = $this->refunds->createRefund($refundData);
+        $claim = $this->claimProviderRefundRecord(
+            $refundData,
+            $reservationId,
+            'stripe',
+            $transactionId,
+            $amount,
+            $refundId
+        );
+        if (empty($claim['success'])) {
+            return $this->failure(\__('Unable to create the refund record.', 'must-hotel-booking'));
         }
+        if ((string) ($claim['action'] ?? '') === 'blocked') {
+            return $this->failure(\__('A refund for this payment and amount is already recorded or in progress.', 'must-hotel-booking'), [
+                'refund_id' => (int) ($claim['refund_id'] ?? 0),
+                'status' => (string) ($claim['status'] ?? ''),
+            ]);
+        }
+        $refundId = (int) ($claim['refund_id'] ?? 0);
         if ($refundId <= 0) {
             return $this->failure(\__('Unable to create the refund record.', 'must-hotel-booking'));
         }
@@ -161,12 +174,7 @@ final class PaymentRefundService
             'refund_review_status' => 'approved',
             'gateway_refund_status' => 'processing',
         ]);
-        $stripeIdempotencyKey = \is_array($retryableRefund) && (int) ($retryableRefund['id'] ?? 0) === $refundId
-            ? \sanitize_text_field((string) ($retryableRefund['idempotency_key'] ?? ''))
-            : '';
-        if ($stripeIdempotencyKey === '') {
-            $stripeIdempotencyKey = 'soves_refund_' . $refundId;
-        }
+        $stripeIdempotencyKey = (string) ($refundData['idempotency_key'] ?? '');
         $clockIdempotencyKey = 'SOVES-REFUND-' . $refundId;
         $this->refunds->updateRefund($refundId, [
             'idempotency_key' => $stripeIdempotencyKey,
@@ -330,7 +338,7 @@ final class PaymentRefundService
             'status' => 'processing',
             'clock_sync_status' => ProviderReservationView::isProviderBacked($reservation) ? 'pending' : 'not_required',
             'requested_by_user_id' => \get_current_user_id(),
-            'idempotency_key' => 'pokpay_refund_' . $reservationId . '_' . \md5($transactionId . '|' . \number_format($amount, 2, '.', '')),
+            'idempotency_key' => $this->refundIdempotencyKey('pokpay', $reservationId, $transactionId, $amount),
             'clock_idempotency_key' => 'SOVES-REFUND-POKPAY-' . $reservationId . '-' . \time(),
             'metadata' => \wp_json_encode([
                 'cancel_reservation' => $cancelAfterRefund,
@@ -346,13 +354,24 @@ final class PaymentRefundService
         $refundId = \is_array($review)
             ? (int) ($review['id'] ?? 0)
             : (\is_array($retryableRefund) ? (int) ($retryableRefund['id'] ?? 0) : 0);
-        if ($refundId > 0) {
-            unset($refundData['created_at']);
-            $this->refunds->updateRefund($refundId, $refundData);
-        } else {
-            $refundId = $this->refunds->createRefund($refundData);
+        $claim = $this->claimProviderRefundRecord(
+            $refundData,
+            $reservationId,
+            'pokpay',
+            $transactionId,
+            $amount,
+            $refundId
+        );
+        if (empty($claim['success'])) {
+            return $this->failure(\__('Unable to create the refund record.', 'must-hotel-booking'));
         }
-
+        if ((string) ($claim['action'] ?? '') === 'blocked') {
+            return $this->failure(\__('A refund for this payment and amount is already recorded or in progress.', 'must-hotel-booking'), [
+                'refund_id' => (int) ($claim['refund_id'] ?? 0),
+                'status' => (string) ($claim['status'] ?? ''),
+            ]);
+        }
+        $refundId = (int) ($claim['refund_id'] ?? 0);
         if ($refundId <= 0) {
             return $this->failure(\__('Unable to create the refund record.', 'must-hotel-booking'));
         }
@@ -366,7 +385,14 @@ final class PaymentRefundService
             'updated_at' => $now,
         ]);
 
-        $response = PaymentEngine::refundPokPaySdkOrder($transactionId, $amount, $currency, $reason, $isFullRefund);
+        $response = PaymentEngine::refundPokPaySdkOrder(
+            $transactionId,
+            $amount,
+            $currency,
+            $reason,
+            $isFullRefund,
+            (string) ($refundData['idempotency_key'] ?? '')
+        );
 
         if (empty($response['success'])) {
             $message = $this->safeProviderFailureMessage(
@@ -742,6 +768,60 @@ final class PaymentRefundService
         }
 
         return \substr($message, 0, 300);
+    }
+
+    /**
+     * Claim a refund row before making any provider call. The repository
+     * implementation serializes concurrent requests; the fallback keeps
+     * lightweight unit doubles compatible with the service contract.
+     *
+     * @param array<string, mixed> $refundData
+     * @return array<string, mixed>
+     */
+    private function claimProviderRefundRecord(
+        array $refundData,
+        int $reservationId,
+        string $gateway,
+        string $providerPaymentReference,
+        float $amount,
+        int $preferredRefundId = 0
+    ): array {
+        if (\method_exists($this->refunds, 'claimProviderRefund')) {
+            return (array) $this->refunds->claimProviderRefund(
+                $refundData,
+                $reservationId,
+                $gateway,
+                $providerPaymentReference,
+                $amount,
+                $preferredRefundId
+            );
+        }
+
+        if ($preferredRefundId > 0) {
+            $updateData = $refundData;
+            unset($updateData['created_at']);
+            return [
+                'success' => $this->refunds->updateRefund($preferredRefundId, $updateData),
+                'action' => 'claimed',
+                'refund_id' => $preferredRefundId,
+            ];
+        }
+
+        $refundId = $this->refunds->createRefund($refundData);
+        return [
+            'success' => $refundId > 0,
+            'action' => $refundId > 0 ? 'created' : 'create_failed',
+            'refund_id' => $refundId,
+        ];
+    }
+
+    private function refundIdempotencyKey(string $gateway, int $reservationId, string $providerPaymentReference, float $amount): string
+    {
+        return 'mhb_refund_' . \sanitize_key($gateway) . '_' . $reservationId . '_' . \substr(
+            \hash('sha256', \trim($providerPaymentReference) . '|' . \number_format($amount, 2, '.', '')),
+            0,
+            48
+        );
     }
 
     /** @param mixed $value @return array<string, mixed> */

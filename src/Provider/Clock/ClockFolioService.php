@@ -493,6 +493,23 @@ final class ClockFolioService
             $direction === 'refund' ? 'clock.refund_credit_item_create' : ($direction === 'deposit' ? 'clock.deposit_payment_create' : 'clock.folio_payment_create')
         );
         if (!$response->isSuccess()) {
+            $recovered = null;
+            if ($response->getStatusCode() <= 0 || $response->getStatusCode() >= 500) {
+                $recovered = $this->findCreditItemByReference($folioId, $reference, $amount, $currency, $reservationId);
+            }
+            if (\is_array($recovered) && !empty($recovered['success']) && !empty($recovered['found'])) {
+                return [
+                    'success' => true,
+                    'credit_item_id' => (string) ($recovered['credit_item_id'] ?? ''),
+                    'status_code' => $response->getStatusCode(),
+                    'error_code' => '',
+                    'message' => '',
+                    'retryable' => false,
+                    'forbidden' => false,
+                    'recovered_by_reference' => true,
+                    'ambiguous' => false,
+                ];
+            }
             $message = $response->getErrorMessage() !== ''
                 ? $response->getErrorMessage()
                 : \__('Clock credit item create request failed.', 'must-hotel-booking');
@@ -502,19 +519,113 @@ final class ClockFolioService
                 'status_code' => $response->getStatusCode(),
                 'error_code' => $response->getErrorCode(),
                 'message' => $message,
-                'retryable' => $response->isRetryable(),
+                'retryable' => $response->isRateLimited(),
                 'forbidden' => $response->isForbidden(),
+                'ambiguous' => $response->getStatusCode() <= 0 || $response->getStatusCode() >= 500,
+            ];
+        }
+
+        $creditItemId = $this->extractCreditItemId($response->getData());
+        if ($creditItemId === '') {
+            $lookup = $this->findCreditItemByReference($folioId, $reference, $amount, $currency, $reservationId);
+            if (!empty($lookup['success']) && !empty($lookup['found'])) {
+                $creditItemId = (string) ($lookup['credit_item_id'] ?? '');
+            }
+        }
+        if ($creditItemId === '') {
+            return [
+                'success' => false,
+                'credit_item_id' => '',
+                'status_code' => $response->getStatusCode(),
+                'error_code' => 'missing_credit_item_id',
+                'message' => \__('Clock accepted the credit-item request but no durable credit-item ID could be reconciled. Manual review is required before any replay.', 'must-hotel-booking'),
+                'retryable' => false,
+                'forbidden' => false,
+                'ambiguous' => true,
             ];
         }
         return [
             'success' => true,
-            'credit_item_id' => $this->extractCreditItemId($response->getData()),
+            'credit_item_id' => $creditItemId,
             'status_code' => $response->getStatusCode(),
             'error_code' => '',
             'message' => '',
             'retryable' => false,
             'forbidden' => false,
+            'ambiguous' => false,
         ];
+    }
+
+    /**
+     * Clock documents first-level equality filters on every list endpoint.
+     * Use the provider transaction/refund reference as the reconciliation key,
+     * then independently validate amount and currency before accepting a match.
+     *
+     * @return array{success: bool, found: bool, ambiguous: bool, credit_item_id: string, item: array<string, mixed>, message: string}
+     */
+    public function findCreditItemByReference(
+        string $folioId,
+        string $reference,
+        float $amount,
+        string $currency,
+        int $reservationId = 0
+    ): array {
+        $folioId = \sanitize_text_field($folioId);
+        $reference = \sanitize_text_field($reference);
+        $currency = \strtoupper(\sanitize_text_field($currency));
+
+        if ($folioId === '' || $reference === '' || $currency === '') {
+            return $this->creditItemLookupResult(false, false, false, '', [], \__('Clock credit-item reconciliation identity is incomplete.', 'must-hotel-booking'));
+        }
+
+        $path = ClockEndpointRegistry::resolvePath('folio_credit_items_list', ['folio_id' => $folioId]);
+        $response = $this->client->get(
+            $path,
+            ['reference.eq' => $reference],
+            'clock.folio_credit_items_reference_lookup',
+            [
+                'api_type' => ClockEndpointRegistry::apiType('folio_credit_items_list'),
+                'reservation_id' => $reservationId,
+                'external_id' => $folioId,
+                'endpoint_name' => 'folio_credit_items_list',
+                'bypass_cache' => true,
+            ]
+        );
+
+        if (!$response->isSuccess()) {
+            return $this->creditItemLookupResult(
+                false,
+                false,
+                false,
+                '',
+                [],
+                $response->getErrorMessage() !== '' ? $response->getErrorMessage() : \__('Clock credit-item lookup failed.', 'must-hotel-booking')
+            );
+        }
+
+        $matches = [];
+        foreach ($this->extractList($response->getData()) as $item) {
+            if ((string) ($item['reference'] ?? '') !== $reference) {
+                continue;
+            }
+            $itemCurrency = \strtoupper(\sanitize_text_field((string) ($item['currency'] ?? ($item['currency_code'] ?? ''))));
+            $itemAmount = $this->creditItemAmount($item);
+            $itemId = $this->extractCreditItemId($item);
+            if ($itemId === '' || $itemCurrency !== $currency || $itemAmount === null || \abs($itemAmount - \round($amount, 2)) >= 0.01) {
+                continue;
+            }
+            $matches[$itemId] = $item;
+        }
+
+        if (\count($matches) > 1) {
+            return $this->creditItemLookupResult(true, false, true, '', [], \__('Clock returned multiple credit items for the same provider reference, amount, and currency.', 'must-hotel-booking'));
+        }
+        if (\count($matches) === 0) {
+            return $this->creditItemLookupResult(true, false, false, '', [], '');
+        }
+
+        $creditItemId = (string) \array_key_first($matches);
+        return $this->creditItemLookupResult(true, true, false, $creditItemId, $matches[$creditItemId], '');
     }
     /** @return array{verification_status: string, message: string} */
     public function verifyFolioBalance(string $folioId): array
@@ -872,6 +983,30 @@ final class ClockFolioService
             }
         }
         return '';
+    }
+
+    /** @param array<string, mixed> $item */
+    private function creditItemAmount(array $item): ?float
+    {
+        foreach (['value_cents', 'version_effective_value_cents'] as $key) {
+            if (isset($item[$key]) && \is_numeric($item[$key])) {
+                return \round(((float) $item[$key]) / 100, 2);
+            }
+        }
+        return $this->firstMoneyValue($item, ['value', 'amount']);
+    }
+
+    /** @param array<string, mixed> $item @return array{success: bool, found: bool, ambiguous: bool, credit_item_id: string, item: array<string, mixed>, message: string} */
+    private function creditItemLookupResult(bool $success, bool $found, bool $ambiguous, string $creditItemId, array $item, string $message): array
+    {
+        return [
+            'success' => $success,
+            'found' => $found,
+            'ambiguous' => $ambiguous,
+            'credit_item_id' => $creditItemId,
+            'item' => $item,
+            'message' => $message,
+        ];
     }
     private function paymentSubType(string $gateway): string
     {

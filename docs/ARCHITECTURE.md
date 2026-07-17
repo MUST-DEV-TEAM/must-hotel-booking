@@ -2,7 +2,7 @@
 
 ## Evidence baseline
 
-This describes current `main` at `dcff3b4` / `v0.4.90`. It is a runtime navigation guide, not proof that production configuration or data matches a fresh install.
+This describes the `0.4.92` release-candidate working tree based on commit `b0380ad`. It is a runtime navigation guide, not proof that production configuration or data matches a fresh install.
 
 ## Runtime overview
 
@@ -29,7 +29,7 @@ The desired conceptual direction is surfaces → engines/providers → repositor
 
 ### `must-hotel-booking.php`
 
-- Declares plugin metadata and version `0.4.90`.
+- Declares plugin metadata and version `0.4.92`.
 - Defines path, URL, basename, slug, updater repository/branch/token and release-asset constants.
 - Loads `includes/autoloader.php` and `includes/config.php`.
 - Boots `BookingPerformanceMonitor` early.

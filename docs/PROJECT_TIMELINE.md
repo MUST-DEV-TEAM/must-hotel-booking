@@ -21,15 +21,16 @@ This is a concise evidence-backed history, not a task diary. Dates, tags, and re
 | 2026-07-07 | `v0.4.88` split Clock catalog, availability/rate, and reservation fallback schedules and diagnostics. | One schedule/last-run indicator could not express ownership or health. | Separate cron hooks and source-of-truth boundaries remain current. | Verified |
 | 2026-07-10 to 2026-07-12 | Confirmation-integrity Phase 1/2 was developed on `codex/` branches. | Proposed immutable verification ownership, centralized authorization, attempt binding, and stronger schema. | Branch heads are not ancestors of current `main`; these controls are unreleased evidence/future work, not mitigation. | Verified branch state |
 | 2026-07-12 | `v0.4.89` moved current-main Clock online booking to payment-first fulfillment. | Standard online flow should not create Clock inventory before authoritative payment. | Pending local mirrors now precede payment and Clock creation follows verified payment; durable paid-outcome/concurrency recovery gaps remain. | Verified |
-| 2026-07-13 | `v0.4.90` fixed Linux-compatible release packaging. | Release assets must be portable and match updater expectations. | Current version/package baseline is `0.4.90`. | Verified |
+| 2026-07-13 | `v0.4.90` fixed Linux-compatible release packaging. | Release assets must be portable and match updater expectations. | This established the historical `0.4.90` package baseline. | Verified |
 | 2026-07-13 | Repository documentation was consolidated around current code/history evidence. | Forty-five overlapping tracked Markdown files included stale `0.3.45` manuals and pre-payment-first lifecycle claims. | Canonical docs now own current truth; temporary future cleanup phases live only in the consolidation plan. | Verified by current change |
+| 2026-07-15 to 2026-07-17 | The `0.4.92` release candidate integrated confirmation/access controls, payment/refund integrity fixes, PHP 7.4 compatibility, and official Clock transport/accounting hardening. | Closed known IDOR, forged-return, duplicate-write, policy, and balance-only accounting gaps before environment acceptance. | Local lint and 42 standalone tests pass; WordPress/database/provider E2E remains pending. | Working-tree evidence |
 
 ## Historical cautions
 
 - Tags are not continuous. Notable gaps include `v0.4.72`, `v0.4.73`, `v0.4.80`, and `v0.4.84`; tag `0.4.18` lacks the usual `v` prefix.
-- `readme.txt` stable tag is `0.4.90`, but its changelog ends at `0.4.88`. It is not sufficient release evidence by itself.
+- Release metadata now agrees on `0.4.92`; a tag/package and deployment acceptance are still separate release evidence.
 - `codex/p0-confirmation-integrity-phase1` and `codex/p0-payment-first-phase2` point to `b5b8fbf` and do not contain current `main` HEAD. Their docs/code are branch-owned and unreleased.
-- Historical Clock/Postman/sandbox evidence proves only the dated observation. No current provider contract was fetched during this task.
+- Historical Clock/Postman/sandbox evidence proves only the dated observation. The official Clock API contract was refreshed on 2026-07-17, but account-specific acceptance remains pending.
 - Repository tags and tests do not prove which release reached production or whether production schema, callbacks, cron, provider rights, backups, or E2E acceptance passed.
 
 ## Current significance

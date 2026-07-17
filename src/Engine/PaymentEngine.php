@@ -1378,7 +1378,7 @@ final class PaymentEngine
     /**
      * @return array<string, mixed>
      */
-    public static function refundPokPaySdkOrder(string $orderId, float $amount, string $currency, string $reason = '', bool $fullRefund = true): array
+    public static function refundPokPaySdkOrder(string $orderId, float $amount, string $currency, string $reason = '', bool $fullRefund = true, string $idempotencyKey = ''): array
     {
         $orderId = \sanitize_text_field($orderId);
         if ($orderId === '') {
@@ -1416,6 +1416,7 @@ final class PaymentEngine
             'endpoint_name' => 'sdk_order_refund',
             'external_id' => $orderId,
             'merchant_id' => $merchantId,
+            'idempotency_key' => \sanitize_text_field($idempotencyKey),
         ]);
         if (empty($response['success'])) {
             return [
@@ -1872,6 +1873,12 @@ final class PaymentEngine
             }
             $headers['Authorization'] = 'Bearer ' . (string) ($tokenResult['access_token'] ?? '');
         }
+        $idempotencyKey = isset($options['idempotency_key'])
+            ? \sanitize_text_field((string) $options['idempotency_key'])
+            : '';
+        if ($idempotencyKey !== '') {
+            $headers['Idempotency-Key'] = $idempotencyKey;
+        }
         $args = [
             'method' => \strtoupper($method),
             'timeout' => 20,
@@ -1906,10 +1913,10 @@ final class PaymentEngine
             && $allowTokenRetry
             && (
                 $statusCode === 401
-                || \str_contains($messageLower, 'expired token')
-                || \str_contains($messageLower, 'token expired')
-                || \str_contains($messageLower, 'jwt expired')
-                || \str_contains($messageLower, 'unauthorized')
+                || \strpos($messageLower, 'expired token') !== false
+                || \strpos($messageLower, 'token expired') !== false
+                || \strpos($messageLower, 'jwt expired') !== false
+                || \strpos($messageLower, 'unauthorized') !== false
             )
         ) {
             \delete_transient(self::getPokPayAccessTokenCacheKey($environment));

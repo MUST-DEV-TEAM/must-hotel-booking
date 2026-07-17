@@ -1,6 +1,6 @@
 # Integrations
 
-This reference describes integration boundaries on current `main` at `v0.4.90`. It names configuration fields but never their values. Provider contracts and production configuration were not refreshed during documentation consolidation.
+This reference describes the `0.4.92` release-candidate working tree based on commit `b0380ad`. It names configuration fields but never their values. The Clock transport contract was refreshed from the official documentation on 2026-07-17; production configuration remains unverified.
 
 ## Ownership summary
 
@@ -135,20 +135,21 @@ Clock uses configured API type, regional/subscription/account identifiers, endpo
 
 For payment fulfilment, the stable configured target fingerprint uses the finite Clock environment, API type and resolved base endpoint plus region, subscription, account, property and WBE hotel identifiers; it deliberately excludes API secrets. An administrator must approve the current target separately for each site environment, and any target change blocks new/replayed Clock-backed payment completion until re-approved.
 
-Outbound API calls use a two-request HTTP Digest challenge flow. `ClockEndpointResolver` constructs regional/account URLs or validates configured base/template paths. Safe endpoint overrides must remain relative to the expected provider base.
+Outbound API calls use an HTTP Digest challenge flow with one safe nonce refresh after an authenticated `401`. `ClockEndpointResolver` constructs regional/account URLs or validates configured base/template paths. Bases and absolute overrides must use HTTPS and stay inside the configured API-type base; redirects are disabled.
 
 ### Outbound behavior
 
 - `ClockApiClient` sends a correlation header and records sanitized request/response summaries.
 - Safe GET operations can retry once after HTTP 429 and can use bounded request/transient caches.
-- Writes are not automatically retried because timeout-after-write is ambiguous.
+- The client serializes shared WordPress worker slots and throttles below Clock's documented limit of five calls per second per API user. Without `Retry-After`, a 429 waits `retry counter × 500ms`; retries remain bounded.
+- Clock documents automatic retry only for `429`. Other 4xx/5xx responses are not auto-retried, and timeout-after-write is ambiguous.
 - Final availability/quote/guarantee checks explicitly bypass caches.
 - `rates_availability` is queried with sorted `rates[]`, sorted parent `room_types[]`, and `adults`; it establishes only type/rate sellability. Missing occupied dates, non-Boolean or false `free`, errors, stop-sale, or contradictory arrival/departure restrictions do not pass.
 - `room_statuses` is queried from check-in through checkout-minus-one-day, both inclusive. A single-type/final check supplies the singular `room_type_id`; a mixed-type search makes one unfiltered request and discards non-candidate groups locally. The exact physical mapping must have a Boolean `available=true` row under its mapped parent type.
 - Intermediate rate availability can cache for 45 seconds and room status for 15 seconds. Final checkout and paid fulfilment bypass both layers. Missing rows, malformed/conflicting responses, transport failures, and incomplete mappings are provider-unconfirmed; explicit `free=false` or `available=false` is confirmed unavailable.
 - The disabled-date calendar remains advisory type/rate data plus local exact-room conflicts. It does not issue a 180-day physical-room status scan, and an apparently open range cannot continue without a selected-range `room_statuses` check.
 - Exact-room creation requires room-type, physical-room, and rate mapping. Fulfilment requires all three current external IDs to match the saved attempt-time snapshots, then sends the type as `arrival_room_type_id` and the physical room as `arrival_room_id`; a different returned room is not accepted as substitution.
-- Cancellation and amendment paths reread before retry and verify provider state after writes.
+- Cancellation and amendment paths verify provider state after writes. Only a `429` is queued automatically; network/5xx ambiguity is reread immediately and otherwise requires manual review.
 - Local idempotency keys are logged, but a general provider idempotency header is not transmitted.
 
 ### Inbound Clock and AWS SNS
@@ -157,11 +158,12 @@ Outbound API calls use a two-request HTTP Digest challenge flow. `ClockEndpointR
 
 - restrict certificate URLs to safe Amazon SNS hosts/schemes;
 - verify the SNS signature and signed fields;
+- require either an exact configured SNS `TopicArn` match or complete HTTP Basic authentication, preventing another valid AWS SNS topic from becoming a trusted Clock sender;
 - handle subscription confirmation through a safe URL request;
 - use `MessageId`/body keys, locks, and request logs for deduplication;
 - return retryable failure when provider fetch or durable local mirror application fails.
 
-Optional complete Basic credentials can protect the endpoint. Legacy Bearer/HMAC header verification remains for configured non-SNS senders. Missing mappings enqueue a booking-upsert job; they must not invent provider identity.
+Complete Basic credentials can bind the endpoint when the Clock topic ARN is unavailable; otherwise the exact SNS topic must be pinned. Legacy Bearer/HMAC header verification remains for configured non-SNS senders. Missing mappings enqueue a booking-upsert job; they must not invent provider identity.
 
 ### Scheduling and rate limits
 
@@ -219,4 +221,4 @@ A clear retention/pruning policy for provider and activity logs was not found. E
 
 External verification requires explicit approval, a named non-production or production target, backup/rollback readiness, masked evidence collection, known expected records, and a stop condition. Do not infer authorization from the existence of configured credentials.
 
-Current source also declares PHP 7.4 compatibility while payment, email, and portal paths use PHP 8-only functions such as `str_contains()`/`str_starts_with()`. Treat PHP 8 as the practical runtime requirement until code or metadata is reconciled and verified.
+Payment, email, and portal paths use PHP 7.4-compatible string checks. The declared PHP 7.4 baseline is now covered by source lint; the production runtime should still be tested during deployment.

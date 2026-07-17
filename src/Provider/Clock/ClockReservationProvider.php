@@ -648,6 +648,9 @@ final class ClockReservationProvider implements ReservationProviderInterface
             if (!BookingQuoteDraft::guaranteePolicyMatches($quoteDraft, $roomId, $pricing)) {
                 return $this->errorResult([\__('The payment or guarantee terms changed since you reviewed the booking. Return to checkout to review the latest terms. No reservation or payment was created.', 'must-hotel-booking')]);
             }
+            if (!BookingQuoteDraft::cancellationPolicyMatches($quoteDraft, $roomId, $pricing)) {
+                return $this->errorResult([\__('The cancellation policy changed since you reviewed the booking. Return to checkout to review the latest terms. No reservation or payment was created.', 'must-hotel-booking')]);
+            }
             /*
              * Online Stripe/PokPay reservations require a verified Clock guarantee
              * policy so Clock can calculate Required Deposit correctly.
@@ -958,6 +961,7 @@ final class ClockReservationProvider implements ReservationProviderInterface
         string $reason
     ): array {
         $fulfilledReservationIds = \array_values(\array_unique(\array_filter(\array_map('intval', $fulfilledReservationIds))));
+        $persistenceFailures = [];
         foreach ($reservationIds as $reservationId) {
             $reservation = $repository->getReservation((int) $reservationId);
             if (!\is_array($reservation)) {
@@ -974,20 +978,23 @@ final class ClockReservationProvider implements ReservationProviderInterface
                 'recovery_required' => 'reread_clock_before_create',
                 'recorded_at' => \current_time('mysql'),
             ];
-            $repository->updateProviderMetadata((int) $reservationId, [
+            if (!$repository->updateProviderMetadata((int) $reservationId, [
                 'provider_sync_status' => 'manual_review',
                 'provider_sync_error' => \sanitize_text_field($message),
                 'provider_metadata' => $metadata,
-            ]);
+            ])) {
+                $persistenceFailures[] = (int) $reservationId;
+            }
         }
 
         return [
             'success' => false,
             'state' => empty($fulfilledReservationIds) ? 'manual_review' : 'partial_manual_review',
-            'retryable' => false,
-            'reason_code' => \sanitize_key($reason),
+            'retryable' => !empty($persistenceFailures),
+            'reason_code' => !empty($persistenceFailures) ? 'manual_review_persistence_failed' : \sanitize_key($reason),
             'reservation_ids' => \array_values(\array_map('intval', $reservationIds)),
             'fulfilled_reservation_ids' => $fulfilledReservationIds,
+            'persistence_failures' => $persistenceFailures,
             'message' => $message,
         ];
     }

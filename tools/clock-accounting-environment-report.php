@@ -88,6 +88,8 @@ $report = [
         'endpoint_overrides' => ClockConfig::endpointOverrides(),
         'endpoint_override_errors' => ClockEndpointRegistry::validateOverrides((array) ($clock['clock_endpoint_overrides'] ?? [])),
         'webhook_secret_set' => ClockConfig::webhookSecret() !== '',
+        'webhook_sns_topic_arn_set' => ClockConfig::webhookSnsTopicArn() !== '',
+        'webhook_basic_auth_set' => ClockConfig::webhookBasicUsername() !== '' && ClockConfig::webhookBasicPassword() !== '',
         'webhook_url' => \function_exists('rest_url') ? MustBookingConfig::build_public_rest_url('must-hotel-booking/v1/clock/webhook') : '',
     ],
     'payments' => [

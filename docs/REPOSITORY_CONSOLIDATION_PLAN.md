@@ -8,11 +8,11 @@
 
 The plugin has a substantial operational surface and useful domain separation, but repository hygiene and production-integrity confidence are uneven.
 
-- Current release evidence is clear: `main` is at `dcff3b4`, tagged `v0.4.90`, and the plugin header, version constant, and `readme.txt` stable tag agree.
+- The current release-candidate working tree is based on `b0380ad`; plugin header, version constant, and `readme.txt` stable tag agree on `0.4.92`.
 - Bootstrap, managed pages, local/Clock provider adapters, repositories, payment gateways, staff portal, admin surfaces, and WP-Cron workers are all present.
 - Documentation had become materially stale and duplicated. Before this consolidation, the active worktree held 45 tracked Markdown files, two ignored temporary Markdown files, long manuals based on `0.3.45`, a 317-line task diary, and multiple dated Clock research/acceptance reports.
 - The current automated tests are standalone PHP scripts. Many are valuable static or mocked checks, but several high-risk payment-first tests assert source markers rather than exercising database concurrency or failure recovery.
-- Current `main` contains confirmed production-integrity risks. Cleanup of documentation and generated artifacts is safe; behavioral cleanup is not safe until dedicated tests and rollback gates exist.
+- The original audit found confirmed production-integrity risks. The risk register below now marks implemented remediations while retaining unresolved operational and acceptance risks.
 
 ### Main sources of bloat
 
@@ -31,21 +31,15 @@ The plugin has a substantial operational surface and useful domain separation, b
 
 ### Main production-integrity risks
 
-The highest-risk verified findings are:
+The highest remaining risks are external acceptance and operations rather than known blind-write defects: real database/concurrency behavior is not certified; multi-room Clock creation can end partially fulfilled; schema history lacks an ordered migration ledger; WP-Cron/provider rights/current production state are unknown; and log retention, durable email retry ownership, plus passive PokPay credential probes remain unresolved.
 
-1. Anonymous confirmation-page access can disclose another reservation and guest data by sequential reservation ID, and a forged PokPay return query can fail/cancel a pending reservation.
-2. A provider-paid Stripe/PokPay outcome is not durably recorded before Clock fulfillment. A Clock failure can leave local rows pending with no durable paid transaction and no internal recovery job.
-3. Duplicate payment callbacks can receive the same Clock creation claim, while the Clock client records an idempotency value only in local logs and does not transmit an idempotency header.
-4. Generic confirmation/payment actions are not governed by a single atomic authorization boundary. Clock-specific guards exist, but local online flows and some manual writes remain less constrained.
-5. Concurrent refund requests rely on check-then-insert without a database uniqueness constraint for the business idempotency tuple.
-
-See [Production-integrity risk register](#8-production-integrity-risk-register). These findings are documentation only; this task does not fix them.
+See [Production-integrity risk register](#8-production-integrity-risk-register) for both resolved and open findings.
 
 ### Cleanup readiness
 
 - **Safe now:** canonical documentation consolidation, tracked obsolete Markdown retirement, and read-only inventory work.
 - **Safe after review:** ignored/generated artifact cleanup and retirement of obsolete diagnostic evidence.
-- **Not safe yet:** dead-code removal, service consolidation, schema work, booking/payment changes, and Clock accounting changes.
+- **Not safe without a scoped plan:** dead-code removal, service consolidation, destructive schema work, or provider/production mutation.
 
 ## 2. Evidence and audit scope
 
@@ -218,15 +212,15 @@ The ignored `.worktrees/p0-confirmation-integrity-phase1/**` and `.worktrees/p0-
 | Conflicting sources | Current implementation evidence | Intended/historical evidence | Risk | Future resolution |
 | --- | --- | --- | --- | --- |
 | Root README says use a shortcode or block | No `add_shortcode()` or `register_block_type()` registration found; managed pages drive frontend | Old README copy | Developers configure a nonexistent entry point | Keep README aligned with managed pages/Elementor only. |
-| Core docs call `0.4.80` current | Header/constant/tag are `0.4.90` | June 11 knowledge-base snapshot | Wrong architecture/lifecycle assumptions | Canonical docs now state evidence baseline and require code verification. |
+| Core docs called `0.4.80` current | Header/constant/readme now state release-candidate `0.4.92` | June 11 knowledge-base snapshot | Wrong architecture/lifecycle assumptions | Canonical docs state the working-tree evidence baseline and require code verification. |
 | Booking/payment docs say Clock booking is created during confirmation | v0.4.89 defers Clock creation for online `pending_payment` rows until verified payment | Pre-v0.4.89 behavior | Critical misunderstanding of recovery/order | `DOMAIN_LIFECYCLES.md` and ADR-0001 own current ordering. |
 | Old manuals default Pay at Hotel on | Current defaults: PokPay enabled, Pay at Hotel disabled unless explicitly opted in | v0.3.45 settings | Unpaid confirmations may be enabled accidentally | `PROJECT_CONTEXT`, lifecycle and operations docs own current policy. |
-| Unmerged branches describe immutable confirmation authorization and verification tables | Those classes/tables are absent from `main` | `8be9f0e`, `b5b8fbf`, branch design/handoff | Intended safeguards may be mistaken for released behavior | Phase 8 must reconcile designs against current main; never document them as implemented. |
-| `readme.txt` stable tag is `0.4.90`, changelog ends at `0.4.88` | Header/tag/release commits prove `0.4.89` and `0.4.90` | Text changelog was not updated | Distribution history incomplete | Phase 10 should update `readme.txt` under explicit source-edit scope. |
+| Earlier branches described immutable confirmation authorization and verification tables | The current working tree includes those controls and related additive schema | `8be9f0e`, `b5b8fbf`, later integration work | Historical branch state can be mistaken for current absence | Canonical architecture/lifecycle docs own current behavior. |
+| `readme.txt` previously ended at `0.4.88` | Header/constant/stable tag now agree on `0.4.92` and the release entry is present | Text changelog lagged release work | Distribution history was incomplete | Keep metadata synchronized for every release. |
 | Release/version history looks continuous in old docs | Tag gaps include `v0.4.72`, `v0.4.73`, `v0.4.80`, `v0.4.84`; tag `0.4.18` lacks `v` | `readme.txt` has additional version headings | Fabricated version groupings/dates | Canonical changelog includes only evidence-supported releases. |
 | E2E harness described as read-only | Default avoids explicit provider writes, but it loads WordPress; plugin boot may sync pages/roles/options/cron | Harness README | Local DB may change even without provider writes | Operations doc distinguishes offline static tests, WordPress-loaded checks, external reads, and external writes. |
-| Plugin header/readme declare PHP 7.4+ | Active payment, email, and portal code uses PHP 8-only `str_contains()`/`str_starts_with()` | Distribution metadata | Fatal errors on a declared-supported runtime | Reconcile in a compatibility release with a tested version decision; operations treats PHP 8 as practical minimum meanwhile. |
-| Diagnostics presents table health | Installer defines 28 tables while the diagnostic sample checks 22 | Settings diagnostics vs installer | Missing schema can be overlooked | Expand/label diagnostics in a scoped operations/schema task. |
+| Plugin header/readme declare PHP 7.4+ | Active payment, email, portal, and quote paths now use PHP 7.4-compatible helpers | Distribution metadata and lint | Exact deployment runtime can still differ | Keep PHP 7.4 syntax/behavior checks in release verification. |
+| Diagnostics presents table health | Installer defines 34 tables while the diagnostic sample checks 24 | Settings diagnostics vs installer | Missing schema can be overlooked | Expand/label diagnostics in a scoped operations/schema task. |
 | Legacy manuals describe a factory reset | Current source exposes only the guarded Demo / Test Hotel Data reset | `v0.3.45` manuals | Operators may expect a nonexistent or differently scoped destructive action | Current operations doc owns the exact reset boundary. |
 | Provider preflight is described as read-only | Tool performs external Clock/Stripe/PokPay reads/authentication | Tool label and implementation | An apparently safe diagnostic contacts providers | Require explicit network/provider approval and rename/relabel only in a scoped tools phase. |
 
@@ -234,27 +228,27 @@ The ignored `.worktrees/p0-confirmation-integrity-phase1/**` and `.worktrees/p0-
 
 | ID | Severity | Finding and current evidence | Consequence | Required future action |
 | --- | --- | --- | --- | --- |
-| R-01 | Critical | Anonymous query `reservation_ids`/`booking_id` reaches confirmation queries without ownership proof (`confirmation-page.php`, `ReservationRepository`). Rows include name, email, phone, country, stay and payment state. | Guest-data disclosure / IDOR | Add session-bound or signed access tokens, minimize response data, and anonymous regression tests. |
-| R-02 | Critical | Forged `payment_method=pokpay&pokpay_return=cancel|failed|error&reservation_ids=N` calls `failPendingPaymentReservations()` without ownership verification. | Unauthorized cancellation, availability release, failed ledger state | Bind returns to an immutable payment attempt and require signed/server-verified ownership before state change. |
-| R-03 | Critical | `completeVerifiedOnlinePayment()` performs Clock fulfillment before persisting the paid provider transaction. Failure records only metadata and no internal recovery job. | Captured money with locally pending/stranded booking; weak reconciliation evidence | Persist provider-paid outcome atomically before fulfillment and create an idempotent recovery queue/manual action. |
-| R-04 | Critical | `claimPendingClockReservation()` returns `claimed` for an existing `creating` row with the same key; Clock client does not transmit its idempotency value. | Concurrent duplicate Clock reservations | Implement exclusive lease semantics, provider-supported idempotency where available, reread-before-retry, and concurrency tests. |
-| R-05 | High | Confirmation transitions are not centrally authorized; current guard is Clock-specific. Callers may report success even when a guard silently skipped the write. | False operator feedback or confirmation of unverified local online rows | Central policy/service with explicit result, dedicated capability, exact verification ownership, and atomic hooks. |
-| R-06 | High | Manual payment/status writes use different non-atomic orderings. | Payment ledger and reservation state can diverge on partial failure | Transactional service and failure-injection tests. |
+| R-01 | Resolved | Public confirmation/cancellation access uses opaque, hashed, expiring reservation-set grants exchanged for scoped cookie-backed contexts; numeric query IDs are not authorization. | Anonymous IDOR paths are blocked by ownership proof. | Keep anonymous access and expiry/revocation tests current. |
+| R-02 | Resolved | PokPay success/finalize paths require the authorized reservation set and stored order binding; cancel/failure browser returns are informational and do not mutate booking state. | Forged return parameters cannot release inventory or fail a payment row. | Keep forged-return regression tests current. |
+| R-03 | Resolved | Authoritative paid-provider evidence and exact allocations persist before Clock fulfillment; failures retain durable recovery/manual-review evidence without success hooks. | Captured payments remain traceable and recoverable without false confirmation. | Keep payment-first failure and replay tests current. |
+| R-04 | Resolved | Clock fulfillment uses an owner-token lease and a durable local idempotency claim; the undocumented provider header was removed and ambiguous outcomes require reread/manual review. | Duplicate Clock reservations are reduced without assuming unsupported provider idempotency. | Keep provider contract and timeout/replay tests current. |
+| R-05 | Resolved | First confirmed-equivalent transitions route through centralized flow-specific authorization and return explicit outcomes; hooks run only after committed transitions. | Callers cannot silently bypass payment/provider confirmation authority. | Keep repository-guard and lifecycle-result tests current. |
+| R-06 | Resolved for pending-payment failure | Pending payment failure/expiry now writes reservation and failed-ledger state in one local transaction and dispatches hooks only after commit. | Partial failure is rolled back for this lifecycle. | Extend the same boundary to any future manual multi-row command. |
 | R-07 | High | Multi-room Clock creation loops without transaction/compensation across all mirror/provider writes. | Partial booking group after later room fails | Checkout-group identity, compensation/reconciliation, and multi-room failure tests. |
-| R-08 | High | Refund duplicate protection is check-then-insert with no unique business tuple; PokPay refund call has no idempotency option. | Duplicate concurrent refunds | Unique allocation/idempotency schema, atomic claim, provider contract verification, concurrency tests. |
-| R-09 | High | Accounting retry may infer success from balance movement and substitute an accounting key as a credit-item ID; provider write idempotency is not transmitted. | Duplicate or falsely verified Clock credit items | Durable provider item identity, exact correlation, reread evidence, and ambiguous-outcome manual review. |
+| R-08 | Resolved | Refund rows use a deterministic idempotency key, a serialized database claim, and provider idempotency for Stripe/PokPay. | Concurrent duplicate refund calls are blocked before provider write. | Keep retry and provider contract tests current. |
+| R-09 | Resolved | Accounting recovery now requires an exact Clock credit-item match by reference, amount, currency, and real provider item ID; balance-only inference and synthetic IDs were removed. | Duplicate or falsely verified Clock credit items are prevented from being auto-accepted. | Keep exact-correlation and ambiguous-outcome tests current. |
 | R-10 | High | Schema history is reconstructed through `dbDelta()` plus current-version repair; no numbered migration chain or foreign keys. | Upgrade drift and partial schema repairs | Upgrade matrix across historical releases/MySQL/MariaDB; introduce additive migration ledger only with compatibility plan. |
 | R-11 | Medium | Final Clock fulfillment revalidates after payment; availability/price/policy can change after money capture. | Paid but unfulfilled booking | Document/implement a customer-safe compensation and staff escalation policy; never auto-refund without verified rules. |
 | R-12 | Medium | Static source-marker tests pass without proving concurrency, atomicity, provider binding, or recovery. | False confidence | Replace critical static assertions with database/integration tests while retaining cheap structural checks. |
 | R-13 | Medium | Provider logs contain response summaries; recursive sanitizer exists but every new field/path must use it. | Secret/PII leakage | Redaction regression tests and bounded retention review. |
 | R-14 | Medium | WP-Cron jobs depend on traffic unless server cron is configured; stale locks/jobs have recovery logic but live health is unknown. | Stale inventory locks or provider mirrors | Production cron monitoring, bounded queues, and read-only health verification. |
 | R-15 | Medium | Clock accommodation-charge cleanup, cancellation-fee posting, checked-in moves, and ambiguous financial adjustments remain manual. | Operational drift if staff assumes automation | Preserve manual-review states and explicit runbooks until contracts/ownership are durable. |
-| R-16 | High | `ReservationEngine::createReservations()` uses `$selectedRatePlanMap` without defining it in that function. | Final local creation can fall back to rate-plan ID `0`, changing price/policy attribution. | Add a regression test, pass the selected map explicitly, and verify existing pending rows before a scoped fix. |
-| R-17 | Medium | `BookingQuoteDraft` stores cancellation-policy data but current final comparison enforces total/currency/guarantee, not the complete cancellation-policy snapshot. | Guest may pay after a policy change that was not surfaced for review. | Add field-complete comparison and policy-change tests before claiming full policy revalidation. |
-| R-18 | High | Guest cancellation tokens are deterministic and have no explicit expiry; confirmation access is already unbound. | Long-lived bearer link exposure can disclose or authorize later actions. | Add expiring, scoped, revocable authorization with migration/compatibility handling. |
+| R-16 | Resolved | `ReservationEngine::createReservations()` resolves `$selectedRatePlanMap` before final pricing and local assembly. | Selected rate-plan attribution is retained. | Keep the quote/reservation regression test. |
+| R-17 | Resolved | `BookingQuoteDraft::cancellationPolicyMatches()` compares the room-specific signed policy with fresh final pricing before Clock writes. | Policy changes require guest review before payment/provider creation. | Keep field-complete policy tests. |
+| R-18 | Resolved | Guest access uses random hashed grants with purpose, reservation-set scope, expiry, atomic execution consumption, and revocable cookie contexts. | Long-lived deterministic bearer access is removed. | Keep token scope, expiry, consumption, and revocation tests current. |
 | R-19 | Medium | `PokPayPayment::validatePayment()` may authenticate externally when an unverified gateway is rendered in a public flow. | Passive public traffic can trigger credential probes, provider load, and diagnostic state changes. | Move probes to explicit privileged operations; public rendering should consume cached state only. |
-| R-20 | High | Metadata declares PHP 7.4 while active code uses PHP 8-only functions. | Fatal errors on a supported-by-metadata runtime. | Decide/test the compatibility baseline, then either polyfill/refactor or raise metadata in a deliberate release. |
-| R-21 | Medium | Table diagnostics cover 22 of 28 installer tables; provider/activity retention and durable email retry ownership are not defined. | Incomplete health signal, unbounded evidence/storage, and lost notifications after transient failure. | Expand schema diagnostics, define retention, and design an idempotent notification retry boundary. |
+| R-20 | Resolved | Payment, email, portal, and quote paths use PHP 7.4-compatible helpers; metadata remains PHP 7.4. | Declared runtime and active code are aligned for these paths. | Keep full source lint in release checks. |
+| R-21 | Medium | Table diagnostics cover 24 of 34 installer tables; provider/activity retention and durable email retry ownership are not defined. | Incomplete health signal, unbounded evidence/storage, and lost notifications after transient failure. | Expand schema diagnostics, define retention, and design an idempotent notification retry boundary. |
 
 ## 9. Target repository structure
 

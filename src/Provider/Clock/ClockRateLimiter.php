@@ -6,6 +6,7 @@ final class ClockRateLimiter
 {
     private const MIN_INTERVAL_MICROSECONDS = 250000;
     private const SHARED_SLOT_TRANSIENT = 'must_hotel_booking_clock_next_request_at';
+    private const SHARED_LOCK_OPTION = 'must_hotel_booking_clock_rate_limiter_lock';
 
     /** @var callable */
     private $clock;
@@ -41,6 +42,7 @@ final class ClockRateLimiter
 
     public function acquire(): int
     {
+        $lockValue = $this->acquireSharedLock();
         $now = (float) \call_user_func($this->clock);
         $sharedNext = 0.0;
 
@@ -52,22 +54,23 @@ final class ClockRateLimiter
         $localNext = self::$lastRequestAt > 0.0
             ? self::$lastRequestAt + (self::MIN_INTERVAL_MICROSECONDS / 1000000)
             : 0.0;
-        $next = \max($now, $sharedNext, $localNext);
-        $waitMicroseconds = (int) \max(0, \ceil(($next - $now) * 1000000));
+        $grantedAt = \max($now, $sharedNext, $localNext);
+        $waitMicroseconds = (int) \max(0, \ceil(($grantedAt - $now) * 1000000));
 
-        if ($waitMicroseconds > 0) {
-            \call_user_func($this->sleeper, $waitMicroseconds);
-        }
-
-        $grantedAt = (float) \call_user_func($this->clock);
-        self::$lastRequestAt = \max($grantedAt, $next);
+        self::$lastRequestAt = $grantedAt;
 
         if (\function_exists('set_transient')) {
             \set_transient(
                 self::SHARED_SLOT_TRANSIENT,
-                self::$lastRequestAt + (self::MIN_INTERVAL_MICROSECONDS / 1000000),
+                $grantedAt + (self::MIN_INTERVAL_MICROSECONDS / 1000000),
                 2
             );
+        }
+
+        $this->releaseSharedLock($lockValue);
+
+        if ($waitMicroseconds > 0) {
+            \call_user_func($this->sleeper, $waitMicroseconds);
         }
 
         return $waitMicroseconds;
@@ -82,10 +85,9 @@ final class ClockRateLimiter
         }
 
         $attempt = \max(1, $attempt);
-        $baseMilliseconds = \min(5000, 250 * (2 ** ($attempt - 1)));
-        $jitterMilliseconds = (int) \call_user_func($this->random, 25, 175);
 
-        return ($baseMilliseconds + $jitterMilliseconds) * 1000;
+        // Clock documents retry delay as retry counter multiplied by 500ms.
+        return \min(5000, $attempt * 500) * 1000;
     }
 
     public function sleep(int $microseconds): void
@@ -98,6 +100,49 @@ final class ClockRateLimiter
     public static function resetForTests(): void
     {
         self::$lastRequestAt = 0.0;
+    }
+
+    private function acquireSharedLock(): string
+    {
+        if (!\function_exists('add_option') || !\function_exists('get_option') || !\function_exists('delete_option')) {
+            return '';
+        }
+
+        $token = \function_exists('wp_generate_uuid4')
+            ? \wp_generate_uuid4()
+            : \substr(\hash('sha256', \uniqid('', true)), 0, 32);
+
+        for ($attempt = 0; $attempt < 100; $attempt++) {
+            $now = (float) \call_user_func($this->clock);
+            $value = $token . '|' . ($now + 1.0);
+            if (\add_option(self::SHARED_LOCK_OPTION, $value, '', 'no')) {
+                return $value;
+            }
+
+            $existing = (string) \get_option(self::SHARED_LOCK_OPTION, '');
+            $separator = \strrpos($existing, '|');
+            $expiresAt = $separator === false ? 0.0 : (float) \substr($existing, $separator + 1);
+            if ($expiresAt <= $now) {
+                \delete_option(self::SHARED_LOCK_OPTION);
+                continue;
+            }
+
+            \call_user_func($this->sleeper, 10000);
+        }
+
+        return '';
+    }
+
+    private function releaseSharedLock(string $lockValue): void
+    {
+        if ($lockValue === '' || !\function_exists('get_option') || !\function_exists('delete_option')) {
+            return;
+        }
+
+        $current = (string) \get_option(self::SHARED_LOCK_OPTION, '');
+        if ($current !== '' && \hash_equals($lockValue, $current)) {
+            \delete_option(self::SHARED_LOCK_OPTION);
+        }
     }
 
     private function retryAfterSeconds(string $retryAfter): int

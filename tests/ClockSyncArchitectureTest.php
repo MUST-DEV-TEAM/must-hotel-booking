@@ -13,6 +13,7 @@ $clockConfig = (string) \file_get_contents($root . '/src/Provider/Clock/ClockCon
 $settings = (string) \file_get_contents($root . '/src/Admin/SettingsPage.php');
 $plugin = (string) \file_get_contents($root . '/src/Core/Plugin.php');
 $diagnostics = (string) \file_get_contents($root . '/src/Admin/SettingsDiagnostics.php');
+$supportDiagnostics = (string) \file_get_contents($root . '/src/Core/SupportDiagnosticsEndpoint.php');
 
 $failures = [];
 $scheduler = '';
@@ -115,6 +116,14 @@ foreach ([
     if (\strpos($diagnostics . $settings, $needle) === false) {
         $failures[] = "Diagnostics/UI must include {$needle}.";
     }
+}
+
+if (\strpos($supportDiagnostics, 'ClockSyncScheduler::getReservationHook()') === false) {
+    $failures[] = 'Production readiness must check the canonical Clock reservation fallback cron hook.';
+}
+
+if (\strpos($supportDiagnostics, 'must_hotel_booking_clock_auto_reservation_sync') !== false) {
+    $failures[] = 'Production readiness must not require the retired Clock auto-reservation cron hook.';
 }
 
 /*

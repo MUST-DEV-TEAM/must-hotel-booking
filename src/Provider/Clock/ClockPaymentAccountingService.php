@@ -369,6 +369,13 @@ final class ClockPaymentAccountingService
             $reservationId
         );
         if (empty($postResult['success'])) {
+            if (!empty($postResult['ambiguous'])) {
+                return $this->markManualReview(
+                    $accountingId,
+                    ClockAccountingReason::CLOCK_POSTING_REQUIRES_MANUAL_ACTION,
+                    (string) ($postResult['message'] ?? \__('Clock returned an ambiguous payment-posting outcome. Verify the folio by provider reference before any new write.', 'must-hotel-booking'))
+                );
+            }
             return $this->markFailure(
                 $accountingId,
                 ClockAccountingReason::forFolioMessage(
@@ -650,34 +657,63 @@ final class ClockPaymentAccountingService
             return null;
         }
 
-        if ($folioId === '' || !isset($accounting['expected_balance']) || $accounting['expected_balance'] === '' || $accounting['expected_balance'] === null) {
-            return null;
+        $direction = \sanitize_key((string) ($accounting['direction'] ?? ''));
+        $reference = $direction === 'refund'
+            ? \sanitize_text_field((string) ($accounting['provider_refund_id'] ?? ''))
+            : \sanitize_text_field((string) ($accounting['provider_transaction_id'] ?? ''));
+        $amount = \round((float) ($accounting['amount'] ?? 0.0), 2);
+        $currency = \strtoupper(\sanitize_text_field((string) ($accounting['currency'] ?? '')));
+
+        if ($folioId === '' || $reference === '' || $currency === '' || \abs($amount) < 0.01) {
+            return $this->markManualReview(
+                $accountingId,
+                ClockAccountingReason::CLOCK_POSTING_REQUIRES_MANUAL_ACTION,
+                \__('Clock accounting retry is missing the exact provider reference, amount, currency, or folio identity.', 'must-hotel-booking')
+            );
         }
 
-        $expectedBalance = \round((float) $accounting['expected_balance'], 2);
+        $lookup = $this->folios->findCreditItemByReference($folioId, $reference, $amount, $currency, $reservationId);
+        if (empty($lookup['success'])) {
+            return $this->markManualReview(
+                $accountingId,
+                ClockAccountingReason::CLOCK_POSTING_REQUIRES_MANUAL_ACTION,
+                (string) ($lookup['message'] ?? \__('Clock credit-item reconciliation could not be completed.', 'must-hotel-booking'))
+            );
+        }
+        if (!empty($lookup['ambiguous'])) {
+            return $this->markManualReview(
+                $accountingId,
+                ClockAccountingReason::CLOCK_POSTING_REQUIRES_MANUAL_ACTION,
+                (string) ($lookup['message'] ?? \__('Clock credit-item reconciliation returned multiple matches.', 'must-hotel-booking'))
+            );
+        }
+        if (empty($lookup['found'])) {
+            return (string) ($accounting['last_error_code'] ?? '') === 'rate_limited'
+                ? null
+                : $this->markManualReview(
+                    $accountingId,
+                    ClockAccountingReason::CLOCK_POSTING_REQUIRES_MANUAL_ACTION,
+                    \__('Clock does not document automatic replay for this failed write. No exact credit-item match was found, so manual review is required before posting again.', 'must-hotel-booking')
+                );
+        }
+
+        $clockCreditItemId = (string) ($lookup['credit_item_id'] ?? '');
+        if ($clockCreditItemId === '') {
+            return $this->markManualReview(
+                $accountingId,
+                ClockAccountingReason::CLOCK_POSTING_REQUIRES_MANUAL_ACTION,
+                \__('Clock matched the provider reference but did not return a durable credit-item ID.', 'must-hotel-booking')
+            );
+        }
+
         $balanceResult = $this->folios->readFolioBalance($folioId, $reservationId);
-        if (empty($balanceResult['success']) || !isset($balanceResult['balance'])) {
-            return null;
-        }
-
-        $actualBalance = \round((float) $balanceResult['balance'], 2);
-        if (\abs($actualBalance - $expectedBalance) >= 0.01) {
-            $this->accounting->update($accountingId, [
-                'clock_folio_id' => $folioId,
-                'actual_balance' => $actualBalance,
-                'updated_at' => $this->now(),
-            ]);
-            return null;
-        }
+        $actualBalance = !empty($balanceResult['success']) && isset($balanceResult['balance'])
+            ? \round((float) $balanceResult['balance'], 2)
+            : null;
 
         $postedAt = (string) ($accounting['posted_at'] ?? '');
         if ($postedAt === '') {
             $postedAt = $this->now();
-        }
-
-        $clockCreditItemId = (string) ($accounting['clock_credit_item_id'] ?? '');
-        if ($clockCreditItemId === '') {
-            $clockCreditItemId = (string) ($accounting['idempotency_key'] ?? '');
         }
 
         $verifiedAt = $this->now();
@@ -685,7 +721,7 @@ final class ClockPaymentAccountingService
             'status' => 'posted',
             'clock_folio_id' => $folioId,
             'clock_credit_item_id' => $clockCreditItemId,
-            'verification_status' => 'verified_expected_balance',
+            'verification_status' => 'verified_credit_item_reference',
             'actual_balance' => $actualBalance,
             'reconciliation_status' => 'verified',
             'last_error_code' => '',
@@ -787,7 +823,12 @@ final class ClockPaymentAccountingService
         }
         $clockItemId = (string) ($accounting['clock_credit_item_id'] ?? '');
         if ($clockItemId === '') {
-            $clockItemId = (string) ($accounting['idempotency_key'] ?? '');
+            $this->mirrorRefundFailure(
+                $refundId,
+                'manual_review',
+                \__('Clock refund accounting has no durable credit-item ID and cannot be marked synchronized.', 'must-hotel-booking')
+            );
+            return;
         }
         $this->refunds->updateRefund($refundId, [
             'clock_folio_id' => (string) ($accounting['clock_folio_id'] ?? ''),

@@ -1,12 +1,12 @@
 # Operations
 
-This runbook covers installation, configuration, verification, deployment, diagnostics, incidents, and recovery for current `main` at `v0.4.90`. It does not authorize provider or production operations.
+This runbook covers installation, configuration, verification, deployment, diagnostics, incidents, and recovery for the `0.4.92` release-candidate working tree based on commit `b0380ad`. It does not authorize provider or production operations.
 
 ## Evidence and compatibility baseline
 
-- Current evidence: branch `main`, commit `dcff3b4`, tag `v0.4.90`, inspected 2026-07-13.
+- Current evidence: working tree based on commit `b0380ad`, release metadata `0.4.92`, inspected 2026-07-17.
 - Plugin metadata declares WordPress 5.0+, PHP 7.4+, and tested through WordPress 6.0.
-- Current code uses PHP 8-only functions including `str_contains()` and `str_starts_with()` in payment, email, and portal paths. Treat PHP 8 as the practical minimum until metadata or code is reconciled and tested.
+- Payment, email, and portal paths use PHP 7.4-compatible string checks. Run the production PHP lint/deployment check before release.
 - The WordPress tested-up-to value is metadata, not proof of compatibility with current WordPress, Elementor, theme, PHP, database, browser, or provider versions.
 - Production configuration, database shape, credentials, callbacks, cron execution, backups, and provider state were not inspected in this consolidation.
 
@@ -15,7 +15,7 @@ This runbook covers installation, configuration, verification, deployment, diagn
 ### Prerequisites
 
 - A recoverable WordPress installation with database/file backup access.
-- Practical PHP 8 runtime because of the current compatibility contradiction above.
+- PHP 7.4 or later; run source lint and the booking/payment smoke tests on the exact deployment runtime.
 - HTTPS for any provider callback environment.
 - Working WordPress permalinks and WP-Cron, or an external scheduler that calls `wp-cron.php`.
 - Provider accounts/rights only when that integration is intentionally configured.
@@ -71,6 +71,8 @@ Configure, in order:
 9. Support diagnostics only if its token-protected public endpoint is operationally required.
 
 Fresh-install payment policy prefers online payment; PokPay is the default when available. `pay_at_hotel` is disabled unless explicitly enabled. Do not enable a method merely because fields are populated; validate the intended environment through an approved administrative process.
+
+For Clock, use the documented regional URL shape `https://{region}.clock-software.com/{api_type}/{subscription_id}/{account_id}` or a deliberately configured HTTPS proxy base. PMS and Base API access are validated independently. Confirm the API user has the required account rights, keep traffic at or below five calls per second, and never treat a network/5xx result after a write as permission to replay it. Inbound PUSH must have either the exact SNS `TopicArn` pinned or complete Basic credentials; an SNS signature alone is not sufficient source binding.
 
 ## Managed pages and routes
 

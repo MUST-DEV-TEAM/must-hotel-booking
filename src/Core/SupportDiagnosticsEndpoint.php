@@ -4,6 +4,7 @@ use MustHotelBooking\Admin\SettingsDiagnostics;
 use MustHotelBooking\Engine\PaymentEngine;
 use MustHotelBooking\Provider\Clock\ClockApiClient;
 use MustHotelBooking\Provider\Clock\ClockConfig;
+use MustHotelBooking\Provider\Clock\ClockSyncScheduler;
 use MustHotelBooking\Provider\ProviderDataSanitizer;
 use MustHotelBooking\Provider\ProviderManager;
 final class SupportDiagnosticsEndpoint
@@ -744,12 +745,22 @@ final class SupportDiagnosticsEndpoint
      */
     private static function getCronReadinessForProduction(array $diagnostics): array
     {
-        unset($diagnostics);
         $required = [
             'must_hotel_booking_cleanup_expired_locks',
             'must_hotel_booking_process_provider_sync_jobs',
-            'must_hotel_booking_clock_auto_reservation_sync',
         ];
+        $provider = isset($diagnostics['provider']) && \is_array($diagnostics['provider'])
+            ? $diagnostics['provider']
+            : [];
+        $clock = isset($provider['clock']) && \is_array($provider['clock'])
+            ? $provider['clock']
+            : [];
+        if (
+            (string) ($provider['configured_mode'] ?? '') === ProviderManager::CLOCK_MODE
+            && !empty($clock['clock_reservation_fallback_sync_enabled'])
+        ) {
+            $required[] = ClockSyncScheduler::getReservationHook();
+        }
         $scheduled = [];
         foreach (self::getPluginCronStatuses()['items'] as $item) {
             if (\is_array($item) && isset($item['hook'])) {
@@ -1095,7 +1106,7 @@ final class SupportDiagnosticsEndpoint
         $latest = self::getLatestPaidReservationTrialRow();
         $lockCleanupCronScheduled = self::isCronHookScheduled('must_hotel_booking_cleanup_expired_locks');
         $providerSyncCronScheduled = self::isCronHookScheduled('must_hotel_booking_process_provider_sync_jobs');
-        $clockAutoSyncCronScheduled = self::isCronHookScheduled('must_hotel_booking_clock_auto_reservation_sync');
+        $clockAutoSyncCronScheduled = self::isCronHookScheduled(ClockSyncScheduler::getReservationHook());
         if (empty($latest)) {
             return [
                 'latest_paid_reservation_id' => 0,

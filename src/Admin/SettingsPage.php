@@ -1840,6 +1840,9 @@ final class SettingsPage
         if ($posted_webhook_secret !== '') {
             $form['clock_webhook_secret'] = $posted_webhook_secret;
         }
+        $form['clock_webhook_sns_topic_arn'] = isset($source['clock_webhook_sns_topic_arn']) && !\is_array($source['clock_webhook_sns_topic_arn'])
+            ? \sanitize_text_field((string) \wp_unslash($source['clock_webhook_sns_topic_arn']))
+            : (string) ($form['clock_webhook_sns_topic_arn'] ?? '');
         $posted_webhook_basic_username = isset($source['clock_webhook_basic_username']) && !\is_array($source['clock_webhook_basic_username'])
             ? \sanitize_text_field((string) \wp_unslash($source['clock_webhook_basic_username']))
             : '';
@@ -3187,6 +3190,12 @@ final class SettingsPage
                     : __('Optional backward-compatible auth for custom Clock webhook senders. Clock PMS PUSH uses Amazon SNS signatures and can also use the Basic credentials below.', 'must-hotel-booking'),
             ]);
             self::renderField([
+                'label' => __('Clock SNS Topic ARN', 'must-hotel-booking'),
+                'name' => 'clock_webhook_sns_topic_arn',
+                'value' => $form['clock_webhook_sns_topic_arn'] ?? '',
+                'description' => __('Recommended when Basic Auth is not used. Pin the exact AWS SNS TopicArn delivered for this Clock PUSH subscription; messages from another valid SNS topic are rejected.', 'must-hotel-booking'),
+            ]);
+            self::renderField([
                 'label' => __('Clock PUSH Basic username', 'must-hotel-booking'),
                 'name' => 'clock_webhook_basic_username',
                 'type' => 'password',
@@ -3590,13 +3599,16 @@ final class SettingsPage
             ],
             [
                 'label' => \__('Inbound webhook sync', 'must-hotel-booking'),
-                'ready' => empty($summary['clock_webhook_basic_auth_incomplete']),
+                'ready' => empty($summary['clock_webhook_basic_auth_incomplete'])
+                    && (!empty($summary['clock_webhook_basic_auth_set']) || !empty($summary['clock_webhook_sns_topic_arn_set'])),
                 'always_show_note' => true,
                 'note' => !empty($summary['clock_webhook_basic_auth_incomplete'])
                     ? \__('Clock PUSH Basic authentication is incomplete. Save both the username and password, or clear both values.', 'must-hotel-booking')
                     : (!empty($summary['clock_webhook_basic_auth_set'])
-                        ? \__('Clock PUSH/SNS payloads are verified with Amazon SNS signatures. Optional HTTP Basic authentication is configured for the endpoint URL.', 'must-hotel-booking')
-                        : \__('Clock PUSH/SNS payloads are verified with Amazon SNS signatures. Configure optional HTTP Basic credentials only if the Clock endpoint URL includes them.', 'must-hotel-booking')),
+                        ? \__('Clock PUSH/SNS payloads require valid Amazon SNS signatures and HTTP Basic authentication.', 'must-hotel-booking')
+                        : (!empty($summary['clock_webhook_sns_topic_arn_set'])
+                            ? \__('Clock PUSH/SNS payloads require valid Amazon SNS signatures from the pinned TopicArn.', 'must-hotel-booking')
+                            : \__('Configure a pinned Clock SNS Topic ARN or complete HTTP Basic credentials before enabling inbound PUSH.', 'must-hotel-booking'))),
             ],
         ];
         self::renderPanelStart(\__('Clock readiness', 'must-hotel-booking'), \__('Per-capability readiness for direct Clock API mode. WBE Inline readiness is intentionally not counted here.', 'must-hotel-booking'));
@@ -3775,7 +3787,8 @@ final class SettingsPage
         echo '<article class="must-settings-summary-card"><span class="must-settings-summary-label">' . \esc_html__('Sync cron', 'must-hotel-booking') . '</span><strong>' . \esc_html((string) ($syncCron['health'] ?? 'unknown')) . '</strong></article>';
         echo '<article class="must-settings-summary-card"><span class="must-settings-summary-label">' . \esc_html__('Inbound successful', 'must-hotel-booking') . '</span><strong>' . \esc_html((string) ($inboundSummary['successful'] ?? 0)) . '</strong></article>';
         echo '<article class="must-settings-summary-card"><span class="must-settings-summary-label">' . \esc_html__('Inbound failed', 'must-hotel-booking') . '</span><strong>' . \esc_html((string) ($inboundSummary['failed'] ?? 0)) . '</strong></article>';
-        echo '<article class="must-settings-summary-card"><span class="must-settings-summary-label">' . \esc_html__('Webhook configured', 'must-hotel-booking') . '</span><strong>' . \esc_html(!empty($inboundSync['webhook_secret_set']) ? \__('Yes', 'must-hotel-booking') : \__('No', 'must-hotel-booking')) . '</strong></article>';
+        $inboundSourceBound = !empty($inboundSync['webhook_basic_auth_set']) || !empty($inboundSync['webhook_sns_topic_arn_set']);
+        echo '<article class="must-settings-summary-card"><span class="must-settings-summary-label">' . \esc_html__('Webhook source bound', 'must-hotel-booking') . '</span><strong>' . \esc_html($inboundSourceBound ? \__('Yes', 'must-hotel-booking') : \__('No', 'must-hotel-booking')) . '</strong></article>';
         echo '</div>';
         if (!empty($syncSummary['last_error'])) {
             echo '<p class="description"><strong>' . \esc_html__('Last outbound sync error:', 'must-hotel-booking') . '</strong> ' . \esc_html((string) $syncSummary['last_error']) . '</p>';

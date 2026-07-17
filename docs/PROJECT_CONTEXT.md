@@ -4,7 +4,7 @@
 
 - Integration branch inspected: `codex/final-confirmation-integrity-integration`.
 - Base commit: `9f591c69419bcc45a050ee26b42a39e094d4d10c`; the integration changes are currently uncommitted.
-- Plugin header and version constant: `0.4.90`.
+- Plugin header and version constant: `0.4.92`.
 - Evidence date: 2026-07-15.
 - Current executable source outranks documentation. Production configuration and database state were not inspected.
 
@@ -89,13 +89,11 @@ Code supports finite local, staging and production payment credential slots, plu
 
 1. The confirmation grants, exact pending-attempt binding, environment/Clock-target gate, paid-provider observations, immutable payment ownership, central first-confirmation authorization, repository guard, and fulfillment leases have received static review only; database concurrency and provider behavior are not certified.
 2. There is no automatic recovery worker for Clock fulfillment held in `manual_review`; staff must reread Clock before any approved recovery create.
-3. Concurrent refund and ambiguous Clock accounting retries retain unresolved idempotency risk outside this integration.
-4. Selected local rate-plan propagation and final cancellation-policy comparison have code/documentation discrepancies requiring focused tests.
-5. Clock checked-in room/type moves, accommodation-charge cleanup, cancellation-fee accounting, and ambiguous financial adjustments remain manual or unsupported.
-6. Distribution metadata declares PHP 7.4 support while active code uses PHP 8-only helpers; PHP 7.4 runtime compatibility is not credible without remediation/testing.
-7. Public rendering can trigger a PokPay credential authentication probe when saved credential state is unverified; passive requests should not own provider diagnostics.
-8. Provider/activity log retention is unspecified, and no durable email retry queue was verified.
-9. Production acceptance is not established by repository evidence. Dated sandbox/E2E notes are historical, not current readiness proof.
+3. Clock checked-in room/type moves, accommodation-charge cleanup, cancellation-fee accounting, and ambiguous financial adjustments remain manual or unsupported.
+4. Distribution metadata declares PHP 7.4 support; active payment, email, portal, and quote paths use PHP 7.4-compatible helpers and pass source lint on the available runtime.
+5. Public rendering can trigger a PokPay credential authentication probe when saved credential state is unverified; passive requests should not own provider diagnostics.
+6. Provider/activity log retention is unspecified, and no durable email retry queue was verified.
+7. Production acceptance is not established by repository evidence. Clock sandbox rights/response acceptance, callbacks, cron, database upgrades, and end-to-end payment/refund flows still require approved environment testing.
 
 Detailed evidence and future phases are in `REPOSITORY_CONSOLIDATION_PLAN.md`.
 
@@ -103,6 +101,6 @@ Detailed evidence and future phases are in `REPOSITORY_CONSOLIDATION_PLAN.md`.
 
 1. Human-review and certify the integrated confirmation, payment, and Clock fulfillment call paths.
 2. Perform approved behavioral database/concurrency coverage for confirmation, callbacks, refunds, inventory and accounting.
-3. Certify Clock create/reference persistence, timeout-after-write recovery, and multi-room partial outcomes in a non-production environment.
-4. Reconcile declared/runtime PHP compatibility and move provider credential probes out of passive public rendering.
+3. Certify Clock create/reference persistence, exact credit-item reconciliation, timeout-after-write recovery, and multi-room partial outcomes in a non-production environment.
+4. Move provider credential probes out of passive public rendering and define provider/activity retention plus durable email retry ownership.
 5. Complete later repository cleanup only after integrity coverage exists.

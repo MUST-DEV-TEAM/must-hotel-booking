@@ -1,6 +1,6 @@
 # Domain Lifecycles
 
-This document describes current `main` behavior at `v0.4.90`. It separates verified implementation from intended invariants and known defects. Source code remains authoritative when behavior changes.
+This document describes the `0.4.92` release-candidate working tree based on commit `b0380ad`. It separates verified implementation from intended invariants and known defects. Source code remains authoritative when behavior changes.
 
 ## Authorities and identifiers
 
@@ -55,9 +55,9 @@ A public search supplies check-in, check-out, and party size through managed boo
 - For deferred Clock payment checkout, the current session's unexpired exact physical-room locks are converted to all pending local mirrors in one database transaction. Physical-room mutexes serialize competing sessions; any overlapping blocking reservation, expired/missing/wrong-owner lock, insert error, or commit error rolls back the complete room set before payment initiation.
 - `fallback_to_local_when_clock_unavailable` is configurable but normally false. Enabling it can split provider ownership and must be treated as an explicit operational risk.
 
-### Known defect
+### Resolved integrity issue
 
-`ReservationEngine::createReservations()` uses `$selectedRatePlanMap` without declaring it in that function. Current PHP behavior can therefore fall back to rate-plan ID `0` while emitting a notice, even though checkout preview used the selected plan. This is a current-main pricing/policy integrity risk.
+`ReservationEngine::createReservations()` now resolves `$selectedRatePlanMap` before final pricing and reservation assembly. The selected rate plan is therefore retained from checkout through local creation.
 
 ## Quote and final revalidation
 
@@ -69,7 +69,7 @@ Checkout has a valid selection, guest form, currency, and calculated room items.
 
 - `BookingQuoteDraft` stores a signed, expiring draft of reviewed pricing and policy data.
 - Intermediate Clock quote reads may be cached briefly.
-- The final Clock boundary requests fresh type/rate availability, exact physical-room status, price, and guarantee information with caches bypassed. The selected local rate plan must map to the parent type, and the exact physical-room row must be `available=true` for the inclusive occupied-night range.
+- The final Clock boundary requests fresh type/rate availability, exact physical-room status, price, guarantee information, and cancellation policy with caches bypassed. The selected local rate plan must map to the parent type, and the exact physical-room row must be `available=true` for the inclusive occupied-night range.
 - A changed total, currency, or required guarantee stops before payment/provider writes and requires guest review.
 
 ### Forbidden transitions
@@ -78,9 +78,9 @@ Checkout has a valid selection, guest form, currency, and calculated room items.
 - Do not create a payment/provider reservation after a final mismatch.
 - Do not treat draft signature validity as proof that provider facts remain current.
 
-### Current discrepancy
+### Policy revalidation
 
-The draft contains a cancellation-policy snapshot, but the final comparison reliably enforces pricing and guarantee data, not the full cancellation-policy snapshot. Documentation must not claim complete cancellation-policy revalidation until tested current code proves it.
+The final comparison also checks the room-specific cancellation-policy snapshot. A policy mismatch stops the flow before any reservation or payment write and requires guest review.
 
 See [ADR-0002](decisions/ADR-0002-final-live-quote-revalidation.md).
 
@@ -145,7 +145,7 @@ Every first transition to a confirmed-equivalent state is owned by `ReservationC
 - Clock creation retains both dimensions: `arrival_room_type_id` comes from the saved-matching accommodation/type mapping and `arrival_room_id` from the saved-matching physical-room mapping. A different returned physical-room ID is failure, never substitution.
 - Expired leases, ambiguous provider responses, and local persistence failures enter `manual_review`; another create is forbidden until Clock is reread and reconciled. The only exception is an explicitly authorized internal first-time recovery that proves the deterministic create key has no request log, the exact persisted physical room and mapping still match, and all paid-attempt/allocation/target checks still pass; it reacquires a dedicated manual-review lease before the normal provider create path.
 - If a Clock reconciliation write succeeds but its requested local lifecycle transition is blocked, the operation returns failure, stores `manual_review`, and does not present the reservation set as fully confirmed.
-- Clock request logging records idempotency information, but the API client does not generally transmit a provider idempotency header.
+- Clock create requests persist and log a local idempotency key. Clock does not document a provider idempotency header, so ambiguous outcomes require authoritative reread and manual review rather than blind replay.
 - Multi-room Clock creation is not one provider transaction. Each completed room is recorded, and any partial group is reported as partial manual review rather than complete success.
 - No runtime or provider certification is established by this integration review.
 
@@ -187,7 +187,7 @@ Guest token action, authorized admin/staff action, or Clock-originated status ch
 - Cancellation does not prove a gateway refund.
 - Clock cancellation does not authorize an automatic refund amount.
 - Refund success does not prove Clock accommodation charges were cleaned up.
-- Ambiguous provider results must remain retryable or manual-review states.
+- A Clock `429` may enter bounded retry. Other failed or ambiguous write outcomes require authoritative reread and otherwise remain manual-review states; they are not blind-replay permission.
 
 ## Refund lifecycle
 
@@ -198,7 +198,7 @@ Guest token action, authorized admin/staff action, or Clock-originated status ch
 5. Only authoritative provider completion marks the refund completed.
 6. Clock negative credit-item accounting is a separate operation and can retry or require manual review.
 
-Current refund duplicate detection is a check followed by insert without a database uniqueness guarantee for the business tuple. Concurrent requests can therefore race. PokPay does not transmit the local idempotency key to the provider in the same way Stripe does.
+Refund creation now claims the reservation/provider/reference/amount tuple under a MySQL advisory lock before any gateway call. Stripe and PokPay both receive the deterministic local idempotency key; failed rows may be retried only after the claim is released.
 
 ## Amendments
 
@@ -223,7 +223,7 @@ Direct repository status writes are forbidden for provider lifecycle changes bec
 
 Eligible website payments use an open deposit folio. The standard folio is snapshotted and must remain unchanged. Verification uses signed raw balance movement plus normalized held amount. Refund accounting is negative and separate from the gateway refund.
 
-Automatic accommodation-charge cleanup and cancellation-fee posting remain manual because the plugin cannot durably prove charge-level ownership and targeting. Reconciliation must not invent a provider credit-item ID from a local idempotency key or accept balance alone when unrelated entries could explain it; current code still has ambiguous inference paths that require hardening.
+Automatic accommodation-charge cleanup and cancellation-fee posting remain manual because the plugin cannot durably prove charge-level ownership and targeting. Reconciliation requires an exact credit-item match by provider reference, amount, currency, and real Clock item ID; it does not invent an ID from a local key or accept balance alone when unrelated entries could explain it.
 
 See [ADR-0003](decisions/ADR-0003-clock-deposit-and-manual-accounting-boundaries.md).
 

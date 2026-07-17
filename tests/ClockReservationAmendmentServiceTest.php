@@ -291,8 +291,9 @@ namespace {
             ];
             $jobs = new ProviderSyncJobRepository();
             $result = $this->service($client, $jobs)->amend($this->reservations->row, $this->request(), 'test');
-            $this->assertTrue(!empty($result['queued']), 'write timeout queues reread-first reconciliation');
-            $this->assertSame(['GET', 'PUT'], \array_column($client->calls, 'method'), 'write timeout does not pretend a confirming reread occurred');
+            $this->assertTrue(!empty($result['manual_review_required']), 'unconfirmed write timeout requires manual review instead of blind replay');
+            $this->assertSame(['GET', 'PUT', 'GET'], \array_column($client->calls, 'method'), 'write timeout triggers an immediate authoritative reread');
+            $this->assertSame(0, \count($jobs->rows), 'ambiguous write is not automatically queued when Clock does not document safe replay');
             $this->assertSame(1, (int) $this->reservations->row['assigned_room_id'], 'write timeout does not update the local room');
             $this->assertSame(100.0, (float) $this->reservations->row['total_price'], 'write timeout does not update the local total');
         }

@@ -295,9 +295,14 @@ final class BookingStatusEngine
     }
 
     /**
+     * Move a pending payment group to a terminal failure state and write its
+     * failed ledger rows as one local transaction. Provider reconciliation is
+     * deliberately performed only after the local transaction commits.
+     *
      * @param array<int, int> $reservationIds
+     * @return array<string, mixed>
      */
-    public static function failPendingPaymentReservations(array $reservationIds, string $method, string $reservationStatus = 'payment_failed'): void
+    public static function failPendingPaymentReservations(array $reservationIds, string $method, string $reservationStatus = 'payment_failed'): array
     {
         if (!\in_array($reservationStatus, ['payment_failed', 'expired', 'cancelled'], true)) {
             $reservationStatus = 'payment_failed';
@@ -306,12 +311,104 @@ final class BookingStatusEngine
         $method = \sanitize_key($method);
         $method = $method !== '' ? $method : 'stripe';
 
-        self::updateReservationStatuses($reservationIds, $reservationStatus, 'cancelled');
-        self::createPaymentRows($reservationIds, $method, 'failed');
+        $reservationIds = \array_values(\array_unique(\array_filter(\array_map('intval', $reservationIds))));
+        if (empty($reservationIds)) {
+            return [
+                'success' => false,
+                'updated' => [],
+                'failed' => [],
+                'reason_code' => 'missing_reservation_ids',
+            ];
+        }
+
+        $reservationRepository = get_reservation_repository();
+        if (!\method_exists($reservationRepository, 'beginTransaction')
+            || !\method_exists($reservationRepository, 'commit')
+            || !\method_exists($reservationRepository, 'rollback')
+        ) {
+            return [
+                'success' => false,
+                'updated' => [],
+                'failed' => $reservationIds,
+                'reason_code' => 'transactional_storage_required',
+            ];
+        }
+
+        if (!$reservationRepository->beginTransaction()) {
+            return [
+                'success' => false,
+                'updated' => [],
+                'failed' => $reservationIds,
+                'reason_code' => 'transaction_start_failed',
+            ];
+        }
+
+        // A cancellation may legitimately use the cancellation payment label;
+        // payment failure and expiry must remain failed in the reservation row.
+        $reservationPaymentStatus = $reservationStatus === 'cancelled' ? 'cancelled' : 'failed';
+        $statusOutcome = self::updateReservationStatuses(
+            $reservationIds,
+            $reservationStatus,
+            $reservationPaymentStatus,
+            false
+        );
+        $statusHandled = \array_values(\array_unique(\array_merge(
+            \array_map('intval', (array) ($statusOutcome['updated'] ?? [])),
+            \array_map('intval', (array) ($statusOutcome['already'] ?? []))
+        )));
+        if (!empty($statusOutcome['failed']) || \count($statusHandled) !== \count($reservationIds)) {
+            $reservationRepository->rollback();
+
+            return [
+                'success' => false,
+                'updated' => [],
+                'failed' => $reservationIds,
+                'reason_code' => 'reservation_status_persistence_failed',
+                'status_outcome' => $statusOutcome,
+            ];
+        }
+
+        $paymentOutcome = self::createPaymentRows($reservationIds, $method, 'failed', '', false);
+        if (!empty($paymentOutcome['failed'])) {
+            $reservationRepository->rollback();
+
+            return [
+                'success' => false,
+                'updated' => [],
+                'failed' => $reservationIds,
+                'reason_code' => 'payment_ledger_persistence_failed',
+                'status_outcome' => $statusOutcome,
+                'payment_outcome' => $paymentOutcome,
+            ];
+        }
+
+        if (!$reservationRepository->commit()) {
+            $reservationRepository->rollback();
+
+            return [
+                'success' => false,
+                'updated' => [],
+                'failed' => $reservationIds,
+                'reason_code' => 'transaction_commit_failed',
+                'status_outcome' => $statusOutcome,
+                'payment_outcome' => $paymentOutcome,
+            ];
+        }
+
+        self::dispatchReservationStatusEvents($statusOutcome);
+        self::dispatchPaymentRecordedEvents($paymentOutcome);
 
         if (\class_exists(\MustHotelBooking\Provider\Clock\ClockPaymentReconciliationService::class)) {
             (new \MustHotelBooking\Provider\Clock\ClockPaymentReconciliationService())->reconcilePaymentFailed($reservationIds, $reservationStatus, $method);
         }
+
+        return [
+            'success' => true,
+            'updated' => $reservationIds,
+            'failed' => [],
+            'status_outcome' => $statusOutcome,
+            'payment_outcome' => $paymentOutcome,
+        ];
     }
 
     /**

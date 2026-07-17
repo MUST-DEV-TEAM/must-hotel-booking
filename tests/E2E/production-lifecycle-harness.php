@@ -63,6 +63,7 @@ $clockWebhookUrl = MustBookingConfig::build_public_rest_url('must-hotel-booking/
 $clockBasicUsernameSet = ClockConfig::webhookBasicUsername() !== '';
 $clockBasicPasswordSet = ClockConfig::webhookBasicPassword() !== '';
 $clockBasicAuthIncomplete = $clockBasicUsernameSet !== $clockBasicPasswordSet;
+$clockSnsTopicPinned = ClockConfig::webhookSnsTopicArn() !== '';
 
 $checks = [];
 $checks[] = check(
@@ -153,12 +154,13 @@ $checks[] = check(
 );
 $checks[] = check(
     'credentials.clock_inbound_auth',
-    !$clockBasicAuthIncomplete,
+    !$clockBasicAuthIncomplete && (($clockBasicUsernameSet && $clockBasicPasswordSet) || $clockSnsTopicPinned),
     'BLOCKED',
-    'Clock inbound accepts Amazon SNS signatures; optional Basic auth and legacy token/HMAC are configuration choices.',
-    'Clock inbound Basic authentication is half-configured; save both values or clear both.',
+    'Clock inbound requires Amazon SNS signatures plus a pinned Topic ARN or complete Basic authentication.',
+    'Clock inbound is not source-bound; configure a pinned Topic ARN or both Basic authentication values.',
     [
         'sns_signature_verification' => true,
+        'sns_topic_arn_pinned' => $clockSnsTopicPinned,
         'basic_auth_set' => $clockBasicUsernameSet && $clockBasicPasswordSet,
         'basic_auth_incomplete' => $clockBasicAuthIncomplete,
         'legacy_token_or_hmac_set' => ClockConfig::webhookSecret() !== '',

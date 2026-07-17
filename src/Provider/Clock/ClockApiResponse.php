@@ -57,7 +57,7 @@ final class ClockApiResponse
 
     public function isRetryable(): bool
     {
-        return $this->isRateLimited() || $this->statusCode >= 500 || $this->isConnectivityFailure();
+        return $this->isRateLimited() || $this->isConnectivityFailure();
     }
 
     public function isConnectivityFailure(): bool

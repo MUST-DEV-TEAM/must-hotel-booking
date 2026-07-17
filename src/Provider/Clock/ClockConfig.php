@@ -210,6 +210,13 @@ final class ClockConfig
     {
         return (string) (self::settings()['clock_webhook_secret'] ?? '');
     }
+    public static function webhookSnsTopicArn(): string
+    {
+        $value = \trim((string) (self::settings()['clock_webhook_sns_topic_arn'] ?? ''));
+        return \preg_match('/^arn:(aws|aws-cn|aws-us-gov):sns:[a-z0-9-]+:\d{12}:[A-Za-z0-9_-]+$/', $value) === 1
+            ? $value
+            : '';
+    }
     public static function webhookBasicUsername(): string
     {
         return (string) (self::settings()['clock_webhook_basic_username'] ?? '');
@@ -439,7 +446,7 @@ final class ClockConfig
         if (!self::pmsApiEnabled()) {
             $errors[] = \__('Clock PMS API access is disabled in settings.', 'must-hotel-booking');
         }
-        foreach (ClockEndpointResolver::configurationErrors() as $error) {
+        foreach (ClockEndpointResolver::configurationErrors('pms_api') as $error) {
             $errors[] = $error;
         }
         if (self::apiUser() === '') {
@@ -460,7 +467,7 @@ final class ClockConfig
         if (!self::baseApiEnabled()) {
             $errors[] = \__('Clock Base API access is disabled in settings.', 'must-hotel-booking');
         }
-        foreach (ClockEndpointResolver::configurationErrors() as $error) {
+        foreach (ClockEndpointResolver::configurationErrors('base_api') as $error) {
             $errors[] = $error;
         }
         if (self::apiUser() === '') {
@@ -470,6 +477,18 @@ final class ClockConfig
             $errors[] = \__('Clock API key is missing.', 'must-hotel-booking');
         }
         return \array_values(\array_unique($errors));
+    }
+
+    /** @return array<int, string> */
+    public static function configurationErrorsForApiType(string $apiType): array
+    {
+        $apiType = ClockEndpointResolver::normalizeApiType($apiType);
+
+        if ($apiType === 'base_api') {
+            return self::baseApiConfigurationErrors();
+        }
+
+        return self::configurationErrors();
     }
     /** @return array<string, mixed> */
     public static function summary(): array
@@ -551,6 +570,7 @@ final class ClockConfig
             'clock_same_day_folio_payment_enabled' => self::sameDayFolioPaymentEnabled(),
             'clock_required_rights_missing' => self::requiredRightsMissing(),
             'clock_webhook_secret_set' => self::webhookSecret() !== '',
+            'clock_webhook_sns_topic_arn_set' => self::webhookSnsTopicArn() !== '',
             'clock_webhook_basic_auth_set' => self::webhookBasicUsername() !== '' && self::webhookBasicPassword() !== '',
             'clock_webhook_basic_auth_incomplete' => (self::webhookBasicUsername() !== '') !== (self::webhookBasicPassword() !== ''),
             'public_callback_base_url' => MustBookingConfig::get_public_callback_base_url(),
@@ -616,7 +636,17 @@ final class ClockConfig
     private static function normalizeBaseUrl(string $url): string
     {
         $url = \trim($url);
-        if ($url === '' || \preg_match('#^https?://#i', $url) !== 1) {
+        if ($url === '' || \preg_match('#^https://#i', $url) !== 1) {
+            return '';
+        }
+        $parts = \wp_parse_url($url);
+        if (!\is_array($parts)
+            || (string) ($parts['host'] ?? '') === ''
+            || isset($parts['user'])
+            || isset($parts['pass'])
+            || isset($parts['query'])
+            || isset($parts['fragment'])
+            || ClockEndpointResolver::hasUnsafePathSegments((string) ($parts['path'] ?? ''))) {
             return '';
         }
         return \rtrim(\esc_url_raw($url), "/ \t\n\r\0\x0B");

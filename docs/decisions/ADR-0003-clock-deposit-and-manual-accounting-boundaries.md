@@ -18,7 +18,7 @@ Repository evidence also shows that an isolated held deposit may have a negative
 - Post eligible future website payments to an open `deposit=true` Clock folio.
 - Snapshot the standard folio and require it to remain unchanged.
 - Verify the signed raw balance movement and a normalized held amount; do not infer success from aggregate booking balance alone.
-- Correlate gateway, provider transaction, reservation, operation, folio, and provider credit-item identifiers when available.
+- Correlate gateway, provider transaction, reservation, operation, folio, and the real provider credit-item identifier. Recovery requires exact reference, amount, and currency agreement.
 - Automatically reverse a Clock item only when the original verified item remains on an open, unused deposit folio.
 - Keep accommodation-charge cleanup, cancellation-fee posting, uncertain legacy-folio changes, and amendment financial deltas as explicit manual-review states until durable charge ownership and targeting exist.
 
@@ -40,7 +40,7 @@ Repository evidence also shows that an isolated held deposit may have a negative
 
 - Some cleanup requires staff action.
 - Provider operations can still be ambiguous after a timeout or missing item identity.
-- Current reconciliation may infer an accounting result from balance evidence or substitute a local key when a provider item ID is absent; that requires hardening before blind retry is safe.
+- Missing or ambiguous provider item identity requires manual review; balance evidence and local idempotency keys are not substitutes for a Clock credit-item ID.
 
 ## Implementation constraints
 

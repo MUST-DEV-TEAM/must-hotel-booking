@@ -63,11 +63,11 @@ A fixed-room flow starts from a known physical room and skips the general select
 - Browser return/callback parameters never override server-derived status.
 - Manual review, provider-unavailable, and ambiguous outcomes must remain warnings/pending states, not green success notices.
 
-### Current confirmation/cancellation defects
+### Confirmation/cancellation access contract
 
-The confirmation surface currently accepts numeric reservation/booking identifiers without a guest/session-bound view token. It can expose booking and guest data, and forged PokPay failure parameters can mutate another pending reservation. Cancellation tokens are deterministic and lack explicit expiry. These are critical current-main defects, not acceptable UX contracts.
+The confirmation surface requires an opaque, hashed, expiring grant scoped to the exact reservation set and exchanges it for a per-tab cookie-backed context. Numeric reservation/booking identifiers and PokPay browser return parameters are not authorization. Cancellation execution uses a separate short-lived purpose and is atomically consumed before mutation.
 
-Any redesign must first preserve evidence and add authorization; visual concealment is not a fix.
+Any redesign must preserve these server-side ownership, purpose, expiry, and one-time execution boundaries; visual concealment is not authorization.
 
 ## WordPress admin information architecture
 

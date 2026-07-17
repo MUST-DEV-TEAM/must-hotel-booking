@@ -561,10 +561,41 @@ final class ClockPaymentReconciliationService
         );
         if (!$response->isSuccess()) {
             $message = $response->getErrorMessage() !== '' ? $response->getErrorMessage() : \__('Clock reconciliation request failed.', 'must-hotel-booking');
-            $this->updateMetadata($reservationId, $row, $action, $idempotencyKey, false, 'pending_retry', $message);
+            $statusCode = $response->getStatusCode();
+            $isCancellation = (string) ($action['request_operation'] ?? '') === 'clock.reservation_cancel';
+            if ($isCancellation && ($statusCode <= 0 || $statusCode >= 500)) {
+                $confirmed = $this->rereadReservationState($row);
+                if (!empty($confirmed['success']) && $this->isCancelledProviderState((array) ($confirmed['state'] ?? []))) {
+                    $this->updateMetadata(
+                        $reservationId,
+                        $row,
+                        $action,
+                        $idempotencyKey,
+                        true,
+                        'synced',
+                        '',
+                        (array) ($confirmed['state'] ?? [])
+                    );
+                    return [
+                        'success' => true,
+                        'retry' => false,
+                        'message' => \__('Clock cancellation was confirmed by reread after an ambiguous response.', 'must-hotel-booking'),
+                    ];
+                }
+            }
+            $retryable = $statusCode === 429;
+            $this->updateMetadata(
+                $reservationId,
+                $row,
+                $action,
+                $idempotencyKey,
+                false,
+                $retryable ? 'pending_retry' : 'manual_review',
+                $message
+            );
             return [
                 'success' => false,
-                'retry' => true,
+                'retry' => $retryable,
                 'message' => $message,
             ];
         }
@@ -637,10 +668,10 @@ final class ClockPaymentReconciliationService
             }
             if ((string) ($row['provider_sync_status'] ?? '') === 'pending_retry' && empty($preWriteState['success'])) {
                 $message = (string) ($preWriteState['message'] ?? \__('Clock cancellation retry could not reread the booking.', 'must-hotel-booking'));
-                $this->updateMetadata($reservationId, $row, $action, $idempotencyKey, false, 'pending_retry', $message);
+                $this->updateMetadata($reservationId, $row, $action, $idempotencyKey, false, 'manual_review', $message);
                 return [
                     'success' => false,
-                    'queued' => true,
+                    'queued' => false,
                     'message' => $message,
                 ];
             }
@@ -716,11 +747,43 @@ final class ClockPaymentReconciliationService
         );
         if (!$response->isSuccess()) {
             $message = $response->getErrorMessage() !== '' ? $response->getErrorMessage() : \__('Clock reconciliation request failed.', 'must-hotel-booking');
-            $this->updateMetadata($reservationId, $row, $action, $idempotencyKey, false, 'pending_retry', $message);
-            $this->enqueueRetry($row, $action, $payload, $message);
+            $statusCode = $response->getStatusCode();
+            if ($isCancellation && ($statusCode <= 0 || $statusCode >= 500)) {
+                $confirmed = $this->rereadReservationState($row);
+                if (!empty($confirmed['success']) && $this->isCancelledProviderState((array) ($confirmed['state'] ?? []))) {
+                    $this->updateMetadata(
+                        $reservationId,
+                        $row,
+                        $action,
+                        $idempotencyKey,
+                        true,
+                        'synced',
+                        '',
+                        (array) ($confirmed['state'] ?? [])
+                    );
+                    return [
+                        'success' => true,
+                        'queued' => false,
+                        'message' => \__('Clock cancellation was confirmed by reread after an ambiguous response.', 'must-hotel-booking'),
+                    ];
+                }
+            }
+            $retryable = $statusCode === 429;
+            $this->updateMetadata(
+                $reservationId,
+                $row,
+                $action,
+                $idempotencyKey,
+                false,
+                $retryable ? 'pending_retry' : 'manual_review',
+                $message
+            );
+            if ($retryable) {
+                $this->enqueueRetry($row, $action, $payload, $message);
+            }
             return [
                 'success' => false,
-                'queued' => true,
+                'queued' => $retryable,
                 'message' => $message,
             ];
         }
@@ -731,11 +794,10 @@ final class ClockPaymentReconciliationService
                 $message = !empty($postWriteState['message'])
                     ? (string) $postWriteState['message']
                     : \__('Clock accepted the cancellation request, but booking reread did not confirm a cancelled state.', 'must-hotel-booking');
-                $this->updateMetadata($reservationId, $row, $action, $idempotencyKey, false, 'pending_retry', $message);
-                $this->enqueueRetry($row, $action, $payload, $message);
+                $this->updateMetadata($reservationId, $row, $action, $idempotencyKey, false, 'manual_review', $message);
                 return [
                     'success' => false,
-                    'queued' => true,
+                    'queued' => false,
                     'message' => $message,
                 ];
             }

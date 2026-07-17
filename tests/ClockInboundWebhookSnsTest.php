@@ -141,6 +141,8 @@ namespace MustHotelBooking\Provider\Clock {
         public static $basicUsername = '';
         /** @var string */
         public static $basicPassword = '';
+        /** @var string */
+        public static $snsTopicArn = 'arn:aws:sns:us-east-1:123456789012:clock-push';
 
         public static function isEnabled(): bool
         {
@@ -160,6 +162,11 @@ namespace MustHotelBooking\Provider\Clock {
         public static function webhookBasicPassword(): string
         {
             return self::$basicPassword;
+        }
+
+        public static function webhookSnsTopicArn(): string
+        {
+            return self::$snsTopicArn;
         }
     }
 
@@ -332,6 +339,8 @@ namespace {
             $this->missingConfiguredBasicAuth();
             $this->incompleteBasicConfiguration();
             $this->validSnsSignature();
+            $this->missingSnsSourcePin();
+            $this->wrongSnsTopic();
             $this->invalidSnsSignature();
             $this->unsafeSigningCertificateUrl();
             $this->subscriptionConfirmation();
@@ -396,6 +405,26 @@ namespace {
             $response = $this->send($this->signedNotification('valid-signature'));
             $this->assertSame(200, $response->get_status(), 'valid SNS signature is accepted');
             $this->assertSame(1, \count(ClockInboundSyncService::$processed), 'valid SNS signature processes one notification');
+        }
+
+        private function missingSnsSourcePin(): void
+        {
+            $this->reset();
+            ClockConfig::$snsTopicArn = '';
+            $response = $this->send($this->signedNotification('missing-topic-pin'));
+            $this->assertSame(503, $response->get_status(), 'SNS without a pinned topic or Basic auth is rejected as incomplete configuration');
+            $this->assertSame(0, \count(ClockInboundSyncService::$processed), 'unbound SNS source does not process notification');
+        }
+
+        private function wrongSnsTopic(): void
+        {
+            $this->reset();
+            $payload = $this->signedNotification('wrong-topic');
+            $payload['TopicArn'] = 'arn:aws:sns:us-east-1:123456789012:another-topic';
+            $payload['Signature'] = $this->sign($payload);
+            $response = $this->send($payload);
+            $this->assertSame(403, $response->get_status(), 'a valid signature from a different SNS topic is rejected');
+            $this->assertSame(0, \count(ClockInboundSyncService::$processed), 'wrong SNS topic does not process notification');
         }
 
         private function invalidSnsSignature(): void
@@ -646,6 +675,7 @@ namespace {
             ClockConfig::$legacySecret = '';
             ClockConfig::$basicUsername = '';
             ClockConfig::$basicPassword = '';
+            ClockConfig::$snsTopicArn = 'arn:aws:sns:us-east-1:123456789012:clock-push';
             ClockInboundSyncService::$processed = [];
             ClockInboundSyncService::$results = [];
             ProviderRequestLogRepository::reset();

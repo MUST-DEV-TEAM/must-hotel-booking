@@ -300,6 +300,31 @@ final class BookingQuoteDraft
     }
 
     /**
+     * Require the final provider pricing to retain the cancellation policy
+     * that the guest reviewed in the signed quote.
+     *
+     * @param mixed $draft
+     * @param array<string, mixed> $freshPricing
+     */
+    public static function cancellationPolicyMatches($draft, int $roomId, array $freshPricing): bool
+    {
+        $draft = self::normalize($draft);
+        if (empty($draft) || $roomId <= 0) {
+            return false;
+        }
+
+        $storedPricing = self::pricingForRoom($draft, $roomId);
+        $storedPolicy = \array_key_exists('cancellation_policy', $storedPricing)
+            ? self::sanitizeValue($storedPricing['cancellation_policy'])
+            : null;
+        $freshPolicy = \array_key_exists('cancellation_policy', $freshPricing)
+            ? self::sanitizeValue($freshPricing['cancellation_policy'])
+            : null;
+
+        return self::canonicalValue($storedPolicy) === self::canonicalValue($freshPolicy);
+    }
+
+    /**
      * @param mixed $draft
      * @return array<string, mixed>
      */
@@ -324,6 +349,32 @@ final class BookingQuoteDraft
         $encoded = \function_exists('wp_json_encode') ? \wp_json_encode($draft) : \json_encode($draft);
 
         return \hash_hmac('sha256', \is_string($encoded) ? $encoded : '', self::signingKey());
+    }
+
+    /** @param mixed $value @return mixed */
+    private static function canonicalValue($value)
+    {
+        if (!\is_array($value)) {
+            return $value;
+        }
+
+        $normalized = [];
+        foreach ($value as $key => $item) {
+            $normalized[$key] = self::canonicalValue($item);
+        }
+        $expectedIndex = 0;
+        $isList = true;
+        foreach (\array_keys($normalized) as $key) {
+            if ((int) $key !== $expectedIndex++) {
+                $isList = false;
+                break;
+            }
+        }
+        if (!$isList) {
+            \ksort($normalized);
+        }
+
+        return $normalized;
     }
 
     private static function signingKey(): string

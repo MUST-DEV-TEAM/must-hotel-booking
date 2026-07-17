@@ -844,11 +844,21 @@
         return normalizeDateList(state.disabledCheckinDates);
     }
 
-    function getSingleCalendarVisualUnavailableDates(
+    function getSingleCalendarUnavailableDates(
         selectedCheckin,
         selectedCheckout
     ) {
         return getSingleCalendarDisabledDates(
+            selectedCheckin,
+            selectedCheckout
+        );
+    }
+
+    function getSingleCalendarVisualUnavailableDates(
+        selectedCheckin,
+        selectedCheckout
+    ) {
+        return getSingleCalendarUnavailableDates(
             selectedCheckin,
             selectedCheckout
         );

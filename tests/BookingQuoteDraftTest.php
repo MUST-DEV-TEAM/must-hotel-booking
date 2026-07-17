@@ -62,6 +62,10 @@ namespace {
                     ],
                     'currency' => 'EUR',
                     'guarantee_policy_id' => 9,
+                    'cancellation_policy' => [
+                        'cancel_before_days' => 21,
+                        'penalty_amount' => 0,
+                    ],
                 ],
             ],
         ],
@@ -145,6 +149,16 @@ namespace {
     }
     if (\MustHotelBooking\Engine\BookingQuoteDraft::guaranteePolicyMatches($draft, 63, ['guarantee_policy_id' => 10])) {
         $failures[] = 'A changed guarantee policy must require customer review.';
+    }
+    if (!\MustHotelBooking\Engine\BookingQuoteDraft::cancellationPolicyMatches($draft, 63, [
+        'cancellation_policy' => ['penalty_amount' => 0, 'cancel_before_days' => 21],
+    ])) {
+        $failures[] = 'An unchanged cancellation policy should match the signed quote.';
+    }
+    if (\MustHotelBooking\Engine\BookingQuoteDraft::cancellationPolicyMatches($draft, 63, [
+        'cancellation_policy' => ['penalty_amount' => 50, 'cancel_before_days' => 21],
+    ])) {
+        $failures[] = 'A changed cancellation policy must require customer review.';
     }
 
     $cachedItems = \MustHotelBooking\Engine\BookingQuoteDraft::roomItems($draft);

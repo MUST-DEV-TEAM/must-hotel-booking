@@ -113,10 +113,28 @@ final class ClockReservationAmendmentService
             $message = $response->getErrorMessage() !== ''
                 ? $response->getErrorMessage()
                 : \__('Clock rejected the booking amendment.', 'must-hotel-booking');
-            $retryable = $response->getStatusCode() === 0 || $response->getStatusCode() === 429 || $response->getStatusCode() >= 500;
+            $statusCode = $response->getStatusCode();
 
-            if ($retryable) {
+            if ($statusCode === 429) {
                 return $this->queueRetry($reservation, $request, $target, $source, $message, true);
+            }
+
+            if ($statusCode <= 0 || $statusCode >= 500) {
+                $confirmed = $this->fetchBooking($bookingId, $reservationId);
+                if (
+                    !empty($confirmed['success'])
+                    && $this->remoteMatches($confirmed['booking'], $request, $target, !$isCheckedIn)
+                ) {
+                    return $this->applyReread(
+                        $reservation,
+                        $request,
+                        $target,
+                        $confirmed['booking'],
+                        $quote,
+                        $source,
+                        $idempotencyKey
+                    );
+                }
             }
 
             return $this->manualReviewFailure($reservation, $request, $message, $source);

@@ -594,7 +594,7 @@ final class PublicBookingAccessService
             [
                 'expires' => time() + $maxAge,
                 'path' => '/',
-                'secure' => true,
+                'secure' => !function_exists('is_ssl') || (bool) is_ssl(),
                 'httponly' => true,
                 'samesite' => 'Lax',
             ]
@@ -614,7 +614,7 @@ final class PublicBookingAccessService
             [
                 'expires' => time() - 3600,
                 'path' => '/',
-                'secure' => true,
+                'secure' => !function_exists('is_ssl') || (bool) is_ssl(),
                 'httponly' => true,
                 'samesite' => 'Lax',
             ]

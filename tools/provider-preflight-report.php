@@ -57,6 +57,8 @@ $report = [
         'api_user_set' => ClockConfig::apiUser() !== '',
         'api_key_set' => ClockConfig::apiKey() !== '',
         'webhook_secret_set' => ClockConfig::webhookSecret() !== '',
+        'webhook_sns_topic_arn_set' => ClockConfig::webhookSnsTopicArn() !== '',
+        'webhook_basic_auth_set' => ClockConfig::webhookBasicUsername() !== '' && ClockConfig::webhookBasicPassword() !== '',
         'webhook_url_public' => isPublicUrl(MustBookingConfig::build_public_rest_url('must-hotel-booking/v1/clock/webhook')),
         'webhook_url' => MustBookingConfig::build_public_rest_url('must-hotel-booking/v1/clock/webhook'),
         'auto_sync_enabled' => ClockConfig::autoSyncEnabled(),

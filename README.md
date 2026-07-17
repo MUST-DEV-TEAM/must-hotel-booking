@@ -4,10 +4,10 @@ MUST Hotel Booking is a WordPress hotel-booking and operations plugin. It manage
 
 ## Project status
 
-- Current code and release tag: `0.4.90`.
-- Runtime: WordPress plugin; metadata declares PHP 7.4+, but current code practically requires PHP 8 until compatibility is reconciled.
+- Current working-tree release candidate: `0.4.92`, based on commit `b0380ad`.
+- Runtime: WordPress plugin; metadata declares PHP 7.4+ and active payment, email, portal, and quote paths use PHP 7.4-compatible helpers.
 - Status: active development with substantial local, Stripe, PokPay, Clock PMS, admin, staff-portal, and Elementor functionality.
-- Readiness: **not proven production-ready**. The repository audit records unresolved critical confirmation access-control and paid-payment/Clock-fulfillment recovery risks. See [Project Context](docs/PROJECT_CONTEXT.md) and the temporary [Repository Consolidation Plan](docs/REPOSITORY_CONSOLIDATION_PLAN.md).
+- Readiness: **code-hardened, not production-certified**. Local checks pass, but real WordPress/database upgrades, Clock account rights and response shapes, callbacks, cron, and payment/refund E2E still require approved environment acceptance. See [Project Context](docs/PROJECT_CONTEXT.md) and [Operations](docs/OPERATIONS.md).
 
 ## Main capabilities
 
@@ -22,11 +22,11 @@ MUST Hotel Booking is a WordPress hotel-booking and operations plugin. It manage
 ## Requirements
 
 - WordPress 5.0 or later.
-- PHP 8 in practice. The plugin header currently declares PHP 7.4, but active payment, email, and portal paths use PHP 8-only string helpers.
+- PHP 7.4 or later; test the exact deployment runtime before release.
 - Pretty permalinks for staff portal routes.
 - Provider credentials and callback URLs only when the relevant integration is explicitly enabled.
 
-The header/readme requirements are distribution metadata, but they currently conflict with executable PHP usage. Treat both PHP 7.4 support and WordPress versions newer than the recorded tested-through value as unverified until compatibility tests pass.
+The header/readme requirements are distribution metadata, not runtime certification. Treat the exact PHP runtime and WordPress versions newer than the recorded tested-through value as unverified until deployment compatibility tests pass.
 
 ## Local installation
 

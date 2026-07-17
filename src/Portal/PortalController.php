@@ -2402,9 +2402,9 @@ final class PortalController
             $entityType = \sanitize_key((string) ($activityRow['entity_type'] ?? ''));
             $context = self::decodeActivityContext((string) ($activityRow['context_json'] ?? ''));
             $actionUrl = self::buildAuditActionUrl($activityRow, $context);
-            if (\str_starts_with($eventType, 'payment_')) {
+            if (\strpos($eventType, 'payment_') === 0) {
                 $paymentCount++;
-            } elseif (\str_contains($eventType, 'cancellation')) {
+            } elseif (\strpos($eventType, 'cancellation') !== false) {
                 $cancellationCount++;
             } else {
                 $reservationCount++;
@@ -3967,7 +3967,7 @@ final class PortalController
                         return false;
                     }
                     $eventType = \sanitize_key((string) ($row['event_type'] ?? ''));
-                    return !\str_starts_with($eventType, 'payment_');
+                    return \strpos($eventType, 'payment_') !== 0;
                 }
             )
         );

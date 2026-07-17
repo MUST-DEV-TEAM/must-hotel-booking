@@ -38,6 +38,165 @@ final class RefundRepository extends AbstractRepository
         return $inserted === false ? 0 : (int) $this->wpdb->insert_id;
     }
 
+    /**
+     * Atomically claim one provider refund operation for a reservation/reference
+     * tuple. MySQL advisory locks are used because older installations may
+     * contain duplicate/blank legacy idempotency values, so adding a unique
+     * index during upgrade would not be safe by itself.
+     *
+     * @param array<string, mixed> $data
+     * @return array<string, mixed>
+     */
+    public function claimProviderRefund(
+        array $data,
+        int $reservationId,
+        string $gateway,
+        string $providerPaymentReference,
+        float $amount,
+        int $preferredRefundId = 0
+    ): array {
+        $gateway = \sanitize_key($gateway);
+        $providerPaymentReference = \trim($providerPaymentReference);
+        $amount = \round($amount, 2);
+        $idempotencyKey = \trim((string) ($data['idempotency_key'] ?? ''));
+
+        if (
+            $reservationId <= 0
+            || $gateway === ''
+            || $providerPaymentReference === ''
+            || $amount <= 0.0
+            || $idempotencyKey === ''
+            || !$this->refundsTableExists()
+        ) {
+            return [
+                'success' => false,
+                'action' => 'invalid',
+                'refund_id' => 0,
+                'message' => 'Invalid refund claim data.',
+            ];
+        }
+
+        $lockName = 'mhb_refund_claim_' . \substr(
+            \hash('sha256', $reservationId . '|' . $gateway . '|' . $providerPaymentReference . '|' . \number_format($amount, 2, '.', '')),
+            0,
+            48
+        );
+        $lockAcquired = (int) $this->wpdb->get_var(
+            $this->wpdb->prepare('SELECT GET_LOCK(%s, %d)', $lockName, 5)
+        ) === 1;
+
+        if (!$lockAcquired) {
+            return [
+                'success' => false,
+                'action' => 'lock_failed',
+                'refund_id' => 0,
+                'message' => 'Unable to claim the refund operation lock.',
+            ];
+        }
+
+        try {
+            $blockingRefund = $this->findBlockingProviderRefund($reservationId, $gateway, $providerPaymentReference, $amount);
+            if (
+                \is_array($blockingRefund)
+                && (int) ($blockingRefund['id'] ?? 0) !== $preferredRefundId
+            ) {
+                return [
+                    'success' => true,
+                    'action' => 'blocked',
+                    'refund_id' => (int) ($blockingRefund['id'] ?? 0),
+                    'status' => (string) ($blockingRefund['status'] ?? ''),
+                ];
+            }
+
+            $candidate = null;
+            if ($preferredRefundId > 0) {
+                $candidate = $this->getRefund($preferredRefundId);
+            }
+            if (!\is_array($candidate)) {
+                $candidate = $this->findRetryableProviderRefund($reservationId, $gateway, $providerPaymentReference, $amount);
+            }
+            if (!\is_array($candidate)) {
+                $candidate = $this->findByIdempotencyKey($idempotencyKey);
+            }
+
+            if (\is_array($candidate)) {
+                $candidateId = (int) ($candidate['id'] ?? 0);
+                if (!$this->matchesProviderRefundTuple($candidate, $reservationId, $gateway, $providerPaymentReference, $amount)) {
+                    return [
+                        'success' => false,
+                        'action' => 'claim_conflict',
+                        'refund_id' => 0,
+                        'message' => 'Refund claim data conflicts with the existing refund record.',
+                    ];
+                }
+
+                $candidateStatus = \sanitize_key((string) ($candidate['status'] ?? ''));
+                if (
+                    $candidateId <= 0
+                    || \in_array($candidateStatus, ['pending', 'processing', 'succeeded', 'completed', 'manual_pending', 'manual_completed'], true)
+                ) {
+                    return [
+                        'success' => true,
+                        'action' => 'blocked',
+                        'refund_id' => $candidateId,
+                        'status' => $candidateStatus,
+                    ];
+                }
+
+                $updateData = $data;
+                unset($updateData['created_at']);
+                if (!$this->updateRefund($candidateId, $updateData)) {
+                    return [
+                        'success' => false,
+                        'action' => 'update_failed',
+                        'refund_id' => $candidateId,
+                        'message' => 'Unable to claim the existing refund record.',
+                    ];
+                }
+
+                return [
+                    'success' => true,
+                    'action' => 'claimed',
+                    'refund_id' => $candidateId,
+                    'status' => (string) ($data['status'] ?? ''),
+                ];
+            }
+
+            $refundId = $this->createRefund($data);
+            if ($refundId > 0) {
+                return [
+                    'success' => true,
+                    'action' => 'created',
+                    'refund_id' => $refundId,
+                    'status' => (string) ($data['status'] ?? ''),
+                ];
+            }
+
+            // A concurrent process may have inserted the same deterministic key
+            // between the SELECT and INSERT. Re-read it before reporting failure.
+            $existing = $this->findByIdempotencyKey($idempotencyKey);
+            if (\is_array($existing)) {
+                return [
+                    'success' => true,
+                    'action' => 'blocked',
+                    'refund_id' => (int) ($existing['id'] ?? 0),
+                    'status' => (string) ($existing['status'] ?? ''),
+                ];
+            }
+
+            return [
+                'success' => false,
+                'action' => 'create_failed',
+                'refund_id' => 0,
+                'message' => 'Unable to create the refund record.',
+            ];
+        } finally {
+            $this->wpdb->query(
+                $this->wpdb->prepare('SELECT RELEASE_LOCK(%s)', $lockName)
+            );
+        }
+    }
+
     /** @param array<string, mixed> $data */
     public function updateRefund(int $refundId, array $data): bool
     {
@@ -238,6 +397,32 @@ final class RefundRepository extends AbstractRepository
         );
 
         return \is_array($row) ? $row : null;
+    }
+
+    /** @return array<string, mixed>|null */
+    private function findByIdempotencyKey(string $idempotencyKey): ?array
+    {
+        if ($idempotencyKey === '' || !$this->refundsTableExists()) {
+            return null;
+        }
+
+        $row = $this->wpdb->get_row(
+            $this->wpdb->prepare(
+                'SELECT * FROM ' . $this->table('refunds') . ' WHERE idempotency_key = %s ORDER BY id DESC LIMIT 1',
+                $idempotencyKey
+            ),
+            ARRAY_A
+        );
+
+        return \is_array($row) ? $row : null;
+    }
+
+    private function matchesProviderRefundTuple(array $row, int $reservationId, string $gateway, string $reference, float $amount): bool
+    {
+        return (int) ($row['reservation_id'] ?? 0) === $reservationId
+            && \sanitize_key((string) ($row['gateway'] ?? '')) === $gateway
+            && \trim((string) ($row['provider_payment_reference'] ?? '')) === $reference
+            && \abs((float) ($row['amount'] ?? 0.0) - $amount) < 0.01;
     }
 
     /** @return array<string, mixed>|null */

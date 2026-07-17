@@ -110,10 +110,20 @@ final class ClockApiClient
             }
         );
 
-        $errors = ClockConfig::configurationErrors();
+        $errors = \method_exists(ClockConfig::class, 'configurationErrorsForApiType')
+            ? ClockConfig::configurationErrorsForApiType($apiType)
+            : ClockConfig::configurationErrors();
 
         if (!empty($errors)) {
             $response = new ClockApiResponse(0, '', null, 'config_missing', \implode(' ', $errors), $this->durationMs($started));
+            $this->completeLog($logId, $response, 0, []);
+            $this->recordPerformance($endpointName, $operation, $response, 'miss', 0);
+
+            return $response;
+        }
+
+        if ($url === '' || \stripos($url, 'https://') !== 0) {
+            $response = new ClockApiResponse(0, '', null, 'invalid_endpoint', \__('Clock endpoint URL is invalid or outside the configured API base.', 'must-hotel-booking'), $this->durationMs($started));
             $this->completeLog($logId, $response, 0, []);
             $this->recordPerformance($endpointName, $operation, $response, 'miss', 0);
 
@@ -126,6 +136,9 @@ final class ClockApiClient
                 ? \max(1, \min(ClockConfig::timeoutSeconds(), (int) $options['timeout']))
                 : ClockConfig::timeoutSeconds(),
             'headers' => $this->headers($correlationId),
+            'redirection' => 0,
+            'sslverify' => true,
+            'user-agent' => 'MUST Hotel Booking/' . (\defined('MUST_HOTEL_BOOKING_VERSION') ? MUST_HOTEL_BOOKING_VERSION : 'unknown'),
         ];
 
         if (isset($options['body'])) {
@@ -207,11 +220,7 @@ final class ClockApiClient
     {
         $path = \trim($path);
 
-        if (\preg_match('#^https?://#i', $path) === 1) {
-            $url = $path;
-        } else {
-            $url = ClockEndpointResolver::buildUrl($apiType !== '' ? $apiType : ClockConfig::apiType(), $path);
-        }
+        $url = ClockEndpointResolver::buildUrl($apiType !== '' ? $apiType : ClockConfig::apiType(), $path);
 
         if (!empty($query) && \function_exists('add_query_arg')) {
             $url = \add_query_arg($query, $url);
@@ -478,7 +487,7 @@ final class ClockApiClient
 
     private function isRetryable(ClockApiResponse $response): bool
     {
-        return $response->getStatusCode() === 429 || $response->getStatusCode() >= 500 || $response->isConnectivityFailure();
+        return $response->getStatusCode() === 429 || $response->isConnectivityFailure();
     }
 
     private function correlationId(): string

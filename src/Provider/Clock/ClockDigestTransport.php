@@ -60,6 +60,37 @@ final class ClockDigestTransport
         $args['headers'] = $headers;
 
         $this->rateLimiter->acquire();
+        $response = \wp_remote_request($url, $args);
+
+        /*
+         * A Digest nonce may expire between requests. A 401 response proves
+         * that the write was not authorized, so one challenge refresh is safe
+         * even for POST/PUT calls and avoids surfacing a false provider error.
+         */
+        $responseStatus = \is_wp_error($response) ? 0 : (int) \wp_remote_retrieve_response_code($response);
+        if ($responseStatus !== 401) {
+            return $response;
+        }
+
+        $refreshedChallenge = (string) \wp_remote_retrieve_header($response, 'www-authenticate');
+        if ($refreshedChallenge === '' || \stripos($refreshedChallenge, 'digest') === false) {
+            return $response;
+        }
+
+        $headers['Authorization'] = $this->buildDigestHeader(
+            $method,
+            $url,
+            $refreshedChallenge,
+            ClockConfig::apiUser(),
+            ClockConfig::apiKey()
+        );
+        if ($headers['Authorization'] === '') {
+            return $response;
+        }
+
+        $args['headers'] = $headers;
+        $this->rateLimiter->acquire();
+
         return \wp_remote_request($url, $args);
     }
 
@@ -83,19 +114,36 @@ final class ClockDigestTransport
         $nonce = (string) $data['nonce'];
         $qop = isset($data['qop']) ? (string) $data['qop'] : '';
         $algorithm = isset($data['algorithm']) ? \strtoupper((string) $data['algorithm']) : 'MD5';
+        $algorithm = $algorithm !== '' ? $algorithm : 'MD5';
+        $sessionAlgorithm = \substr($algorithm, -5) === '-SESS';
+        $baseAlgorithm = $sessionAlgorithm ? \substr($algorithm, 0, -5) : $algorithm;
+        $hashAlgorithm = $baseAlgorithm === 'MD5'
+            ? 'md5'
+            : ($baseAlgorithm === 'SHA-256' ? 'sha256' : ($baseAlgorithm === 'SHA-512-256' ? 'sha512/256' : ''));
 
-        if ($algorithm !== '' && $algorithm !== 'MD5') {
+        if ($hashAlgorithm === '' || !\in_array($hashAlgorithm, \hash_algos(), true)) {
             return '';
         }
 
-        $ha1 = \md5($user . ':' . $realm . ':' . $key);
-        $ha2 = \md5($method . ':' . $uri);
-        $cnonce = \substr(\md5(\wp_generate_uuid4()), 0, 16);
+        $uuid = \function_exists('wp_generate_uuid4') ? \wp_generate_uuid4() : \uniqid('', true);
+        $cnonce = \substr(\hash($hashAlgorithm, $uuid), 0, 32);
         $nc = '00000001';
-        $qopValue = \stripos($qop, 'auth') !== false ? 'auth' : '';
+        $qopOptions = \array_filter(\array_map('trim', \explode(',', \strtolower($qop))));
+        $qopValue = \in_array('auth', $qopOptions, true) ? 'auth' : '';
+
+        if ($qop !== '' && $qopValue === '') {
+            // auth-int needs the exact entity body hash and is not offered by Clock's documented examples.
+            return '';
+        }
+
+        $ha1 = \hash($hashAlgorithm, $user . ':' . $realm . ':' . $key);
+        if ($sessionAlgorithm) {
+            $ha1 = \hash($hashAlgorithm, $ha1 . ':' . $nonce . ':' . $cnonce);
+        }
+        $ha2 = \hash($hashAlgorithm, $method . ':' . $uri);
         $response = $qopValue !== ''
-            ? \md5($ha1 . ':' . $nonce . ':' . $nc . ':' . $cnonce . ':' . $qopValue . ':' . $ha2)
-            : \md5($ha1 . ':' . $nonce . ':' . $ha2);
+            ? \hash($hashAlgorithm, $ha1 . ':' . $nonce . ':' . $nc . ':' . $cnonce . ':' . $qopValue . ':' . $ha2)
+            : \hash($hashAlgorithm, $ha1 . ':' . $nonce . ':' . $ha2);
 
         $parts = [
             'Digest username="' . $this->quote($user) . '"',
@@ -107,6 +155,10 @@ final class ClockDigestTransport
 
         if (!empty($data['opaque'])) {
             $parts[] = 'opaque="' . $this->quote((string) $data['opaque']) . '"';
+        }
+
+        if ($algorithm !== '') {
+            $parts[] = 'algorithm=' . $algorithm;
         }
 
         if ($qopValue !== '') {
@@ -121,7 +173,11 @@ final class ClockDigestTransport
     /** @return array<string, string> */
     private function parseChallenge(string $challenge): array
     {
-        $challenge = \trim((string) \preg_replace('/^\s*Digest\s+/i', '', $challenge));
+        $digestAt = \stripos($challenge, 'Digest ');
+        if ($digestAt === false) {
+            return [];
+        }
+        $challenge = \trim(\substr($challenge, $digestAt + 7));
         $data = [];
 
         if (\preg_match_all('/([a-z0-9_\-]+)=("([^"]*)"|([^,\s]+))/i', $challenge, $matches, PREG_SET_ORDER)) {

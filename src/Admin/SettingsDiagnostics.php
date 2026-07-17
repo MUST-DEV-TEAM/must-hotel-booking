@@ -383,6 +383,7 @@ final class SettingsDiagnostics
             'inbound_sync' => [
                 'summary' => $inboundSummary,
                 'webhook_secret_set' => !empty($providerSummary['clock_webhook_secret_set']),
+                'webhook_sns_topic_arn_set' => !empty($providerSummary['clock_webhook_sns_topic_arn_set']),
                 'webhook_basic_auth_set' => !empty($providerSummary['clock_webhook_basic_auth_set']),
                 'webhook_basic_auth_incomplete' => !empty($providerSummary['clock_webhook_basic_auth_incomplete']),
                 'sns_signature_verification' => true,
@@ -546,7 +547,7 @@ final class SettingsDiagnostics
         $lines[] = 'Clock Public Booking Paths Configured: ' . (string) ($clock['clock_public_booking_paths_configured'] ?? 0);
         $lines[] = 'Clock Reconciliation Paths Configured: ' . (string) ($clock['clock_reconciliation_paths_configured'] ?? 0);
         $lines[] = 'Clock Inbound Sync Paths Configured: ' . (string) ($clock['clock_inbound_sync_paths_configured'] ?? 0);
-        $lines[] = 'Clock Inbound Auth: SNS signatures supported; Basic auth set: ' . (!empty($clock['clock_webhook_basic_auth_set']) ? 'yes' : 'no') . '; Basic auth incomplete: ' . (!empty($clock['clock_webhook_basic_auth_incomplete']) ? 'yes' : 'no') . '; legacy token/HMAC set: ' . (!empty($clock['clock_webhook_secret_set']) ? 'yes' : 'no');
+        $lines[] = 'Clock Inbound Auth: SNS signatures supported; Topic ARN pinned: ' . (!empty($clock['clock_webhook_sns_topic_arn_set']) ? 'yes' : 'no') . '; Basic auth set: ' . (!empty($clock['clock_webhook_basic_auth_set']) ? 'yes' : 'no') . '; Basic auth incomplete: ' . (!empty($clock['clock_webhook_basic_auth_incomplete']) ? 'yes' : 'no') . '; legacy token/HMAC set: ' . (!empty($clock['clock_webhook_secret_set']) ? 'yes' : 'no');
         $lines[] = 'Clock Webhook URL: ' . (string) ($clock['clock_webhook_url'] ?? '');
         $lines[] = 'Stripe Webhook URL: ' . (string) ($data['payments']['stripe_webhook_url'] ?? '');
         $lines[] = 'PokPay Webhook URL: ' . (string) ($data['payments']['pokpay_webhook_url'] ?? '');

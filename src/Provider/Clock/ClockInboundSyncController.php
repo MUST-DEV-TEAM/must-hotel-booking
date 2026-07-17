@@ -251,6 +251,24 @@ final class ClockInboundSyncController
         }
 
         if (!empty($sns)) {
+            $expectedTopicArn = ClockConfig::webhookSnsTopicArn();
+            $receivedTopicArn = (string) ($sns['topic_arn'] ?? '');
+            if ($expectedTopicArn === '' && !$basicConfigured) {
+                return [
+                    'success' => false,
+                    'status' => 503,
+                    'code' => 'sns_source_unpinned',
+                    'message' => \__('Clock SNS webhook requires a pinned Topic ARN or complete HTTP Basic authentication.', 'must-hotel-booking'),
+                ];
+            }
+            if ($expectedTopicArn !== '' && !\hash_equals($expectedTopicArn, $receivedTopicArn)) {
+                return [
+                    'success' => false,
+                    'status' => 403,
+                    'code' => 'sns_topic_mismatch',
+                    'message' => \__('Amazon SNS TopicArn does not match the configured Clock PUSH topic.', 'must-hotel-booking'),
+                ];
+            }
             $snsResult = self::verifySnsEnvelope($sns);
             if (empty($snsResult['success'])) {
                 return $snsResult;

@@ -116,6 +116,24 @@ namespace MustHotelBooking\Provider\Clock {
         public int $postCalls = 0;
 
         /** @return array<string, mixed> */
+        public function findCreditItemByReference(
+            string $folioId,
+            string $reference,
+            float $amount,
+            string $currency,
+            int $reservationId = 0
+        ): array {
+            unset($folioId, $amount, $currency, $reservationId);
+            return [
+                'success' => true,
+                'found' => $reference === 're_1',
+                'ambiguous' => false,
+                'credit_item_id' => $reference === 're_1' ? 'credit_refund_1' : '',
+                'message' => '',
+            ];
+        }
+
+        /** @return array<string, mixed> */
         public function validateRefundFolio(string $clockBookingId, string $folioId, int $reservationId): array
         {
             unset($clockBookingId, $folioId, $reservationId);
@@ -343,7 +361,7 @@ namespace {
     $failures = [];
 
     if (empty($result['success'])) {
-        $failures[] = 'Retry recovery should report success when the expected balance already exists.';
+        $failures[] = 'Retry recovery should report success when an exact provider credit item exists.';
     }
     if ($folioService->postCalls !== 0) {
         $failures[] = 'Retry recovery must reread and recover before posting another Clock refund item.';
@@ -357,8 +375,8 @@ namespace {
     if (!\is_array($updatedRefund) || (string) ($updatedRefund['clock_sync_status'] ?? '') !== 'synced') {
         $failures[] = 'Recovered refund must be mirrored as synced.';
     }
-    if (!\is_array($updatedRefund) || (string) ($updatedRefund['clock_refund_item_id'] ?? '') !== $idempotencyKey) {
-        $failures[] = 'Recovered refund should use the accounting idempotency key as the durable Clock placeholder reference.';
+    if (!\is_array($updatedRefund) || (string) ($updatedRefund['clock_refund_item_id'] ?? '') !== 'credit_refund_1') {
+        $failures[] = 'Recovered refund must retain the real Clock credit-item ID.';
     }
 
     if ($failures) {

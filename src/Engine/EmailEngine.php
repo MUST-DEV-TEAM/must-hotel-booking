@@ -608,10 +608,10 @@ final class EmailEngine
         $checkinTimestamp = \strtotime('+14 days', (int) \current_time('timestamp'));
         $checkoutTimestamp = \strtotime('+17 days', (int) \current_time('timestamp'));
         $hotelPhone = MustBookingConfig::get_hotel_phone();
-        $paymentMethod = \str_contains($templateKey, '_paid') ? 'stripe' : 'pay_at_hotel';
-        $paymentStatus = \str_contains($templateKey, 'cancelled')
+        $paymentMethod = \strpos($templateKey, '_paid') !== false ? 'stripe' : 'pay_at_hotel';
+        $paymentStatus = \strpos($templateKey, 'cancelled') !== false
             ? 'cancelled'
-            : (\str_contains($templateKey, '_paid') ? 'paid' : 'unpaid');
+            : (\strpos($templateKey, '_paid') !== false ? 'paid' : 'unpaid');
         return [
             '{booking_id}' => 'TEST-1001',
             '{guest_name}' => 'Alex Morgan',

@@ -5758,3 +5758,12 @@ div.must-confirmation-picker:nth-child(1) > div:nth-child(3) > div:nth-child(1) 
         max-width: 400px;
     }
 }
+
+/* Keep keyboard focus visible after the visual reset rules above. */
+.must-hotel-booking-page-booking :where(a, button, input, select, textarea, [role="button"], [tabindex]):focus-visible,
+.must-hotel-booking-page-booking-confirmation :where(a, button, input, select, textarea, [role="button"], [tabindex]):focus-visible,
+.must-booking-process-page :where(a, button, input, select, textarea, [role="button"], [tabindex]):focus-visible {
+    outline: 2px solid #141414 !important;
+    outline-offset: 3px;
+    box-shadow: none !important;
+}

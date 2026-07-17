@@ -232,7 +232,11 @@ function build_confirmation_cancellation_policy_review(int $reservationId, array
         $amountPaid,
         'system',
         0.0,
-        \__('Online cancellation more than 21 days before check-in refunds paid amount minus the stored provider fee.', 'must-hotel-booking')
+        \sprintf(
+            /* translators: %d is the configured cancellation-policy day threshold. */
+            \__('Online cancellation more than %d days before check-in refunds paid amount minus the stored provider fee.', 'must-hotel-booking'),
+            $policyDays
+        )
     );
     $base = [
         'reservation_id' => $reservationId,

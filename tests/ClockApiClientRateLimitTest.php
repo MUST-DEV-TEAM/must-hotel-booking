@@ -9,8 +9,10 @@ namespace {
     $GLOBALS['mhb_clock_http_queue'] = [
         ['status' => 429, 'body' => '{"message":"Too Many Requests"}', 'headers' => ['retry-after' => '1']],
         ['status' => 200, 'body' => '{"ok":true}', 'headers' => []],
+        ['status' => 200, 'body' => '{"created":true}', 'headers' => []],
     ];
     $GLOBALS['mhb_clock_http_calls'] = 0;
+    $GLOBALS['mhb_clock_last_headers'] = [];
     $GLOBALS['mhb_clock_transients'] = [];
 
     function __($text, $domain = null): string { unset($domain); return (string) $text; }
@@ -23,7 +25,8 @@ namespace {
     function set_transient(string $key, $value, int $expiration): bool { unset($expiration); $GLOBALS['mhb_clock_transients'][$key] = $value; return true; }
     function wp_remote_request(string $url, array $args): array
     {
-        unset($url, $args);
+        unset($url);
+        $GLOBALS['mhb_clock_last_headers'] = isset($args['headers']) && is_array($args['headers']) ? $args['headers'] : [];
         $GLOBALS['mhb_clock_http_calls']++;
         return \array_shift($GLOBALS['mhb_clock_http_queue']);
     }
@@ -94,12 +97,20 @@ namespace {
 
     $first = $client->request('GET', '/rates_availability?from=2026-07-01', ['endpoint_name' => 'rates_availability'], 'clock.rates_availability.search');
     $second = $client->request('GET', '/rates_availability?from=2026-07-01', ['endpoint_name' => 'rates_availability'], 'clock.rates_availability.search');
+    $idempotent = $client->request('POST', '/bookings', [
+        'endpoint_name' => 'reservation_create',
+        'idempotency_key' => 'clock-create-123',
+        'body' => ['booking' => ['id' => 1]],
+    ], 'clock.reservation_create');
     $failures = [];
 
     if (!$first->isSuccess() || !$second->isSuccess()) {
         $failures[] = 'Clock 429 responses should retry and recover when the next response succeeds.';
     }
-    if ((int) $GLOBALS['mhb_clock_http_calls'] !== 2) {
+    if (!$idempotent->isSuccess() || isset($GLOBALS['mhb_clock_last_headers']['Idempotency-Key'])) {
+        $failures[] = 'Clock writes must not transmit an undocumented provider idempotency header.';
+    }
+    if ((int) $GLOBALS['mhb_clock_http_calls'] !== 3) {
         $failures[] = 'Identical GET requests in one request lifecycle must be deduplicated after the first successful result.';
     }
     if (empty($sleeps) || \max($sleeps) < 1000000) {
