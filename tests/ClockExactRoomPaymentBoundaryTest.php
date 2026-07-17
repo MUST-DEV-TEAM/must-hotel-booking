@@ -51,6 +51,48 @@ namespace MustHotelBooking\Engine {
     final class BookingValidationEngine
     {
         public static function validateGuestForm(array $guestForm): array { unset($guestForm); return []; }
+        public static function parseRequestContext(array $source, bool $allowDefaults = false): array
+        {
+            unset($allowDefaults);
+            $checkin=(string)($source['checkin'] ?? '');
+            $checkout=(string)($source['checkout'] ?? '');
+            $valid=$checkin !== '' && $checkout !== '' && $checkin < $checkout;
+            return [
+                'is_valid'=>$valid,
+                'checkin'=>$checkin,
+                'checkout'=>$checkout,
+                'guests'=>max(1,(int)($source['guests'] ?? 1)),
+                'room_count'=>max(1,(int)($source['room_count'] ?? 1)),
+                'accommodation_type'=>(string)($source['accommodation_type'] ?? ''),
+                'errors'=>$valid ? [] : ['Invalid booking context.'],
+            ];
+        }
+        public static function applyFixedRoomContext(array $context, array $room): array
+        {
+            unset($room);
+            return $context;
+        }
+    }
+
+    final class RatePlanEngine
+    {
+        public static function getRatePlansForRoomType(int $roomTypeId): array
+        {
+            return $roomTypeId === 10
+                ? [['id' => 30, 'is_active' => 1, 'max_occupancy' => 2]]
+                : [];
+        }
+
+        public static function getRoomRatePlan(int $roomTypeId, int $ratePlanId): ?array
+        {
+            foreach (self::getRatePlansForRoomType($roomTypeId) as $plan) {
+                if ((int) ($plan['id'] ?? 0) === $ratePlanId) {
+                    return $plan;
+                }
+            }
+
+            return null;
+        }
     }
 
     final class BookingQuoteDraft
@@ -155,22 +197,47 @@ namespace MustHotelBooking\Engine {
 }
 
 namespace MustHotelBooking\Frontend {
-    function get_booking_selected_room_ids(): array { return [21]; }
-    function get_booking_selected_rooms(): array { return [['id' => 21]]; }
-    function get_booking_selected_room_rate_plan_map(): array { return [21 => 30]; }
-    function get_booking_selection_flow_data(): array
-    {
-        return ['quote_draft' => [
-            'checkin' => '2026-08-01',
-            'checkout' => '2026-08-03',
-            'guests' => 2,
-            'room_count' => 1,
-            'accommodation_type' => 'room-type:10',
-            'coupon_code' => '',
-        ]];
+    $boundarySelection = [];
+    function boundary_reset_selection(?array $state = null): void {
+        global $boundarySelection;
+        $boundarySelection = $state ?? [
+            'context' => ['checkin'=>'2026-08-01','checkout'=>'2026-08-03','guests'=>2,'room_count'=>1,'accommodation_type'=>'room-type:10'],
+            'selected_rooms' => [['room_id'=>21,'rate_plan_id'=>30]],
+            'flow_data' => ['quote_draft'=>['checkin'=>'2026-08-01','checkout'=>'2026-08-03','guests'=>2,'room_count'=>1,'accommodation_type'=>'room-type:10','coupon_code'=>'']],
+        ];
+    }
+    boundary_reset_selection();
+    function get_booking_selection(): array { global $boundarySelection; return $boundarySelection; }
+    function get_booking_selected_room_ids(): array {
+        global $boundarySelection;
+        return array_values(array_map(static fn(array $r): int => (int)($r['room_id'] ?? 0), (array)($boundarySelection['selected_rooms'] ?? [])));
+    }
+    function get_booking_selected_rooms(): array {
+        global $boundarySelection;
+        return array_values(array_map(static fn(array $r): array => ['id'=>(int)($r['room_id'] ?? 0),'rate_plan_id'=>(int)($r['rate_plan_id'] ?? 0)], (array)($boundarySelection['selected_rooms'] ?? [])));
+    }
+    function get_booking_selected_room_rate_plan_map(): array {
+        global $boundarySelection; $map=[];
+        foreach ((array)($boundarySelection['selected_rooms'] ?? []) as $r) { $map[(int)($r['room_id'] ?? 0)] = (int)($r['rate_plan_id'] ?? 0); }
+        return $map;
+    }
+    function get_booking_selection_flow_data(): array { global $boundarySelection; return (array)($boundarySelection['flow_data'] ?? []); }
+    function do_booking_selection_contexts_match(array $a, array $b): bool {
+        foreach (['checkin','checkout','guests','room_count','accommodation_type'] as $k) { if ((string)($a[$k] ?? '') !== (string)($b[$k] ?? '')) return false; }
+        return true;
+    }
+    function clear_booking_selection(bool $releaseLocks = true): void { unset($releaseLocks); boundary_reset_selection(['context'=>[],'selected_rooms'=>[],'flow_data'=>[]]); }
+    function add_room_to_booking_selection(int $roomId, array $context, int $ratePlanId = 0): bool {
+        global $boundarySelection;
+        $boundarySelection['context']=$context;
+        $boundarySelection['selected_rooms']=[['room_id'=>$roomId,'rate_plan_id'=>max(0,$ratePlanId)]];
+        return true;
+    }
+    function update_booking_selection_flow_data(array $data): void {
+        global $boundarySelection;
+        $boundarySelection['flow_data']=array_merge((array)($boundarySelection['flow_data'] ?? []),$data);
     }
     function combine_checkout_phone_value(array $guestForm): string { unset($guestForm); return ''; }
-    function clear_booking_selection(bool $releaseLocks = true): void { unset($releaseLocks); }
 }
 
 namespace MustHotelBooking\Provider\Clock {
@@ -255,10 +322,11 @@ namespace MustHotelBooking\Provider\Clock {
             string $sessionId = '',
             int $guests = 1,
             int $ratePlanId = 0,
-            string $operationContext = 'final_revalidation'
+            string $operationContext = 'final_revalidation',
+            int $excludeReservationId = 0
         ): bool
         {
-            $this->freshCalls[] = compact('roomId', 'checkin', 'checkout', 'sessionId', 'guests', 'ratePlanId', 'operationContext');
+            $this->freshCalls[] = compact('roomId', 'checkin', 'checkout', 'sessionId', 'guests', 'ratePlanId', 'operationContext', 'excludeReservationId');
             return $this->available;
         }
     }
@@ -353,6 +421,7 @@ namespace {
             'physical_room_id' => 21,
             'room_mapping' => ['id' => 10, 'external_id' => '1001', 'external_code' => 'STANDARD'],
             'physical_mapping' => ['id' => 21, 'external_id' => '501', 'external_code' => 'ROOM-501'],
+            'room' => ['id'=>21,'room_type_id'=>10,'physical_room_id'=>21,'name'=>'Boundary room','max_guests'=>2],
         ];
     }
 
@@ -403,6 +472,29 @@ namespace {
     $guestForm = ['first_name' => 'Ada', 'last_name' => 'Guest', 'email' => 'ada@example.test'];
     $context = ['is_valid' => true, 'checkin' => '2026-08-01', 'checkout' => '2026-08-03', 'guests' => 2];
 
+    \MustHotelBooking\Frontend\boundary_reset_selection(['context'=>[],'selected_rooms'=>[],'flow_data'=>[]]);
+    $client=new ClockApiClient();
+    $availability=new ClockAvailabilityProvider();
+    $availability->available=true;
+    $quote=new ClockQuoteProvider();
+    $mirror=new ClockMirrorReservationService();
+    $selection=new ClockRoomSelection();
+    $selection->selection=boundary_selection();
+    $bootstrapErrors=boundary_provider($client,$availability,$quote,$mirror,$selection)->bootstrapCheckoutSelectionFromRequest([
+        'room_id'=>10,
+        'inventory_room_id'=>21,
+        'checkin'=>'2026-08-01',
+        'checkout'=>'2026-08-03',
+        'guests'=>2,
+        'room_count'=>1,
+        'accommodation_type'=>'room-type:10',
+    ]);
+    $bootstrapSelection=\MustHotelBooking\Frontend\get_booking_selection();
+    if (!empty($bootstrapErrors) || (int)($bootstrapSelection['selected_rooms'][0]['rate_plan_id'] ?? 0) !== 30) {
+        $failures[]='A direct fixed-room checkout without rate_plan_id must persist its single applicable mapped Clock rate.';
+    }
+    \MustHotelBooking\Frontend\boundary_reset_selection();
+
     $client = new ClockApiClient();
     $availability = new ClockAvailabilityProvider();
     $quote = new ClockQuoteProvider();
@@ -434,6 +526,9 @@ namespace {
     $confirmation = (string) \file_get_contents(__DIR__ . '/../src/Frontend/confirmation-page.php');
     $reservationCall = \strpos($confirmation, 'create_checkout_reservations(');
     $paymentCall = \strpos($confirmation, 'PaymentEngine::processPayment');
+    if (\strpos($confirmation, 'if (!empty($reservation_ids) && empty($messages))') !== false) {
+        $failures[] = 'Informational quote notices must not suppress payment after successful local reservation creation.';
+    }
     if ($reservationCall === false || $paymentCall === false || $reservationCall > $paymentCall) {
         $failures[] = 'PokPay order creation must remain downstream of successful local reservation creation.';
     }
@@ -529,8 +624,9 @@ namespace {
     }
     if ((int) ($availability->freshCalls[0]['guests'] ?? 0) !== 2
         || (int) ($availability->freshCalls[0]['ratePlanId'] ?? 0) !== 30
-        || (string) ($availability->freshCalls[0]['operationContext'] ?? '') !== 'paid_fulfilment') {
-        $failures[] = 'Paid fulfilment validation must use saved guests, rate, and paid operation context.';
+        || (string) ($availability->freshCalls[0]['operationContext'] ?? '') !== 'paid_fulfilment'
+        || (int) ($availability->freshCalls[0]['excludeReservationId'] ?? 0) !== 77) {
+        $failures[] = 'Paid fulfilment validation must use saved guests, rate, paid operation context, and exclude its own reservation.';
     }
 
     $boundaryRepository = new BoundaryReservationRepository();

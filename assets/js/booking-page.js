@@ -175,13 +175,16 @@
         return parsed;
     }
     function getFixedAvailabilityRoomId() {
+        var hiddenInventoryInput = document.querySelector('input[name="inventory_room_id"], input[name="physical_room_id"]');
+        var hiddenParsed = hiddenInventoryInput ? parseInt(String(hiddenInventoryInput.value || '0'), 10) : 0;
+        if (Number.isFinite(hiddenParsed) && hiddenParsed > 0) {
+            return hiddenParsed;
+        }
         var fixedRoom = config.fixedRoom && typeof config.fixedRoom === 'object' ? config.fixedRoom : {};
         var parsed = parseInt(String(fixedRoom.physical_room_id || fixedRoom.inventory_room_id || config.fixedInventoryRoomId || '0'), 10);
-
         if (Number.isFinite(parsed) && parsed > 0) {
             return parsed;
         }
-
         return getFixedRoomId();
     }
     function isFixedRoomMode() {
@@ -465,6 +468,7 @@
         var roomCountFields = document.querySelectorAll('.must-booking-room-count');
         var accommodationTypeFields = document.querySelectorAll('.must-booking-hidden-accommodation-type');
         var roomIdFields = document.querySelectorAll('.must-booking-hidden-room-id');
+        var inventoryRoomIdFields = document.querySelectorAll('input[name="inventory_room_id"], input[name="physical_room_id"]');
         checkinFields.forEach(function (field) {
             field.value = context.checkin;
         });
@@ -482,6 +486,9 @@
         });
         roomIdFields.forEach(function (field) {
             field.value = String(context.roomId || 0);
+        });
+        inventoryRoomIdFields.forEach(function (field) {
+            field.value = String(context.availabilityRoomId || 0);
         });
     }
     function rebuildGuestsSelectOptions(guestsSelect, guestsInput, accommodationTypeSelect, roomCountSelect) {
@@ -525,13 +532,13 @@
         var arrowIconUrl = String(config.arrowIconUrl || '');
         var bedIconUrl = String(config.bedIconUrl || '');
         var html = rooms.map(function (room) {
-                var roomId = Number(room.id || 0);
-                var roomTypeId = Number(room.room_type_id || roomId || 0);
-                var inventoryRoomId = Number(room.physical_room_id || 0);
-                var submittedRoomId = inventoryRoomId > 0 ? roomTypeId : roomId;
-                var inventoryRoomInput = inventoryRoomId > 0
-                    ? '<input type="hidden" name="inventory_room_id" value="' + escapeHtml(inventoryRoomId) + '" />'
-                    : '';
+            var roomId = Number(room.id || 0);
+            var roomTypeId = Number(room.room_type_id || roomId || 0);
+            var inventoryRoomId = Number(room.physical_room_id || 0);
+            var submittedRoomId = inventoryRoomId > 0 ? roomTypeId : roomId;
+            var inventoryRoomInput = inventoryRoomId > 0
+                ? '<input type="hidden" name="inventory_room_id" value="' + escapeHtml(inventoryRoomId) + '" />'
+                : '';
             var roomName = String(room.name || strings.roomLabel || 'Room');
             var roomDescription = String(room.description || '');
             var maxGuests = Number(room.max_guests || 0);
@@ -757,26 +764,22 @@
             });
         });
     }
-function markUnavailableDayElement(dayElement, unavailableDates) {
-    if (!dayElement || !dayElement.dateObj) {
-        return;
-    }
-
-    var dates = normalizeDateList(unavailableDates);
-    var dateString = formatDate(dayElement.dateObj);
-    var isUnavailable = dates.indexOf(dateString) !== -1;
-
-    dayElement.classList.toggle('must-booking-day-unavailable', isUnavailable);
-
-    if (isUnavailable) {
-        dayElement.setAttribute('aria-disabled', 'true');
-        return;
-    }
-
-    if (!dayElement.classList.contains('flatpickr-disabled') && !dayElement.classList.contains('notAllowed')) {
-        dayElement.removeAttribute('aria-disabled');
-    }
-}    function syncUnavailableDayClasses(picker, unavailableDates) {
+    function markUnavailableDayElement(dayElement, unavailableDates) {
+        if (!dayElement || !dayElement.dateObj) {
+            return;
+        }
+        var dates = normalizeDateList(unavailableDates);
+        var dateString = formatDate(dayElement.dateObj);
+        var isUnavailable = dates.indexOf(dateString) !== -1;
+        dayElement.classList.toggle('must-booking-day-unavailable', isUnavailable);
+        if (isUnavailable) {
+            dayElement.setAttribute('aria-disabled', 'true');
+            return;
+        }
+        if (!dayElement.classList.contains('flatpickr-disabled') && !dayElement.classList.contains('notAllowed')) {
+            dayElement.removeAttribute('aria-disabled');
+        }
+    } function syncUnavailableDayClasses(picker, unavailableDates) {
         if (!picker || !picker.calendarContainer) {
             return;
         }
@@ -790,91 +793,154 @@ function markUnavailableDayElement(dayElement, unavailableDates) {
     function refreshUnavailableDayClasses() {
         var checkinInput = document.getElementById('must-booking-checkin');
         var checkoutInput = document.getElementById('must-booking-checkout');
+
         syncUnavailableDayClasses(
             state.checkinPicker,
             !state.checkoutPicker && checkinInput && checkoutInput
-                ? getSingleCalendarVisualUnavailableDates(checkinInput.value)
+                ? getSingleCalendarVisualUnavailableDates(
+                    checkinInput.value,
+                    checkoutInput.value
+                )
                 : state.disabledCheckinDates
         );
-        syncUnavailableDayClasses(state.checkoutPicker, state.disabledCheckoutDates);
+
+        syncUnavailableDayClasses(
+            state.checkoutPicker,
+            state.disabledCheckoutDates
+        );
     }
+
     function normalizeDateList(value) {
         if (!Array.isArray(value)) {
             return [];
         }
+
         return value.filter(function (date) {
             return isValidDateString(date);
         }).map(function (date) {
             return String(date);
         });
     }
+
     function isDateInList(date, dates) {
         return dates.indexOf(String(date || '')) !== -1;
     }
-    function getSingleCalendarUnavailableDates() {
-        var seen = {};
-        var combined = [];
-        normalizeDateList(state.disabledCheckinDates).concat(normalizeDateList(state.disabledCheckoutDates)).forEach(function (date) {
-            if (seen[date]) {
-                return;
-            }
-            seen[date] = true;
-            combined.push(date);
-        });
-        return combined;
-    }
-    function getSingleCalendarDisabledDates(selectedCheckin) {
+
+    function getSingleCalendarDisabledDates(selectedCheckin, selectedCheckout) {
         var currentCheckin = String(selectedCheckin || '').trim();
-        return getSingleCalendarUnavailableDates().filter(function (date) {
-            return !isValidDateString(currentCheckin) || date !== currentCheckin;
-        });
+        var currentCheckout = String(selectedCheckout || '').trim();
+
+        /*
+         * When check-in exists but checkout is empty, the next click is checkout.
+         * In every other state, the next click starts a new check-in selection.
+         */
+        if (
+            isValidDateString(currentCheckin) &&
+            !isValidDateString(currentCheckout)
+        ) {
+            return normalizeDateList(state.disabledCheckoutDates);
+        }
+
+        return normalizeDateList(state.disabledCheckinDates);
     }
-    function getSingleCalendarVisualUnavailableDates(selectedCheckin) {
-        return getSingleCalendarDisabledDates(selectedCheckin);
+
+    function getSingleCalendarVisualUnavailableDates(
+        selectedCheckin,
+        selectedCheckout
+    ) {
+        return getSingleCalendarDisabledDates(
+            selectedCheckin,
+            selectedCheckout
+        );
     }
-    function isSingleCalendarUnavailableDate(date, selectedCheckin) {
-        return getSingleCalendarDisabledDates(selectedCheckin).indexOf(String(date || '')) !== -1;
+
+    function isSingleCalendarUnavailableDate(
+        date,
+        selectedCheckin,
+        selectedCheckout
+    ) {
+        return getSingleCalendarDisabledDates(
+            selectedCheckin,
+            selectedCheckout
+        ).indexOf(String(date || '')) !== -1;
     }
+
     function findFirstAvailableDate(startDate, disabledDates) {
         var start = parseDateString(startDate || config.today || '');
         var windowDays = parseInt(String(config.windowDays || '180'), 10);
         var dates = normalizeDateList(disabledDates);
+
         if (!start) {
             return '';
         }
+
         if (!Number.isFinite(windowDays) || windowDays < 1) {
             windowDays = 180;
         }
+
         for (var index = 0; index < windowDays; index++) {
             var candidate = new Date(start.getTime());
             candidate.setDate(candidate.getDate() + index);
+
             var formatted = formatDate(candidate);
+
             if (dates.indexOf(formatted) === -1) {
                 return formatted;
             }
         }
+
         return '';
     }
+
     function findFirstAvailableCheckout(checkin, disabledCheckoutDates) {
         var start = parseDateString(checkin);
         var windowDays = parseInt(String(config.windowDays || '180'), 10);
         var dates = normalizeDateList(disabledCheckoutDates);
+
         if (!start) {
             return '';
         }
+
         if (!Number.isFinite(windowDays) || windowDays < 1) {
             windowDays = 180;
         }
+
         for (var nights = 1; nights <= windowDays; nights++) {
             var candidate = new Date(start.getTime());
             candidate.setDate(candidate.getDate() + nights);
+
             var formatted = formatDate(candidate);
+
             if (dates.indexOf(formatted) === -1) {
                 return formatted;
             }
         }
+
         return '';
     }
+    function getSingleCalendarDisabledDates(selectedCheckin, selectedCheckout) {
+        var currentCheckin = String(selectedCheckin || '').trim();
+        var currentCheckout = String(selectedCheckout || '').trim();
+
+        /*
+         * With one calendar, the meaning of a click depends on the current step:
+         *
+         * - No active unfinished range: the next click selects check-in.
+         * - Check-in selected and checkout empty: the next click selects checkout.
+         *
+         * Checkout-specific disabled dates must never globally disable dates that
+         * can still be selected as a new check-in.
+         */
+        if (
+            isValidDateString(currentCheckin) &&
+            !isValidDateString(currentCheckout)
+        ) {
+            return normalizeDateList(state.disabledCheckoutDates);
+        }
+
+        return normalizeDateList(state.disabledCheckinDates);
+    }
+
     function getInitialDisabledDatesPayload() {
         return config.initialDisabledDates && typeof config.initialDisabledDates === 'object'
             ? config.initialDisabledDates
@@ -947,7 +1013,10 @@ function markUnavailableDayElement(dayElement, unavailableDates) {
         if (state.checkinPicker) {
             state.checkinPicker.set(
                 'disable',
-                !state.checkoutPicker ? getSingleCalendarDisabledDates(nextCheckin) : state.disabledCheckinDates
+                !state.checkoutPicker ? getSingleCalendarDisabledDates(
+                    nextCheckin,
+                    checkoutInput.value
+                ) : state.disabledCheckinDates
             );
         }
         if (!state.checkoutPicker) {
@@ -986,8 +1055,15 @@ function markUnavailableDayElement(dayElement, unavailableDates) {
         params.append('room_count', String(context.roomCount || 0));
         params.append('accommodation_type', String(context.accommodationType || getAccommodationTypeValue()));
         params.append('window_days', String(config.windowDays || 180));
-        if (Number(context.availabilityRoomId || context.roomId || 0) > 0) {
-            params.append('room_id', String(context.availabilityRoomId || context.roomId));
+        var disabledDatesRoomId = Number(context.roomId || 0);
+        var disabledDatesAvailabilityRoomId = Number(context.availabilityRoomId || 0);
+        if (disabledDatesAvailabilityRoomId > 0) {
+            params.append('room_id', String(disabledDatesAvailabilityRoomId));
+            if (disabledDatesRoomId > 0 && disabledDatesAvailabilityRoomId !== disabledDatesRoomId) {
+                params.append('inventory_room_id', String(disabledDatesAvailabilityRoomId));
+            }
+        } else if (disabledDatesRoomId > 0) {
+            params.append('room_id', String(disabledDatesRoomId));
         }
         if (isValidDateString(context.checkin)) {
             params.append('checkin', context.checkin);
@@ -1086,8 +1162,15 @@ function markUnavailableDayElement(dayElement, unavailableDates) {
         params.append('guests', String(context.guests));
         params.append('room_count', String(context.roomCount || 0));
         params.append('accommodation_type', String(context.accommodationType || getAccommodationTypeValue()));
-        if (Number(context.availabilityRoomId || context.roomId || 0) > 0) {
-            params.append('room_id', String(context.availabilityRoomId || context.roomId));
+        var availabilityRoomId = Number(context.roomId || 0);
+        var availabilityPhysicalRoomId = Number(context.availabilityRoomId || 0);
+        if (availabilityPhysicalRoomId > 0) {
+            params.append('room_id', String(availabilityPhysicalRoomId));
+            if (availabilityRoomId > 0 && availabilityPhysicalRoomId !== availabilityRoomId) {
+                params.append('inventory_room_id', String(availabilityPhysicalRoomId));
+            }
+        } else if (availabilityRoomId > 0) {
+            params.append('room_id', String(availabilityRoomId));
         }
         var requestToken = ++state.availabilityRequestToken;
         return fetch(String(config.ajaxUrl) + '?' + params.toString(), {
@@ -1145,23 +1228,31 @@ function markUnavailableDayElement(dayElement, unavailableDates) {
             var selectedDate = String(dateStr || '').trim();
             var currentCheckin = String(checkinInput.value || '').trim();
             var currentCheckout = String(checkoutInput.value || '').trim();
-
             if (!isValidDateString(selectedDate)) {
                 return;
             }
-            if (isSingleCalendarUnavailableDate(selectedDate, currentCheckin)) {
+            if (isSingleCalendarUnavailableDate(
+                selectedDate,
+                currentCheckin,
+                currentCheckout
+            )) {
                 refreshUnavailableDayClasses();
                 updateRangeHighlights(checkinInput.value, checkoutInput.value, state.previewCheckout);
                 return;
             }
-
             if (!isValidDateString(currentCheckin) || isValidDateString(currentCheckout) || selectedDate <= currentCheckin) {
                 checkinInput.value = selectedDate;
                 checkoutInput.value = '';
                 state.previewCheckout = '';
                 if (state.checkinPicker) {
                     state.checkinPicker.setDate(selectedDate, false);
-                    state.checkinPicker.set('disable', getSingleCalendarDisabledDates(selectedDate));
+                    state.checkinPicker.set(
+                        'disable',
+                        getSingleCalendarDisabledDates(
+                            selectedDate,
+                            ''
+                        )
+                    );
                     state.checkinPicker.jumpToDate(selectedDate, true);
                 }
                 refreshUnavailableDayClasses();
@@ -1169,11 +1260,16 @@ function markUnavailableDayElement(dayElement, unavailableDates) {
                 onFieldChange('checkin');
                 return;
             }
-
             checkoutInput.value = selectedDate;
             state.previewCheckout = '';
             if (state.checkinPicker) {
-                state.checkinPicker.set('disable', getSingleCalendarDisabledDates(checkinInput.value));
+                state.checkinPicker.set(
+                    'disable',
+                    getSingleCalendarDisabledDates(
+                        checkinInput.value,
+                        selectedDate
+                    )
+                );
             }
             refreshUnavailableDayClasses();
             updateRangeHighlights(checkinInput.value, checkoutInput.value, state.previewCheckout);
@@ -1186,7 +1282,10 @@ function markUnavailableDayElement(dayElement, unavailableDates) {
                 disableMobile: true,
                 dateFormat: 'Y-m-d',
                 allowInput: false,
-                disable: getSingleCalendarDisabledDates(checkinInput.value),
+                disable: getSingleCalendarDisabledDates(
+                    checkinInput.value,
+                    checkoutInput.value
+                ),
                 locale: {
                     firstDayOfWeek: 1
                 },
@@ -1208,7 +1307,13 @@ function markUnavailableDayElement(dayElement, unavailableDates) {
                     updateRangeHighlights(checkinInput.value, checkoutInput.value, state.previewCheckout);
                 },
                 onDayCreate: function (selectedDates, dateStr, instance, dayElement) {
-                    markUnavailableDayElement(dayElement, getSingleCalendarVisualUnavailableDates(checkinInput.value));
+                    markUnavailableDayElement(
+                        dayElement,
+                        getSingleCalendarVisualUnavailableDates(
+                            checkinInput.value,
+                            checkoutInput.value
+                        )
+                    );
                 }
             });
             if (state.checkinPicker && state.checkinPicker.calendarContainer) {

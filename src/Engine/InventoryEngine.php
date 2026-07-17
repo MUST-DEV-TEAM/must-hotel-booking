@@ -22,7 +22,7 @@ final class InventoryEngine
     /**
      * @return array<int, array<string, mixed>>
      */
-    public static function getAvailableRooms(int $roomTypeId, string $checkin, string $checkout, string $excludeSessionId = ''): array
+    public static function getAvailableRooms(int $roomTypeId, string $checkin, string $checkout, string $excludeSessionId = '', int $excludeReservationId = 0): array
     {
         if (
             $roomTypeId <= 0 ||
@@ -45,7 +45,8 @@ final class InventoryEngine
             $checkout,
             $nonBlockingStatuses,
             $now,
-            $sessionId
+            $sessionId,
+            $excludeReservationId
         );
         $legacyReservationCount = get_inventory_repository()->countUnassignedTypeReservationOverlaps(
             $roomTypeId,

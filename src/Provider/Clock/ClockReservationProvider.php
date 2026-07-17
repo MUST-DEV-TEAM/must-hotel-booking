@@ -139,6 +139,12 @@ final class ClockReservationProvider implements ReservationProviderInterface
         if (empty($selection['is_physical'])) {
             return [\__('Please select an exact room unit before checkout.', 'must-hotel-booking')];
         }
+        $ratePlanId = $this->resolveRatePlanIdForSelection($selection, $ratePlanId);
+
+        if ($ratePlanId <= 0) {
+            return [\__('Please select a rate plan before checkout.', 'must-hotel-booking')];
+        }
+
         $context = BookingValidationEngine::parseRequestContext($source, true);
         $context = BookingValidationEngine::applyFixedRoomContext($context, $room);
         if (empty($context['is_valid'])) {
@@ -1029,7 +1035,8 @@ final class ClockReservationProvider implements ReservationProviderInterface
             LockEngine::getOrCreateSessionId(),
             $guests,
             $ratePlanId,
-            'paid_fulfilment'
+            'paid_fulfilment',
+            $reservationId
         )) {
             $failureReason = \method_exists($this->availability, 'getLastAvailabilityFailureReason')
                 ? (string) $this->availability->getLastAvailabilityFailureReason()
@@ -1276,6 +1283,67 @@ final class ClockReservationProvider implements ReservationProviderInterface
         }
         return 0;
     }
+    /** @param array<string, mixed> $selection */
+    private function resolveRatePlanIdForSelection(array $selection, int $ratePlanId): int
+    {
+        if ($ratePlanId > 0) {
+            return $ratePlanId;
+        }
+
+        $roomTypeId = isset($selection['room_type_id']) ? (int) $selection['room_type_id'] : 0;
+
+        if ($roomTypeId <= 0) {
+            return 0;
+        }
+
+        $eligibleIds = [];
+
+        foreach (\MustHotelBooking\Engine\RatePlanEngine::getRatePlansForRoomType($roomTypeId) as $plan) {
+            if (!\is_array($plan)) {
+                continue;
+            }
+
+            if (isset($plan['is_active']) && (int) $plan['is_active'] !== 1) {
+                continue;
+            }
+
+            $candidateId = isset($plan['id']) ? (int) $plan['id'] : 0;
+
+            if ($candidateId <= 0) {
+                continue;
+            }
+
+            $mapping = $this->catalog->findRatePlanMapping($candidateId);
+
+            if (!$this->hasExternalId($mapping) || !$this->isMappingPublicVisible($mapping)) {
+                continue;
+            }
+
+            $eligibleIds[$candidateId] = $candidateId;
+        }
+
+        if (\count($eligibleIds) !== 1) {
+            return 0;
+        }
+
+        return (int) \reset($eligibleIds);
+    }
+
+    /** @param array<string, mixed>|null $mapping */
+    private function isMappingPublicVisible(?array $mapping): bool
+    {
+        if (!\is_array($mapping)) {
+            return false;
+        }
+
+        $metadata = $this->decodeProviderMetadata($mapping['metadata'] ?? []);
+        $visibility = isset($metadata['public_visible']) && \is_scalar($metadata['public_visible'])
+            ? (string) $metadata['public_visible']
+            : '';
+
+        return $visibility !== 'no';
+    }
+
     /** @param array<string, mixed> $selection */
     private function isValidRatePlanForSelection(array $selection, int $ratePlanId): bool
     {

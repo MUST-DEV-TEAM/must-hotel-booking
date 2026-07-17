@@ -1,7 +1,5 @@
 <?php
-
 namespace MustHotelBooking\Engine;
-
 use MustHotelBooking\Core\BookingRules;
 use MustHotelBooking\Core\ReservationStatus;
 use MustHotelBooking\Core\RoomCatalog;
@@ -11,57 +9,46 @@ use MustHotelBooking\Provider\Contracts\QuoteProviderInterface;
 use MustHotelBooking\Provider\Dto\AvailabilitySearchRequest;
 use MustHotelBooking\Provider\Dto\DisabledDatesRequest;
 use MustHotelBooking\Provider\ProviderManager;
-
 final class AvailabilityAjaxController
 {
     private static function availabilityProvider(): AvailabilityProviderInterface
     {
         return ProviderManager::active()->availability();
     }
-
     private static function quoteProvider(): QuoteProviderInterface
     {
         return ProviderManager::active()->quote();
     }
-
     public static function normalize_disabled_dates_window_days(int $windowDays): int
     {
         if ($windowDays < 30) {
             return 30;
         }
-
         if ($windowDays > 365) {
             return 365;
         }
-
         return $windowDays;
     }
-
     public static function normalize_availability_room_category(string $category): string
     {
         return RoomCatalog::normalizeBookingCategory($category);
     }
-
     /**
      * @return array<int, int>
      */
     public static function get_available_room_ids_for_guests(int $guests, string $category = 'standard-rooms'): array
     {
         $normalized = self::normalize_availability_room_category($category);
-
         if (RoomCatalog::isRoomTypeBookingValue($normalized)) {
             $room = get_room_repository()->getRoomById(RoomCatalog::resolveBookingRoomTypeId($normalized));
             $maxGuests = \is_array($room) && isset($room['max_guests']) ? (int) $room['max_guests'] : 0;
-
             return $maxGuests >= \max(1, $guests) ? [(int) ($room['id'] ?? 0)] : [];
         }
-
         return get_room_repository()->getRoomIdsByTypeAndGuests(
             $normalized,
             \max(1, $guests)
         );
     }
-
     /**
      * @param array<int, int> $roomIds
      * @return array<int, int>
@@ -76,14 +63,11 @@ final class AvailabilityAjaxController
                 }
             )
         );
-
         if (empty($roomIds)) {
             return [];
         }
-
         return get_room_repository()->getRoomCapacityMap($roomIds);
     }
-
     /**
      * @param array<int, int> $roomIds
      * @return array<int, array<int, array<string, string>>>
@@ -98,7 +82,6 @@ final class AvailabilityAjaxController
                 }
             )
         );
-
         if (
             empty($roomIds) ||
             !AvailabilityEngine::isValidBookingDate($rangeStart) ||
@@ -107,7 +90,6 @@ final class AvailabilityAjaxController
         ) {
             return [];
         }
-
         $nonBlockingStatuses = ReservationStatus::getInventoryNonBlockingStatuses();
         $rangesByRoom = get_availability_repository()->getReservationRangesByRoomIds(
             $roomIds,
@@ -115,7 +97,6 @@ final class AvailabilityAjaxController
             $rangeEndExclusive,
             $nonBlockingStatuses
         );
-
         LockEngine::cleanupExpiredLocks();
         $lockRangesByRoom = get_availability_repository()->getActiveLockRangesByRoomIds(
             $roomIds,
@@ -124,24 +105,18 @@ final class AvailabilityAjaxController
             LockEngine::getCurrentUtcDatetime(),
             LockEngine::getOrCreateSessionId()
         );
-
         foreach ($lockRangesByRoom as $roomId => $lockRanges) {
             $roomId = (int) $roomId;
-
             if ($roomId <= 0 || !\is_array($lockRanges)) {
                 continue;
             }
-
             if (!isset($rangesByRoom[$roomId]) || !\is_array($rangesByRoom[$roomId])) {
                 $rangesByRoom[$roomId] = [];
             }
-
             $rangesByRoom[$roomId] = \array_merge($rangesByRoom[$roomId], $lockRanges);
         }
-
         return $rangesByRoom;
     }
-
     /**
      * @param array<int, array<string, string>> $roomRanges
      */
@@ -151,10 +126,8 @@ final class AvailabilityAjaxController
             if (!\is_array($range)) {
                 continue;
             }
-
             $existingCheckin = isset($range['checkin']) ? (string) $range['checkin'] : '';
             $existingCheckout = isset($range['checkout']) ? (string) $range['checkout'] : '';
-
             if (
                 !AvailabilityEngine::isValidBookingDate($existingCheckin) ||
                 !AvailabilityEngine::isValidBookingDate($existingCheckout) ||
@@ -162,15 +135,12 @@ final class AvailabilityAjaxController
             ) {
                 continue;
             }
-
             if ($existingCheckin < $checkout && $existingCheckout > $checkin) {
                 return false;
             }
         }
-
         return true;
     }
-
     /**
      * @param array<int, int> $roomIds
      * @param array<int, array<int, array<string, string>>> $rangesByRoom
@@ -179,21 +149,16 @@ final class AvailabilityAjaxController
     {
         foreach ($roomIds as $roomId) {
             $roomId = (int) $roomId;
-
             if ($roomId <= 0) {
                 continue;
             }
-
             $roomRanges = isset($rangesByRoom[$roomId]) && \is_array($rangesByRoom[$roomId]) ? $rangesByRoom[$roomId] : [];
-
             if (self::is_room_free_for_range($roomRanges, $checkin, $checkout)) {
                 return true;
             }
         }
-
         return false;
     }
-
     /**
      * @param array<int, int> $roomIds
      * @param array<int, array<int, array<string, string>>> $rangesByRoom
@@ -211,36 +176,26 @@ final class AvailabilityAjaxController
         $guests = \max(1, $guests);
         $roomCount = \max(1, $roomCount);
         $freeRoomCapacities = [];
-
         foreach ($roomIds as $roomId) {
             $roomId = (int) $roomId;
-
             if ($roomId <= 0) {
                 continue;
             }
-
             $roomRanges = isset($rangesByRoom[$roomId]) && \is_array($rangesByRoom[$roomId]) ? $rangesByRoom[$roomId] : [];
-
             if (!self::is_room_free_for_range($roomRanges, $checkin, $checkout)) {
                 continue;
             }
-
             $capacity = isset($capacityMap[$roomId]) ? (int) $capacityMap[$roomId] : 0;
-
             if ($capacity > 0) {
                 $freeRoomCapacities[] = $capacity;
             }
         }
-
         if (\count($freeRoomCapacities) < $roomCount) {
             return false;
         }
-
         \rsort($freeRoomCapacities, SORT_NUMERIC);
-
         return \array_sum(\array_slice($freeRoomCapacities, 0, $roomCount)) >= $guests;
     }
-
     /**
      * @return array<int, string>
      */
@@ -252,29 +207,22 @@ final class AvailabilityAjaxController
         $rangeEndExclusive = $start->modify('+' . ($windowDays + 1) . ' day')->format('Y-m-d');
         $roomIds = self::get_available_room_ids_for_guests($guests, $category);
         $disabledDates = [];
-
         if (empty($roomIds)) {
             for ($index = 0; $index < $windowDays; $index++) {
                 $disabledDates[] = $start->modify('+' . $index . ' day')->format('Y-m-d');
             }
-
             return $disabledDates;
         }
-
         $rangesByRoom = self::get_reservation_ranges_by_room_ids($roomIds, $startDate, $rangeEndExclusive);
-
         for ($index = 0; $index < $windowDays; $index++) {
             $checkin = $start->modify('+' . $index . ' day')->format('Y-m-d');
             $checkout = $start->modify('+' . ($index + 1) . ' day')->format('Y-m-d');
-
             if (!self::has_any_room_available_for_range($roomIds, $rangesByRoom, $checkin, $checkout)) {
                 $disabledDates[] = $checkin;
             }
         }
-
         return $disabledDates;
     }
-
     /**
      * @return array<int, string>
      */
@@ -283,34 +231,26 @@ final class AvailabilityAjaxController
         if (!AvailabilityEngine::isValidBookingDate($checkin)) {
             return [];
         }
-
         $windowDays = self::normalize_disabled_dates_window_days($windowDays);
         $checkinDate = new \DateTimeImmutable($checkin);
         $rangeEndExclusive = $checkinDate->modify('+' . ($windowDays + 1) . ' day')->format('Y-m-d');
         $roomIds = self::get_available_room_ids_for_guests($guests, $category);
         $disabledDates = [];
-
         if (empty($roomIds)) {
             for ($nights = 1; $nights <= $windowDays; $nights++) {
                 $disabledDates[] = $checkinDate->modify('+' . $nights . ' day')->format('Y-m-d');
             }
-
             return $disabledDates;
         }
-
         $rangesByRoom = self::get_reservation_ranges_by_room_ids($roomIds, $checkin, $rangeEndExclusive);
-
         for ($nights = 1; $nights <= $windowDays; $nights++) {
             $checkout = $checkinDate->modify('+' . $nights . ' day')->format('Y-m-d');
-
             if (!self::has_any_room_available_for_range($roomIds, $rangesByRoom, $checkin, $checkout)) {
                 $disabledDates[] = $checkout;
             }
         }
-
         return $disabledDates;
     }
-
     /**
      * @return array<int, string>
      */
@@ -322,30 +262,23 @@ final class AvailabilityAjaxController
         $rangeEndExclusive = $start->modify('+' . ($windowDays + 1) . ' day')->format('Y-m-d');
         $roomIds = self::get_available_room_ids_for_guests(1, $category);
         $disabledDates = [];
-
         if (empty($roomIds)) {
             for ($index = 0; $index < $windowDays; $index++) {
                 $disabledDates[] = $start->modify('+' . $index . ' day')->format('Y-m-d');
             }
-
             return $disabledDates;
         }
-
         $rangesByRoom = self::get_reservation_ranges_by_room_ids($roomIds, $startDate, $rangeEndExclusive);
         $capacityMap = self::get_room_capacity_map_for_room_ids($roomIds);
-
         for ($index = 0; $index < $windowDays; $index++) {
             $checkin = $start->modify('+' . $index . ' day')->format('Y-m-d');
             $checkout = $start->modify('+' . ($index + 1) . ' day')->format('Y-m-d');
-
             if (!self::can_room_ids_host_party_for_range($roomIds, $rangesByRoom, $capacityMap, $checkin, $checkout, $guests, $roomCount)) {
                 $disabledDates[] = $checkin;
             }
         }
-
         return $disabledDates;
     }
-
     /**
      * @return array<int, string>
      */
@@ -354,35 +287,27 @@ final class AvailabilityAjaxController
         if (!AvailabilityEngine::isValidBookingDate($checkin)) {
             return [];
         }
-
         $windowDays = self::normalize_disabled_dates_window_days($windowDays);
         $checkinDate = new \DateTimeImmutable($checkin);
         $rangeEndExclusive = $checkinDate->modify('+' . ($windowDays + 1) . ' day')->format('Y-m-d');
         $roomIds = self::get_available_room_ids_for_guests(1, $category);
         $disabledDates = [];
-
         if (empty($roomIds)) {
             for ($nights = 1; $nights <= $windowDays; $nights++) {
                 $disabledDates[] = $checkinDate->modify('+' . $nights . ' day')->format('Y-m-d');
             }
-
             return $disabledDates;
         }
-
         $rangesByRoom = self::get_reservation_ranges_by_room_ids($roomIds, $checkin, $rangeEndExclusive);
         $capacityMap = self::get_room_capacity_map_for_room_ids($roomIds);
-
         for ($nights = 1; $nights <= $windowDays; $nights++) {
             $checkout = $checkinDate->modify('+' . $nights . ' day')->format('Y-m-d');
-
             if (!self::can_room_ids_host_party_for_range($roomIds, $rangesByRoom, $capacityMap, $checkin, $checkout, $guests, $roomCount)) {
                 $disabledDates[] = $checkout;
             }
         }
-
         return $disabledDates;
     }
-
     /**
      * @return array<int, string>
      */
@@ -391,19 +316,15 @@ final class AvailabilityAjaxController
         $windowDays = self::normalize_disabled_dates_window_days($windowDays);
         $start = new \DateTimeImmutable(\current_time('Y-m-d'));
         $disabledDates = [];
-
         for ($index = 0; $index < $windowDays; $index++) {
             $checkin = $start->modify('+' . $index . ' day')->format('Y-m-d');
             $checkout = $start->modify('+' . ($index + 1) . ' day')->format('Y-m-d');
-
             if (!AvailabilityEngine::checkAvailability($roomId, $checkin, $checkout, LockEngine::getOrCreateSessionId())) {
                 $disabledDates[] = $checkin;
             }
         }
-
         return $disabledDates;
     }
-
     /**
      * @return array<int, string>
      */
@@ -412,47 +333,36 @@ final class AvailabilityAjaxController
         if (!AvailabilityEngine::isValidBookingDate($checkin)) {
             return [];
         }
-
         $windowDays = self::normalize_disabled_dates_window_days($windowDays);
         $checkinDate = new \DateTimeImmutable($checkin);
         $disabledDates = [];
-
         for ($nights = 1; $nights <= $windowDays; $nights++) {
             $checkout = $checkinDate->modify('+' . $nights . ' day')->format('Y-m-d');
-
             if (!AvailabilityEngine::checkAvailability($roomId, $checkin, $checkout, LockEngine::getOrCreateSessionId())) {
                 $disabledDates[] = $checkout;
             }
         }
-
         return $disabledDates;
     }
-
     /**
      * @return array<string, mixed>|null
      */
     public static function get_available_room_for_ajax_by_id(int $roomId, string $checkin, string $checkout, int $guests = 1): ?array
     {
         $room = get_room_repository()->getRoomById($roomId);
-
         if (!\is_array($room)) {
             return null;
         }
-
         $guests = \max(1, $guests);
         $roomMaxGuests = isset($room['max_guests']) ? (int) $room['max_guests'] : 0;
-
         if ($roomMaxGuests > 0 && $guests > $roomMaxGuests) {
             return null;
         }
-
         if (!AvailabilityEngine::checkAvailability($roomId, $checkin, $checkout, LockEngine::getOrCreateSessionId())) {
             return null;
         }
-
         return $room;
     }
-
     /**
      * @return array<int, array<string, mixed>>
      */
@@ -462,7 +372,6 @@ final class AvailabilityAjaxController
             new AvailabilitySearchRequest($checkin, $checkout, $guests, $category)
         );
     }
-
     /**
      * @param array<int, string> $disabledCheckinDates
      */
@@ -470,11 +379,9 @@ final class AvailabilityAjaxController
     {
         $windowDays = self::normalize_disabled_dates_window_days($windowDays);
         $startDate = $startDate !== '' ? $startDate : \current_time('Y-m-d');
-
         if (!AvailabilityEngine::isValidBookingDate($startDate)) {
             $startDate = \current_time('Y-m-d');
         }
-
         $disabledLookup = \array_fill_keys(
             \array_values(
                 \array_filter(
@@ -486,24 +393,19 @@ final class AvailabilityAjaxController
             ),
             true
         );
-
         try {
             $start = new \DateTimeImmutable($startDate);
         } catch (\Exception $exception) {
             return '';
         }
-
         for ($index = 0; $index < $windowDays; $index++) {
             $date = $start->modify('+' . $index . ' day')->format('Y-m-d');
-
             if (empty($disabledLookup[$date])) {
                 return $date;
             }
         }
-
         return '';
     }
-
     /**
      * @param array<int, string> $disabledCheckoutDates
      */
@@ -512,7 +414,6 @@ final class AvailabilityAjaxController
         if (!AvailabilityEngine::isValidBookingDate($checkin)) {
             return '';
         }
-
         $windowDays = self::normalize_disabled_dates_window_days($windowDays);
         $disabledLookup = \array_fill_keys(
             \array_values(
@@ -525,32 +426,25 @@ final class AvailabilityAjaxController
             ),
             true
         );
-
         try {
             $checkinDate = new \DateTimeImmutable($checkin);
         } catch (\Exception $exception) {
             return '';
         }
-
         for ($nights = 1; $nights <= $windowDays; $nights++) {
             $checkout = $checkinDate->modify('+' . $nights . ' day')->format('Y-m-d');
-
             if (empty($disabledLookup[$checkout])) {
                 return $checkout;
             }
         }
-
         return '';
     }
-
     public static function ajax_must_get_disabled_dates(): void
     {
         $nonce = isset($_REQUEST['nonce']) ? (string) \wp_unslash($_REQUEST['nonce']) : '';
-
         if (!\wp_verify_nonce($nonce, 'must_availability_check')) {
             \wp_send_json_error(['message' => \__('Security check failed.', 'must-hotel-booking')], 403);
         }
-
         $maxBookingGuests = BookingRules::getMaxBookingGuestsLimit();
         $guests = isset($_REQUEST['guests']) ? \max(1, \min($maxBookingGuests, \absint(\wp_unslash($_REQUEST['guests'])))) : 1;
         $roomCount = BookingRules::normalizeRoomCount($_REQUEST['room_count'] ?? 0);
@@ -558,14 +452,25 @@ final class AvailabilityAjaxController
         $windowDays = self::normalize_disabled_dates_window_days($windowDays);
         $checkin = isset($_REQUEST['checkin']) ? \sanitize_text_field((string) \wp_unslash($_REQUEST['checkin'])) : '';
         $roomId = isset($_REQUEST['room_id']) ? \absint(\wp_unslash($_REQUEST['room_id'])) : 0;
+        $inventoryRoomId = 0;
+        foreach (['inventory_room_id', 'physical_room_id'] as $physicalRoomKey) {
+            if (isset($_REQUEST[$physicalRoomKey])) {
+                $candidatePhysicalRoomId = \absint(\wp_unslash($_REQUEST[$physicalRoomKey]));
+                if ($candidatePhysicalRoomId > 0) {
+                    $inventoryRoomId = $candidatePhysicalRoomId;
+                    break;
+                }
+            }
+        }
+        if ($inventoryRoomId > 0) {
+            $roomId = $inventoryRoomId;
+        }
         $accommodationType = isset($_REQUEST['accommodation_type'])
             ? self::normalize_availability_room_category(\sanitize_text_field((string) \wp_unslash($_REQUEST['accommodation_type'])))
             : 'standard-rooms';
-
         if ($checkin !== '' && !AvailabilityEngine::isValidBookingDate($checkin)) {
             \wp_send_json_error(['message' => \__('Invalid check-in date.', 'must-hotel-booking')], 400);
         }
-
         $disabledDates = self::availabilityProvider()->getDisabledDates(
             new DisabledDatesRequest($checkin, $guests, $roomCount, $roomId, $accommodationType, $windowDays)
         );
@@ -575,15 +480,12 @@ final class AvailabilityAjaxController
         $disabledCheckoutDates = isset($disabledDates['disabled_checkout_dates']) && \is_array($disabledDates['disabled_checkout_dates'])
             ? $disabledDates['disabled_checkout_dates']
             : [];
-
         $firstAvailableCheckin = self::get_first_available_checkin_date(
             $disabledCheckinDates,
             $windowDays,
             \current_time('Y-m-d')
         );
-
         $selectedCheckinForCheckout = $checkin;
-
         if (
             $selectedCheckinForCheckout === '' ||
             !AvailabilityEngine::isValidBookingDate($selectedCheckinForCheckout) ||
@@ -591,7 +493,6 @@ final class AvailabilityAjaxController
         ) {
             $selectedCheckinForCheckout = $firstAvailableCheckin;
         }
-
         if (
             $selectedCheckinForCheckout !== '' &&
             $selectedCheckinForCheckout !== $checkin
@@ -599,18 +500,15 @@ final class AvailabilityAjaxController
             $checkoutDisabledDates = self::availabilityProvider()->getDisabledDates(
                 new DisabledDatesRequest($selectedCheckinForCheckout, $guests, $roomCount, $roomId, $accommodationType, $windowDays)
             );
-
             $disabledCheckoutDates = isset($checkoutDisabledDates['disabled_checkout_dates']) && \is_array($checkoutDisabledDates['disabled_checkout_dates'])
                 ? $checkoutDisabledDates['disabled_checkout_dates']
                 : [];
         }
-
         $firstAvailableCheckout = self::get_first_available_checkout_date(
             $selectedCheckinForCheckout,
             $disabledCheckoutDates,
             $windowDays
         );
-
         \wp_send_json_success([
             'room_id' => $roomId,
             'guests' => $guests,
@@ -634,47 +532,52 @@ final class AvailabilityAjaxController
                 : '',
         ]);
     }
-
     public static function ajax_must_check_availability(): void
     {
         $nonce = isset($_REQUEST['nonce']) ? (string) \wp_unslash($_REQUEST['nonce']) : '';
-
         if (!\wp_verify_nonce($nonce, 'must_availability_check')) {
             \wp_send_json_error(['message' => \__('Security check failed.', 'must-hotel-booking')], 403);
         }
-
         $checkin = isset($_REQUEST['checkin']) ? \sanitize_text_field((string) \wp_unslash($_REQUEST['checkin'])) : '';
         $checkout = isset($_REQUEST['checkout']) ? \sanitize_text_field((string) \wp_unslash($_REQUEST['checkout'])) : '';
         $maxBookingGuests = BookingRules::getMaxBookingGuestsLimit();
         $guests = isset($_REQUEST['guests']) ? \max(1, \min($maxBookingGuests, \absint(\wp_unslash($_REQUEST['guests'])))) : 1;
         $roomCount = BookingRules::normalizeRoomCount($_REQUEST['room_count'] ?? 0);
         $roomId = isset($_REQUEST['room_id']) ? \absint(\wp_unslash($_REQUEST['room_id'])) : 0;
+        $inventoryRoomId = 0;
+        foreach (['inventory_room_id', 'physical_room_id'] as $physicalRoomKey) {
+            if (isset($_REQUEST[$physicalRoomKey])) {
+                $candidatePhysicalRoomId = \absint(\wp_unslash($_REQUEST[$physicalRoomKey]));
+                if ($candidatePhysicalRoomId > 0) {
+                    $inventoryRoomId = $candidatePhysicalRoomId;
+                    break;
+                }
+            }
+        }
+        if ($inventoryRoomId > 0) {
+            $roomId = $inventoryRoomId;
+        }
         $accommodationType = isset($_REQUEST['accommodation_type'])
             ? self::normalize_availability_room_category(\sanitize_text_field((string) \wp_unslash($_REQUEST['accommodation_type'])))
             : 'standard-rooms';
-
         if (!AvailabilityEngine::isValidBookingDate($checkin) || !AvailabilityEngine::isValidBookingDate($checkout) || $checkin >= $checkout) {
             \wp_send_json_error(['message' => \__('Invalid check-in/check-out dates.', 'must-hotel-booking')], 400);
         }
-
         $rooms = [];
         $message = '';
         $availabilityStatus = '';
         $resolvedRoomCount = $roomId > 0
             ? 1
             : BookingRules::resolveRoomCount($guests, $roomCount, $accommodationType);
-
         if ($roomId > 0) {
             $availabilityProvider = self::availabilityProvider();
             $room = $availabilityProvider->getAvailableRoomById($roomId, $checkin, $checkout, $guests);
-
             if (\is_array($room)) {
                 $rooms[] = $room;
             } else {
                 $failureReason = \method_exists($availabilityProvider, 'getLastAvailabilityFailureReason')
                     ? (string) $availabilityProvider->getLastAvailabilityFailureReason()
                     : '';
-
                 if ($failureReason === 'provider_unconfirmed') {
                     $message = \__('Availability could not be confirmed. Please try again.', 'must-hotel-booking');
                     $availabilityStatus = 'provider_unconfirmed';
@@ -693,16 +596,13 @@ final class AvailabilityAjaxController
                     $accommodationType
                 )
             );
-
             if ($resolvedRoomCount > 1 && !AvailabilityEngine::canRoomSetHostParty($rooms, $guests, $resolvedRoomCount)) {
                 $rooms = [];
             }
-
             if (empty($rooms)) {
                 $failureReason = \method_exists($availabilityProvider, 'getLastAvailabilityFailureReason')
                     ? (string) $availabilityProvider->getLastAvailabilityFailureReason()
                     : '';
-
                 if (empty($rooms) && $failureReason === 'provider_unconfirmed') {
                     $message = \__('Availability could not be confirmed. Please try again.', 'must-hotel-booking');
                     $availabilityStatus = 'provider_unconfirmed';
@@ -719,46 +619,35 @@ final class AvailabilityAjaxController
                 }
             }
         }
-
         $payload = [];
-
         foreach ($rooms as $room) {
             if (!\is_array($room)) {
                 continue;
             }
-
             $currentRoomId = isset($room['id']) ? (int) $room['id'] : 0;
-
             if ($currentRoomId <= 0 || !self::availabilityProvider()->checkBookingRestrictions($currentRoomId, $checkin, $checkout)) {
                 continue;
             }
-
             $dynamicTotalPrice = null;
             $dynamicRoomSubtotal = null;
             $dynamicNights = null;
             $pricingGuests = $resolvedRoomCount > 1 ? 1 : $guests;
             $pricing = self::quoteProvider()->calculateTotal($currentRoomId, $checkin, $checkout, $pricingGuests);
-
             if (\is_array($pricing) && !empty($pricing['success'])) {
                 if (isset($pricing['total_price'])) {
                     $dynamicTotalPrice = (float) $pricing['total_price'];
                 }
-
                 if (isset($pricing['room_subtotal'])) {
                     $dynamicRoomSubtotal = (float) $pricing['room_subtotal'];
                 }
-
                 if (isset($pricing['nights'])) {
                     $dynamicNights = (int) $pricing['nights'];
                 }
             }
-
             $ratePlans = self::quoteProvider()->getRoomRatePlansWithPricing($currentRoomId, $checkin, $checkout, $pricingGuests);
-
             if (empty($ratePlans)) {
                 continue;
             }
-
             $roomPayload = [
                 'id' => $currentRoomId,
                 'gallery_room_id' => isset($room['gallery_room_id']) ? (int) $room['gallery_room_id'] : 0,
@@ -782,17 +671,13 @@ final class AvailabilityAjaxController
                 'dynamic_nights' => $dynamicNights,
                 'rate_plans' => $ratePlans,
             ];
-
             $enrichedPayload = RoomViewBuilder::buildBookingResultsRoomViewData($roomPayload);
-
             if ($enrichedPayload !== null) {
                 $payload[] = $enrichedPayload;
                 continue;
             }
-
             $payload[] = $roomPayload;
         }
-
         \wp_send_json_success([
             'checkin' => $checkin,
             'checkout' => $checkout,
@@ -804,7 +689,6 @@ final class AvailabilityAjaxController
             'rooms' => $payload,
         ]);
     }
-
     public static function registerHooks(): void
     {
         \add_action('wp_ajax_must_check_availability', [self::class, 'ajax_must_check_availability']);

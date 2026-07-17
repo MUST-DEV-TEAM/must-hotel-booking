@@ -565,11 +565,9 @@ final class SettingsDiagnostics
         $lines[] = 'Clock Auto Sync Health: ' . (string) ($clockSync['auto_sync_health'] ?? '');
         $lines[] = 'Clock WP-Cron Disabled: ' . (!empty($clockSync['wp_cron_disabled']) ? 'yes' : 'no');
         $lines[] = 'Clock Last Full Catalog Sync: ' . (string) ($clockSync['last_full_catalog_sync'] ?? '');
-        $lines[] = 'Clock Last Availability/Rate Sync: ' . (string) ($clockSync['last_availability_rate_sync'] ?? '');
         $lines[] = 'Clock Last Reservation Fallback Sync: ' . (string) ($clockSync['last_reservation_fallback_sync'] ?? '');
         $lines[] = 'Clock Last Webhook Received: ' . (string) ($clockSync['last_webhook_received'] ?? '');
         $lines[] = 'Clock Next Full Catalog Sync: ' . (string) ($clockSync['next_full_catalog_sync'] ?? '');
-        $lines[] = 'Clock Next Availability/Rate Sync: ' . (string) ($clockSync['next_availability_rate_sync'] ?? '');
         $lines[] = 'Clock Next Reservation Fallback Sync: ' . (string) ($clockSync['next_reservation_fallback_sync'] ?? '');
         $lines[] = 'Clock Sync Due Jobs: ' . (string) ($syncSummary['due'] ?? 0);
         $lines[] = 'Clock Sync Pending Jobs: ' . (string) ($syncCounts[ProviderSyncJobRepository::STATUS_PENDING] ?? 0);

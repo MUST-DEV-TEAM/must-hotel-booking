@@ -6,22 +6,15 @@ use MustHotelBooking\Provider\ProviderManager;
 final class ClockSyncScheduler
 {
     private const CATALOG_HOOK = 'must_hotel_booking_clock_full_catalog_sync';
-    private const AVAILABILITY_RATE_HOOK = 'must_hotel_booking_clock_availability_rate_sync';
     private const RESERVATION_HOOK = 'must_hotel_booking_clock_reservation_fallback_sync';
     private const STATE_OPTION = 'must_hotel_booking_clock_sync_state';
     private const RUNS_OPTION = 'must_hotel_booking_clock_sync_recent_runs';
-    private const AVAILABILITY_SNAPSHOT_OPTION = 'must_hotel_booking_clock_availability_rate_snapshot';
     private const LOCK_PREFIX = 'must_hotel_booking_clock_sync_lock_';
     private const LOCK_TTL_SECONDS = 900;
 
     public static function getCatalogHook(): string
     {
         return self::CATALOG_HOOK;
-    }
-
-    public static function getAvailabilityRateHook(): string
-    {
-        return self::AVAILABILITY_RATE_HOOK;
     }
 
     public static function getReservationHook(): string
@@ -49,7 +42,6 @@ final class ClockSyncScheduler
     {
         \add_filter('cron_schedules', [self::class, 'registerCronIntervals']);
         \add_action(self::CATALOG_HOOK, [self::class, 'runCatalogCron']);
-        \add_action(self::AVAILABILITY_RATE_HOOK, [self::class, 'runAvailabilityRateCron']);
         \add_action(self::RESERVATION_HOOK, [self::class, 'runReservationCron']);
     }
 
@@ -60,11 +52,6 @@ final class ClockSyncScheduler
         }
         self::scheduleCatalogCron();
         self::scheduleRecurringCron(
-            self::AVAILABILITY_RATE_HOOK,
-            ClockConfig::availabilityRateSyncEnabled(),
-            ClockConfig::availabilityRateSyncIntervalMinutes()
-        );
-        self::scheduleRecurringCron(
             self::RESERVATION_HOOK,
             ClockConfig::reservationFallbackSyncEnabled(),
             ClockConfig::reservationFallbackIntervalMinutes()
@@ -73,7 +60,7 @@ final class ClockSyncScheduler
 
     public static function unscheduleCron(): void
     {
-        foreach ([self::CATALOG_HOOK, self::AVAILABILITY_RATE_HOOK, self::RESERVATION_HOOK] as $hook) {
+        foreach ([self::CATALOG_HOOK, self::RESERVATION_HOOK] as $hook) {
             self::clearHook($hook);
         }
         ClockReservationAutoSyncScheduler::unscheduleCron();
@@ -89,11 +76,6 @@ final class ClockSyncScheduler
     public static function runCatalogCron(): void
     {
         self::runSync('catalog', 'automatic');
-    }
-
-    public static function runAvailabilityRateCron(): void
-    {
-        self::runSync('availability_rates', 'automatic');
     }
 
     public static function runReservationCron(): void
@@ -120,16 +102,13 @@ final class ClockSyncScheduler
     {
         $state = self::state();
         $catalogNext = self::nextRun(self::CATALOG_HOOK);
-        $availabilityNext = self::nextRun(self::AVAILABILITY_RATE_HOOK);
         $reservationNext = self::nextRun(self::RESERVATION_HOOK);
         $locks = [
             'catalog' => self::lockInfo('catalog'),
-            'availability_rates' => self::lockInfo('availability_rates'),
             'reservations' => self::lockInfo('reservations'),
         ];
         $autoSyncHealth = self::autoSyncHealth($state, $locks, [
             'catalog' => $catalogNext,
-            'availability_rates' => $availabilityNext,
             'reservations' => $reservationNext,
         ]);
 
@@ -137,19 +116,16 @@ final class ClockSyncScheduler
             'auto_sync_health' => $autoSyncHealth,
             'wp_cron_disabled' => \defined('DISABLE_WP_CRON') && \DISABLE_WP_CRON,
             'last_full_catalog_sync' => (string) ($state['last_catalog_sync'] ?? ''),
-            'last_availability_rate_sync' => (string) ($state['last_availability_rates_sync'] ?? ''),
             'last_reservation_fallback_sync' => (string) ($state['last_reservations_sync'] ?? ''),
             'last_webhook_received' => (string) ($state['last_webhook_received'] ?? ''),
             'last_manual_sync' => (string) ($state['last_manual_sync'] ?? ''),
             'last_automatic_sync' => (string) ($state['last_automatic_sync'] ?? ''),
             'last_successful_sync' => (string) ($state['last_successful_sync'] ?? ''),
             'next_full_catalog_sync' => $catalogNext,
-            'next_availability_rate_sync' => $availabilityNext,
             'next_reservation_fallback_sync' => $reservationNext,
             'locks' => $locks,
             'last_errors' => [
                 'catalog' => (string) ($state['last_error_catalog'] ?? ''),
-                'availability_rates' => (string) ($state['last_error_availability_rates'] ?? ''),
                 'reservations' => (string) ($state['last_error_reservations'] ?? ''),
             ],
             'recent_runs' => self::recentRuns(),
@@ -178,8 +154,6 @@ final class ClockSyncScheduler
         try {
             if ($syncType === 'catalog') {
                 $result = self::runCatalogSync();
-            } elseif ($syncType === 'availability_rates') {
-                $result = self::runAvailabilityRateSync();
             } else {
                 $result = self::runReservationFallbackSync();
             }
@@ -223,40 +197,6 @@ final class ClockSyncScheduler
                 'reservation_mirrors' => (int) (($summary['reservations_created'] ?? 0) + ($summary['reservations_updated'] ?? 0)),
             ],
             'error' => \implode('; ', $errors),
-        ];
-    }
-
-    /** @return array<string, mixed> */
-    private static function runAvailabilityRateSync(): array
-    {
-        $path = ClockConfig::ratesAvailabilityPath();
-        if ($path === '') {
-            return [
-                'status' => 'skipped_missing_capability',
-                'counts' => [],
-                'error' => \__('Clock rates availability endpoint path is not configured.', 'must-hotel-booking'),
-            ];
-        }
-        $response = (new ClockApiClient())->request('GET', $path, [], 'clock.availability_rate_sync');
-        if (!$response->isSuccess()) {
-            return [
-                'status' => 'failed',
-                'counts' => [],
-                'error' => $response->getErrorMessage() !== '' ? $response->getErrorMessage() : \__('Clock availability/rate sync failed.', 'must-hotel-booking'),
-            ];
-        }
-        $items = self::countResponseItems($response->getData());
-        \update_option(self::AVAILABILITY_SNAPSHOT_OPTION, [
-            'synced_at' => self::now(),
-            'items' => $items,
-        ], false);
-        return [
-            'status' => 'success',
-            'counts' => [
-                'availability_rows' => $items,
-                'invalidated_cache_items' => 1,
-            ],
-            'error' => '',
         ];
     }
 
@@ -439,7 +379,7 @@ final class ClockSyncScheduler
         if (\defined('DISABLE_WP_CRON') && \DISABLE_WP_CRON) {
             return 'wp_cron_disabled';
         }
-        if (!ClockConfig::fullCatalogSyncEnabled() && !ClockConfig::availabilityRateSyncEnabled() && !ClockConfig::reservationFallbackSyncEnabled()) {
+        if (!ClockConfig::fullCatalogSyncEnabled() && !ClockConfig::reservationFallbackSyncEnabled()) {
             return 'disabled';
         }
         foreach ($locks as $lock) {
@@ -449,7 +389,6 @@ final class ClockSyncScheduler
         }
         $enabledNextRuns = [
             'catalog' => ClockConfig::fullCatalogSyncEnabled() ? ($nextRuns['catalog'] ?? '') : 'disabled',
-            'availability_rates' => ClockConfig::availabilityRateSyncEnabled() ? ($nextRuns['availability_rates'] ?? '') : 'disabled',
             'reservations' => ClockConfig::reservationFallbackSyncEnabled() ? ($nextRuns['reservations'] ?? '') : 'disabled',
         ];
         foreach ($enabledNextRuns as $nextRun) {
@@ -457,12 +396,8 @@ final class ClockSyncScheduler
                 return 'missing';
             }
         }
-        if ((string) ($state['last_error_catalog'] ?? '') !== '' || (string) ($state['last_error_availability_rates'] ?? '') !== '' || (string) ($state['last_error_reservations'] ?? '') !== '') {
+        if ((string) ($state['last_error_catalog'] ?? '') !== '' || (string) ($state['last_error_reservations'] ?? '') !== '') {
             return 'failing';
-        }
-        // clock_availability_rate_interval_minutes: overdue after 2x the configured interval.
-        if (self::isOverdue((string) ($state['last_availability_rates_sync'] ?? ''), ClockConfig::availabilityRateSyncIntervalMinutes() * 2 * 60)) {
-            return 'overdue';
         }
         // clock_reservation_fallback_interval_minutes: overdue after 2x the configured interval.
         if (self::isOverdue((string) ($state['last_reservations_sync'] ?? ''), ClockConfig::reservationFallbackIntervalMinutes() * 2 * 60)) {
@@ -485,9 +420,6 @@ final class ClockSyncScheduler
 
     private static function hasCapabilityForType(string $syncType): bool
     {
-        if ($syncType === 'availability_rates') {
-            return ClockConfig::ratesAvailabilityPath() !== '';
-        }
         if ($syncType === 'reservations') {
             return ClockConfig::reservationFetchPath() !== '';
         }
@@ -502,16 +434,13 @@ final class ClockSyncScheduler
         if ($syncType === 'catalog') {
             return ClockConfig::fullCatalogSyncEnabled();
         }
-        if ($syncType === 'availability_rates') {
-            return ClockConfig::availabilityRateSyncEnabled();
-        }
         return ClockConfig::reservationFallbackSyncEnabled();
     }
 
     private static function normalizeSyncType(string $syncType): string
     {
         $syncType = \sanitize_key($syncType);
-        return \in_array($syncType, ['catalog', 'availability_rates', 'reservations'], true) ? $syncType : 'catalog';
+        return \in_array($syncType, ['catalog', 'reservations'], true) ? $syncType : 'catalog';
     }
 
     /** @param mixed $data */
