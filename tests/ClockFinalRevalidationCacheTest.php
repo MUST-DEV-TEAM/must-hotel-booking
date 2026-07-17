@@ -9,6 +9,8 @@ namespace {
     $GLOBALS['mhb_clock_http_queue'] = [
         ['status' => 200, 'body' => '{"available":true,"version":"cached"}', 'headers' => []],
         ['status' => 200, 'body' => '{"available":false,"version":"fresh"}', 'headers' => []],
+        ['status' => 200, 'body' => '{"version":"status-cached"}', 'headers' => []],
+        ['status' => 200, 'body' => '{"version":"status-fresh"}', 'headers' => []],
         ['status' => 200, 'body' => '{"total_price":100,"version":"cached"}', 'headers' => []],
         ['status' => 200, 'body' => '{"total_price":120,"version":"fresh"}', 'headers' => []],
     ];
@@ -80,11 +82,15 @@ namespace {
     \MustHotelBooking\Provider\Clock\ClockRateLimiter::resetForTests();
     $client = new \MustHotelBooking\Provider\Clock\ClockApiClient();
     $availabilityPath = '/rates_availability?from=2026-07-01&to=2026-07-02';
+    $roomStatusesPath = '/room_statuses?from=2026-07-01&to=2026-07-01&room_type_id=1001';
     $productsPath = '/products?arrival=2026-07-01&departure=2026-07-02';
 
     $availabilityCached = $client->request('GET', $availabilityPath, ['endpoint_name' => 'rates_availability', 'cache_ttl' => 45]);
     $availabilityRepeated = $client->request('GET', $availabilityPath, ['endpoint_name' => 'rates_availability', 'cache_ttl' => 45]);
     $availabilityFresh = $client->request('GET', $availabilityPath, ['endpoint_name' => 'rates_availability', 'cache_ttl' => 45, 'bypass_cache' => true]);
+    $statusesCached = $client->request('GET', $roomStatusesPath, ['endpoint_name' => 'room_statuses']);
+    $statusesRepeated = $client->request('GET', $roomStatusesPath, ['endpoint_name' => 'room_statuses']);
+    $statusesFresh = $client->request('GET', $roomStatusesPath, ['endpoint_name' => 'room_statuses', 'bypass_cache' => true]);
     $pricingCached = $client->request('GET', $productsPath, ['endpoint_name' => 'products', 'cache_ttl' => 45]);
     $pricingRepeated = $client->request('GET', $productsPath, ['endpoint_name' => 'products', 'cache_ttl' => 45]);
     $pricingFresh = $client->request('GET', $productsPath, ['endpoint_name' => 'products', 'cache_ttl' => 45, 'bypass_cache' => true]);
@@ -96,14 +102,20 @@ namespace {
     if (($availabilityFresh->getData()['version'] ?? '') !== 'fresh' || !empty($availabilityFresh->getData()['available'])) {
         $failures[] = 'Final availability validation must bypass the cached available response.';
     }
+    if (($statusesCached->getData()['version'] ?? '') !== 'status-cached' || ($statusesRepeated->getData()['version'] ?? '') !== 'status-cached') {
+        $failures[] = 'Intermediate room_statuses reads should reuse the 15-second endpoint cache.';
+    }
+    if (($statusesFresh->getData()['version'] ?? '') !== 'status-fresh') {
+        $failures[] = 'Final room_statuses validation must bypass its cache.';
+    }
     if (($pricingCached->getData()['version'] ?? '') !== 'cached' || ($pricingRepeated->getData()['version'] ?? '') !== 'cached') {
         $failures[] = 'Intermediate quote display should reuse the safe short-lived cache.';
     }
     if (($pricingFresh->getData()['version'] ?? '') !== 'fresh' || (float) ($pricingFresh->getData()['total_price'] ?? 0) !== 120.0) {
         $failures[] = 'Final price validation must bypass the cached old total.';
     }
-    if ((int) $GLOBALS['mhb_clock_http_calls'] !== 4) {
-        $failures[] = 'Only repeated intermediate reads may be deduplicated; both final validations must make fresh HTTP calls.';
+    if ((int) $GLOBALS['mhb_clock_http_calls'] !== 6) {
+        $failures[] = 'Only repeated intermediate reads may be deduplicated; rate, status, and price final validations must make fresh HTTP calls.';
     }
 
     if ($failures) {

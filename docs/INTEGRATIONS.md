@@ -98,7 +98,7 @@ The plugin authenticates through the provider SDK login, caches the bearer token
 ### Identifiers and verification
 
 - The SDK-order ID is saved as the pending transaction/provider reference.
-- Each SDK order is durably bound to one exact payment-row allocation, checkout mode, expiry, booking snapshot, explicit site environment, credential fingerprint, and Clock target when required.
+- Each SDK order is durably bound to one exact payment-row allocation, checkout mode, expiry, versioned booking snapshot, explicit site environment, credential fingerprint, and Clock target when required. For Clock-backed exact-room attempts, the snapshot includes the local type/physical allocation, stay, guests, amount, rate plan, and normalized physical-room, accommodation/type, and rate external IDs.
 - The order is also bound to the configured PokPay environment and merchant/key fingerprint used for the authoritative reread.
 - Finalization rereads the order and accepts captured/paid/completed provider state only when order, local reservation allocation, amount, and currency match.
 - Redirect/fail/webhook URLs are generated server-side.
@@ -143,7 +143,11 @@ Outbound API calls use a two-request HTTP Digest challenge flow. `ClockEndpointR
 - Safe GET operations can retry once after HTTP 429 and can use bounded request/transient caches.
 - Writes are not automatically retried because timeout-after-write is ambiguous.
 - Final availability/quote/guarantee checks explicitly bypass caches.
-- Exact-room creation requires room-type, physical-room, and rate mapping; the website booking reference is sent in provider reference/note fields.
+- `rates_availability` is queried with sorted `rates[]`, sorted parent `room_types[]`, and `adults`; it establishes only type/rate sellability. Missing occupied dates, non-Boolean or false `free`, errors, stop-sale, or contradictory arrival/departure restrictions do not pass.
+- `room_statuses` is queried from check-in through checkout-minus-one-day, both inclusive. A single-type/final check supplies the singular `room_type_id`; a mixed-type search makes one unfiltered request and discards non-candidate groups locally. The exact physical mapping must have a Boolean `available=true` row under its mapped parent type.
+- Intermediate rate availability can cache for 45 seconds and room status for 15 seconds. Final checkout and paid fulfilment bypass both layers. Missing rows, malformed/conflicting responses, transport failures, and incomplete mappings are provider-unconfirmed; explicit `free=false` or `available=false` is confirmed unavailable.
+- The disabled-date calendar remains advisory type/rate data plus local exact-room conflicts. It does not issue a 180-day physical-room status scan, and an apparently open range cannot continue without a selected-range `room_statuses` check.
+- Exact-room creation requires room-type, physical-room, and rate mapping. Fulfilment requires all three current external IDs to match the saved attempt-time snapshots, then sends the type as `arrival_room_type_id` and the physical room as `arrival_room_id`; a different returned room is not accepted as substitution.
 - Cancellation and amendment paths reread before retry and verify provider state after writes.
 - Local idempotency keys are logged, but a general provider idempotency header is not transmitted.
 

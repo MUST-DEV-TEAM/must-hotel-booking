@@ -14,7 +14,7 @@ final class PublicBookingAccessRepository extends AbstractRepository
         return $this->table('public_booking_access_contexts');
     }
 
-    public function tableExists(): bool
+    public function publicAccessTableExists(): bool
     {
         return parent::tableExists('public_booking_access');
     }
@@ -27,7 +27,7 @@ final class PublicBookingAccessRepository extends AbstractRepository
     /** @param array<string, mixed> $grant */
     public function insertGrant(array $grant): int
     {
-        if (!$this->tableExists()) {
+        if (!$this->publicAccessTableExists()) {
             return 0;
         }
 
@@ -143,7 +143,7 @@ final class PublicBookingAccessRepository extends AbstractRepository
     /** @return array<string, mixed>|null */
     public function findByTokenHash(string $tokenHash): ?array
     {
-        if ($tokenHash === '' || !$this->tableExists()) {
+        if ($tokenHash === '' || !$this->publicAccessTableExists()) {
             return null;
         }
 
@@ -250,7 +250,7 @@ final class PublicBookingAccessRepository extends AbstractRepository
 
     public function touchUsage(int $grantId, string $timestamp): bool
     {
-        if ($grantId <= 0 || !$this->tableExists()) {
+        if ($grantId <= 0 || !$this->publicAccessTableExists()) {
             return false;
         }
 
@@ -270,7 +270,7 @@ final class PublicBookingAccessRepository extends AbstractRepository
 
     public function revoke(int $grantId, string $timestamp): bool
     {
-        if ($grantId <= 0 || !$this->tableExists()) {
+        if ($grantId <= 0 || !$this->publicAccessTableExists()) {
             return false;
         }
 
@@ -289,7 +289,7 @@ final class PublicBookingAccessRepository extends AbstractRepository
 
     public function hasActiveCancellationExecution(string $reservationSetHash, string $timestamp = ''): bool
     {
-        if ($reservationSetHash === '' || !$this->tableExists()) {
+        if ($reservationSetHash === '' || !$this->publicAccessTableExists()) {
             return false;
         }
 
@@ -322,7 +322,7 @@ final class PublicBookingAccessRepository extends AbstractRepository
 
     public function claimCancellation(int $grantId, string $timestamp): bool
     {
-        if ($grantId <= 0 || !$this->tableExists()) {
+        if ($grantId <= 0 || !$this->publicAccessTableExists()) {
             return false;
         }
 
@@ -361,7 +361,7 @@ final class PublicBookingAccessRepository extends AbstractRepository
 
     private function updateCancellationStatus(int $grantId, string $status, string $timestamp, string $timestampColumn): bool
     {
-        if ($grantId <= 0 || !$this->tableExists() || !in_array($timestampColumn, ['completed_at', 'failed_at'], true)) {
+        if ($grantId <= 0 || !$this->publicAccessTableExists() || !in_array($timestampColumn, ['completed_at', 'failed_at'], true)) {
             return false;
         }
 

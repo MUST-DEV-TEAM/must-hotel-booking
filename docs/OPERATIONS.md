@@ -155,6 +155,17 @@ Classify test evidence correctly:
 - A source-text assertion proves ordering/markers in source, not callback concurrency, database transactions, or provider outcomes.
 - The E2E harness is the broadest repository lifecycle workflow, but its write mode is destructive/external and requires explicit authorization.
 
+### Clock exact-room read acceptance
+
+Deployment of exact physical-room availability requires a separately approved, read-only check in a named non-production Clock environment. Confirm all of the following without creating reservations, holds, payments, callbacks, sync jobs, or accounting writes:
+
+1. One `rates_availability` read for a known parent type/rate returns complete occupied-date rows with Boolean `free` evidence.
+2. One matching `room_statuses` read uses check-in through checkout-minus-one-day and returns the documented room-type groups and physical-room Boolean `available` rows.
+3. A known available and a known unavailable physical room are classified correctly without substitution.
+4. The configured account has endpoint rights, request latency is acceptable, and logs contain only sanitized operation/error summaries rather than full response bodies, guest data, housekeeping notes, credentials, or unnecessary private identifiers.
+
+Until that account-specific check passes, local fake-fixture tests establish only the modeled contract; they do not certify production Clock rights, response shape, data agreement, or performance. Any transport, HTTP, parse, mapping, or missing-row uncertainty must remain provider-unconfirmed and fail closed at selected-stay/write boundaries.
+
 ## Tool safety matrix
 
 | Tool | Safety boundary |

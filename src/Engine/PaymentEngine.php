@@ -2298,9 +2298,18 @@ final class PaymentEngine
                 $pokPayReservationIdsByOrder[$transactionId][] = (int) $reservationId;
                 continue;
             }
+            if (self::resumeVerifiedPendingClockFulfilment([(int) $reservationId])) {
+                continue;
+            }
+            if (self::hasPendingClockFulfilment([(int) $reservationId])) {
+                continue;
+            }
             $stripeReservationIds[] = (int) $reservationId;
         }
         foreach ($pokPayReservationIdsByOrder as $orderId => $orderReservationIds) {
+            if (self::resumeVerifiedPendingClockFulfilment($orderReservationIds)) {
+                continue;
+            }
             if (self::hasPendingClockFulfilment($orderReservationIds)) {
                 continue;
             }
@@ -2313,15 +2322,7 @@ final class PaymentEngine
             }
         }
         if (!empty($stripeReservationIds)) {
-            $stripeReservationIds = \array_values(\array_filter(
-                $stripeReservationIds,
-                static function (int $reservationId): bool {
-                    return !self::hasPendingClockFulfilment([$reservationId]);
-                }
-            ));
-            if (!empty($stripeReservationIds)) {
-                BookingStatusEngine::failPendingStripeReservations($stripeReservationIds, 'expired');
-            }
+            BookingStatusEngine::failPendingStripeReservations($stripeReservationIds, 'expired');
         }
     }
     public static function registerPaymentRestRoutes(): void
@@ -3079,6 +3080,236 @@ final class PaymentEngine
     {
         $identity = (new PaymentEnvironmentCompatibilityPolicy())->currentGatewayIdentity($method, $environment);
         return (string) ($identity['account_fingerprint'] ?? '');
+    }
+
+    /**
+     * Explicit internal recovery for a paid Clock fulfilment that stopped
+     * before its first provider create request. This is intentionally not
+     * registered as a public route or automatic retry path.
+     *
+     * @return array<string, mixed>
+     */
+    public static function reconcileManualReviewClockFulfilment(int $reservationId): array
+    {
+        if ($reservationId <= 0) {
+            return ['success' => false, 'state' => 'blocked'];
+        }
+
+        $reservations = get_reservation_repository();
+        $reservation = $reservations->getReservation($reservationId);
+        if (
+            !\is_array($reservation)
+            || \sanitize_key((string) ($reservation['provider'] ?? '')) !== ProviderManager::CLOCK_MODE
+            || \sanitize_key((string) ($reservation['status'] ?? '')) !== 'pending_payment'
+            || \sanitize_key((string) ($reservation['payment_status'] ?? '')) !== 'pending'
+            || \sanitize_key((string) ($reservation['provider_sync_status'] ?? '')) !== 'manual_review'
+            || \trim((string) ($reservation['provider_booking_id'] ?? '')) !== ''
+            || \trim((string) ($reservation['provider_reservation_id'] ?? '')) !== ''
+        ) {
+            return ['success' => false, 'state' => 'blocked'];
+        }
+
+        $metadata = self::decodeProviderMetadata((string) ($reservation['provider_metadata'] ?? ''));
+        $fulfilment = isset($metadata['clock_fulfilment']) && \is_array($metadata['clock_fulfilment'])
+            ? $metadata['clock_fulfilment']
+            : [];
+        if (
+            \sanitize_key((string) ($fulfilment['state'] ?? '')) !== 'manual_review'
+            || \sanitize_key((string) ($fulfilment['reason'] ?? '')) !== 'clock_create_requires_reread'
+        ) {
+            return ['success' => false, 'state' => 'blocked'];
+        }
+
+        $allocations = (new \MustHotelBooking\Database\PaymentVerificationRepository())->getForReservation($reservationId);
+        $allocation = \count($allocations) === 1 && \is_array($allocations[0]) ? $allocations[0] : [];
+        $method = \sanitize_key((string) ($allocation['provider'] ?? ''));
+        $attemptReference = \sanitize_text_field((string) ($allocation['provider_attempt_reference'] ?? ''));
+        $claimKey = $method !== '' && $attemptReference !== ''
+            ? 'mhb-clock-payment-' . \substr(\hash('sha256', $reservationId . '|' . $method . '|' . $attemptReference), 0, 48)
+            : '';
+        $logs = new ProviderRequestLogRepository();
+        if (
+            !\in_array($method, ['stripe', 'pokpay'], true)
+            || $claimKey === ''
+            || !\hash_equals((string) ($reservation['provider_fulfilment_key'] ?? ''), $claimKey)
+            || !$logs->providerRequestLogsTableExists()
+            || $logs->hasLog(ProviderManager::CLOCK_MODE, 'clock.reservation_create', 'outbound', $claimKey)
+        ) {
+            return ['success' => false, 'state' => 'blocked'];
+        }
+
+        if (!self::resumeVerifiedPendingClockFulfilment([$reservationId], true)) {
+            return ['success' => false, 'state' => 'blocked'];
+        }
+
+        $reloaded = $reservations->getReservation($reservationId);
+        $confirmed = \is_array($reloaded)
+            && \trim((string) ($reloaded['provider_booking_id'] ?? '')) !== ''
+            && ReservationStatus::isConfirmed((string) ($reloaded['status'] ?? ''));
+
+        return [
+            'success' => $confirmed,
+            'state' => \is_array($reloaded) ? \sanitize_key((string) ($reloaded['provider_sync_status'] ?? '')) : 'blocked',
+        ];
+    }
+
+    /**
+     * Resume a Clock create only when the payment verification transaction has
+     * already committed its exact ownership/allocation evidence. This is the
+     * recovery path for a request interruption between durable verification and
+     * the normal Clock fulfillment call; it does not reread payment providers.
+     *
+     * @param array<int, int> $reservationIds
+     */
+    private static function resumeVerifiedPendingClockFulfilment(array $reservationIds, bool $allowManualReviewRecovery = false): bool
+    {
+        $reservationIds = self::normalizeReservationIds($reservationIds);
+        if (empty($reservationIds)) {
+            return false;
+        }
+
+        $reservations = get_reservation_repository();
+        $payments = get_payment_repository();
+        $verifications = new \MustHotelBooking\Database\PaymentVerificationRepository();
+        $refunds = new \MustHotelBooking\Database\RefundRepository();
+        $verificationGroupId = 0;
+        $method = '';
+        $attemptReference = '';
+        $transactionReference = '';
+        $providerMode = '';
+        $accountFingerprint = '';
+        $totalAmountMinor = -1;
+        $currency = '';
+
+        foreach ($reservationIds as $reservationId) {
+            $reservation = $reservations->getReservation($reservationId);
+            if (!\is_array($reservation)) {
+                return false;
+            }
+            $syncStatus = \sanitize_key((string) ($reservation['provider_sync_status'] ?? ''));
+            if (
+                \sanitize_key((string) ($reservation['provider'] ?? '')) !== ProviderManager::CLOCK_MODE
+                || \sanitize_key((string) ($reservation['status'] ?? '')) !== 'pending_payment'
+                || \sanitize_key((string) ($reservation['payment_status'] ?? '')) !== 'pending'
+                || ($allowManualReviewRecovery ? $syncStatus !== 'manual_review' : $syncStatus !== 'pending_fulfilment')
+                || \trim((string) ($reservation['provider_booking_id'] ?? '')) !== ''
+                || \trim((string) ($reservation['provider_reservation_id'] ?? '')) !== ''
+            ) {
+                return false;
+            }
+            if (!empty($refunds->getRefundsForReservation($reservationId))) {
+                return false;
+            }
+
+            $allocations = $verifications->getForReservation($reservationId);
+            if (\count($allocations) !== 1 || !\is_array($allocations[0])) {
+                return false;
+            }
+            $allocation = $allocations[0];
+            $allocationGroupId = (int) ($allocation['verification_group_id'] ?? 0);
+            $allocationMethod = \sanitize_key((string) ($allocation['provider'] ?? ''));
+            $allocationAttemptReference = \sanitize_text_field((string) ($allocation['provider_attempt_reference'] ?? ''));
+            $allocationTransactionReference = \sanitize_text_field((string) ($allocation['provider_transaction_reference'] ?? ''));
+            $allocationMode = \sanitize_key((string) ($allocation['provider_mode'] ?? ''));
+            $allocationFingerprint = (string) ($allocation['provider_account_fingerprint'] ?? '');
+            $allocationTotalMinor = (int) ($allocation['total_amount_minor'] ?? -1);
+            $allocationCurrency = \strtoupper(\sanitize_text_field((string) ($allocation['group_currency'] ?? '')));
+            $paymentId = (int) ($allocation['payment_id'] ?? 0);
+            $payment = $paymentId > 0 ? $payments->getPayment($paymentId) : null;
+
+            if (
+                $allocationGroupId <= 0
+                || !\in_array($allocationMethod, ['stripe', 'pokpay'], true)
+                || $allocationAttemptReference === ''
+                || $allocationTransactionReference === ''
+                || $allocationMode === ''
+                || $allocationFingerprint === ''
+                || $allocationTotalMinor <= 0
+                || $allocationCurrency === ''
+                || !\is_array($payment)
+                || (int) ($payment['reservation_id'] ?? 0) !== $reservationId
+                || \sanitize_key((string) ($payment['method'] ?? '')) !== $allocationMethod
+                || \sanitize_key((string) ($payment['status'] ?? '')) !== 'paid'
+                || \sanitize_key((string) ($payment['attempt_status'] ?? '')) !== 'verified'
+                || \sanitize_text_field((string) ($payment['transaction_id'] ?? '')) !== $allocationTransactionReference
+            ) {
+                return false;
+            }
+
+            if ($verificationGroupId === 0) {
+                $verificationGroupId = $allocationGroupId;
+                $method = $allocationMethod;
+                $attemptReference = $allocationAttemptReference;
+                $transactionReference = $allocationTransactionReference;
+                $providerMode = $allocationMode;
+                $accountFingerprint = $allocationFingerprint;
+                $totalAmountMinor = $allocationTotalMinor;
+                $currency = $allocationCurrency;
+                continue;
+            }
+            if (
+                $verificationGroupId !== $allocationGroupId
+                || $method !== $allocationMethod
+                || $attemptReference !== $allocationAttemptReference
+                || $transactionReference !== $allocationTransactionReference
+                || $providerMode !== $allocationMode
+                || $accountFingerprint !== $allocationFingerprint
+                || $totalAmountMinor !== $allocationTotalMinor
+                || $currency !== $allocationCurrency
+            ) {
+                return false;
+            }
+        }
+
+        $groupAllocations = $verificationGroupId > 0 ? $verifications->getAllocations($verificationGroupId) : [];
+        $allocatedReservationIds = self::normalizeReservationIds(\array_column($groupAllocations, 'reservation_id'));
+        if (\count($groupAllocations) !== \count($reservationIds) || $allocatedReservationIds !== $reservationIds) {
+            return false;
+        }
+
+        $verifiedFacts = [
+            'server_verified' => true,
+            'provider_transaction_reference' => $transactionReference,
+            'provider_attempt_reference' => $attemptReference,
+            'provider_mode' => $providerMode,
+            'provider_account_fingerprint' => $accountFingerprint,
+            'total_amount_minor' => $totalAmountMinor,
+            'currency' => $currency,
+            'verification_source' => 'durable_pending_clock_recovery',
+        ];
+        $attemptValidation = (new PaymentAttemptIntegrity())->validateFinalization($method, $reservationIds, $verifiedFacts);
+        if (empty($attemptValidation['allowed'])) {
+            return false;
+        }
+
+        $clockResult = (new \MustHotelBooking\Provider\Clock\ClockReservationProvider())->fulfillPendingOnlinePayment(
+            $reservationIds,
+            $method,
+            $attemptReference,
+            $allowManualReviewRecovery
+        );
+        if (empty($clockResult['success'])) {
+            return true;
+        }
+
+        $completion = (new OnlinePaymentVerificationService())->recordAndConfirm($method, $reservationIds, $verifiedFacts);
+        if (empty($completion['success']) || !self::allReservationsConfirmed($reservationIds)) {
+            self::persistPaidProviderFailure(
+                $method,
+                $reservationIds,
+                $verifiedFacts,
+                (string) ($completion['reason_code'] ?? 'confirmation_incomplete')
+            );
+            return true;
+        }
+
+        (new \MustHotelBooking\Database\PaidProviderObservationRepository())->markResolved(
+            $method,
+            $transactionReference,
+            $providerMode,
+            $accountFingerprint
+        );
+        return true;
     }
 
     /** @param array<int, int> $reservationIds */

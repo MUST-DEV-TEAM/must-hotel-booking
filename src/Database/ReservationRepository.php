@@ -2,6 +2,9 @@
 namespace MustHotelBooking\Database;
 final class ReservationRepository extends AbstractRepository
 {
+    /** @var bool|null */
+    private $atomicConversionStorageReady;
+
     public function reservationsTableExists(): bool
     {
         return $this->tableExists('reservations');
@@ -368,7 +371,7 @@ final class ReservationRepository extends AbstractRepository
                     AND provider_booking_id = %s
                     AND provider_reservation_id = %s
                     AND provider_sync_status IN (%s, %s, %s)
-                    AND (provider_fulfilment_lease_expires_at IS NULL OR provider_fulfilment_lease_expires_at = %s OR provider_fulfilment_lease_expires_at <= %s)',
+                    AND (provider_fulfilment_lease_expires_at IS NULL OR provider_fulfilment_lease_expires_at <= %s)',
                 'creating',
                 '',
                 $claimKey,
@@ -383,8 +386,71 @@ final class ReservationRepository extends AbstractRepository
                 '',
                 'pending_payment',
                 'pending_fulfilment',
-                '',
                 $now
+            )
+        );
+
+        return $updated === 1
+            ? ['outcome' => 'claimed', 'lease_expires_at' => $leaseExpiresAt]
+            : ['outcome' => 'in_progress'];
+    }
+
+    /**
+     * Claim a first-time Clock create that was held for manual review before
+     * any provider request was sent. Callers must prove that boundary before
+     * invoking this explicit recovery claim.
+     *
+     * @return array{outcome: string, lease_expires_at?: string}
+     */
+    public function claimManualReviewClockReservation(int $reservationId, string $claimKey, string $ownerToken, int $leaseSeconds = 300): array
+    {
+        $claimKey = $this->providerText($claimKey, 191);
+        $ownerToken = $this->providerText($ownerToken, 64);
+        if ($reservationId <= 0 || $claimKey === '' || $ownerToken === '') {
+            return ['outcome' => 'blocked'];
+        }
+
+        $reservation = $this->getReservation($reservationId);
+        if (!\is_array($reservation)
+            || \trim((string) ($reservation['provider_booking_id'] ?? '')) !== ''
+            || \trim((string) ($reservation['provider_reservation_id'] ?? '')) !== ''
+            || \sanitize_key((string) ($reservation['status'] ?? '')) !== 'pending_payment'
+            || \sanitize_key((string) ($reservation['payment_status'] ?? '')) !== 'pending'
+            || \sanitize_key((string) ($reservation['provider_sync_status'] ?? '')) !== 'manual_review'
+        ) {
+            return ['outcome' => 'blocked'];
+        }
+
+        $now = \current_time('mysql', true);
+        $leaseSeconds = \max(60, \min(900, $leaseSeconds));
+        $leaseExpiresAt = \gmdate('Y-m-d H:i:s', \time() + $leaseSeconds);
+        $updated = $this->wpdb->query(
+            $this->wpdb->prepare(
+                'UPDATE ' . $this->table('reservations') . '
+                SET provider_sync_status = %s,
+                    provider_sync_error = %s,
+                    provider_fulfilment_key = %s,
+                    provider_fulfilment_owner = %s,
+                    provider_fulfilment_claimed_at = %s,
+                    provider_fulfilment_lease_expires_at = %s
+                WHERE id = %d
+                    AND status = %s
+                    AND payment_status = %s
+                    AND provider_booking_id = %s
+                    AND provider_reservation_id = %s
+                    AND provider_sync_status = %s',
+                'creating',
+                '',
+                $claimKey,
+                $ownerToken,
+                $now,
+                $leaseExpiresAt,
+                $reservationId,
+                'pending_payment',
+                'pending',
+                '',
+                '',
+                'manual_review'
             )
         );
 
@@ -563,13 +629,174 @@ final class ReservationRepository extends AbstractRepository
      */
     public function createProviderMirrorReservation(array $reservationData): int
     {
+        $data = $this->normalizeProviderMirrorReservationData($reservationData);
+        if (empty($data)) {
+            return 0;
+        }
+        $inserted = $this->wpdb->insert(
+            $this->table('reservations'),
+            $data,
+            $this->resolveReservationFormats($data)
+        );
+        return $inserted !== false ? (int) $this->wpdb->insert_id : 0;
+    }
+
+    /**
+     * Atomically convert exact physical-room locks into pending Clock mirrors.
+     *
+     * @param array<int, array<string, mixed>> $reservationRows
+     * @param array<int, string> $nonBlockingStatuses
+     * @return array{success: bool, reason_code: string, reservation_ids: array<int, int>}
+     */
+    public function createProviderMirrorReservationsFromLocks(
+        array $reservationRows,
+        string $sessionId,
+        array $nonBlockingStatuses = []
+    ): array {
+        $sessionId = $this->normalizeAtomicSessionId($sessionId);
+        if ($sessionId === '' || empty($reservationRows)) {
+            return $this->atomicConversionResult(false, 'invalid_input');
+        }
+
+        $normalizedRows = [];
+        $physicalRoomIds = [];
+        foreach (\array_values($reservationRows) as $selectionIndex => $reservationRow) {
+            if (!\is_array($reservationRow)) {
+                return $this->atomicConversionResult(false, 'invalid_input');
+            }
+            $data = $this->normalizeProviderMirrorReservationData($reservationRow);
+            $assignedRoomId = isset($data['assigned_room_id']) ? (int) $data['assigned_room_id'] : 0;
+            if (empty($data)
+                || (int) ($data['room_id'] ?? 0) <= 0
+                || (int) ($data['room_type_id'] ?? 0) <= 0
+                || $assignedRoomId <= 0
+                || (int) ($data['guest_id'] ?? 0) <= 0
+                || (int) ($data['guests'] ?? 0) <= 0
+                || !$this->isValidReservationDate((string) ($data['checkin'] ?? ''))
+                || !$this->isValidReservationDate((string) ($data['checkout'] ?? ''))
+                || (string) $data['checkin'] >= (string) $data['checkout']
+                || (string) ($data['status'] ?? '') !== 'pending_payment'
+                || (string) ($data['payment_status'] ?? '') !== 'pending'
+                || (string) ($data['provider'] ?? '') !== 'clock'
+                || isset($physicalRoomIds[$assignedRoomId])
+            ) {
+                return $this->atomicConversionResult(false, 'invalid_input');
+            }
+            $physicalRoomIds[$assignedRoomId] = $assignedRoomId;
+            $normalizedRows[(int) $selectionIndex] = $data;
+        }
+
+        $locksTable = $this->lockTableName();
+        if (!$this->hasTransactionalAtomicConversionStorage($locksTable)) {
+            return $this->atomicConversionResult(false, 'transactional_storage_required');
+        }
+        if (!$this->beginTransaction()) {
+            return $this->atomicConversionResult(false, 'transaction_start_failed');
+        }
+
+        $statuses = $this->normalizeNonBlockingStatuses($nonBlockingStatuses);
+        $sortedPhysicalRoomIds = \array_values($physicalRoomIds);
+        \sort($sortedPhysicalRoomIds, \SORT_NUMERIC);
+
+        try {
+            foreach ($sortedPhysicalRoomIds as $physicalRoomId) {
+                $lockedRoomId = $this->wpdb->get_var(
+                    $this->wpdb->prepare(
+                        'SELECT id FROM ' . $this->wpdb->prefix . 'mhb_rooms WHERE id = %d FOR UPDATE',
+                        $physicalRoomId
+                    )
+                );
+                if ((int) $lockedRoomId !== $physicalRoomId) {
+                    $this->rollback();
+                    return $this->atomicConversionResult(false, 'physical_room_missing');
+                }
+            }
+
+            $reservationIdsBySelection = [];
+            foreach ($normalizedRows as $selectionIndex => $data) {
+                $assignedRoomId = (int) $data['assigned_room_id'];
+                $overlapCount = $this->wpdb->get_var(
+                    $this->wpdb->prepare(
+                        'SELECT COUNT(*) FROM ' . $this->table('reservations') . '
+                        WHERE assigned_room_id = %d
+                            AND checkin < %s
+                            AND checkout > %s
+                            AND status NOT IN (%s, %s, %s)',
+                        $assignedRoomId,
+                        (string) $data['checkout'],
+                        (string) $data['checkin'],
+                        $statuses[0],
+                        $statuses[1],
+                        $statuses[2]
+                    )
+                );
+                if ($overlapCount === null) {
+                    $this->rollback();
+                    return $this->atomicConversionResult(false, 'reservation_overlap_check_failed');
+                }
+                if ((int) $overlapCount > 0) {
+                    $this->rollback();
+                    return $this->atomicConversionResult(false, 'reservation_overlap');
+                }
+
+                $deleted = $this->wpdb->query(
+                    $this->wpdb->prepare(
+                        'DELETE FROM ' . $locksTable . '
+                        WHERE room_id = %d
+                            AND checkin = %s
+                            AND checkout = %s
+                            AND session_id = %s
+                            AND expires_at > UTC_TIMESTAMP()',
+                        $assignedRoomId,
+                        (string) $data['checkin'],
+                        (string) $data['checkout'],
+                        $sessionId
+                    )
+                );
+                if ($deleted === false) {
+                    $this->rollback();
+                    return $this->atomicConversionResult(false, 'lock_consume_failed');
+                }
+                if ((int) $deleted !== 1) {
+                    $this->rollback();
+                    return $this->atomicConversionResult(false, 'lock_unavailable');
+                }
+
+                $inserted = $this->wpdb->insert(
+                    $this->table('reservations'),
+                    $data,
+                    $this->resolveReservationFormats($data)
+                );
+                if ($inserted === false || (int) $this->wpdb->insert_id <= 0) {
+                    $this->rollback();
+                    return $this->atomicConversionResult(false, 'reservation_insert_failed');
+                }
+                $reservationIdsBySelection[$selectionIndex] = (int) $this->wpdb->insert_id;
+            }
+
+            if (!$this->commit()) {
+                $this->rollback();
+                return $this->atomicConversionResult(false, 'transaction_commit_failed');
+            }
+        } catch (\Throwable $error) {
+            $this->rollback();
+            return $this->atomicConversionResult(false, 'database_error');
+        }
+
+        \ksort($reservationIdsBySelection, \SORT_NUMERIC);
+        return $this->atomicConversionResult(true, '', \array_values($reservationIdsBySelection));
+    }
+
+    /** @param array<string, mixed> $reservationData @return array<string, mixed> */
+    private function normalizeProviderMirrorReservationData(array $reservationData): array
+    {
         $bookingId = isset($reservationData['booking_id']) ? (string) $reservationData['booking_id'] : '';
         $roomId = isset($reservationData['room_id']) ? (int) $reservationData['room_id'] : 0;
         $guestId = isset($reservationData['guest_id']) ? (int) $reservationData['guest_id'] : 0;
         $checkin = isset($reservationData['checkin']) ? (string) $reservationData['checkin'] : '';
         $checkout = isset($reservationData['checkout']) ? (string) $reservationData['checkout'] : '';
         if ($bookingId === '' || $roomId <= 0 || $guestId <= 0 || $checkin === '' || $checkout === '') {
-            return 0;
+            return [];
         }
         $data = [
             'booking_id' => $bookingId,
@@ -602,15 +829,73 @@ final class ReservationRepository extends AbstractRepository
             'provider_metadata' => $this->providerJson($reservationData['provider_metadata'] ?? null),
             'created_at' => isset($reservationData['created_at']) ? (string) $reservationData['created_at'] : \current_time('mysql'),
         ];
-        if (\MustHotelBooking\Core\ReservationStatus::isConfirmed((string) $data['status'])) {
-            return 0;
+        return \MustHotelBooking\Core\ReservationStatus::isConfirmed((string) $data['status']) ? [] : $data;
+    }
+
+    private function normalizeAtomicSessionId(string $sessionId): string
+    {
+        return \substr((string) \preg_replace('/[^a-zA-Z0-9_-]/', '', $sessionId), 0, 191);
+    }
+
+    private function isValidReservationDate(string $date): bool
+    {
+        $parsed = \DateTimeImmutable::createFromFormat('!Y-m-d', $date);
+        return $parsed instanceof \DateTimeImmutable && $parsed->format('Y-m-d') === $date;
+    }
+
+    private function hasTransactionalAtomicConversionStorage(string $locksTable): bool
+    {
+        if ($this->atomicConversionStorageReady !== null) {
+            return $this->atomicConversionStorageReady;
         }
-        $inserted = $this->wpdb->insert(
+        $tableNames = [
+            $this->wpdb->prefix . 'mhb_rooms',
+            $locksTable,
             $this->table('reservations'),
-            $data,
-            $this->resolveReservationFormats($data)
+        ];
+        $rows = $this->wpdb->get_results(
+            $this->wpdb->prepare(
+                'SELECT TABLE_NAME, ENGINE
+                FROM information_schema.TABLES
+                WHERE TABLE_SCHEMA = DATABASE()
+                    AND TABLE_NAME IN (%s, %s, %s)',
+                $tableNames[0],
+                $tableNames[1],
+                $tableNames[2]
+            ),
+            ARRAY_A
         );
-        return $inserted !== false ? (int) $this->wpdb->insert_id : 0;
+        $engines = [];
+        if (\is_array($rows)) {
+            foreach ($rows as $row) {
+                if (!\is_array($row)) {
+                    continue;
+                }
+                $tableName = (string) ($row['TABLE_NAME'] ?? $row['table_name'] ?? '');
+                $engine = \strtolower((string) ($row['ENGINE'] ?? $row['engine'] ?? ''));
+                if ($tableName !== '') {
+                    $engines[$tableName] = $engine;
+                }
+            }
+        }
+        $this->atomicConversionStorageReady = true;
+        foreach ($tableNames as $tableName) {
+            if (($engines[$tableName] ?? '') !== 'innodb') {
+                $this->atomicConversionStorageReady = false;
+                break;
+            }
+        }
+        return $this->atomicConversionStorageReady;
+    }
+
+    /** @param array<int, int> $reservationIds @return array{success: bool, reason_code: string, reservation_ids: array<int, int>} */
+    private function atomicConversionResult(bool $success, string $reasonCode, array $reservationIds = []): array
+    {
+        return [
+            'success' => $success,
+            'reason_code' => $reasonCode,
+            'reservation_ids' => $reservationIds,
+        ];
     }
     /** @param array<string, mixed> $data @return array<int, string> */
     private function providerMetadataFormats(array $data): array
@@ -2176,7 +2461,7 @@ final class ReservationRepository extends AbstractRepository
             return [];
         }
         $sql = $this->wpdb->prepare(
-            'SELECT id, booking_id, room_id, room_type_id, assigned_room_id, rate_plan_id, guest_id, checkin, checkout, guests, status, booking_source, total_price, coupon_id, coupon_code, coupon_discount_total, payment_status, confirmation_flow, confirmation_claim_id, confirmation_source, confirmed_at, created_at
+            'SELECT id, booking_id, room_id, room_type_id, assigned_room_id, rate_plan_id, guest_id, checkin, checkout, guests, status, booking_source, provider, total_price, coupon_id, coupon_code, coupon_discount_total, payment_status, confirmation_flow, confirmation_claim_id, confirmation_source, confirmed_at, provider_metadata, created_at
             FROM ' . $this->table('reservations') . '
             WHERE id IN (' . $this->buildIntegerPlaceholders($reservationIds) . ')
             ORDER BY id ASC',

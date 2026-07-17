@@ -128,6 +128,8 @@ Key relationships:
 
 - Reservation → guest via `guest_id`.
 - Reservation → sellable room via `room_id`; provider/internal type via `room_type_id`; physical unit via `assigned_room_id`.
+- Deferred Clock checkout converts the current session's unexpired exact `mhb_inventory_locks` rows into `pending_payment` mirrors through one transaction. It locks `mhb_rooms` rows in ascending ID order, rejects overlapping blocking reservations, consumes the exact locks, inserts the full mirror set, and commits all rooms together.
+- Atomic exact-lock conversion requires `mhb_rooms`, the active inventory-lock table, and `must_reservations` to use InnoDB. If the storage engine cannot be verified as transactional, checkout fails before mutation or payment initiation.
 - Payment/refund/accounting rows link back to reservations and each other through IDs and external references.
 - Provider mappings bind local entities to external IDs.
 - JSON/text provider metadata carries pricing snapshots, cancellation financial state, Clock references, fulfillment flags and diagnostic context. Treat stored keys as compatibility contracts.

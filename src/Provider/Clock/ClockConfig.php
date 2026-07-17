@@ -11,6 +11,7 @@ final class ClockConfig
         'rooms' => '/rooms',
         'rates' => '/rates',
         'rates_availability' => '/rates_availability',
+        'room_statuses' => '/room_statuses',
         'products' => '/products',
         'wbe_room_type_rates' => '/rates',
         'rate_plans' => '/rate_plans',
@@ -135,6 +136,10 @@ final class ClockConfig
     {
         return self::catalogPaths()['rates_availability'];
     }
+    public static function roomStatusesPath(): string
+    {
+        return self::catalogPaths()['room_statuses'];
+    }
     public static function productsPath(): string
     {
         return self::catalogPaths()['products'];
@@ -222,14 +227,7 @@ final class ClockConfig
         $time = (string) (self::settings()['clock_full_catalog_sync_hour'] ?? '03:00');
         return \preg_match('/^(2[0-3]|[01]\d):([0-5]\d)$/', $time) === 1 ? $time : '03:00';
     }
-    public static function availabilityRateSyncEnabled(): bool
-    {
-        return !empty(self::settings()['clock_availability_rate_sync_enabled']);
-    }
-    public static function availabilityRateSyncIntervalMinutes(): int
-    {
-        return self::normalizeAutoSyncInterval((int) (self::settings()['clock_availability_rate_interval_minutes'] ?? 15));
-    }
+
     public static function reservationFallbackSyncEnabled(): bool
     {
         return !empty(self::settings()['clock_reservation_fallback_sync_enabled']);
@@ -279,6 +277,7 @@ final class ClockConfig
             'rooms' => self::pathOrDefault((string) ($settings['clock_rooms_path'] ?? ''), self::CATALOG_DEFAULT_PATHS['rooms']),
             'rates' => self::pathOrDefault((string) ($settings['clock_rates_path'] ?? ''), self::CATALOG_DEFAULT_PATHS['rates']),
             'rates_availability' => self::pathOrDefault((string) ($settings['clock_rates_availability_path'] ?? ''), self::CATALOG_DEFAULT_PATHS['rates_availability']),
+            'room_statuses' => self::pathOrDefault((string) ($settings['clock_room_statuses_path'] ?? ''), self::CATALOG_DEFAULT_PATHS['room_statuses']),
             'products' => self::pathOrDefault((string) ($settings['clock_products_path'] ?? ''), self::CATALOG_DEFAULT_PATHS['products']),
             'wbe_room_type_rates' => self::pathOrDefault((string) ($settings['clock_wbe_room_type_rates_path'] ?? ''), self::CATALOG_DEFAULT_PATHS['wbe_room_type_rates']),
             'rate_plans' => self::pathOrDefault((string) ($settings['clock_rate_plans_path'] ?? ''), self::CATALOG_DEFAULT_PATHS['rate_plans']),
@@ -405,6 +404,9 @@ final class ClockConfig
         if (self::ratesAvailabilityPath() === '') {
             $errors[] = \__('Clock rates availability endpoint path is not configured.', 'must-hotel-booking');
         }
+        if (self::roomStatusesPath() === '') {
+            $errors[] = \__('Clock room statuses endpoint path is not configured.', 'must-hotel-booking');
+        }
         if (self::productsPath() === '') {
             $errors[] = \__('Clock products endpoint path is not configured.', 'must-hotel-booking');
         }
@@ -516,6 +518,7 @@ final class ClockConfig
             'clock_catalog_paths_configured' => $configuredCatalogPaths,
             'clock_catalog_endpoints' => self::catalogEndpoints(),
             'clock_rates_availability_path' => $catalogPaths['rates_availability'],
+            'clock_room_statuses_path' => $catalogPaths['room_statuses'],
             'clock_products_path' => $catalogPaths['products'],
             'clock_public_booking_paths_configured' => $configuredPublicBookingPaths,
             'clock_public_booking_configured' => self::isPublicBookingConfigured(),
@@ -554,8 +557,6 @@ final class ClockConfig
             'clock_webhook_url' => \function_exists('rest_url') ? MustBookingConfig::build_public_rest_url('must-hotel-booking/v1/clock/webhook') : '',
             'clock_full_catalog_sync_enabled' => self::fullCatalogSyncEnabled(),
             'clock_full_catalog_sync_hour' => self::fullCatalogSyncHour(),
-            'clock_availability_rate_sync_enabled' => self::availabilityRateSyncEnabled(),
-            'clock_availability_rate_interval_minutes' => self::availabilityRateSyncIntervalMinutes(),
             'clock_reservation_fallback_sync_enabled' => self::reservationFallbackSyncEnabled(),
             'clock_reservation_fallback_interval_minutes' => self::reservationFallbackIntervalMinutes(),
             'clock_reservation_fallback_batch_size' => self::reservationFallbackBatchSize(),

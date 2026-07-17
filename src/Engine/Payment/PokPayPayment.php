@@ -22,6 +22,47 @@ final class PokPayPayment implements PaymentInterface
         if (empty($validation['success'])) {
             return $validation + ['method' => $this->method];
         }
+        $checkoutMode = PaymentEngine::getPokPayCheckoutMode();
+        $attempt = isset($context['payment_attempt']) && \is_array($context['payment_attempt']) ? $context['payment_attempt'] : [];
+        $provisionalReference = 'pokpay-preorder-' . \wp_generate_uuid4();
+        $attempt['provider_attempt_reference'] = $provisionalReference;
+        $attempt['attempt_checkout_mode'] = $checkoutMode;
+        $attempt['attempt_expires_at'] = \gmdate('Y-m-d H:i:s', \time() + (PaymentEngine::getPendingPaymentCleanupMinutes() * 60));
+        $paymentRows = BookingStatusEngine::createPaymentRows($reservationIds, $this->method, 'pending', $provisionalReference, true, $attempt);
+        if (!empty($paymentRows['failed'])) {
+            return [
+                'success' => false,
+                'method' => $this->method,
+                'state' => 'integrity_error',
+                'checkout_mode' => $checkoutMode,
+                'expires_at' => (string) $attempt['attempt_expires_at'],
+                'reason_code' => 'pending_attempt_persistence_failed',
+                'message' => \__('PokPay checkout was blocked because its local attempt identity could not be stored safely.', 'must-hotel-booking'),
+            ];
+        }
+        $preflight = PaymentEngine::validateReusablePendingPaymentAttempt(
+            ['session_id' => $provisionalReference, 'reservation_ids' => $reservationIds],
+            $this->method,
+            $amount,
+            $currency,
+            'website_online_pokpay'
+        );
+        if (empty($preflight['allowed'])) {
+            $attemptRows = \MustHotelBooking\Engine\get_payment_repository()->getPaymentAttemptRows($this->method, $provisionalReference);
+            \MustHotelBooking\Engine\get_payment_repository()->updatePaymentAttemptRows(
+                \array_values(\array_filter(\array_map('intval', \array_column($attemptRows, 'id')))),
+                ['attempt_status' => 'superseded', 'attempt_failure_code' => 'pending_attempt_preflight_invalid']
+            );
+            return [
+                'success' => false,
+                'method' => $this->method,
+                'state' => 'integrity_error',
+                'checkout_mode' => $checkoutMode,
+                'expires_at' => (string) $attempt['attempt_expires_at'],
+                'reason_code' => 'pending_attempt_preflight_invalid',
+                'message' => \__('PokPay checkout was blocked because its immutable payment bindings could not be reread safely.', 'must-hotel-booking'),
+            ];
+        }
         $result = PaymentEngine::createPokPaySdkOrder(
             $reservationIds,
             $this->extractGuestForm($context),
@@ -44,19 +85,22 @@ final class PokPayPayment implements PaymentInterface
                 'message' => \__('PokPay created an order response without a usable reference. Do not retry until the hotel reviews it.', 'must-hotel-booking'),
             ];
         }
-        $checkoutMode = PaymentEngine::getPokPayCheckoutMode();
-        $checkoutUrl = isset($result['checkout_url'])
-            ? (string) $result['checkout_url']
-            : (isset($result['redirect_url']) ? (string) $result['redirect_url'] : '');
-        $attempt = isset($context['payment_attempt']) && \is_array($context['payment_attempt']) ? $context['payment_attempt'] : [];
-        $attempt['provider_attempt_reference'] = $orderId;
-        $attempt['attempt_checkout_mode'] = $checkoutMode;
-        $attempt['attempt_expires_at'] = (string) ($result['expires_at'] ?? '');
-        if ($attempt['attempt_expires_at'] === '') {
-            $attempt['attempt_expires_at'] = \gmdate('Y-m-d H:i:s', \time() + (PaymentEngine::getPendingPaymentCleanupMinutes() * 60));
+        $providerExpiresAt = \trim((string) ($result['expires_at'] ?? ''));
+        if ($providerExpiresAt !== '') {
+            $attempt['attempt_expires_at'] = $providerExpiresAt;
         }
-        $paymentRows = BookingStatusEngine::createPaymentRows($reservationIds, $this->method, 'pending', $orderId, true, $attempt);
-        if (!empty($paymentRows['failed'])) {
+        $paymentRepository = \MustHotelBooking\Engine\get_payment_repository();
+        $attemptRows = $paymentRepository->getPaymentAttemptRows($this->method, $provisionalReference);
+        $paymentIds = \array_values(\array_filter(\array_map('intval', \array_column($attemptRows, 'id'))));
+        if (empty($paymentIds) || !$paymentRepository->updatePaymentAttemptRows($paymentIds, [
+            'transaction_id' => $orderId,
+            'provider_attempt_reference' => $orderId,
+            'attempt_expires_at' => (string) $attempt['attempt_expires_at'],
+        ])) {
+            $paymentRepository->updatePaymentAttemptRows($paymentIds, [
+                'attempt_status' => 'manual_review',
+                'attempt_failure_code' => 'provider_attempt_rebind_failed',
+            ]);
             return [
                 'success' => false,
                 'method' => $this->method,
@@ -66,10 +110,39 @@ final class PokPayPayment implements PaymentInterface
                 'session_id' => $orderId,
                 'checkout_mode' => $checkoutMode,
                 'expires_at' => (string) $attempt['attempt_expires_at'],
-                'reason_code' => 'pending_attempt_persistence_failed',
-                'message' => \__('PokPay checkout was created, but its local attempt identity could not be stored safely. Do not retry until the hotel reviews it.', 'must-hotel-booking'),
+                'reason_code' => 'provider_attempt_rebind_failed',
+                'message' => \__('PokPay checkout was created, but its provider reference could not be bound locally. Do not retry until the hotel reviews it.', 'must-hotel-booking'),
             ];
         }
+        $rebound = PaymentEngine::validateReusablePendingPaymentAttempt(
+            ['session_id' => $orderId, 'reservation_ids' => $reservationIds],
+            $this->method,
+            $amount,
+            $currency,
+            'website_online_pokpay'
+        );
+        if (empty($rebound['allowed'])) {
+            $reboundRows = $paymentRepository->getPaymentAttemptRows($this->method, $orderId);
+            $paymentRepository->updatePaymentAttemptRows(
+                \array_values(\array_filter(\array_map('intval', \array_column($reboundRows, 'id')))),
+                ['attempt_status' => 'manual_review', 'attempt_failure_code' => 'pending_attempt_rebind_invalid']
+            );
+            return [
+                'success' => false,
+                'method' => $this->method,
+                'state' => 'manual_review',
+                'provider_attempt_created' => true,
+                'provider_reference' => $orderId,
+                'session_id' => $orderId,
+                'checkout_mode' => $checkoutMode,
+                'expires_at' => (string) $attempt['attempt_expires_at'],
+                'reason_code' => 'pending_attempt_rebind_invalid',
+                'message' => \__('PokPay checkout was created, but its immutable payment bindings could not be reread safely. Do not retry until the hotel reviews it.', 'must-hotel-booking'),
+            ];
+        }
+        $checkoutUrl = isset($result['checkout_url'])
+            ? (string) $result['checkout_url']
+            : (isset($result['redirect_url']) ? (string) $result['redirect_url'] : '');
         if ($checkoutMode === 'sdk_confirm_url_redirect' && ($checkoutUrl === '' || !PaymentEngine::isPokPayCheckoutUrl($checkoutUrl))) {
             $attemptRows = \MustHotelBooking\Engine\get_payment_repository()->getPaymentAttemptRows($this->method, $orderId);
             \MustHotelBooking\Engine\get_payment_repository()->updatePaymentAttemptRows(

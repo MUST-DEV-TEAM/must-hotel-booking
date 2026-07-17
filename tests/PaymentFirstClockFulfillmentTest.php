@@ -6,30 +6,48 @@ if (\PHP_SAPI !== 'cli') {
 }
 
 $root = \dirname(__DIR__);
-$provider = (string) \file_get_contents($root . '/src/Provider/Clock/ClockReservationProvider.php');
 $payment = (string) \file_get_contents($root . '/src/Engine/PaymentEngine.php');
 $failures = [];
 
-if (\strpos($provider, 'public function fulfillPendingOnlinePayment') === false) {
-    $failures[] = 'Clock provider must expose a post-payment fulfillment boundary.';
+$cleanupStart = \strpos($payment, 'public static function cleanupExpiredPendingPaymentReservations');
+$cleanupEnd = \strpos($payment, 'public static function registerPaymentRestRoutes', $cleanupStart === false ? 0 : $cleanupStart + 1);
+$cleanup = $cleanupStart !== false && $cleanupEnd !== false ? \substr($payment, $cleanupStart, $cleanupEnd - $cleanupStart) : '';
+
+$resumeCall = \strpos($cleanup, 'resumeVerifiedPendingClockFulfilment');
+$preserveGuard = \strpos($cleanup, 'hasPendingClockFulfilment');
+if ($cleanup === '' || $resumeCall === false) {
+    $failures[] = 'Expired-payment cleanup must resume a durably verified pending Clock fulfilment.';
+} elseif ($preserveGuard !== false && $resumeCall > $preserveGuard) {
+    $failures[] = 'Verified pending Clock fulfilment must be resumed before the cleanup preservation guard.';
 }
 
-$start = \strpos($payment, 'private static function completeVerifiedOnlinePayment');
-$end = \strpos($payment, 'private static function ', $start === false ? 0 : $start + 1);
-$body = $start !== false && $end !== false ? \substr($payment, $start, $end - $start) : '';
-$clock = \strpos($body, 'fulfillPendingOnlinePayment');
-$paymentRows = \strpos($body, 'createPaymentRows');
-$status = \strpos($body, 'updateReservationStatuses');
+$helperStart = \strpos($payment, 'private static function resumeVerifiedPendingClockFulfilment');
+$helperEnd = \strpos($payment, 'private static function ', $helperStart === false ? 0 : $helperStart + 1);
+$helper = $helperStart !== false && $helperEnd !== false ? \substr($payment, $helperStart, $helperEnd - $helperStart) : '';
 
-if ($body === '' || $clock === false || $paymentRows === false || $status === false) {
-    $failures[] = 'Verified payment completion must include Clock fulfillment, payment recording, and confirmation.';
-} elseif (!($clock < $paymentRows && $paymentRows < $status)) {
-    $failures[] = 'Clock creation must precede payment recording, which must precede local confirmation.';
+foreach ([
+    'PaymentVerificationRepository',
+    'getForReservation',
+    'attempt_status',
+    'provider_attempt_reference',
+    'provider_transaction_reference',
+    'pending_fulfilment',
+    'provider_booking_id',
+    'provider_reservation_id',
+    'RefundRepository',
+    'getRefundsForReservation',
+    'validateFinalization',
+    'fulfillPendingOnlinePayment',
+    'recordAndConfirm',
+] as $marker) {
+    if ($helper === '' || \strpos($helper, $marker) === false) {
+        $failures[] = 'Clock fulfilment recovery is missing the ' . $marker . ' safety guard.';
+    }
 }
 
-foreach (['amount_total', 'stripe_reservation_metadata_mismatch', 'currencyCode', 'reservationPaymentsMatchPokPayOrder'] as $marker) {
-    if (\strpos($payment, $marker) === false) {
-        $failures[] = 'Provider verification is missing the ' . $marker . ' check.';
+foreach (['getPokPaySdkOrder', 'getStripeCheckoutSession', 'search'] as $forbidden) {
+    if ($helper !== '' && \stripos($helper, $forbidden) !== false) {
+        $failures[] = 'First-time Clock fulfilment recovery must not perform provider correlation searches.';
     }
 }
 

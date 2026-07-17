@@ -16,11 +16,12 @@ $defer = \strpos($body, '$deferClockCreation');
 $clockWrite = \strpos($body, 'createClockBooking');
 $guard = \strpos($body, 'if (!$deferClockCreation)');
 $mirror = \strpos($body, 'createMirrorReservation');
+$batchMirror = \strpos($body, 'createPendingMirrorReservationsFromLocks');
 
-if ($body === '' || $defer === false || $guard === false || $mirror === false || $clockWrite === false) {
+if ($body === '' || $defer === false || $guard === false || $mirror === false || $batchMirror === false || $clockWrite === false) {
     $failures[] = 'Clock checkout must expose a deferred online-payment creation branch.';
-} elseif ($defer > $guard || $guard > $clockWrite || $mirror < $guard) {
-    $failures[] = 'Pending online checkout must bypass the Clock write and create only the local mirror.';
+} elseif ($defer > $batchMirror || $batchMirror > $clockWrite || $guard > $clockWrite || $mirror < $guard) {
+    $failures[] = 'Pending online checkout must bypass the Clock write and atomically create its local mirrors.';
 }
 
 foreach (['defer_provider_creation', 'pending_guest_form', 'pending_clock_creation'] as $marker) {

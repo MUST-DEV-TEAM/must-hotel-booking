@@ -25,6 +25,135 @@ final class ClockMirrorReservationService
         array $providerReservation,
         array $options
     ): int {
+        $prepared = $this->prepareMirrorReservationData(
+            $context,
+            $guestForm,
+            $guestId,
+            $validatedRoom,
+            $providerReservation,
+            $options
+        );
+        if (empty($prepared['reservation_data']) || !\is_array($prepared['reservation_data'])) {
+            return 0;
+        }
+        $repository = \MustHotelBooking\Engine\get_reservation_repository();
+        $reservationId = $repository->createProviderMirrorReservation($prepared['reservation_data']);
+
+        if ($reservationId <= 0) {
+            return 0;
+        }
+
+        $this->releaseSelectionLock(
+            (int) ($prepared['lock_room_id'] ?? 0),
+            (string) ($context['checkin'] ?? ''),
+            (string) ($context['checkout'] ?? '')
+        );
+
+        \do_action('must_hotel_booking/reservation_created', $reservationId);
+        if (!empty($prepared['provider_created'])) {
+            $this->logReferenceDiagnostics(
+                $reservationId,
+                (string) ($prepared['booking_id'] ?? ''),
+                (string) ($prepared['provider_booking_id'] ?? ''),
+                (string) ($prepared['clock_booking_reference'] ?? ''),
+                isset($prepared['reference_mapping']) && \is_array($prepared['reference_mapping']) ? $prepared['reference_mapping'] : []
+            );
+        }
+
+        return $reservationId;
+    }
+
+    /**
+     * @param array<string, mixed> $context
+     * @param array<string, string> $guestForm
+     * @param array<int, array<string, mixed>> $validatedRooms
+     * @param array<string, mixed> $options
+     * @return array{success: bool, reason_code: string, reservation_ids: array<int, int>}
+     */
+    public function createPendingMirrorReservationsFromLocks(
+        array $context,
+        array $guestForm,
+        int $guestId,
+        array $validatedRooms,
+        array $options,
+        string $sessionId
+    ): array {
+        if ($guestId <= 0 || empty($validatedRooms) || $sessionId === '') {
+            return ['success' => false, 'reason_code' => 'invalid_input', 'reservation_ids' => []];
+        }
+        $reservationRows = [];
+        foreach ($validatedRooms as $validatedRoom) {
+            if (!\is_array($validatedRoom)) {
+                return ['success' => false, 'reason_code' => 'invalid_input', 'reservation_ids' => []];
+            }
+            $roomOptions = $options;
+            $roomOptions['booking_id'] = $this->generateBookingReference();
+            $roomOptions['defer_provider_creation'] = true;
+            $roomOptions['pending_guest_form'] = $guestForm;
+            $prepared = $this->prepareMirrorReservationData(
+                $context,
+                $guestForm,
+                $guestId,
+                $validatedRoom,
+                [],
+                $roomOptions
+            );
+            if (empty($prepared['reservation_data']) || !\is_array($prepared['reservation_data'])) {
+                return ['success' => false, 'reason_code' => 'invalid_input', 'reservation_ids' => []];
+            }
+            $reservationRows[] = $prepared['reservation_data'];
+        }
+        $repository = \MustHotelBooking\Engine\get_reservation_repository();
+        $result = $repository->createProviderMirrorReservationsFromLocks($reservationRows, $sessionId);
+        if (empty($result['success'])) {
+            return [
+                'success' => false,
+                'reason_code' => (string) ($result['reason_code'] ?? 'database_error'),
+                'reservation_ids' => [],
+            ];
+        }
+        $reservationIds = isset($result['reservation_ids']) && \is_array($result['reservation_ids'])
+            ? \array_values(\array_map('intval', $result['reservation_ids']))
+            : [];
+        if (\count($reservationIds) !== \count($reservationRows)) {
+            return ['success' => false, 'reason_code' => 'database_error', 'reservation_ids' => []];
+        }
+        foreach ($reservationIds as $reservationId) {
+            \do_action('must_hotel_booking/reservation_created', $reservationId);
+        }
+        return ['success' => true, 'reason_code' => '', 'reservation_ids' => $reservationIds];
+    }
+
+    private function releaseSelectionLock(int $roomId, string $checkin, string $checkout): void
+    {
+        if ($roomId <= 0 || $checkin === '' || $checkout === '') {
+            return;
+        }
+
+        if (InventoryEngine::hasInventoryForRoomType($roomId)) {
+            InventoryEngine::releaseLocksForRoomType($roomId, $checkin, $checkout);
+            return;
+        }
+
+        LockEngine::releaseExactLock($roomId, $checkin, $checkout);
+    }
+
+    /**
+     * @param array<string, mixed> $context
+     * @param array<string, string> $guestForm
+     * @param array<string, mixed> $validatedRoom
+     * @param array<string, mixed> $providerReservation
+     * @param array<string, mixed> $options
+     * @return array<string, mixed>
+     */
+    private function prepareMirrorReservationData(
+        array $context,
+        array $guestForm,
+        int $guestId,
+        array $validatedRoom,
+        array $providerReservation,
+        array $options
+    ): array {
         $roomId = isset($validatedRoom['room_id']) ? (int) $validatedRoom['room_id'] : 0;
         $roomTypeId = isset($validatedRoom['room_type_id']) ? (int) $validatedRoom['room_type_id'] : $roomId;
         $assignedRoomId = isset($validatedRoom['physical_room_id']) ? (int) $validatedRoom['physical_room_id'] : 0;
@@ -38,23 +167,19 @@ final class ClockMirrorReservationService
         $bookingSource = isset($options['booking_source']) ? \sanitize_key((string) $options['booking_source']) : 'website';
         $extraNotes = isset($options['notes']) ? \trim(\sanitize_textarea_field((string) $options['notes'])) : '';
         $note = ReservationEngine::buildReservationNote($noteRoomId, $guestForm);
-
         if ($extraNotes !== '') {
             $note = \trim($note);
             $note .= ($note !== '' ? "\n\n" : '') . $extraNotes;
         }
         $cancellationPolicy = $ratePlanId > 0 ? CancellationEngine::getCancellationPolicy($ratePlanId) : null;
-
         if (\is_array($cancellationPolicy) && (string) ($cancellationPolicy['name'] ?? '') !== '') {
             $note = \trim($note);
-            $note .= ($note !== '' ? "\n\n" : '')
-                . \sprintf(
-                    /* translators: %s is cancellation policy name. */
-                    \__('Cancellation Policy: %s', 'must-hotel-booking'),
-                    (string) $cancellationPolicy['name']
-                );
+            $note .= ($note !== '' ? "\n\n" : '') . \sprintf(
+                /* translators: %s is cancellation policy name. */
+                \__('Cancellation Policy: %s', 'must-hotel-booking'),
+                (string) $cancellationPolicy['name']
+            );
         }
-
         $clockIdentifiers = ClockBookingReferenceMapper::extractClockIdentifiers($providerReservation);
         $providerBookingId = (string) ($clockIdentifiers['clock_booking_id'] ?? '');
         $providerReservationId = $this->firstString($providerReservation, ['reservation_id', 'provider_reservation_id', 'id', 'booking_id']);
@@ -81,103 +206,79 @@ final class ClockMirrorReservationService
         $pricingSnapshot = \function_exists('MustHotelBooking\\Frontend\\build_price_breakdown_snapshot')
             ? \MustHotelBooking\Frontend\build_price_breakdown_snapshot($pricing)
             : [];
-        $repository = \MustHotelBooking\Engine\get_reservation_repository();
-        $reservationId = $repository->createProviderMirrorReservation([
-            'booking_id' => $bookingId,
-            'room_id' => $roomTypeId,
-            'room_type_id' => $roomTypeId,
-            'assigned_room_id' => $assignedRoomId,
-            'rate_plan_id' => \max(0, $ratePlanId),
-            'guest_id' => $guestId,
-            'checkin' => (string) ($context['checkin'] ?? ''),
-            'checkout' => (string) ($context['checkout'] ?? ''),
-            'guests' => isset($validatedRoom['guests']) ? (int) $validatedRoom['guests'] : \max(1, (int) ($context['guests'] ?? 1)),
-            'status' => isset($options['reservation_status']) ? \sanitize_key((string) $options['reservation_status']) : 'pending',
-            'booking_source' => $bookingSource !== '' ? $bookingSource : 'website',
-            'notes' => $note,
-            'total_price' => isset($pricing['total_price']) ? (float) $pricing['total_price'] : 0.0,
-            'coupon_id' => $couponId,
-            'coupon_code' => $couponCode,
-            'coupon_discount_total' => $couponDiscountTotal,
-            'payment_status' => isset($options['payment_status']) ? \sanitize_key((string) $options['payment_status']) : 'pending',
-            'confirmation_flow' => isset($options['confirmation_flow']) ? \sanitize_key((string) $options['confirmation_flow']) : 'legacy',
-            'provider' => ProviderManager::CLOCK_MODE,
-            'provider_booking_id' => $providerBookingId,
-            'provider_reservation_id' => $providerReservationId,
-            'provider_status' => $providerStatus,
-            'provider_payment_status' => $providerPaymentStatus,
-            'provider_sync_status' => $providerCreated ? 'synced' : ($deferProviderCreation ? 'pending_payment' : 'synced'),
-            'provider_synced_at' => $providerCreated ? $now : null,
-            'provider_payload_ref' => $providerReservationId !== '' ? $providerReservationId : $providerBookingId,
-            'provider_metadata' => [
-                'source' => $bookingSource !== '' && $bookingSource !== 'website' ? $bookingSource : 'public_booking_mvp',
-                'payment_strategy' => 'clock_pms',
-                'provider_created_before_payment' => $providerCreated && (string) ($options['payment_status'] ?? '') === 'pending',
-                'pending_clock_creation' => $deferProviderCreation,
-                'payment_reconciliation_required' => false,
-                'clock_payment_required' => $providerCreated && (string) ($options['payment_status'] ?? '') === 'pending',
-                'pending_guest_form' => $pendingGuestForm,
-                'clock_booking_id' => $providerBookingId,
-                'clock_booking_reference' => $clockBookingReference,
-                'website_booking_reference' => $bookingId,
-                'pricing_snapshot' => $pricingSnapshot,
-                'website_reference_sent_to_clock' => !empty($referenceMapping['website_reference_sent_to_clock']),
-                'clock_reference_storage_field' => (string) ($referenceMapping['clock_reference_storage_field'] ?? ''),
-                'clock_reference_fallback_fields' => isset($referenceMapping['clock_reference_fallback_fields']) && \is_array($referenceMapping['clock_reference_fallback_fields'])
-                    ? $referenceMapping['clock_reference_fallback_fields']
-                    : [],
-                'clock_reference_text' => (string) ($referenceMapping['clock_reference_text'] ?? ''),
-                'last_clock_reference_sync' => [
-                    'success' => $providerCreated && !empty($referenceMapping['website_reference_sent_to_clock']),
-                    'sync_status' => !$providerCreated
-                        ? 'pending_payment'
-                        : (!empty($referenceMapping['website_reference_sent_to_clock']) ? 'synced' : 'failed'),
-                    'synced_at' => $providerCreated ? $now : null,
-                    'storage_field' => (string) ($referenceMapping['clock_reference_storage_field'] ?? ''),
-                    'fallback_fields' => isset($referenceMapping['clock_reference_fallback_fields']) && \is_array($referenceMapping['clock_reference_fallback_fields'])
+        return [
+            'reservation_data' => [
+                'booking_id' => $bookingId,
+                'room_id' => $roomTypeId,
+                'room_type_id' => $roomTypeId,
+                'assigned_room_id' => $assignedRoomId,
+                'rate_plan_id' => \max(0, $ratePlanId),
+                'guest_id' => $guestId,
+                'checkin' => (string) ($context['checkin'] ?? ''),
+                'checkout' => (string) ($context['checkout'] ?? ''),
+                'guests' => isset($validatedRoom['guests']) ? (int) $validatedRoom['guests'] : \max(1, (int) ($context['guests'] ?? 1)),
+                'status' => isset($options['reservation_status']) ? \sanitize_key((string) $options['reservation_status']) : 'pending',
+                'booking_source' => $bookingSource !== '' ? $bookingSource : 'website',
+                'notes' => $note,
+                'total_price' => isset($pricing['total_price']) ? (float) $pricing['total_price'] : 0.0,
+                'coupon_id' => $couponId,
+                'coupon_code' => $couponCode,
+                'coupon_discount_total' => $couponDiscountTotal,
+                'payment_status' => isset($options['payment_status']) ? \sanitize_key((string) $options['payment_status']) : 'pending',
+                'confirmation_flow' => isset($options['confirmation_flow']) ? \sanitize_key((string) $options['confirmation_flow']) : 'legacy',
+                'provider' => ProviderManager::CLOCK_MODE,
+                'provider_booking_id' => $providerBookingId,
+                'provider_reservation_id' => $providerReservationId,
+                'provider_status' => $providerStatus,
+                'provider_payment_status' => $providerPaymentStatus,
+                'provider_sync_status' => $providerCreated ? 'synced' : ($deferProviderCreation ? 'pending_payment' : 'synced'),
+                'provider_synced_at' => $providerCreated ? $now : null,
+                'provider_payload_ref' => $providerReservationId !== '' ? $providerReservationId : $providerBookingId,
+                'provider_metadata' => [
+                    'source' => $bookingSource !== '' && $bookingSource !== 'website' ? $bookingSource : 'public_booking_mvp',
+                    'payment_strategy' => 'clock_pms',
+                    'provider_created_before_payment' => $providerCreated && (string) ($options['payment_status'] ?? '') === 'pending',
+                    'pending_clock_creation' => $deferProviderCreation,
+                    'payment_reconciliation_required' => false,
+                    'clock_payment_required' => $providerCreated && (string) ($options['payment_status'] ?? '') === 'pending',
+                    'pending_guest_form' => $pendingGuestForm,
+                    'clock_booking_id' => $providerBookingId,
+                    'clock_booking_reference' => $clockBookingReference,
+                    'website_booking_reference' => $bookingId,
+                    'pricing_snapshot' => $pricingSnapshot,
+                    'website_reference_sent_to_clock' => !empty($referenceMapping['website_reference_sent_to_clock']),
+                    'clock_reference_storage_field' => (string) ($referenceMapping['clock_reference_storage_field'] ?? ''),
+                    'clock_reference_fallback_fields' => isset($referenceMapping['clock_reference_fallback_fields']) && \is_array($referenceMapping['clock_reference_fallback_fields'])
                         ? $referenceMapping['clock_reference_fallback_fields']
                         : [],
+                    'clock_reference_text' => (string) ($referenceMapping['clock_reference_text'] ?? ''),
+                    'last_clock_reference_sync' => [
+                        'success' => $providerCreated && !empty($referenceMapping['website_reference_sent_to_clock']),
+                        'sync_status' => !$providerCreated
+                            ? 'pending_payment'
+                            : (!empty($referenceMapping['website_reference_sent_to_clock']) ? 'synced' : 'failed'),
+                        'synced_at' => $providerCreated ? $now : null,
+                        'storage_field' => (string) ($referenceMapping['clock_reference_storage_field'] ?? ''),
+                        'fallback_fields' => isset($referenceMapping['clock_reference_fallback_fields']) && \is_array($referenceMapping['clock_reference_fallback_fields'])
+                            ? $referenceMapping['clock_reference_fallback_fields']
+                            : [],
+                    ],
+                    'provider_response' => $this->responseSummary($providerReservation),
+                    'selected_room_id' => $roomId,
+                    'physical_room_id' => $assignedRoomId,
+                    'room_mapping' => $validatedRoom['room_mapping'] ?? null,
+                    'physical_mapping' => $validatedRoom['physical_mapping'] ?? null,
+                    'rate_plan_mapping' => $validatedRoom['rate_plan_mapping'] ?? null,
                 ],
-                'provider_response' => $this->responseSummary($providerReservation),
-                'selected_room_id' => $roomId,
-                'physical_room_id' => $assignedRoomId,
-                'room_mapping' => $validatedRoom['room_mapping'] ?? null,
-                'physical_mapping' => $validatedRoom['physical_mapping'] ?? null,
-                'rate_plan_mapping' => $validatedRoom['rate_plan_mapping'] ?? null,
+                'created_at' => $now,
             ],
-            'created_at' => $now,
-        ]);
-
-        if ($reservationId <= 0) {
-            return 0;
-        }
-
-        $this->releaseSelectionLock(
-            $assignedRoomId > 0 ? $assignedRoomId : $roomId,
-            (string) ($context['checkin'] ?? ''),
-            (string) ($context['checkout'] ?? '')
-        );
-
-        \do_action('must_hotel_booking/reservation_created', $reservationId);
-        if ($providerCreated) {
-            $this->logReferenceDiagnostics($reservationId, $bookingId, $providerBookingId, $clockBookingReference, $referenceMapping);
-        }
-
-        return $reservationId;
-    }
-
-    private function releaseSelectionLock(int $roomId, string $checkin, string $checkout): void
-    {
-        if ($roomId <= 0 || $checkin === '' || $checkout === '') {
-            return;
-        }
-
-        if (InventoryEngine::hasInventoryForRoomType($roomId)) {
-            InventoryEngine::releaseLocksForRoomType($roomId, $checkin, $checkout);
-            return;
-        }
-
-        LockEngine::releaseExactLock($roomId, $checkin, $checkout);
+            'lock_room_id' => $assignedRoomId > 0 ? $assignedRoomId : $roomId,
+            'provider_created' => $providerCreated,
+            'booking_id' => $bookingId,
+            'provider_booking_id' => $providerBookingId,
+            'clock_booking_reference' => $clockBookingReference,
+            'reference_mapping' => $referenceMapping,
+        ];
     }
 
     /** @param array<string, mixed> $guestForm @return array<string, string> */

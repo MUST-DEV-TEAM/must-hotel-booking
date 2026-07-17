@@ -49,6 +49,10 @@ A public search supplies check-in, check-out, and party size through managed boo
 - Invalid dates, insufficient capacity, expired locks, inactive rooms, and blocking reservations stop the flow.
 - Unavailable dates must remain unavailable throughout range selection; UI appearance is not an availability authority.
 - A lock reduces race exposure but is not a substitute for final availability validation.
+- In Clock exact-room mode, `rates_availability` proves parent-type/rate sellability through `room_types[]`, while `room_statuses` separately proves that the exact mapped physical room is available for the complete occupied-night range. Neither source can substitute for the other.
+- A physical selection must have Clock physical-room, accommodation/type, and applicable rate mappings whose parent IDs agree. Missing, ambiguous, malformed, or mismatched evidence is provider-unconfirmed and fails closed without substituting another room of the same type.
+- The long disabled-date calendar is advisory: it combines type/rate daily data with local exact-room conflicts and does not precompute Clock physical-room status. Every selected range must still pass `room_statuses` before continuation or a write boundary.
+- For deferred Clock payment checkout, the current session's unexpired exact physical-room locks are converted to all pending local mirrors in one database transaction. Physical-room mutexes serialize competing sessions; any overlapping blocking reservation, expired/missing/wrong-owner lock, insert error, or commit error rolls back the complete room set before payment initiation.
 - `fallback_to_local_when_clock_unavailable` is configurable but normally false. Enabling it can split provider ownership and must be treated as an explicit operational risk.
 
 ### Known defect
@@ -65,7 +69,7 @@ Checkout has a valid selection, guest form, currency, and calculated room items.
 
 - `BookingQuoteDraft` stores a signed, expiring draft of reviewed pricing and policy data.
 - Intermediate Clock quote reads may be cached briefly.
-- The final Clock boundary requests fresh availability, price, and guarantee information with caches bypassed.
+- The final Clock boundary requests fresh type/rate availability, exact physical-room status, price, and guarantee information with caches bypassed. The selected local rate plan must map to the parent type, and the exact physical-room row must be `available=true` for the inclusive occupied-night range.
 - A changed total, currency, or required guarantee stops before payment/provider writes and requires guest review.
 
 ### Forbidden transitions
@@ -92,15 +96,15 @@ See [ADR-0002](decisions/ADR-0002-final-live-quote-revalidation.md).
 
 ### Online payment initiation
 
-1. Create pending reservation records and compute the server-owned target identity from the explicit site environment, gateway credentials, exact reservation totals/snapshot, and approved Clock property/account when required.
+1. Create pending reservation records and compute the server-owned target identity from the explicit site environment, gateway credentials, exact reservation totals/snapshot, and approved Clock property/account when required. Clock mode atomically consumes the current session's exact physical-room locks while creating the complete pending mirror set; failure returns no reservation allocation and does not initiate payment.
 2. Create a Stripe Checkout Session or PokPay SDK order, then store its immutable attempt identity and exact payment-row allocation on new payment rows.
 3. Redirect only to an allowlisted HTTPS provider host.
 4. Keep inventory blocked while the attempt is pending.
 5. Expiration/failure moves reservations to `expired` or `payment_failed` and releases inventory.
 
-A pending attempt is reusable only when its durable reference, provider/mode/credential fingerprint, checkout mode, unexpired deadline, reservation/payment allocation, minor-unit total, currency, booking snapshot, site environment, and Clock target still match. A mismatch supersedes the attempt without overwriting its provider ownership; only an otherwise unchanged pending reservation set may start a new authoritative attempt. Legacy or incomplete attempt rows fail closed for review.
+A pending attempt is reusable only when its durable reference, provider/mode/credential fingerprint, checkout mode, unexpired deadline, reservation/payment allocation, minor-unit total, currency, booking snapshot, site environment, and Clock target still match. The versioned exact-room booking snapshot binds each reservation's type and assigned physical-room IDs, rate-plan ID, dates, guests, minor-unit total, and normalized Clock physical-room, accommodation/type, and rate external IDs. Unrelated provider diagnostics are excluded. A mismatch supersedes the attempt without overwriting its provider ownership; only an otherwise unchanged pending reservation set may start a new authoritative attempt. Legacy or incomplete unpaid attempts must restart, while paid legacy or incomplete evidence fails closed into review.
 
-Pending-payment cleanup runs through WP-Cron and a bounded age threshold. Rows with durable verified-payment evidence or a pending/manual Clock fulfillment are not ordinary expired checkout attempts; manual-review outcomes require explicit reconciliation.
+Pending-payment cleanup runs through WP-Cron and a bounded age threshold. A Clock-backed `pending_fulfilment` row may resume only when its complete immutable verification group, paid/verified attempt, unchanged pending reservation state, no refund, and current approved target all still match; it then uses the normal Clock lease and confirmation owners without a payment-provider reread or correlation search. Rows with active/expired/ambiguous/manual Clock fulfillment are not ordinary expired checkout attempts; manual-review outcomes require explicit reconciliation.
 
 ## Verified online completion and Clock fulfillment
 
@@ -125,6 +129,7 @@ Every first transition to a confirmed-equivalent state is owned by `ReservationC
 
 - Gateway callbacks reread provider state and validate reservation binding, amount, and currency.
 - Verified completion rechecks the attempt-time provider mode/credential fingerprint, explicit site environment, Clock environment, and approved Clock target before durable ownership or any Clock create.
+- Paid Clock fulfillment rechecks fresh exact-room availability and requires the current physical-room, accommodation/type, and rate external mappings to match all three saved attempt-time snapshots before any Clock create.
 - Existing paid payment/confirmed reservation state short-circuits repeated completion.
 - One provider transaction is uniquely owned by one environment/account and exact deterministic allocation; the same pending payment row cannot be allocated to another group.
 - Clock fulfillment uses an atomic owner-token lease; a second callback receives `in_progress` and cannot create.
@@ -137,7 +142,8 @@ Every first transition to a confirmed-equivalent state is owned by `ReservationC
 - Authoritative gateway evidence is stored as an immutable ownership/allocation group and, for Clock recovery, in reservation provider metadata before any Clock write. Paid evidence alone does not confirm, show success, consume confirmation side effects, or emit payment/accounting hooks.
 - If authoritative paid status is known but attempt/allocation/amount/currency/target compatibility, local persistence, confirmation, or Clock fulfilment fails, one idempotent paid-provider observation records the paid facts and recovery state. Replays update that evidence; it emits no payment/confirmation hooks and is marked resolved only after full completion.
 - Only the active lease owner can reach the Clock create boundary or persist returned Clock identifiers.
-- Expired leases, ambiguous provider responses, and local persistence failures enter `manual_review`; another create is forbidden until Clock is reread and reconciled.
+- Clock creation retains both dimensions: `arrival_room_type_id` comes from the saved-matching accommodation/type mapping and `arrival_room_id` from the saved-matching physical-room mapping. A different returned physical-room ID is failure, never substitution.
+- Expired leases, ambiguous provider responses, and local persistence failures enter `manual_review`; another create is forbidden until Clock is reread and reconciled. The only exception is an explicitly authorized internal first-time recovery that proves the deterministic create key has no request log, the exact persisted physical room and mapping still match, and all paid-attempt/allocation/target checks still pass; it reacquires a dedicated manual-review lease before the normal provider create path.
 - If a Clock reconciliation write succeeds but its requested local lifecycle transition is blocked, the operation returns failure, stores `manual_review`, and does not present the reservation set as fully confirmed.
 - Clock request logging records idempotency information, but the API client does not generally transmit a provider idempotency header.
 - Multi-room Clock creation is not one provider transaction. Each completed room is recorded, and any partial group is reported as partial manual review rather than complete success.

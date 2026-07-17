@@ -683,7 +683,8 @@ final class InventoryRepository extends AbstractRepository
         string $checkout,
         array $nonBlockingStatuses,
         string $now,
-        string $excludeSessionId = ''
+        string $excludeSessionId = '',
+        int $excludeReservationId = 0
     ): array {
         if (
             $roomTypeId <= 0 ||
@@ -710,6 +711,7 @@ final class InventoryRepository extends AbstractRepository
                         AND res.checkin < %s
                         AND res.checkout > %s
                         AND res.status NOT IN (%s, %s, %s)
+                        AND res.id <> %d
                 )
                 AND NOT EXISTS (
                     SELECT 1
@@ -727,6 +729,7 @@ final class InventoryRepository extends AbstractRepository
             $statuses[0],
             $statuses[1],
             $statuses[2],
+            $excludeReservationId,
             $checkout,
             $checkin,
             $now,

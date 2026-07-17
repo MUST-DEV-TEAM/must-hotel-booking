@@ -961,7 +961,7 @@ function get_pending_confirmation_page_view_data(): array
                                 $stripe_coupon_ids[] = (int) $coupon_rule['id'];
                             }
                         }
-                        if (!empty($reservation_ids) && empty($messages)) {
+                        if (!empty($reservation_ids)) {
                             $payment_result = \is_array($reused_payment_result)
                                 ? $reused_payment_result
                                 : PaymentEngine::processPayment(
