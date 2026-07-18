@@ -261,6 +261,8 @@ function render_admin_reservations_notice_from_query(): void
         'reservation_amendment_failed' => ['error', \__('Reservation amendment failed. Review availability, mappings, provider diagnostics, and the latest error.', 'must-hotel-booking')],
         'clock_website_reference_synced' => ['success', \__('Website booking reference was sent to Clock.', 'must-hotel-booking')],
         'clock_website_reference_sync_failed' => ['error', \__('Website booking reference could not be sent to Clock. Check provider diagnostics before retrying.', 'must-hotel-booking')],
+        'reservation_clock_fulfilment_recovered' => ['success', \__('The paid booking was fulfilled in Clock and is now confirmed.', 'must-hotel-booking')],
+        'reservation_clock_fulfilment_recovery_blocked' => ['warning', \__('Clock fulfillment recovery was not completed. Reread the booking in Clock to confirm no reservation exists; if it remains blocked, the outcome requires manual reconciliation.', 'must-hotel-booking')],
         'reservation_guest_update_queued' => ['warning', \__('Clock guest detail edit could not be completed immediately. A provider sync job was queued for retry.', 'must-hotel-booking')],
         'reservation_guest_update_failed' => ['error', \__('Clock guest detail edit could not be completed or queued. Check provider diagnostics before retrying.', 'must-hotel-booking')],
         'reservation_guest_email_resent' => ['success', \__('Guest reservation email resent.', 'must-hotel-booking')],
@@ -1489,6 +1491,24 @@ function render_admin_reservation_detail_page_content(array $detailData): void
                 $currentUrl,
                 'button button-secondary',
                 \__('Send this website booking reference to Clock now?', 'must-hotel-booking')
+            );
+        }
+        if (
+            !empty($providerContext['is_clock'])
+            && \sanitize_key((string) ($reservation['provider_sync_status'] ?? '')) === 'manual_review'
+            && \current_user_can('manage_options')
+        ) {
+            echo '<hr />';
+            echo '<h3>' . \esc_html__('Paid Booking Held for Clock Recovery', 'must-hotel-booking') . '</h3>';
+            echo '<p class="description">' . \esc_html__('This booking is paid but its Clock reservation was not created. First reread the booking directly in Clock to confirm no reservation already exists. Recovery rereads exact-room availability and creates the Clock reservation only when it is still safe; otherwise the booking stays in manual review and no duplicate is created.', 'must-hotel-booking') . '</p>';
+            render_admin_reservation_detail_action_form(
+                'recover_clock_fulfilment',
+                \__('Recover Clock Reservation (Paid)', 'must-hotel-booking'),
+                $currentUrl,
+                $reservationId,
+                $currentUrl,
+                'button button-primary',
+                \__('Have you confirmed in Clock that no reservation exists for this paid booking? Attempt recovery now?', 'must-hotel-booking')
             );
         }
         echo '</div></div>';

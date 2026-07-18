@@ -7,6 +7,7 @@ use MustHotelBooking\Core\StaffAccess;
 use MustHotelBooking\Engine\BookingLifecycleSyncService;
 use MustHotelBooking\Engine\BookingStatusEngine;
 use MustHotelBooking\Engine\EmailEngine;
+use MustHotelBooking\Engine\PaymentEngine;
 use MustHotelBooking\Engine\ReservationAmendmentService;
 use MustHotelBooking\Provider\Clock\ClockPaymentReconciliationService;
 use MustHotelBooking\Provider\Clock\ClockWebsiteReferenceSyncService;
@@ -127,6 +128,9 @@ final class ReservationAdminActions
                 break;
             case 'sync_clock_website_reference':
                 $notice = $this->syncClockWebsiteReferenceNotice($reservationId);
+                break;
+            case 'recover_clock_fulfilment':
+                $notice = $this->recoverClockFulfilmentNotice($reservationId);
                 break;
             case 'resend_guest_email':
                 $notice = EmailEngine::resendGuestReservationEmail($reservationId) ? 'reservation_guest_email_resent' : 'action_failed';
@@ -281,6 +285,26 @@ final class ReservationAdminActions
         );
 
         return !empty($result['updated']) || !empty($result['already']);
+    }
+
+    /**
+     * Operator-triggered recovery for a paid Clock booking that stopped in
+     * manual review before its first Clock reservation create. The heavy
+     * validation (verified-payment ownership, no prior create request log,
+     * fresh availability, lease) lives in PaymentEngine; this wrapper only
+     * enforces authorization and maps the fail-closed result to a notice.
+     */
+    private function recoverClockFulfilmentNotice(int $reservationId): string
+    {
+        if (!\current_user_can('manage_options')) {
+            return 'action_failed';
+        }
+
+        $result = PaymentEngine::reconcileManualReviewClockFulfilment($reservationId);
+
+        return !empty($result['success'])
+            ? 'reservation_clock_fulfilment_recovered'
+            : 'reservation_clock_fulfilment_recovery_blocked';
     }
 
     private function markReservationPending(int $reservationId): bool
